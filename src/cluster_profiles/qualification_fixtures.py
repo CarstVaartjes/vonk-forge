@@ -100,16 +100,6 @@ class Fixture:
             "sha256": self.sha256,
         }
 
-    def evidence(self, slot: str) -> dict[str, object]:
-        return {
-            **self.declaration(slot),
-            **(
-                {"provenance": dict(self.provenance)}
-                if self.provenance is not None
-                else {}
-            ),
-        }
-
 
 class _OutputLimits(TypedDict):
     """Validated artifact-job output limits for one recipe fixture case."""
@@ -136,40 +126,6 @@ class RecipeFixture:
     @property
     def all_cases(self) -> tuple[RecipeFixture, ...]:
         return (self, *self.supplemental_cases)
-
-    def preview(self) -> dict[str, object]:
-        preview = {
-            "kind": "artifact-job",
-            "available": True,
-            "recipe": self.key,
-            "recipe_content_sha256": self.content_sha256,
-            "interface": self.interface,
-            "parameters": self.parameters,
-            "inputs": [
-                {"fixture": fixture.fixture_id, **fixture.evidence(slot)}
-                for slot, fixture in self.inputs
-            ],
-            "output_limits": self.output_limits,
-            "timeout_seconds": self.timeout_seconds,
-            "assertions": list(self.assertions),
-            "capabilities_path": "/api/artifact-jobs/capabilities",
-        }
-        if self.supplemental_cases:
-            preview["cases"] = [
-                {
-                    "id": case.case_id,
-                    "parameters": case.parameters,
-                    "inputs": [
-                        {"fixture": fixture.fixture_id, **fixture.evidence(slot)}
-                        for slot, fixture in case.inputs
-                    ],
-                    "output_limits": case.output_limits,
-                    "timeout_seconds": case.timeout_seconds,
-                    "assertions": list(case.assertions),
-                }
-                for case in self.all_cases
-            ]
-        return preview
 
     @contextmanager
     def materialize(self) -> Iterator[list[tuple[dict[str, object], Path]]]:
@@ -234,19 +190,6 @@ class ServiceRecipe:
     alias: str
     cases: tuple[ServiceCase, ...]
     higher_tiers: dict[str, tuple[str, ...]]
-
-    def preview(self, fixtures: Mapping[str, Fixture]) -> dict[str, object]:
-        return {
-            "kind": "openai-service",
-            "available": True,
-            "recipe": self.key,
-            "recipe_content_sha256": self.content_sha256,
-            "alias": self.alias,
-            "cases": [case.render(self.alias, fixtures) for case in self.cases],
-            "higher_tiers": {
-                key: list(values) for key, values in self.higher_tiers.items()
-            },
-        }
 
 
 def _object(value: object, label: str) -> Mapping[str, object]:
@@ -936,7 +879,6 @@ class FixtureRegistry:
         recipes: Mapping[str, RecipeFixture],
         special: Mapping[str, Mapping[str, object]],
         *,
-        manifest_sha256: str,
         service_cases: Mapping[str, ServiceCase] | None = None,
         service_recipes: Mapping[str, ServiceRecipe] | None = None,
     ) -> None:
@@ -945,7 +887,6 @@ class FixtureRegistry:
         self.special = {key: dict(value) for key, value in special.items()}
         self.service_cases = dict(service_cases or {})
         self.service_recipes = dict(service_recipes or {})
-        self.manifest_sha256 = manifest_sha256
 
     @classmethod
     def load(cls, path: Path) -> FixtureRegistry:
@@ -1120,7 +1061,6 @@ class FixtureRegistry:
             fixtures,
             recipes,
             special,
-            manifest_sha256=hashlib.sha256(raw).hexdigest(),
             service_cases=service_cases,
             service_recipes=service_recipes,
         )

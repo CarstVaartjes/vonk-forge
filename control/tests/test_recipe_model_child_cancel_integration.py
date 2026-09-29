@@ -19,17 +19,14 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.bounded_json import require_mapping
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocument, Job, User
-from vonk_control.recipe_image_availability import (
-    RecipeImageAvailabilityService,
-)
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
 from .test_recipe_image_availability import (
-    Transport,
     _add_revision,
     _recipe,
     _runtime,
+    _service,
 )
 
 
@@ -242,7 +239,7 @@ def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     # _add_revision prefixes the revision key with ``document-`` for the
     # owning document identity, which is limited to 36 characters.
     recipe_revision_id = uuid.uuid4().hex[:24]
@@ -325,11 +322,10 @@ def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
         del recipe_revision_id, force
         return recipe, _runtime()
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(image_root),
         authority=resolve_recipe_authority,
-        transport=Transport(),
         model_cache=CacheAdapter(),
         clock=lambda: now,
     )

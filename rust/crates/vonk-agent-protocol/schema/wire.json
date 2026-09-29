@@ -95,17 +95,6 @@
     "AgentClaim": {
       "additionalProperties": false,
       "properties": {
-        "attempt": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Attempt",
-          "type": "integer"
-        },
-        "authority_revision": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Authority Revision",
-          "type": "string"
-        },
         "deadline": {
           "format": "date-time",
           "title": "Deadline",
@@ -119,29 +108,8 @@
           "title": "Fence",
           "type": "string"
         },
-        "job_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Job Id",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
         "operation": {
           "$ref": "#/$defs/AgentOperation"
-        },
-        "operation_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Operation Id",
-          "type": "string"
         },
         "payload": {
           "anyOf": [
@@ -183,28 +151,11 @@
             }
           ],
           "title": "Payload"
-        },
-        "payload_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Payload Digest",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
-        "job_id",
-        "operation_id",
-        "attempt",
         "fence",
-        "node_id",
         "operation",
-        "authority_revision",
-        "payload_digest",
         "payload",
         "deadline"
       ],
@@ -215,12 +166,6 @@
       "additionalProperties": false,
       "description": "Authenticated heartbeat response for deadline renewal and cancellation.",
       "properties": {
-        "attempt": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Attempt",
-          "type": "integer"
-        },
         "cancel_requested": {
           "title": "Cancel Requested",
           "type": "boolean"
@@ -237,41 +182,10 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Fence",
           "type": "string"
-        },
-        "job_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Job Id",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "operation_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Operation Id",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
-        "job_id",
-        "operation_id",
-        "attempt",
         "fence",
-        "node_id",
         "deadline",
         "cancel_requested"
       ],
@@ -572,44 +486,12 @@
     "AgentProgress": {
       "additionalProperties": false,
       "properties": {
-        "attempt": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Attempt",
-          "type": "integer"
-        },
-        "deadline": {
-          "format": "date-time",
-          "title": "Deadline",
-          "type": "string"
-        },
         "fence": {
           "format": "uuid",
           "maxLength": 36,
           "minLength": 36,
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Fence",
-          "type": "string"
-        },
-        "job_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Job Id",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "operation_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Operation Id",
           "type": "string"
         },
         "progress": {
@@ -622,21 +504,10 @@
             }
           ],
           "default": null
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
-        "job_id",
-        "operation_id",
-        "attempt",
-        "fence",
-        "node_id",
-        "deadline"
+        "fence"
       ],
       "title": "AgentProgress",
       "type": "object"
@@ -644,44 +515,12 @@
     "AgentResult": {
       "additionalProperties": false,
       "properties": {
-        "attempt": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Attempt",
-          "type": "integer"
-        },
-        "deadline": {
-          "format": "date-time",
-          "title": "Deadline",
-          "type": "string"
-        },
         "fence": {
           "format": "uuid",
           "maxLength": 36,
           "minLength": 36,
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Fence",
-          "type": "string"
-        },
-        "job_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Job Id",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "operation_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Operation Id",
           "type": "string"
         },
         "result": {
@@ -728,11 +567,6 @@
           ],
           "title": "Result"
         },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
         "state": {
           "enum": [
             "succeeded",
@@ -745,13 +579,7 @@
         }
       },
       "required": [
-        "schema_version",
-        "job_id",
-        "operation_id",
-        "attempt",
         "fence",
-        "node_id",
-        "deadline",
         "state",
         "result"
       ],
@@ -779,11 +607,6 @@
           "title": "Build Digest",
           "type": "string"
         },
-        "observation_receipt_public_key": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Receipt Public Key",
-          "type": "string"
-        },
         "package_activation": {
           "anyOf": [
             {
@@ -795,11 +618,6 @@
           ],
           "default": null
         },
-        "self_test_passed": {
-          "const": true,
-          "title": "Self Test Passed",
-          "type": "boolean"
-        },
         "semantic_version": {
           "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
           "title": "Semantic Version",
@@ -810,9 +628,7 @@
         "architecture",
         "semantic_version",
         "build_digest",
-        "binary_digest",
-        "self_test_passed",
-        "observation_receipt_public_key"
+        "binary_digest"
       ],
       "title": "AgentRuntimeIdentity",
       "type": "object"
@@ -820,12 +636,6 @@
     "AgentUpgradeGrantRequest": {
       "additionalProperties": false,
       "properties": {
-        "attempt": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Attempt",
-          "type": "integer"
-        },
         "expires_in_seconds": {
           "maximum": 300,
           "minimum": 1,
@@ -835,21 +645,6 @@
         "fence": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
-          "type": "string"
-        },
-        "job_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Job Id",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "operation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Operation Id",
           "type": "string"
         },
         "package_sha256": {
@@ -864,10 +659,6 @@
         }
       },
       "required": [
-        "node_id",
-        "job_id",
-        "operation_id",
-        "attempt",
         "fence",
         "expires_in_seconds",
         "package_sha256",
@@ -990,11 +781,6 @@
           "title": "Package Version",
           "type": "string"
         },
-        "self_test_passed": {
-          "const": true,
-          "title": "Self Test Passed",
-          "type": "boolean"
-        },
         "status": {
           "const": "upgraded",
           "title": "Status",
@@ -1007,7 +793,6 @@
         "build_digest",
         "package_sha256",
         "package_version",
-        "self_test_passed",
         "status",
         "activation_receipt"
       ],
@@ -1018,25 +803,13 @@
       "additionalProperties": false,
       "description": "The complete payload accepted by the artifact transfer operation.",
       "properties": {
-        "authority_revision": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Authority Revision",
-          "type": "string"
-        },
         "plan_digest": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Plan Digest",
           "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
-        "authority_revision",
         "plan_digest"
       ],
       "title": "ArtifactDistributionPayload",
@@ -1045,69 +818,14 @@
     "ArtifactDistributionResult": {
       "additionalProperties": false,
       "properties": {
-        "assignment_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Assignment Id",
-          "type": "string"
-        },
         "downloaded_bytes": {
           "maximum": 17592186044416,
           "minimum": 0,
           "title": "Downloaded Bytes",
           "type": "integer"
-        },
-        "imported_image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Imported Image Digest",
-          "type": "string"
-        },
-        "model_artifact_set_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Model Artifact Set Sha256",
-          "type": "string"
-        },
-        "oci_image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Oci Image Digest",
-          "type": "string"
-        },
-        "verified": {
-          "const": true,
-          "title": "Verified",
-          "type": "boolean"
-        },
-        "verified_digests": {
-          "items": {
-            "pattern": "^[0-9a-f]{64}$",
-            "type": "string"
-          },
-          "maxItems": 4096,
-          "title": "Verified Digests",
-          "type": "array"
-        },
-        "verified_image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Verified Image Digest",
-          "type": "string"
-        },
-        "verified_oci_layout_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Verified Oci Layout Sha256",
-          "type": "string"
         }
       },
       "required": [
-        "assignment_id",
-        "model_artifact_set_sha256",
-        "verified",
-        "verified_digests",
-        "verified_image_digest",
-        "imported_image_digest",
-        "verified_oci_layout_sha256",
-        "oci_image_digest",
         "downloaded_bytes"
       ],
       "title": "ArtifactDistributionResult",
@@ -1143,14 +861,6 @@
     "ClaimRequest": {
       "additionalProperties": false,
       "properties": {
-        "capabilities": {
-          "items": {
-            "type": "string"
-          },
-          "maxItems": 128,
-          "title": "Capabilities",
-          "type": "array"
-        },
         "hostname": {
           "anyOf": [
             {
@@ -1166,19 +876,22 @@
           "default": null,
           "title": "Hostname"
         },
-        "lease_seconds": {
-          "maximum": 300,
-          "minimum": 1,
-          "title": "Lease Seconds",
-          "type": "integer"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
+        "preflight_fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preflight Fingerprint"
         },
         "protocol_version": {
-          "const": 3,
+          "maximum": 2147483647,
+          "minimum": 1,
           "title": "Protocol Version",
           "type": "integer"
         },
@@ -1193,9 +906,6 @@
         }
       },
       "required": [
-        "capabilities",
-        "lease_seconds",
-        "node_id",
         "protocol_version",
         "runtime_identity",
         "wait_seconds"
@@ -1206,9 +916,6 @@
     "CompiledArtifact": {
       "additionalProperties": false,
       "properties": {
-        "distribution_object": {
-          "$ref": "#/$defs/CompiledDistributionObject"
-        },
         "file_id": {
           "maxLength": 64,
           "minLength": 1,
@@ -1259,72 +966,29 @@
         "size_bytes",
         "roles",
         "mount",
-        "model",
-        "distribution_object"
+        "model"
       ],
       "title": "CompiledArtifact",
       "type": "object"
     },
     "CompiledArtifactMount": {
       "additionalProperties": false,
+      "description": "A read-only model mount.",
       "properties": {
-        "read_only": {
-          "title": "Read Only",
-          "type": "boolean"
-        },
         "target": {
           "title": "Target",
           "type": "string"
         }
       },
       "required": [
-        "target",
-        "read_only"
+        "target"
       ],
       "title": "CompiledArtifactMount",
       "type": "object"
     },
-    "CompiledDistributionObject": {
-      "additionalProperties": false,
-      "description": "Distribution objects usable as installed model or runtime inputs.",
-      "properties": {
-        "bytes": {
-          "maximum": 17592186044416,
-          "minimum": 0,
-          "title": "Bytes",
-          "type": "integer"
-        },
-        "kind": {
-          "enum": [
-            "model",
-            "oci-archive"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "name": {
-          "maxLength": 512,
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Sha256",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "sha256",
-        "bytes",
-        "kind"
-      ],
-      "title": "CompiledDistributionObject",
-      "type": "object"
-    },
     "CompiledEndpoint": {
       "additionalProperties": false,
+      "description": "An OpenAI-compatible endpoint.",
       "properties": {
         "health_path": {
           "maxLength": 256,
@@ -1344,15 +1008,9 @@
           "minimum": 1024,
           "title": "Port",
           "type": "integer"
-        },
-        "protocol": {
-          "const": "openai",
-          "title": "Protocol",
-          "type": "string"
         }
       },
       "required": [
-        "protocol",
         "port",
         "model_aliases",
         "health_path"
@@ -1426,11 +1084,6 @@
         "runtime_image": {
           "$ref": "#/$defs/CompiledRuntimeImage"
         },
-        "schema_version": {
-          "const": 2,
-          "title": "Schema Version",
-          "type": "integer"
-        },
         "security": {
           "$ref": "#/$defs/CompiledSecurity"
         },
@@ -1439,7 +1092,6 @@
         }
       },
       "required": [
-        "schema_version",
         "identity",
         "runtime",
         "artifacts",
@@ -1456,34 +1108,6 @@
     "CompiledIdentity": {
       "additionalProperties": false,
       "properties": {
-        "build_input_sha256": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Build Input Sha256"
-        },
-        "execution_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Execution Sha256",
-          "type": "string"
-        },
-        "harness_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Harness Sha256",
-          "type": "string"
-        },
-        "model_artifact_bytes": {
-          "maximum": 17592186044416,
-          "minimum": 0,
-          "title": "Model Artifact Bytes",
-          "type": "integer"
-        },
         "model_artifact_set_sha256": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Model Artifact Set Sha256",
@@ -1497,11 +1121,7 @@
       },
       "required": [
         "recipe_revision_sha256",
-        "execution_sha256",
-        "harness_sha256",
-        "build_input_sha256",
-        "model_artifact_set_sha256",
-        "model_artifact_bytes"
+        "model_artifact_set_sha256"
       ],
       "title": "CompiledIdentity",
       "type": "object"
@@ -1530,11 +1150,6 @@
           "title": "Interface",
           "type": "string"
         },
-        "output_path": {
-          "const": "/outputs",
-          "title": "Output Path",
-          "type": "string"
-        },
         "timeout_seconds": {
           "maximum": 3600,
           "minimum": 1,
@@ -1545,7 +1160,6 @@
       "required": [
         "interface",
         "input",
-        "output_path",
         "timeout_seconds"
       ],
       "title": "CompiledJob",
@@ -1553,7 +1167,7 @@
     },
     "CompiledJobInput": {
       "additionalProperties": false,
-      "description": "Typed compiled form of the public ``RecipeJobInput`` declaration.",
+      "description": "Typed compiled form of the public ``RecipeJobInput`` declaration;\ninputs are staged read-only under /inputs.",
       "properties": {
         "max_bytes": {
           "maximum": 1073741824,
@@ -1569,11 +1183,6 @@
           "minItems": 1,
           "title": "Media Types",
           "type": "array"
-        },
-        "path": {
-          "const": "/inputs",
-          "title": "Path",
-          "type": "string"
         },
         "required": {
           "title": "Required",
@@ -1598,7 +1207,6 @@
         }
       },
       "required": [
-        "path",
         "required",
         "media_types",
         "max_bytes"
@@ -1686,28 +1294,6 @@
     "CompiledLifecycle": {
       "additionalProperties": false,
       "properties": {
-        "post_stop": {
-          "items": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "maxItems": 16,
-          "title": "Post Stop",
-          "type": "array"
-        },
-        "pre_start": {
-          "items": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "maxItems": 16,
-          "title": "Pre Start",
-          "type": "array"
-        },
         "stop_timeout_seconds": {
           "maximum": 600,
           "minimum": 1,
@@ -1716,8 +1302,6 @@
         }
       },
       "required": [
-        "pre_start",
-        "post_stop",
         "stop_timeout_seconds"
       ],
       "title": "CompiledLifecycle",
@@ -1810,15 +1394,6 @@
           "title": "Memory Floor Bytes",
           "type": "integer"
         },
-        "memory_kind": {
-          "enum": [
-            "unified",
-            "host",
-            "accelerator"
-          ],
-          "title": "Memory Kind",
-          "type": "string"
-        },
         "port": {
           "anyOf": [
             {
@@ -1865,8 +1440,7 @@
         "master_port",
         "port",
         "reserved_memory_bytes",
-        "memory_floor_bytes",
-        "memory_kind"
+        "memory_floor_bytes"
       ],
       "title": "CompiledPlacement",
       "type": "object"
@@ -1896,50 +1470,28 @@
           "title": "Executable",
           "type": "string"
         },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
         "placement": {
           "$ref": "#/$defs/CompiledPlacement"
-        },
-        "telemetry": {
-          "$ref": "#/$defs/CompiledRuntimeTelemetry"
         }
       },
       "required": [
         "executable",
         "argv",
         "env",
-        "image_digest",
-        "placement",
-        "telemetry"
+        "placement"
       ],
       "title": "CompiledRuntime",
       "type": "object"
     },
     "CompiledRuntimeImage": {
       "additionalProperties": false,
+      "description": "The Controller-built OCI archive; imported locally as\n``localhost/vonk/compiled-runtime-<oci_layout_sha256>@<image_digest>``.",
       "properties": {
-        "architecture": {
-          "const": "linux-arm64",
-          "title": "Architecture",
-          "type": "string"
-        },
         "build_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Build Id"
-        },
-        "distribution_object": {
-          "$ref": "#/$defs/CompiledDistributionObject"
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Build Id",
+          "type": "string"
         },
         "image_bytes": {
           "exclusiveMinimum": 0,
@@ -1957,35 +1509,9 @@
           "title": "Local Image Config Id",
           "type": "string"
         },
-        "local_image_reference": {
-          "title": "Local Image Reference",
-          "type": "string"
-        },
         "oci_layout_sha256": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Oci Layout Sha256",
-          "type": "string"
-        },
-        "platform_manifest_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Platform Manifest Digest",
-          "type": "string"
-        },
-        "registry_manifest_digest": {
-          "anyOf": [
-            {
-              "pattern": "^sha256:[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Registry Manifest Digest"
-        },
-        "runtime_interface": {
-          "const": "vonk.runtime.v1",
-          "title": "Runtime Interface",
           "type": "string"
         },
         "runtime_interface_label": {
@@ -1993,112 +1519,25 @@
           "minLength": 1,
           "title": "Runtime Interface Label",
           "type": "string"
-        },
-        "source": {
-          "enum": [
-            "published",
-            "controller-build"
-          ],
-          "title": "Source",
-          "type": "string"
         }
       },
       "required": [
         "image_digest",
         "oci_layout_sha256",
         "image_bytes",
-        "architecture",
-        "runtime_interface",
-        "source",
         "build_id",
-        "distribution_object",
-        "registry_manifest_digest",
-        "platform_manifest_digest",
         "local_image_config_id",
-        "local_image_reference",
         "runtime_interface_label"
       ],
       "title": "CompiledRuntimeImage",
       "type": "object"
     },
-    "CompiledRuntimeTelemetry": {
-      "additionalProperties": false,
-      "properties": {
-        "engine": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Engine",
-          "type": "string"
-        },
-        "engine_version": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Engine Version"
-        },
-        "metrics_format": {
-          "anyOf": [
-            {
-              "enum": [
-                "prometheus",
-                "comfyui-queue"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Metrics Format"
-        },
-        "metrics_path": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Metrics Path"
-        }
-      },
-      "required": [
-        "engine",
-        "engine_version",
-        "metrics_format",
-        "metrics_path"
-      ],
-      "title": "CompiledRuntimeTelemetry",
-      "type": "object"
-    },
     "CompiledSecurity": {
       "additionalProperties": false,
+      "description": "Per-workload security choices; everything else is a platform constant.",
       "properties": {
-        "capabilities": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Capabilities",
-          "type": "array"
-        },
-        "devices": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Devices",
-          "type": "array"
-        },
-        "host_network": {
-          "title": "Host Network",
+        "gpu": {
+          "title": "Gpu",
           "type": "boolean"
         },
         "mounts": {
@@ -2117,44 +1556,24 @@
           "title": "Network Mode",
           "type": "string"
         },
-        "no_new_privileges": {
-          "title": "No New Privileges",
-          "type": "boolean"
-        },
-        "privileged": {
-          "title": "Privileged",
-          "type": "boolean"
-        },
-        "read_only_root": {
-          "title": "Read Only Root",
-          "type": "boolean"
-        },
         "user": {
           "title": "User",
           "type": "string"
         }
       },
       "required": [
-        "devices",
-        "capabilities",
+        "gpu",
         "network_mode",
-        "host_network",
-        "privileged",
         "user",
-        "mounts",
-        "read_only_root",
-        "no_new_privileges"
+        "mounts"
       ],
       "title": "CompiledSecurity",
       "type": "object"
     },
     "CompiledSecurityMount": {
       "additionalProperties": false,
+      "description": "Model and input mounts are read-only; the output mount is writable.",
       "properties": {
-        "read_only": {
-          "title": "Read Only",
-          "type": "boolean"
-        },
         "source": {
           "enum": [
             "model",
@@ -2171,8 +1590,7 @@
       },
       "required": [
         "source",
-        "target",
-        "read_only"
+        "target"
       ],
       "title": "CompiledSecurityMount",
       "type": "object"
@@ -2180,26 +1598,6 @@
     "CompiledTopology": {
       "additionalProperties": false,
       "properties": {
-        "backend": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Backend",
-          "type": "string"
-        },
-        "mode": {
-          "enum": [
-            "single",
-            "distributed",
-            "tensor_parallel",
-            "pipeline_parallel",
-            "data_parallel",
-            "hybrid",
-            "ray",
-            "mpi"
-          ],
-          "title": "Mode",
-          "type": "string"
-        },
         "name": {
           "title": "Name",
           "type": "string"
@@ -2208,32 +1606,11 @@
           "exclusiveMinimum": 0,
           "title": "Node Count",
           "type": "integer"
-        },
-        "rank": {
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "role": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
-        },
-        "world_size": {
-          "exclusiveMinimum": 0,
-          "title": "World Size",
-          "type": "integer"
         }
       },
       "required": [
         "name",
-        "mode",
-        "backend",
-        "node_count",
-        "world_size",
-        "rank",
-        "role"
+        "node_count"
       ],
       "title": "CompiledTopology",
       "type": "object"
@@ -2267,33 +1644,8 @@
     },
     "DistributionAssignment": {
       "additionalProperties": false,
-      "description": "Controller authorization for one node, generation and object set.",
+      "description": "The object set one node downloads for a distribution plan.",
       "properties": {
-        "assignment_id": {
-          "format": "uuid",
-          "title": "Assignment Id",
-          "type": "string"
-        },
-        "expires_at": {
-          "format": "date-time",
-          "title": "Expires At",
-          "type": "string"
-        },
-        "generation": {
-          "minimum": 1,
-          "title": "Generation",
-          "type": "integer"
-        },
-        "model_artifact_set_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Model Artifact Set Sha256",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
         "objects": {
           "items": {
             "$ref": "#/$defs/DistributionObject"
@@ -2312,26 +1664,9 @@
           "pattern": "^sha256:[0-9a-f]{64}$",
           "title": "Oci Image Digest",
           "type": "string"
-        },
-        "plan_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Plan Digest",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 2,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
-        "assignment_id",
-        "plan_digest",
-        "generation",
-        "node_id",
-        "expires_at",
-        "model_artifact_set_sha256",
         "objects",
         "oci_image_digest",
         "oci_archive_sha256"
@@ -2477,11 +1812,6 @@
           "pattern": "^spk_[0-9a-f]{32}$",
           "title": "Node Id",
           "type": "string"
-        },
-        "observation_receipt_public_key": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Receipt Public Key",
-          "type": "string"
         }
       },
       "required": [
@@ -2490,8 +1820,7 @@
         "host_key_fingerprint",
         "hardware_fingerprint",
         "agent_digest",
-        "boot_id",
-        "observation_receipt_public_key"
+        "boot_id"
       ],
       "title": "EnrollmentEvidence",
       "type": "object"
@@ -2630,12 +1959,6 @@
           "title": "Action",
           "type": "string"
         },
-        "attempt": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Attempt",
-          "type": "integer"
-        },
         "fence": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
@@ -2653,29 +1976,6 @@
           ],
           "default": null,
           "title": "Installation Id"
-        },
-        "job_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Job Id",
-          "type": "string"
-        },
-        "observation_identity_sha256": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Observation Identity Sha256"
-        },
-        "operation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Operation Id",
-          "type": "string"
         },
         "reconciliation_identity": {
           "anyOf": [
@@ -2781,9 +2081,6 @@
       "required": [
         "type",
         "action",
-        "job_id",
-        "operation_id",
-        "attempt",
         "fence",
         "request_sha256"
       ],
@@ -3068,18 +2365,6 @@
           "default": null,
           "title": "Error Code"
         },
-        "evidence_sha256": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Evidence Sha256"
-        },
         "exit_code": {
           "anyOf": [
             {
@@ -3094,17 +2379,6 @@
           "default": null,
           "title": "Exit Code"
         },
-        "observation_receipt": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SignedRecipeRunObservationReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "process_logs": {
           "anyOf": [
             {
@@ -3115,6 +2389,18 @@
             }
           ],
           "default": null
+        },
+        "process_running": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Process Running"
         },
         "request_id": {
           "anyOf": [
@@ -3138,8 +2424,6 @@
             "rejected",
             "package-installed",
             "package-activation-confirmed",
-            "unit-restarted",
-            "reboot-scheduled",
             "container-runtime-request-executed",
             "container-runtime-stop-uncertain"
           ],
@@ -3150,8 +2434,7 @@
       "required": [
         "schema_version",
         "request_id",
-        "status",
-        "evidence_sha256"
+        "status"
       ],
       "title": "HostHelperResponse",
       "type": "object"
@@ -3188,9 +2471,7 @@
         "mapping": {
           "confirm-package-activation": "#/$defs/ConfirmPackageActivationOperation",
           "execute-container-runtime-request": "#/$defs/ExecuteContainerRuntimeRequestOperation",
-          "install-vonk-deb": "#/$defs/InstallVonkDebOperation",
-          "restart-vonk-unit": "#/$defs/RestartVonkUnitOperation",
-          "schedule-reboot": "#/$defs/ScheduleRebootOperation"
+          "install-vonk-deb": "#/$defs/InstallVonkDebOperation"
         },
         "propertyName": "type"
       },
@@ -3200,12 +2481,6 @@
         },
         {
           "$ref": "#/$defs/ConfirmPackageActivationOperation"
-        },
-        {
-          "$ref": "#/$defs/RestartVonkUnitOperation"
-        },
-        {
-          "$ref": "#/$defs/ScheduleRebootOperation"
         },
         {
           "$ref": "#/$defs/ExecuteContainerRuntimeRequestOperation"
@@ -3227,12 +2502,6 @@
           ],
           "title": "Action",
           "type": "string"
-        },
-        "attempt": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Attempt",
-          "type": "integer"
         },
         "expires_in_seconds": {
           "maximum": 300,
@@ -3257,21 +2526,6 @@
           ],
           "default": null,
           "title": "Installation Id"
-        },
-        "job_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Job Id",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "operation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Operation Id",
-          "type": "string"
         },
         "reconciliation_identity": {
           "anyOf": [
@@ -3370,10 +2624,6 @@
         }
       },
       "required": [
-        "node_id",
-        "job_id",
-        "operation_id",
-        "attempt",
         "fence",
         "expires_in_seconds",
         "action",
@@ -3407,12 +2657,6 @@
           "title": "Arguments",
           "type": "array"
         },
-        "attempt": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Attempt",
-          "type": "integer"
-        },
         "fence": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
@@ -3431,11 +2675,6 @@
           "default": null,
           "title": "Installation Id"
         },
-        "job_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Job Id",
-          "type": "string"
-        },
         "job_plan": {
           "anyOf": [
             {
@@ -3446,22 +2685,6 @@
             }
           ],
           "default": null
-        },
-        "observation": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RecipeRunInspectionBinding"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "operation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Operation Id",
-          "type": "string"
         },
         "reconciliation_identity": {
           "anyOf": [
@@ -3488,11 +2711,6 @@
           "default": null,
           "title": "Run Generation"
         },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
         "start_plan": {
           "anyOf": [
             {
@@ -3517,11 +2735,7 @@
         }
       },
       "required": [
-        "schema_version",
         "action",
-        "job_id",
-        "operation_id",
-        "attempt",
         "fence",
         "arguments"
       ],
@@ -4609,11 +3823,6 @@
     },
     "PackageActivationGrantRequest": {
       "properties": {
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
         "receipt": {
           "$ref": "#/$defs/PackageActivationReceipt"
         },
@@ -4622,7 +3831,6 @@
         }
       },
       "required": [
-        "node_id",
         "receipt",
         "runtime_identity"
       ],
@@ -4872,41 +4080,6 @@
       "title": "RecipeBuildAdditionalContext",
       "type": "object"
     },
-    "RecipeBuildArgument": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "maxLength": 64,
-          "minLength": 1,
-          "pattern": "^[a-z][a-z0-9._-]{0,63}$",
-          "title": "Name",
-          "type": "string"
-        },
-        "value": {
-          "anyOf": [
-            {
-              "maxLength": 1024,
-              "type": "string"
-            },
-            {
-              "maximum": 9223372036854775807,
-              "minimum": -9223372036854775808,
-              "type": "integer"
-            },
-            {
-              "type": "boolean"
-            }
-          ],
-          "title": "Value"
-        }
-      },
-      "required": [
-        "name",
-        "value"
-      ],
-      "title": "RecipeBuildArgument",
-      "type": "object"
-    },
     "RecipeBuildBaseImage": {
       "additionalProperties": false,
       "properties": {
@@ -4931,34 +4104,8 @@
     },
     "RecipeBuildCleanupEvidence": {
       "additionalProperties": false,
-      "properties": {
-        "build_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Build Id",
-          "type": "string"
-        },
-        "operation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Operation Id",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "stopped": {
-          "const": true,
-          "title": "Stopped",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "schema_version",
-        "build_id",
-        "operation_id",
-        "stopped"
-      ],
+      "description": "The build service is stopped; the fenced attempt is the whole answer.",
+      "properties": {},
       "title": "RecipeBuildCleanupEvidence",
       "type": "object"
     },
@@ -4975,15 +4122,9 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Operation Id",
           "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "build_id",
         "operation_id"
       ],
@@ -5028,11 +4169,6 @@
     "RecipeBuildEvidence": {
       "additionalProperties": false,
       "properties": {
-        "build_input_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Build Input Sha256",
-          "type": "string"
-        },
         "image_bytes": {
           "exclusiveMinimum": 0,
           "maximum": 17592186044416,
@@ -5048,43 +4184,25 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Oci Layout Sha256",
           "type": "string"
-        },
-        "policy": {
-          "$ref": "#/$defs/RecipeBuildPolicy"
         }
       },
       "required": [
-        "build_input_sha256",
         "image_bytes",
         "image_digest",
-        "oci_layout_sha256",
-        "policy"
+        "oci_layout_sha256"
       ],
       "title": "RecipeBuildEvidence",
       "type": "object"
     },
     "RecipeBuildLimits": {
       "additionalProperties": false,
+      "description": "Resource limits; builds never get a GPU, privileges, host mounts or a\ncontainer socket.",
       "properties": {
-        "container_socket": {
-          "title": "Container Socket",
-          "type": "boolean"
-        },
         "cpu_cores": {
           "maximum": 256,
           "minimum": 1,
           "title": "Cpu Cores",
           "type": "integer"
-        },
-        "gpu": {
-          "maximum": 64,
-          "minimum": 0,
-          "title": "Gpu",
-          "type": "integer"
-        },
-        "host_mounts": {
-          "title": "Host Mounts",
-          "type": "boolean"
         },
         "memory_bytes": {
           "exclusiveMinimum": 0,
@@ -5097,10 +4215,6 @@
           "maximum": 17592186044416,
           "title": "Output Bytes",
           "type": "integer"
-        },
-        "privileged": {
-          "title": "Privileged",
-          "type": "boolean"
         },
         "processes": {
           "maximum": 65535,
@@ -5122,13 +4236,9 @@
         }
       },
       "required": [
-        "container_socket",
         "cpu_cores",
-        "gpu",
-        "host_mounts",
         "memory_bytes",
         "output_bytes",
-        "privileged",
         "processes",
         "temporary_bytes",
         "timeout_seconds"
@@ -5162,6 +4272,7 @@
     },
     "RecipeBuildNetwork": {
       "additionalProperties": false,
+      "description": "Public hosts the build may reach; an empty list builds offline.",
       "properties": {
         "hosts": {
           "items": {
@@ -5170,19 +4281,10 @@
           "maxItems": 64,
           "title": "Hosts",
           "type": "array"
-        },
-        "mode": {
-          "enum": [
-            "none",
-            "public"
-          ],
-          "title": "Mode",
-          "type": "string"
         }
       },
       "required": [
-        "hosts",
-        "mode"
+        "hosts"
       ],
       "title": "RecipeBuildNetwork",
       "type": "object"
@@ -5391,92 +4493,12 @@
       "title": "RecipeBuildOptions",
       "type": "object"
     },
-    "RecipeBuildPolicy": {
-      "additionalProperties": false,
-      "properties": {
-        "dockerfile": {
-          "maxLength": 512,
-          "minLength": 1,
-          "title": "Dockerfile",
-          "type": "string"
-        },
-        "findings": {
-          "items": {
-            "$ref": "#/$defs/RecipeBuildPolicyFinding"
-          },
-          "maxItems": 128,
-          "title": "Findings",
-          "type": "array"
-        },
-        "passed": {
-          "title": "Passed",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "passed",
-        "dockerfile",
-        "findings"
-      ],
-      "title": "RecipeBuildPolicy",
-      "type": "object"
-    },
-    "RecipeBuildPolicyFinding": {
-      "additionalProperties": false,
-      "properties": {
-        "code": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Code",
-          "type": "string"
-        },
-        "detail": {
-          "maxLength": 512,
-          "minLength": 1,
-          "title": "Detail",
-          "type": "string"
-        },
-        "line": {
-          "anyOf": [
-            {
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Line"
-        },
-        "path": {
-          "maxLength": 512,
-          "minLength": 1,
-          "title": "Path",
-          "type": "string"
-        }
-      },
-      "required": [
-        "code",
-        "path",
-        "detail"
-      ],
-      "title": "RecipeBuildPolicyFinding",
-      "type": "object"
-    },
     "RecipeBuildRequest": {
       "additionalProperties": false,
+      "description": "Build one recipe image for linux/arm64.",
       "properties": {
         "adapter": {
           "$ref": "#/$defs/RecipeBuildAdapter"
-        },
-        "arguments": {
-          "items": {
-            "$ref": "#/$defs/RecipeBuildArgument"
-          },
-          "maxItems": 64,
-          "title": "Arguments",
-          "type": "array"
         },
         "base_image_storage_bytes": {
           "maximum": 17592186044416,
@@ -5516,11 +4538,6 @@
           "title": "Dockerfile",
           "type": "string"
         },
-        "kind": {
-          "const": "recipe.build.v1",
-          "title": "Kind",
-          "type": "string"
-        },
         "limits": {
           "$ref": "#/$defs/RecipeBuildLimits"
         },
@@ -5529,11 +4546,6 @@
         },
         "options": {
           "$ref": "#/$defs/RecipeBuildOptions"
-        },
-        "platform": {
-          "const": "linux/arm64",
-          "title": "Platform",
-          "type": "string"
         },
         "recipe_content_sha256": {
           "pattern": "^[0-9a-f]{64}$",
@@ -5545,11 +4557,6 @@
           "title": "Recipe Revision Id",
           "type": "string"
         },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
         "source_bundle_bytes": {
           "maximum": 67108864,
           "minimum": 1,
@@ -5560,40 +4567,21 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Source Bundle Sha256",
           "type": "string"
-        },
-        "target": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "minLength": 1,
-              "pattern": "^[A-Za-z0-9._-]+$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Target"
         }
       },
       "required": [
         "adapter",
-        "arguments",
         "base_image_storage_bytes",
         "base_images",
         "capabilities",
         "build_id",
         "build_input_sha256",
         "dockerfile",
-        "kind",
         "limits",
         "network",
         "options",
-        "platform",
         "recipe_content_sha256",
         "recipe_revision_id",
-        "schema_version",
         "source_bundle_bytes",
         "source_bundle_sha256"
       ],
@@ -5602,35 +4590,8 @@
     },
     "RecipeImageImportEvidence": {
       "additionalProperties": false,
-      "properties": {
-        "build_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Build Id",
-          "type": "string"
-        },
-        "image_bytes": {
-          "exclusiveMinimum": 0,
-          "maximum": 17592186044416,
-          "title": "Image Bytes",
-          "type": "integer"
-        },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "oci_layout_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Oci Layout Sha256",
-          "type": "string"
-        }
-      },
-      "required": [
-        "build_id",
-        "image_bytes",
-        "image_digest",
-        "oci_layout_sha256"
-      ],
+      "description": "The image is imported; the Controller already holds its identity.",
+      "properties": {},
       "title": "RecipeImageImportEvidence",
       "type": "object"
     },
@@ -5653,11 +4614,6 @@
           "title": "Image Digest",
           "type": "string"
         },
-        "kind": {
-          "const": "recipe.image.import.v1",
-          "title": "Kind",
-          "type": "string"
-        },
         "mapping_generation": {
           "minimum": 1,
           "title": "Mapping Generation",
@@ -5673,11 +4629,6 @@
           "title": "Oci Layout Sha256",
           "type": "string"
         },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
         "source_node_id": {
           "pattern": "^spk_[0-9a-f]{32}$",
           "title": "Source Node Id",
@@ -5688,11 +4639,9 @@
         "build_id",
         "image_bytes",
         "image_digest",
-        "kind",
         "mapping_generation",
         "mapping_id",
         "oci_layout_sha256",
-        "schema_version",
         "source_node_id"
       ],
       "title": "RecipeImageImportRequest",
@@ -5719,29 +4668,11 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Plan Digest",
           "type": "string"
-        },
-        "rank": {
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "role": {
-          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
-          "title": "Role",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 2,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "installation_id",
         "plan_digest",
-        "rank",
-        "role",
         "expected_bytes",
         "compiled_execution_plan"
       ],
@@ -6027,19 +4958,10 @@
     },
     "RecipeJobRunRequest": {
       "additionalProperties": false,
+      "description": "One job run; interface, image, placement and timeout come from the plan.",
       "properties": {
         "compiled_execution_plan": {
           "$ref": "#/$defs/CompiledExecutionPlan"
-        },
-        "contract_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Contract Sha256",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
         },
         "input_manifest_sha256": {
           "pattern": "^[0-9a-f]{64}$",
@@ -6065,46 +4987,14 @@
           "title": "Installation Id",
           "type": "string"
         },
-        "interface": {
-          "enum": [
-            "audio-job",
-            "video-job",
-            "image-job",
-            "mesh-job",
-            "artifact-job"
-          ],
-          "title": "Interface",
-          "type": "string"
-        },
         "job_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Job Id",
           "type": "string"
         },
-        "mapping_generation": {
-          "maximum": 9223372036854775807,
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
         "mapping_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Mapping Id",
-          "type": "string"
-        },
-        "memory_floor_bytes": {
-          "maximum": 17592186044416,
-          "minimum": 0,
-          "title": "Memory Floor Bytes",
-          "type": "integer"
-        },
-        "memory_kind": {
-          "enum": [
-            "unified",
-            "host",
-            "accelerator"
-          ],
-          "title": "Memory Kind",
           "type": "string"
         },
         "output_limits": {
@@ -6124,30 +5014,9 @@
           "title": "Plan Digest",
           "type": "string"
         },
-        "rank": {
-          "const": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
         "recipe_revision_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "reserved_memory_bytes": {
-          "maximum": 17592186044416,
-          "minimum": 1,
-          "title": "Reserved Memory Bytes",
-          "type": "integer"
-        },
-        "role": {
-          "const": "entrypoint",
-          "title": "Role",
           "type": "string"
         },
         "run_generation": {
@@ -6160,45 +5029,22 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Run Id",
           "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "timeout_seconds": {
-          "maximum": 3600,
-          "minimum": 1,
-          "title": "Timeout Seconds",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "job_id",
         "run_id",
         "installation_id",
         "mapping_id",
-        "mapping_generation",
         "run_generation",
         "recipe_revision_id",
-        "recipe_content_sha256",
-        "image_digest",
         "plan_digest",
-        "interface",
-        "rank",
-        "role",
-        "reserved_memory_bytes",
-        "memory_floor_bytes",
-        "memory_kind",
-        "contract_sha256",
         "input_manifest_sha256",
         "input_total_bytes",
         "inputs",
         "compiled_execution_plan",
         "output_mappings",
-        "output_limits",
-        "timeout_seconds"
+        "output_limits"
       ],
       "title": "RecipeJobRunRequest",
       "type": "object"
@@ -6252,15 +5098,9 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Run Id",
           "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "job_id",
         "run_id",
         "exit_code",
@@ -6309,780 +5149,57 @@
       "additionalProperties": false,
       "description": "Authority to remove one managed install with an invalid launch contract.",
       "properties": {
-        "compiled_spec_canonical_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Compiled Spec Canonical Sha256",
-          "type": "string"
-        },
-        "install_operation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Install Operation Id",
-          "type": "string"
-        },
-        "install_operation_payload_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Install Operation Payload Sha256",
-          "type": "string"
-        },
         "installation_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Installation Id",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
           "type": "string"
         },
         "plan_digest": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Plan Digest",
           "type": "string"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
-        "node_id",
         "installation_id",
-        "install_operation_id",
-        "install_operation_payload_sha256",
-        "plan_digest",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "compiled_spec_canonical_sha256"
+        "plan_digest"
       ],
       "title": "RecipeReconcilePayload",
       "type": "object"
     },
     "RecipeReconcileResult": {
       "additionalProperties": false,
-      "properties": {
-        "cleanup_receipt_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Cleanup Receipt Sha256",
-          "type": "string"
-        },
-        "compiled_spec_canonical_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Compiled Spec Canonical Sha256",
-          "type": "string"
-        },
-        "install_operation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Install Operation Id",
-          "type": "string"
-        },
-        "install_operation_payload_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Install Operation Payload Sha256",
-          "type": "string"
-        },
-        "installation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Installation Id",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "plan_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Plan Digest",
-          "type": "string"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "reconciled": {
-          "const": true,
-          "title": "Reconciled",
-          "type": "boolean"
-        },
-        "removed_bytes": {
-          "description": "Measured bytes in the removed agent-owned installation tree, excluding the exact helper-managed runtime-cache subtree. The helper separately confirms removal of that private cache without reporting its byte count.",
-          "maximum": 17592186044416,
-          "minimum": 0,
-          "title": "Removed Bytes",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "reconciled",
-        "node_id",
-        "installation_id",
-        "install_operation_id",
-        "install_operation_payload_sha256",
-        "plan_digest",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "compiled_spec_canonical_sha256",
-        "removed_bytes",
-        "cleanup_receipt_sha256"
-      ],
+      "description": "A reconciliation succeeds with an empty result.",
+      "properties": {},
       "title": "RecipeReconcileResult",
       "type": "object"
     },
     "RecipeReconciliationIdentity": {
       "additionalProperties": false,
-      "description": "Exact old install authority carried through the signed cleanup grant.",
+      "description": "The install a reconciliation removes, carried through the cleanup grant.",
       "properties": {
-        "compiled_spec_canonical_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Compiled Spec Canonical Sha256",
-          "type": "string"
-        },
-        "install_operation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Install Operation Id",
-          "type": "string"
-        },
-        "install_operation_payload_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Install Operation Payload Sha256",
-          "type": "string"
-        },
         "installation_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Installation Id",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
           "type": "string"
         },
         "plan_digest": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Plan Digest",
           "type": "string"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
-        "node_id",
         "installation_id",
-        "install_operation_id",
-        "install_operation_payload_sha256",
-        "plan_digest",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "compiled_spec_canonical_sha256"
+        "plan_digest"
       ],
       "title": "RecipeReconciliationIdentity",
       "type": "object"
     },
-    "RecipeRunInspectionBinding": {
+    "RecipeRunInspectionRequest": {
       "additionalProperties": false,
-      "description": "Exact run identity bound into a signed helper inspection request.",
+      "description": "Helper frame for one read-only inspection of a managed run.\n\nUnlike every other helper operation it needs no Controller grant: it only\nreports whether the exact container of an agent-written ``run-inspect``\nruntime request is running.",
       "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "installation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Installation Id",
-          "type": "string"
-        },
-        "local_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Local Address"
-        },
-        "mapping_generation": {
-          "maximum": 9223372036854775807,
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
-        "mapping_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Mapping Id",
-          "type": "string"
-        },
-        "master_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Master Address"
-        },
-        "master_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Master Port"
-        },
-        "model_identity": {
-          "maxLength": 1024,
-          "minLength": 3,
-          "title": "Model Identity",
-          "type": "string"
-        },
-        "port": {
-          "maximum": 65535,
-          "minimum": 1024,
-          "title": "Port",
-          "type": "integer"
-        },
-        "rank": {
-          "maximum": 1023,
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "role": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
-        },
-        "run_generation": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Run Generation",
-          "type": "integer"
-        },
-        "run_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Run Id",
-          "type": "string"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "world_size": {
-          "maximum": 1024,
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "run_id",
-        "installation_id",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "mapping_id",
-        "mapping_generation",
-        "run_generation",
-        "image_digest",
-        "artifact_set_digest",
-        "model_identity",
-        "rank",
-        "role",
-        "world_size",
-        "local_address",
-        "master_address",
-        "master_port",
-        "port",
-        "runtime_arguments_sha256"
-      ],
-      "title": "RecipeRunInspectionBinding",
-      "type": "object"
-    },
-    "RecipeRunObservationGrantRequest": {
-      "additionalProperties": false,
-      "description": "Exact Controller request that authorizes one runtime inspection.",
-      "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
-        "attempt": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Attempt",
-          "type": "integer"
-        },
-        "expires_in_seconds": {
-          "const": 10,
-          "title": "Expires In Seconds",
-          "type": "integer"
-        },
-        "fence": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Fence",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "installation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Installation Id",
-          "type": "string"
-        },
-        "job_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Job Id",
-          "type": "string"
-        },
-        "local_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Local Address"
-        },
-        "mapping_generation": {
-          "maximum": 9223372036854775807,
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
-        "mapping_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Mapping Id",
-          "type": "string"
-        },
-        "master_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Master Address"
-        },
-        "master_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Master Port"
-        },
-        "model_identity": {
-          "maxLength": 1024,
-          "minLength": 3,
-          "title": "Model Identity",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "operation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Operation Id",
-          "type": "string"
-        },
-        "port": {
-          "maximum": 65535,
-          "minimum": 1024,
-          "title": "Port",
-          "type": "integer"
-        },
-        "rank": {
-          "maximum": 1023,
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "request_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Request Sha256",
-          "type": "string"
-        },
-        "role": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
-        },
-        "run_generation": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Run Generation",
-          "type": "integer"
-        },
-        "run_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Run Id",
-          "type": "string"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "world_size": {
-          "maximum": 1024,
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "run_id",
-        "installation_id",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "mapping_id",
-        "mapping_generation",
-        "run_generation",
-        "image_digest",
-        "artifact_set_digest",
-        "model_identity",
-        "rank",
-        "role",
-        "world_size",
-        "local_address",
-        "master_address",
-        "master_port",
-        "port",
-        "runtime_arguments_sha256",
-        "schema_version",
-        "node_id",
-        "job_id",
-        "operation_id",
-        "attempt",
-        "fence",
-        "request_sha256",
-        "expires_in_seconds"
-      ],
-      "title": "RecipeRunObservationGrantRequest",
-      "type": "object"
-    },
-    "RecipeRunObservationGrantWire": {
-      "additionalProperties": false,
-      "description": "Canonical grant response used to authorize one exact observation.",
-      "properties": {
-        "grant": {
-          "$ref": "#/$defs/SignedHostHelperGrant"
-        },
-        "observation_identity_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Identity Sha256",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "schema_version",
-        "observation_identity_sha256",
-        "grant"
-      ],
-      "title": "RecipeRunObservationGrantWire",
-      "type": "object"
-    },
-    "RecipeRunObservationIdentity": {
-      "additionalProperties": false,
-      "description": "Canonical Controller identity projection for one exact observation.",
-      "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "installation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Installation Id",
-          "type": "string"
-        },
-        "local_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Local Address"
-        },
-        "mapping_generation": {
-          "maximum": 9223372036854775807,
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
-        "mapping_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Mapping Id",
-          "type": "string"
-        },
-        "master_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Master Address"
-        },
-        "master_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Master Port"
-        },
-        "model_identity": {
-          "maxLength": 1024,
-          "minLength": 3,
-          "title": "Model Identity",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "port": {
-          "maximum": 65535,
-          "minimum": 1024,
-          "title": "Port",
-          "type": "integer"
-        },
-        "rank": {
-          "maximum": 1023,
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "role": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
-        },
-        "run_generation": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Run Generation",
-          "type": "integer"
-        },
-        "run_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Run Id",
-          "type": "string"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "world_size": {
-          "maximum": 1024,
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "run_id",
-        "installation_id",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "mapping_id",
-        "mapping_generation",
-        "run_generation",
-        "image_digest",
-        "artifact_set_digest",
-        "model_identity",
-        "rank",
-        "role",
-        "world_size",
-        "local_address",
-        "master_address",
-        "master_port",
-        "port",
-        "runtime_arguments_sha256",
-        "schema_version",
-        "node_id"
-      ],
-      "title": "RecipeRunObservationIdentity",
-      "type": "object"
-    },
-    "RecipeRunObservationReceiptClaims": {
-      "additionalProperties": false,
-      "properties": {
-        "authority": {
-          "const": "vonk.recipe-run-observation-helper",
-          "title": "Authority",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "observation_identity_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Identity Sha256",
-          "type": "string"
-        },
-        "observed_at": {
-          "exclusiveMinimum": 0,
-          "format": "int64",
-          "maximum": 9223372036854775807,
-          "title": "Observed At",
-          "type": "integer"
-        },
-        "outcome": {
-          "enum": [
-            "running",
-            "not-running"
-          ],
-          "title": "Outcome",
-          "type": "string"
-        },
         "request_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Request Id",
@@ -7092,35 +5209,19 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Request Sha256",
           "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
-        "authority",
-        "node_id",
         "request_id",
-        "request_sha256",
-        "observation_identity_sha256",
-        "outcome",
-        "observed_at"
+        "request_sha256"
       ],
-      "title": "RecipeRunObservationReceiptClaims",
+      "title": "RecipeRunInspectionRequest",
       "type": "object"
     },
     "RecipeRunObservationWire": {
       "additionalProperties": false,
-      "description": "One current, exact observation produced by the Rust agent.",
+      "description": "What the agent saw of one local run generation.",
       "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
         "endpoint_ready": {
           "anyOf": [
             {
@@ -7132,127 +5233,9 @@
           ],
           "title": "Endpoint Ready"
         },
-        "grant": {
-          "$ref": "#/$defs/SignedHostHelperGrant"
-        },
-        "helper_receipt": {
-          "$ref": "#/$defs/SignedRecipeRunObservationReceipt"
-        },
-        "image_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "installation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Installation Id",
-          "type": "string"
-        },
-        "local_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Local Address"
-        },
-        "mapping_generation": {
-          "maximum": 9223372036854775807,
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
-        "mapping_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Mapping Id",
-          "type": "string"
-        },
-        "master_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Master Address"
-        },
-        "master_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Master Port"
-        },
-        "model_identity": {
-          "maxLength": 1024,
-          "minLength": 3,
-          "title": "Model Identity",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "observation_identity_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Identity Sha256",
-          "type": "string"
-        },
-        "observation_receipt_public_key": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Receipt Public Key",
-          "type": "string"
-        },
-        "observed_at": {
-          "format": "date-time",
-          "title": "Observed At",
-          "type": "string"
-        },
-        "port": {
-          "maximum": 65535,
-          "minimum": 1024,
-          "title": "Port",
-          "type": "integer"
-        },
-        "rank": {
-          "maximum": 1023,
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "role": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
+        "process_running": {
+          "title": "Process Running",
+          "type": "boolean"
         },
         "run_generation": {
           "maximum": 2147483647,
@@ -7264,58 +5247,20 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Run Id",
           "type": "string"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "world_size": {
-          "maximum": 1024,
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
         }
       },
       "required": [
         "run_id",
-        "installation_id",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "mapping_id",
-        "mapping_generation",
         "run_generation",
-        "image_digest",
-        "artifact_set_digest",
-        "model_identity",
-        "rank",
-        "role",
-        "world_size",
-        "local_address",
-        "master_address",
-        "master_port",
-        "port",
-        "runtime_arguments_sha256",
-        "schema_version",
-        "node_id",
-        "observed_at",
-        "endpoint_ready",
-        "observation_identity_sha256",
-        "grant",
-        "helper_receipt",
-        "observation_receipt_public_key"
+        "process_running",
+        "endpoint_ready"
       ],
       "title": "RecipeRunObservationWire",
       "type": "object"
     },
     "RecipeRunObservationsWire": {
       "additionalProperties": false,
-      "description": "The sole current observation snapshot envelope.",
+      "description": "The agent's current observation of every locally managed run.\n\n``observed_at`` is taken before the agent lists its local runs, so a run\nthe Controller changed after that instant is never overwritten by it.",
       "properties": {
         "observed_at": {
           "format": "date-time",
@@ -7329,257 +5274,30 @@
           "maxItems": 64,
           "title": "Runs",
           "type": "array"
-        },
-        "schema_version": {
-          "const": 2,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "observed_at",
         "runs"
       ],
       "title": "RecipeRunObservationsWire",
       "type": "object"
     },
-    "RecipeStartCollectiveReadinessEvidence": {
-      "additionalProperties": false,
-      "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
-        "endpoint": {
-          "title": "Endpoint",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "local_address": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Local Address"
-        },
-        "master_address": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Master Address"
-        },
-        "master_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Master Port"
-        },
-        "memory_reservation_bytes": {
-          "minimum": 1,
-          "title": "Memory Reservation Bytes",
-          "type": "integer"
-        },
-        "model_identity": {
-          "anyOf": [
-            {
-              "maxLength": 1024,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model Identity"
-        },
-        "phase": {
-          "const": "collective-readiness",
-          "title": "Phase",
-          "type": "string"
-        },
-        "rank": {
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "ready": {
-          "const": true,
-          "title": "Ready",
-          "type": "boolean"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "role": {
-          "maxLength": 80,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
-        },
-        "run_generation": {
-          "minimum": 1,
-          "title": "Run Generation",
-          "type": "integer"
-        },
-        "run_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Run Id",
-          "type": "string"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "world_size": {
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "image_digest",
-        "artifact_set_digest",
-        "rank",
-        "world_size",
-        "memory_reservation_bytes",
-        "phase",
-        "run_id",
-        "run_generation",
-        "runtime_arguments_sha256",
-        "role",
-        "local_address",
-        "master_address",
-        "endpoint",
-        "ready"
-      ],
-      "title": "RecipeStartCollectiveReadinessEvidence",
-      "type": "object"
-    },
     "RecipeStartPayload": {
       "additionalProperties": false,
+      "description": "Start one rank; placement, image and addresses come from the plan.",
       "properties": {
-        "alias": {
-          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$",
-          "title": "Alias",
-          "type": "string"
-        },
         "compiled_execution_plan": {
           "$ref": "#/$defs/CompiledExecutionPlan"
-        },
-        "endpoint_address": {
-          "format": "ip",
-          "title": "Endpoint Address",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
         },
         "installation_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Installation Id",
           "type": "string"
         },
-        "local_address": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Local Address"
-        },
-        "mapping_generation": {
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
         "mapping_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Mapping Id",
-          "type": "string"
-        },
-        "master_address": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Master Address"
-        },
-        "master_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Master Port"
-        },
-        "memory_floor_bytes": {
-          "maximum": 17592186044416,
-          "minimum": 0,
-          "title": "Memory Floor Bytes",
-          "type": "integer"
-        },
-        "memory_kind": {
-          "enum": [
-            "unified",
-            "host",
-            "accelerator"
-          ],
-          "title": "Memory Kind",
           "type": "string"
         },
         "phase": {
@@ -7603,36 +5321,9 @@
           "title": "Plan Digest",
           "type": "string"
         },
-        "port": {
-          "maximum": 65535,
-          "minimum": 1024,
-          "title": "Port",
-          "type": "integer"
-        },
-        "rank": {
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
         "recipe_revision_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "reserved_memory_bytes": {
-          "maximum": 17592186044416,
-          "minimum": 1,
-          "title": "Reserved Memory Bytes",
-          "type": "integer"
-        },
-        "role": {
-          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
-          "title": "Role",
           "type": "string"
         },
         "run_generation": {
@@ -7645,11 +5336,6 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Run Id",
           "type": "string"
-        },
-        "schema_version": {
-          "const": 2,
-          "title": "Schema Version",
-          "type": "integer"
         },
         "start_deadline": {
           "anyOf": [
@@ -7664,200 +5350,23 @@
           "format": "date-time",
           "title": "Start Deadline",
           "x-vonk-source-type": "string"
-        },
-        "world_size": {
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "run_id",
         "installation_id",
         "recipe_revision_id",
-        "recipe_content_sha256",
         "mapping_id",
-        "mapping_generation",
-        "image_digest",
         "plan_digest",
-        "alias",
-        "rank",
-        "role",
-        "port",
-        "reserved_memory_bytes",
-        "memory_floor_bytes",
-        "memory_kind",
-        "endpoint_address",
-        "world_size",
         "compiled_execution_plan",
-        "local_address",
-        "master_address",
-        "master_port",
         "run_generation"
       ],
       "title": "RecipeStartPayload",
       "type": "object"
     },
-    "RecipeStartRankLaunchEvidence": {
-      "additionalProperties": false,
-      "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
-        "fabric_projection_bound": {
-          "const": true,
-          "title": "Fabric Projection Bound",
-          "type": "boolean"
-        },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "launched": {
-          "const": true,
-          "title": "Launched",
-          "type": "boolean"
-        },
-        "local_address": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Local Address"
-        },
-        "master_address": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Master Address"
-        },
-        "master_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Master Port"
-        },
-        "memory_reservation_bytes": {
-          "minimum": 1,
-          "title": "Memory Reservation Bytes",
-          "type": "integer"
-        },
-        "model_identity": {
-          "anyOf": [
-            {
-              "maxLength": 1024,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model Identity"
-        },
-        "phase": {
-          "const": "rank-launch",
-          "title": "Phase",
-          "type": "string"
-        },
-        "process_running": {
-          "const": true,
-          "title": "Process Running",
-          "type": "boolean"
-        },
-        "rank": {
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "role": {
-          "maxLength": 80,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
-        },
-        "run_generation": {
-          "minimum": 1,
-          "title": "Run Generation",
-          "type": "integer"
-        },
-        "run_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Run Id",
-          "type": "string"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "world_size": {
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "image_digest",
-        "artifact_set_digest",
-        "rank",
-        "world_size",
-        "memory_reservation_bytes",
-        "phase",
-        "run_id",
-        "run_generation",
-        "runtime_arguments_sha256",
-        "role",
-        "local_address",
-        "master_address",
-        "process_running",
-        "fabric_projection_bound",
-        "launched"
-      ],
-      "title": "RecipeStartRankLaunchEvidence",
-      "type": "object"
-    },
     "RecipeStartResult": {
       "additionalProperties": false,
+      "description": "The serving rank reports its endpoint; every other rank reports ``{}``.",
       "properties": {
         "endpoint": {
           "anyOf": [
@@ -7870,134 +5379,9 @@
           ],
           "default": null,
           "title": "Endpoint"
-        },
-        "evidence": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RecipeStartSingleEvidence"
-            },
-            {
-              "$ref": "#/$defs/RecipeStartRankLaunchEvidence"
-            },
-            {
-              "$ref": "#/$defs/RecipeStartCollectiveReadinessEvidence"
-            },
-            {
-              "$ref": "#/$defs/TensorParallelStartEvidence"
-            }
-          ],
-          "title": "Evidence"
         }
       },
-      "required": [
-        "evidence"
-      ],
       "title": "RecipeStartResult",
-      "type": "object"
-    },
-    "RecipeStartSingleEvidence": {
-      "additionalProperties": false,
-      "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
-        "endpoint": {
-          "title": "Endpoint",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "local_address": {
-          "title": "Local Address",
-          "type": "null"
-        },
-        "master_address": {
-          "title": "Master Address",
-          "type": "null"
-        },
-        "master_port": {
-          "title": "Master Port",
-          "type": "null"
-        },
-        "memory_reservation_bytes": {
-          "minimum": 1,
-          "title": "Memory Reservation Bytes",
-          "type": "integer"
-        },
-        "model_identity": {
-          "anyOf": [
-            {
-              "maxLength": 1024,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model Identity"
-        },
-        "rank": {
-          "const": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "ready": {
-          "const": true,
-          "title": "Ready",
-          "type": "boolean"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "run_generation": {
-          "minimum": 1,
-          "title": "Run Generation",
-          "type": "integer"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "world_size": {
-          "const": 1,
-          "title": "World Size",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "image_digest",
-        "artifact_set_digest",
-        "rank",
-        "world_size",
-        "memory_reservation_bytes",
-        "endpoint",
-        "ready",
-        "run_generation",
-        "runtime_arguments_sha256",
-        "local_address",
-        "master_address",
-        "master_port"
-      ],
-      "title": "RecipeStartSingleEvidence",
       "type": "object"
     },
     "RecipeStopPayload": {
@@ -8016,19 +5400,9 @@
           "title": "Installation Id",
           "type": "string"
         },
-        "mapping_generation": {
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
         "mapping_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Mapping Id",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
           "type": "string"
         },
         "plan_digest": {
@@ -8036,24 +5410,9 @@
           "title": "Plan Digest",
           "type": "string"
         },
-        "rank": {
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
         "recipe_revision_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "role": {
-          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
-          "title": "Role",
           "type": "string"
         },
         "run_generation": {
@@ -8067,37 +5426,20 @@
           "title": "Run Id",
           "type": "string"
         },
-        "schema_version": {
-          "const": 2,
-          "title": "Schema Version",
-          "type": "integer"
-        },
         "target_runtime_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Target Runtime Id",
           "type": "string"
-        },
-        "world_size": {
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "run_id",
         "target_runtime_id",
         "run_generation",
-        "node_id",
         "installation_id",
         "recipe_revision_id",
-        "recipe_content_sha256",
         "mapping_id",
-        "mapping_generation",
         "plan_digest",
-        "rank",
-        "role",
-        "world_size",
         "compiled_execution_plan"
       ],
       "title": "RecipeStopPayload",
@@ -8105,16 +5447,8 @@
     },
     "RecipeStopResult": {
       "additionalProperties": false,
-      "properties": {
-        "stopped": {
-          "const": true,
-          "title": "Stopped",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "stopped"
-      ],
+      "description": "A stop succeeds with an empty result.",
+      "properties": {},
       "title": "RecipeStopResult",
       "type": "object"
     },
@@ -8147,15 +5481,9 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Recipe Content Sha256",
           "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "installation_id",
         "plan_digest",
         "recipe_content_sha256",
@@ -8166,23 +5494,8 @@
     },
     "RecipeUninstallResult": {
       "additionalProperties": false,
-      "properties": {
-        "removed_model_bytes": {
-          "maximum": 17592186044416,
-          "minimum": 0,
-          "title": "Removed Model Bytes",
-          "type": "integer"
-        },
-        "uninstalled": {
-          "const": true,
-          "title": "Uninstalled",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "uninstalled",
-        "removed_model_bytes"
-      ],
+      "description": "An uninstall succeeds with an empty result.",
+      "properties": {},
       "title": "RecipeUninstallResult",
       "type": "object"
     },
@@ -8295,30 +5608,6 @@
       "title": "RequestValidationProblem",
       "type": "object"
     },
-    "RestartVonkUnitOperation": {
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "const": "restart-vonk-unit",
-          "title": "Type",
-          "type": "string"
-        },
-        "unit": {
-          "enum": [
-            "agent",
-            "helper"
-          ],
-          "title": "Unit",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "unit"
-      ],
-      "title": "RestartVonkUnitOperation",
-      "type": "object"
-    },
     "RuntimePreflightFinding": {
       "additionalProperties": false,
       "properties": {
@@ -8352,21 +5641,12 @@
     },
     "RuntimePreflightRequest": {
       "additionalProperties": false,
+      "description": "Check this linux/arm64 host can run one recipe runtime.",
       "properties": {
-        "architecture": {
-          "enum": [
-            "linux-arm64",
-            "linux-amd64"
-          ],
-          "title": "Architecture",
-          "type": "string"
-        },
         "fabric_connectivity": {
           "enum": [
             "none",
-            "connected",
-            "full_mesh",
-            "switch"
+            "connected"
           ],
           "title": "Fabric Connectivity",
           "type": "string"
@@ -8377,24 +5657,10 @@
           "title": "Fabric Minimum Mbps",
           "type": "integer"
         },
-        "mandatory_capabilities": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Mandatory Capabilities",
-          "type": "array"
-        },
         "minimum_free_bytes": {
           "maximum": 18446744073709551615,
           "minimum": 0,
           "title": "Minimum Free Bytes",
-          "type": "integer"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
           "type": "integer"
         },
         "source_build": {
@@ -8403,13 +5669,10 @@
         }
       },
       "required": [
-        "schema_version",
-        "architecture",
         "source_build",
         "minimum_free_bytes",
         "fabric_connectivity",
-        "fabric_minimum_mbps",
-        "mandatory_capabilities"
+        "fabric_minimum_mbps"
       ],
       "title": "RuntimePreflightRequest",
       "type": "object"
@@ -8417,16 +5680,6 @@
     "RuntimePreflightResult": {
       "additionalProperties": false,
       "properties": {
-        "cached": {
-          "title": "Cached",
-          "type": "boolean"
-        },
-        "duration_ms": {
-          "exclusiveMaximum": 60000,
-          "minimum": 0,
-          "title": "Duration Ms",
-          "type": "integer"
-        },
         "findings": {
           "items": {
             "$ref": "#/$defs/RuntimePreflightFinding"
@@ -8445,50 +5698,14 @@
           "minimum": 0,
           "title": "Observed At",
           "type": "integer"
-        },
-        "request_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Request Sha256",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "fingerprint",
-        "request_sha256",
         "observed_at",
-        "duration_ms",
-        "cached",
         "findings"
       ],
       "title": "RuntimePreflightResult",
-      "type": "object"
-    },
-    "ScheduleRebootOperation": {
-      "additionalProperties": false,
-      "properties": {
-        "delay_seconds": {
-          "maximum": 3600,
-          "minimum": 60,
-          "title": "Delay Seconds",
-          "type": "integer"
-        },
-        "type": {
-          "const": "schedule-reboot",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "delay_seconds"
-      ],
-      "title": "ScheduleRebootOperation",
       "type": "object"
     },
     "SignedHostHelperGrant": {
@@ -8512,29 +5729,6 @@
         "signature"
       ],
       "title": "SignedHostHelperGrant",
-      "type": "object"
-    },
-    "SignedRecipeRunObservationReceipt": {
-      "additionalProperties": false,
-      "properties": {
-        "claims": {
-          "$ref": "#/$defs/RecipeRunObservationReceiptClaims"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "signature": {
-          "$ref": "#/$defs/HostHelperSignature"
-        }
-      },
-      "required": [
-        "schema_version",
-        "claims",
-        "signature"
-      ],
-      "title": "SignedRecipeRunObservationReceipt",
       "type": "object"
     },
     "SourceBundleDigestManifest": {
@@ -8697,331 +5891,6 @@
       "title": "SupervisorAcknowledgement",
       "type": "object"
     },
-    "TelemetryCapability": {
-      "additionalProperties": false,
-      "properties": {
-        "device_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Device Id"
-        },
-        "freshness_threshold_seconds": {
-          "exclusiveMinimum": 0,
-          "maximum": 86400,
-          "title": "Freshness Threshold Seconds",
-          "type": "number"
-        },
-        "interface_name": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Interface Name"
-        },
-        "key": {
-          "maxLength": 96,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
-          "title": "Key",
-          "type": "string"
-        },
-        "measurement_kind": {
-          "enum": [
-            "measured",
-            "derived",
-            "estimated",
-            "configured"
-          ],
-          "title": "Measurement Kind",
-          "type": "string"
-        },
-        "node_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Node Id"
-        },
-        "process_id": {
-          "anyOf": [
-            {
-              "maximum": 2147483647,
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Process Id"
-        },
-        "process_name": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Process Name"
-        },
-        "reason": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reason"
-        },
-        "run_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Run Id"
-        },
-        "scope": {
-          "enum": [
-            "node",
-            "accelerator",
-            "memory",
-            "storage",
-            "network",
-            "runtime",
-            "workload",
-            "service",
-            "benchmark"
-          ],
-          "title": "Scope",
-          "type": "string"
-        },
-        "source": {
-          "maxLength": 128,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
-          "title": "Source",
-          "type": "string"
-        },
-        "supported": {
-          "title": "Supported",
-          "type": "boolean"
-        },
-        "unit": {
-          "maxLength": 32,
-          "minLength": 1,
-          "title": "Unit",
-          "type": "string"
-        }
-      },
-      "required": [
-        "key",
-        "scope",
-        "unit",
-        "source",
-        "measurement_kind",
-        "supported",
-        "freshness_threshold_seconds"
-      ],
-      "title": "TelemetryCapability",
-      "type": "object"
-    },
-    "TelemetryDetails": {
-      "additionalProperties": false,
-      "properties": {
-        "accelerator_name": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Accelerator Name"
-        },
-        "accelerator_performance_state": {
-          "anyOf": [
-            {
-              "maxLength": 32,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Accelerator Performance State"
-        }
-      },
-      "required": [
-        "accelerator_name",
-        "accelerator_performance_state"
-      ],
-      "title": "TelemetryDetails",
-      "type": "object"
-    },
-    "TelemetryMetrics": {
-      "additionalProperties": false,
-      "properties": {
-        "capabilities": {
-          "items": {
-            "$ref": "#/$defs/TelemetryCapability"
-          },
-          "maxItems": 128,
-          "title": "Capabilities",
-          "type": "array"
-        },
-        "provenance": {
-          "$ref": "#/$defs/TelemetryProvenance"
-        },
-        "runtimes": {
-          "items": {
-            "$ref": "#/$defs/TelemetryRuntime"
-          },
-          "maxItems": 32,
-          "title": "Runtimes",
-          "type": "array"
-        },
-        "schema_version": {
-          "const": 2,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "series": {
-          "items": {
-            "$ref": "#/$defs/TelemetrySeries"
-          },
-          "maxItems": 512,
-          "title": "Series",
-          "type": "array"
-        },
-        "workloads": {
-          "items": {
-            "$ref": "#/$defs/TelemetryWorkload"
-          },
-          "maxItems": 128,
-          "title": "Workloads",
-          "type": "array"
-        }
-      },
-      "required": [
-        "schema_version",
-        "series",
-        "capabilities",
-        "runtimes",
-        "workloads",
-        "provenance"
-      ],
-      "title": "TelemetryMetrics",
-      "type": "object"
-    },
-    "TelemetryProvenance": {
-      "additionalProperties": false,
-      "properties": {
-        "collector": {
-          "maxLength": 64,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
-          "title": "Collector",
-          "type": "string"
-        },
-        "collector_version": {
-          "maxLength": 64,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
-          "title": "Collector Version",
-          "type": "string"
-        },
-        "host_uptime_seconds": {
-          "anyOf": [
-            {
-              "maximum": 9223372036854775807,
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Host Uptime Seconds"
-        },
-        "source_observed_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Source Observed At"
-        }
-      },
-      "required": [
-        "collector",
-        "collector_version"
-      ],
-      "title": "TelemetryProvenance",
-      "type": "object"
-    },
     "TelemetryRequest": {
       "additionalProperties": false,
       "properties": {
@@ -9033,222 +5902,12 @@
           "minItems": 1,
           "title": "Samples",
           "type": "array"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "samples"
       ],
       "title": "TelemetryRequest",
-      "type": "object"
-    },
-    "TelemetryRuntime": {
-      "additionalProperties": false,
-      "properties": {
-        "adapter": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Adapter",
-          "type": "string"
-        },
-        "adapter_reason": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Adapter Reason"
-        },
-        "adapter_supported": {
-          "title": "Adapter Supported",
-          "type": "boolean"
-        },
-        "adapter_version": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Adapter Version"
-        },
-        "backend": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Backend",
-          "type": "string"
-        },
-        "context_limit_tokens": {
-          "anyOf": [
-            {
-              "maximum": 9223372036854775807,
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Context Limit Tokens"
-        },
-        "endpoint": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Endpoint"
-        },
-        "engine_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Engine Id",
-          "type": "string"
-        },
-        "error": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Error"
-        },
-        "model": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model"
-        },
-        "model_version": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model Version"
-        },
-        "ranks": {
-          "items": {
-            "maximum": 4294967295,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "maxItems": 64,
-          "title": "Ranks",
-          "type": "array"
-        },
-        "readiness": {
-          "enum": [
-            "starting",
-            "ready",
-            "running",
-            "queued",
-            "stopped",
-            "failed",
-            "unknown"
-          ],
-          "title": "Readiness",
-          "type": "string"
-        },
-        "recipe_revision": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Recipe Revision"
-        },
-        "run_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Run Id",
-          "type": "string"
-        },
-        "serving_node_ids": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Serving Node Ids",
-          "type": "array"
-        },
-        "version": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Version"
-        }
-      },
-      "required": [
-        "run_id",
-        "engine_id",
-        "backend",
-        "serving_node_ids",
-        "ranks",
-        "readiness",
-        "adapter",
-        "adapter_supported"
-      ],
-      "title": "TelemetryRuntime",
       "type": "object"
     },
     "TelemetrySample": {
@@ -9258,22 +5917,6 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Boot Id",
           "type": "string"
-        },
-        "cpu_utilization_percent": {
-          "anyOf": [
-            {
-              "maximum": 100,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Cpu Utilization Percent"
-        },
-        "details": {
-          "$ref": "#/$defs/TelemetryDetails"
         },
         "disk_free_bytes": {
           "anyOf": [
@@ -9300,12 +5943,6 @@
             }
           ],
           "title": "Disk Total Bytes"
-        },
-        "gap_samples": {
-          "maximum": 9223372036854775807,
-          "minimum": 0,
-          "title": "Gap Samples",
-          "type": "integer"
         },
         "gpu_memory_free_bytes": {
           "anyOf": [
@@ -9346,19 +5983,6 @@
           ],
           "title": "Gpu Utilization Percent"
         },
-        "load_average_1m": {
-          "anyOf": [
-            {
-              "maximum": 1000000,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Load Average 1M"
-        },
         "memory_available_bytes": {
           "anyOf": [
             {
@@ -9385,704 +6009,30 @@
           ],
           "title": "Memory Total Bytes"
         },
-        "metrics": {
-          "$ref": "#/$defs/TelemetryMetrics"
-        },
-        "network_receive_bytes_per_second": {
-          "anyOf": [
-            {
-              "maximum": 1000000000000000.0,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Network Receive Bytes Per Second"
-        },
-        "network_transmit_bytes_per_second": {
-          "anyOf": [
-            {
-              "maximum": 1000000000000000.0,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Network Transmit Bytes Per Second"
-        },
         "observed_at": {
           "format": "date-time",
           "title": "Observed At",
           "type": "string"
-        },
-        "power_watts": {
-          "anyOf": [
-            {
-              "maximum": 100000,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Power Watts"
-        },
-        "temperature_c": {
-          "anyOf": [
-            {
-              "maximum": 300,
-              "minimum": -100,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Temperature C"
         }
       },
       "required": [
         "boot_id",
         "observed_at",
-        "cpu_utilization_percent",
-        "load_average_1m",
         "memory_total_bytes",
         "memory_available_bytes",
         "disk_total_bytes",
         "disk_free_bytes",
         "gpu_utilization_percent",
         "gpu_memory_total_bytes",
-        "gpu_memory_free_bytes",
-        "temperature_c",
-        "power_watts",
-        "network_receive_bytes_per_second",
-        "network_transmit_bytes_per_second",
-        "gap_samples",
-        "details",
-        "metrics"
+        "gpu_memory_free_bytes"
       ],
       "title": "TelemetrySample",
-      "type": "object"
-    },
-    "TelemetrySeries": {
-      "additionalProperties": false,
-      "properties": {
-        "aggregation": {
-          "maxLength": 32,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
-          "title": "Aggregation",
-          "type": "string"
-        },
-        "device_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Device Id"
-        },
-        "freshness": {
-          "default": "fresh",
-          "enum": [
-            "fresh",
-            "delayed",
-            "stale"
-          ],
-          "title": "Freshness",
-          "type": "string"
-        },
-        "freshness_threshold_seconds": {
-          "exclusiveMinimum": 0,
-          "maximum": 86400,
-          "title": "Freshness Threshold Seconds",
-          "type": "number"
-        },
-        "interface_name": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Interface Name"
-        },
-        "key": {
-          "maxLength": 96,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
-          "title": "Key",
-          "type": "string"
-        },
-        "measurement_kind": {
-          "enum": [
-            "measured",
-            "derived",
-            "estimated",
-            "configured"
-          ],
-          "title": "Measurement Kind",
-          "type": "string"
-        },
-        "node_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Node Id"
-        },
-        "observed_at": {
-          "format": "date-time",
-          "title": "Observed At",
-          "type": "string"
-        },
-        "process_id": {
-          "anyOf": [
-            {
-              "maximum": 2147483647,
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Process Id"
-        },
-        "process_name": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Process Name"
-        },
-        "reason": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reason"
-        },
-        "received_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Received At"
-        },
-        "run_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Run Id"
-        },
-        "scope": {
-          "enum": [
-            "node",
-            "accelerator",
-            "memory",
-            "storage",
-            "network",
-            "runtime",
-            "workload",
-            "service",
-            "benchmark"
-          ],
-          "title": "Scope",
-          "type": "string"
-        },
-        "source": {
-          "maxLength": 128,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
-          "title": "Source",
-          "type": "string"
-        },
-        "support_status": {
-          "enum": [
-            "available",
-            "unsupported",
-            "unavailable",
-            "stale"
-          ],
-          "title": "Support Status",
-          "type": "string"
-        },
-        "unit": {
-          "maxLength": 32,
-          "minLength": 1,
-          "title": "Unit",
-          "type": "string"
-        },
-        "value": {
-          "anyOf": [
-            {
-              "maximum": 9223372036854775807,
-              "minimum": -9223372036854775808,
-              "type": "integer"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Value"
-        }
-      },
-      "required": [
-        "key",
-        "scope",
-        "value",
-        "unit",
-        "source",
-        "measurement_kind",
-        "observed_at",
-        "freshness_threshold_seconds",
-        "support_status",
-        "aggregation"
-      ],
-      "title": "TelemetrySeries",
-      "type": "object"
-    },
-    "TelemetryWorkload": {
-      "additionalProperties": false,
-      "properties": {
-        "created_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Created At"
-        },
-        "elapsed_seconds": {
-          "anyOf": [
-            {
-              "maximum": 31536000,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Elapsed Seconds"
-        },
-        "ended_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ended At"
-        },
-        "engine_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Engine Id",
-          "type": "string"
-        },
-        "eta_seconds": {
-          "anyOf": [
-            {
-              "maximum": 31536000,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Eta Seconds"
-        },
-        "eta_source": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Eta Source"
-        },
-        "executor_node_ids": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Executor Node Ids",
-          "type": "array"
-        },
-        "failure": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Failure"
-        },
-        "job_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Job Id"
-        },
-        "model": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model"
-        },
-        "origin_node_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Origin Node Id"
-        },
-        "progress_max": {
-          "anyOf": [
-            {
-              "exclusiveMinimum": 0,
-              "maximum": 1000000,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Progress Max"
-        },
-        "progress_value": {
-          "anyOf": [
-            {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Progress Value"
-        },
-        "recipe_revision": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Recipe Revision"
-        },
-        "request_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Id"
-        },
-        "run_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Run Id",
-          "type": "string"
-        },
-        "started_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Started At"
-        },
-        "state": {
-          "enum": [
-            "queued",
-            "running",
-            "completed",
-            "failed",
-            "cancelled",
-            "unknown"
-          ],
-          "title": "State",
-          "type": "string"
-        },
-        "title": {
-          "anyOf": [
-            {
-              "maxLength": 200,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Title"
-        }
-      },
-      "required": [
-        "run_id",
-        "engine_id",
-        "state",
-        "executor_node_ids"
-      ],
-      "title": "TelemetryWorkload",
-      "type": "object"
-    },
-    "TensorParallelStartEvidence": {
-      "additionalProperties": false,
-      "description": "Exact endpoint evidence for a phase-free tensor-parallel start.",
-      "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
-        "endpoint": {
-          "title": "Endpoint",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "local_address": {
-          "title": "Local Address",
-          "type": "string"
-        },
-        "master_address": {
-          "title": "Master Address",
-          "type": "string"
-        },
-        "master_port": {
-          "maximum": 65535,
-          "minimum": 1024,
-          "title": "Master Port",
-          "type": "integer"
-        },
-        "memory_reservation_bytes": {
-          "minimum": 1,
-          "title": "Memory Reservation Bytes",
-          "type": "integer"
-        },
-        "model_identity": {
-          "anyOf": [
-            {
-              "maxLength": 1024,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model Identity"
-        },
-        "rank": {
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "ready": {
-          "const": true,
-          "title": "Ready",
-          "type": "boolean"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "format": "uuid",
-          "maxLength": 36,
-          "minLength": 36,
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "run_generation": {
-          "minimum": 1,
-          "title": "Run Generation",
-          "type": "integer"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "world_size": {
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "image_digest",
-        "artifact_set_digest",
-        "rank",
-        "world_size",
-        "memory_reservation_bytes",
-        "endpoint",
-        "ready",
-        "run_generation",
-        "runtime_arguments_sha256",
-        "local_address",
-        "master_address",
-        "master_port"
-      ],
-      "title": "TensorParallelStartEvidence",
       "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Vonk Agent Wire",
   "x-vonk-model-bases": {
-    "CompiledDistributionObject": [
-      "DistributionObject"
-    ],
     "InstallerAcceptanceBaselineRelease": [
       "InstallerReleaseIdentity"
     ],
@@ -10095,25 +6045,11 @@
     "InstallerPackageArtifact": [
       "InstallerReleaseObject"
     ],
-    "RecipeBuildCleanupEvidence": [
-      "RecipeBuildCleanupRequest"
-    ],
     "RecipeJobOutputManifest": [
       "RecipeJobOutputManifestContent"
     ],
     "RecipeReconcilePayload": [
       "RecipeReconciliationIdentity"
-    ],
-    "RecipeRunObservationGrantRequest": [
-      "RecipeRunObservationIdentity",
-      "RecipeRunInspectionBinding"
-    ],
-    "RecipeRunObservationIdentity": [
-      "RecipeRunInspectionBinding"
-    ],
-    "RecipeRunObservationWire": [
-      "RecipeRunObservationIdentity",
-      "RecipeRunInspectionBinding"
     ],
     "RequestValidationProblem": [
       "BoundedErrorResponse"
@@ -10142,7 +6078,6 @@
     "ClaimRequest": "vonk_agent_protocol.claims.ClaimRequest",
     "CompiledArtifact": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifact",
     "CompiledArtifactMount": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifactMount",
-    "CompiledDistributionObject": "vonk_agent_protocol.compiled_execution_plan.CompiledDistributionObject",
     "CompiledEndpoint": "vonk_agent_protocol.compiled_execution_plan.CompiledEndpoint",
     "CompiledEnvironmentEntry": "vonk_agent_protocol.compiled_execution_plan.CompiledEnvironmentEntry",
     "CompiledExecutionPlan": "vonk_agent_protocol.compiled_execution_plan.CompiledExecutionPlan",
@@ -10155,7 +6090,6 @@
     "CompiledPlacement": "vonk_agent_protocol.compiled_execution_plan.CompiledPlacement",
     "CompiledRuntime": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntime",
     "CompiledRuntimeImage": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntimeImage",
-    "CompiledRuntimeTelemetry": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntimeTelemetry",
     "CompiledSecurity": "vonk_agent_protocol.compiled_execution_plan.CompiledSecurity",
     "CompiledSecurityMount": "vonk_agent_protocol.compiled_execution_plan.CompiledSecurityMount",
     "CompiledTopology": "vonk_agent_protocol.compiled_execution_plan.CompiledTopology",
@@ -10200,7 +6134,6 @@
     "RecipeBuildAdapter": "vonk_agent_protocol.build_import.RecipeBuildAdapter",
     "RecipeBuildAdapterDefinition": "vonk_agent_protocol.build_import.RecipeBuildAdapterDefinition",
     "RecipeBuildAdditionalContext": "vonk_agent_protocol.build_import.RecipeBuildAdditionalContext",
-    "RecipeBuildArgument": "vonk_agent_protocol.build_import.RecipeBuildArgument",
     "RecipeBuildBaseImage": "vonk_agent_protocol.build_import.RecipeBuildBaseImage",
     "RecipeBuildCleanupEvidence": "vonk_agent_protocol.build_import.RecipeBuildCleanupEvidence",
     "RecipeBuildCleanupRequest": "vonk_agent_protocol.build_import.RecipeBuildCleanupRequest",
@@ -10210,8 +6143,6 @@
     "RecipeBuildMetadata": "vonk_agent_protocol.build_import.RecipeBuildMetadata",
     "RecipeBuildNetwork": "vonk_agent_protocol.build_import.RecipeBuildNetwork",
     "RecipeBuildOptions": "vonk_agent_protocol.build_import.RecipeBuildOptions",
-    "RecipeBuildPolicy": "vonk_agent_protocol.build_import.RecipeBuildPolicy",
-    "RecipeBuildPolicyFinding": "vonk_agent_protocol.build_import.RecipeBuildPolicyFinding",
     "RecipeBuildRequest": "vonk_agent_protocol.build_import.RecipeBuildRequest",
     "RecipeImageImportEvidence": "vonk_agent_protocol.build_import.RecipeImageImportEvidence",
     "RecipeImageImportRequest": "vonk_agent_protocol.build_import.RecipeImageImportRequest",
@@ -10230,45 +6161,27 @@
     "RecipeReconcilePayload": "vonk_agent_protocol.recipe_operations.RecipeReconcilePayload",
     "RecipeReconcileResult": "vonk_agent_protocol.recipe_operations.RecipeReconcileResult",
     "RecipeReconciliationIdentity": "vonk_agent_protocol.host_helper.RecipeReconciliationIdentity",
-    "RecipeRunInspectionBinding": "vonk_agent_protocol.host_helper.RecipeRunInspectionBinding",
-    "RecipeRunObservationGrantRequest": "vonk_agent_protocol.recipe_observations.RecipeRunObservationGrantRequest",
-    "RecipeRunObservationGrantWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationGrantWire",
-    "RecipeRunObservationIdentity": "vonk_agent_protocol.recipe_observations.RecipeRunObservationIdentity",
-    "RecipeRunObservationReceiptClaims": "vonk_agent_protocol.host_helper.RecipeRunObservationReceiptClaims",
+    "RecipeRunInspectionRequest": "vonk_agent_protocol.host_helper.RecipeRunInspectionRequest",
     "RecipeRunObservationWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationWire",
     "RecipeRunObservationsWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationsWire",
-    "RecipeStartCollectiveReadinessEvidence": "vonk_agent_protocol.contracts.RecipeStartCollectiveReadinessEvidence",
     "RecipeStartPayload": "vonk_agent_protocol.recipe_operations.RecipeStartPayload",
-    "RecipeStartRankLaunchEvidence": "vonk_agent_protocol.contracts.RecipeStartRankLaunchEvidence",
     "RecipeStartResult": "vonk_agent_protocol.contracts.RecipeStartResult",
-    "RecipeStartSingleEvidence": "vonk_agent_protocol.contracts.RecipeStartSingleEvidence",
     "RecipeStopPayload": "vonk_agent_protocol.recipe_operations.RecipeStopPayload",
     "RecipeStopResult": "vonk_agent_protocol.recipe_operations.RecipeStopResult",
     "RecipeUninstallPayload": "vonk_agent_protocol.recipe_operations.RecipeUninstallPayload",
     "RecipeUninstallResult": "vonk_agent_protocol.recipe_operations.RecipeUninstallResult",
     "RenewRequest": "vonk_agent_protocol.enrollment.RenewRequest",
     "RequestValidationProblem": "vonk_control.operation_api.RequestValidationProblem",
-    "RestartVonkUnitOperation": "vonk_agent_protocol.host_helper.RestartVonkUnitOperation",
     "RuntimePreflightFinding": "vonk_agent_protocol.runtime_preflight.RuntimePreflightFinding",
     "RuntimePreflightRequest": "vonk_agent_protocol.runtime_preflight.RuntimePreflightRequest",
     "RuntimePreflightResult": "vonk_agent_protocol.runtime_preflight.RuntimePreflightResult",
-    "ScheduleRebootOperation": "vonk_agent_protocol.host_helper.ScheduleRebootOperation",
     "SignedHostHelperGrant": "vonk_agent_protocol.host_helper.SignedHostHelperGrant",
-    "SignedRecipeRunObservationReceipt": "vonk_agent_protocol.host_helper.SignedRecipeRunObservationReceipt",
     "SourceBundleDigestManifest": "vonk_agent_protocol.source_bundles.SourceBundleDigestManifest",
     "SourceBundleFile": "vonk_agent_protocol.source_bundles.SourceBundleFile",
     "SourceBundleManifest": "vonk_agent_protocol.source_bundles.SourceBundleManifest",
     "SupervisorAcknowledgement": "vonk_agent_protocol.route_activation.SupervisorAcknowledgement",
-    "TelemetryCapability": "vonk_agent_protocol.telemetry.TelemetryCapability",
-    "TelemetryDetails": "vonk_agent_protocol.telemetry.TelemetryDetails",
-    "TelemetryMetrics": "vonk_agent_protocol.telemetry.TelemetryMetrics",
-    "TelemetryProvenance": "vonk_agent_protocol.telemetry.TelemetryProvenance",
     "TelemetryRequest": "vonk_agent_protocol.telemetry.TelemetryRequest",
-    "TelemetryRuntime": "vonk_agent_protocol.telemetry.TelemetryRuntime",
-    "TelemetrySample": "vonk_agent_protocol.telemetry.TelemetrySample",
-    "TelemetrySeries": "vonk_agent_protocol.telemetry.TelemetrySeries",
-    "TelemetryWorkload": "vonk_agent_protocol.telemetry.TelemetryWorkload",
-    "TensorParallelStartEvidence": "vonk_agent_protocol.contracts.TensorParallelStartEvidence"
+    "TelemetrySample": "vonk_agent_protocol.telemetry.TelemetrySample"
   },
   "x-vonk-models": {
     "ActivateRequest": "#/$defs/ActivateRequest",
@@ -10290,7 +6203,6 @@
     "ClaimRequest": "#/$defs/ClaimRequest",
     "CompiledArtifact": "#/$defs/CompiledArtifact",
     "CompiledArtifactMount": "#/$defs/CompiledArtifactMount",
-    "CompiledDistributionObject": "#/$defs/CompiledDistributionObject",
     "CompiledEndpoint": "#/$defs/CompiledEndpoint",
     "CompiledEnvironmentEntry": "#/$defs/CompiledEnvironmentEntry",
     "CompiledExecutionPlan": "#/$defs/CompiledExecutionPlan",
@@ -10303,7 +6215,6 @@
     "CompiledPlacement": "#/$defs/CompiledPlacement",
     "CompiledRuntime": "#/$defs/CompiledRuntime",
     "CompiledRuntimeImage": "#/$defs/CompiledRuntimeImage",
-    "CompiledRuntimeTelemetry": "#/$defs/CompiledRuntimeTelemetry",
     "CompiledSecurity": "#/$defs/CompiledSecurity",
     "CompiledSecurityMount": "#/$defs/CompiledSecurityMount",
     "CompiledTopology": "#/$defs/CompiledTopology",
@@ -10348,7 +6259,6 @@
     "RecipeBuildAdapter": "#/$defs/RecipeBuildAdapter",
     "RecipeBuildAdapterDefinition": "#/$defs/RecipeBuildAdapterDefinition",
     "RecipeBuildAdditionalContext": "#/$defs/RecipeBuildAdditionalContext",
-    "RecipeBuildArgument": "#/$defs/RecipeBuildArgument",
     "RecipeBuildBaseImage": "#/$defs/RecipeBuildBaseImage",
     "RecipeBuildCleanupEvidence": "#/$defs/RecipeBuildCleanupEvidence",
     "RecipeBuildCleanupRequest": "#/$defs/RecipeBuildCleanupRequest",
@@ -10358,8 +6268,6 @@
     "RecipeBuildMetadata": "#/$defs/RecipeBuildMetadata",
     "RecipeBuildNetwork": "#/$defs/RecipeBuildNetwork",
     "RecipeBuildOptions": "#/$defs/RecipeBuildOptions",
-    "RecipeBuildPolicy": "#/$defs/RecipeBuildPolicy",
-    "RecipeBuildPolicyFinding": "#/$defs/RecipeBuildPolicyFinding",
     "RecipeBuildRequest": "#/$defs/RecipeBuildRequest",
     "RecipeImageImportEvidence": "#/$defs/RecipeImageImportEvidence",
     "RecipeImageImportRequest": "#/$defs/RecipeImageImportRequest",
@@ -10378,44 +6286,26 @@
     "RecipeReconcilePayload": "#/$defs/RecipeReconcilePayload",
     "RecipeReconcileResult": "#/$defs/RecipeReconcileResult",
     "RecipeReconciliationIdentity": "#/$defs/RecipeReconciliationIdentity",
-    "RecipeRunInspectionBinding": "#/$defs/RecipeRunInspectionBinding",
-    "RecipeRunObservationGrantRequest": "#/$defs/RecipeRunObservationGrantRequest",
-    "RecipeRunObservationGrantWire": "#/$defs/RecipeRunObservationGrantWire",
-    "RecipeRunObservationIdentity": "#/$defs/RecipeRunObservationIdentity",
-    "RecipeRunObservationReceiptClaims": "#/$defs/RecipeRunObservationReceiptClaims",
+    "RecipeRunInspectionRequest": "#/$defs/RecipeRunInspectionRequest",
     "RecipeRunObservationWire": "#/$defs/RecipeRunObservationWire",
     "RecipeRunObservationsWire": "#/$defs/RecipeRunObservationsWire",
-    "RecipeStartCollectiveReadinessEvidence": "#/$defs/RecipeStartCollectiveReadinessEvidence",
     "RecipeStartPayload": "#/$defs/RecipeStartPayload",
-    "RecipeStartRankLaunchEvidence": "#/$defs/RecipeStartRankLaunchEvidence",
     "RecipeStartResult": "#/$defs/RecipeStartResult",
-    "RecipeStartSingleEvidence": "#/$defs/RecipeStartSingleEvidence",
     "RecipeStopPayload": "#/$defs/RecipeStopPayload",
     "RecipeStopResult": "#/$defs/RecipeStopResult",
     "RecipeUninstallPayload": "#/$defs/RecipeUninstallPayload",
     "RecipeUninstallResult": "#/$defs/RecipeUninstallResult",
     "RenewRequest": "#/$defs/RenewRequest",
     "RequestValidationProblem": "#/$defs/RequestValidationProblem",
-    "RestartVonkUnitOperation": "#/$defs/RestartVonkUnitOperation",
     "RuntimePreflightFinding": "#/$defs/RuntimePreflightFinding",
     "RuntimePreflightRequest": "#/$defs/RuntimePreflightRequest",
     "RuntimePreflightResult": "#/$defs/RuntimePreflightResult",
-    "ScheduleRebootOperation": "#/$defs/ScheduleRebootOperation",
     "SignedHostHelperGrant": "#/$defs/SignedHostHelperGrant",
-    "SignedRecipeRunObservationReceipt": "#/$defs/SignedRecipeRunObservationReceipt",
     "SourceBundleDigestManifest": "#/$defs/SourceBundleDigestManifest",
     "SourceBundleFile": "#/$defs/SourceBundleFile",
     "SourceBundleManifest": "#/$defs/SourceBundleManifest",
     "SupervisorAcknowledgement": "#/$defs/SupervisorAcknowledgement",
-    "TelemetryCapability": "#/$defs/TelemetryCapability",
-    "TelemetryDetails": "#/$defs/TelemetryDetails",
-    "TelemetryMetrics": "#/$defs/TelemetryMetrics",
-    "TelemetryProvenance": "#/$defs/TelemetryProvenance",
     "TelemetryRequest": "#/$defs/TelemetryRequest",
-    "TelemetryRuntime": "#/$defs/TelemetryRuntime",
-    "TelemetrySample": "#/$defs/TelemetrySample",
-    "TelemetrySeries": "#/$defs/TelemetrySeries",
-    "TelemetryWorkload": "#/$defs/TelemetryWorkload",
-    "TensorParallelStartEvidence": "#/$defs/TensorParallelStartEvidence"
+    "TelemetrySample": "#/$defs/TelemetrySample"
   }
 }

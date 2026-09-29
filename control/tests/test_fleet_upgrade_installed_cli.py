@@ -40,12 +40,10 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
                     architecture="linux-arm64",
                     semantic_version="0.1.0",
                     build_digest=OLD_IDENTITY["build_digest"],
                     binary_digest=OLD_IDENTITY["binary_digest"],
-                    self_test_passed=True,
                     last_seen_at=now,
                 )
             )
@@ -133,8 +131,6 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
         first = operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         assert first is not None
@@ -149,8 +145,6 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
         second = operations.claim(
             NODE_B,
             "serial-b",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         assert second is not None

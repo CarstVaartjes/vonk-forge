@@ -304,7 +304,6 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
             sha256=output_digest,
         )
         result = {
-            "schema_version": 1,
             "job_id": job_id,
             "run_id": run_id,
             "exit_code": 0,
@@ -503,7 +502,6 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
 
         empty_outputs: tuple[RecipeJobFile, ...] = ()
         empty_result = {
-            "schema_version": 1,
             "job_id": job_id,
             "run_id": run_id,
             "exit_code": 0,

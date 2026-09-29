@@ -35,11 +35,7 @@ def record_passing_preflight(
         for node in session.scalars(select(AgentNode)):
             if node_ids is not None and node.node_id not in node_ids:
                 continue
-            node.capabilities = [
-                value
-                for value in node.capabilities
-                if not value.startswith("runtime.preflight.fingerprint.")
-            ] + ["runtime.preflight.v1", "runtime.preflight.fingerprint." + "a" * 64]
+            node.preflight_fingerprint = "a" * 64
             key = str(uuid.uuid4())
             job = Job(
                 id=key,
@@ -84,12 +80,8 @@ def record_passing_preflight(
                     ),
                     state="succeeded",
                     result={
-                        "schema_version": 1,
                         "fingerprint": "a" * 64,
-                        "request_sha256": digest,
                         "observed_at": int(now.timestamp()),
-                        "duration_ms": 1,
-                        "cached": False,
                         "findings": [
                             {
                                 "capability": value,

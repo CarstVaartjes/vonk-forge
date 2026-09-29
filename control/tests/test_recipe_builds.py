@@ -18,10 +18,8 @@ from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
-    AgentResult,
     RecipeBuildRequest,
     canonical_message,
-    canonical_payload,
 )
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
@@ -57,7 +55,6 @@ from vonk_control.recipe_image_availability import (
 )
 from vonk_control.recipe_image_removal_contract import RecipeCacheRemovalOwner
 from vonk_control.recipe_operations import (
-    RecipeOperationConflict,
     RecipeOperationService,
     _record_build_evidence,
 )
@@ -70,11 +67,11 @@ from vonk_control.runtime_image_preparation import (
     persist_runtime_image_receipt,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .recipe_removal_review_support import remove_after_review
 
-_CACHED_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
+_CACHED_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 
 
 class RecordingQueue:
@@ -168,23 +165,13 @@ def setup(
         .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
-    document["execution"]["build"]["network"] = network or {
-        "mode": "none",
-        "hosts": [],
-    }
+    document["execution"]["build"]["network"] = network or {"hosts": []}
     document["identity"]["slug"] = recipe_slug
-    document["execution"]["build"]["target"] = "runtime"
     with sessions.begin() as session:
         builder = session.get(AgentNode, node_id) if existing_node else None
         if existing_node:
             assert builder is not None
             builder.binary_digest = "1" * 64
-            builder.self_test_passed = True
-            builder.capabilities = [
-                *builder.capabilities,
-                "recipe.build.v1",
-                "recipe.image.import.v1",
-            ]
         else:
             session.add(
                 AgentNode(
@@ -194,11 +181,6 @@ def setup(
                     semantic_version="1.2.3",
                     build_digest="sha256:" + "a" * 64,
                     binary_digest="1" * 64,
-                    self_test_passed=True,
-                    capabilities=[
-                        "recipe.build.v1",
-                        "recipe.image.import.v1",
-                    ],
                     last_seen_at=now,
                 )
             )
@@ -230,6 +212,7 @@ def setup(
                 "recipe.build.v1",
                 "recipe.build.egress-proxy.v1",
                 "recipe.image.import.v1",
+                "runtime.vonk.v1",
             ),
             memory_pool="separate",
         )
@@ -302,13 +285,10 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
         revision.id, node_id, now=now
     )
 
-    assert plan.agent_payload["kind"] == "recipe.build.v1"
     assert "command" not in plan.agent_payload
-    assert plan.agent_payload["target"] == "runtime"
     assert plan.agent_payload["capabilities"] == ["DAC_OVERRIDE"]
     limits = _json_object(plan.agent_payload["limits"])
     assert limits["cpu_cores"] == 6
-    assert limits["gpu"] == 0
     assert limits["processes"] == 2048
     assert plan.agent_payload["base_images"] == [
         {
@@ -440,23 +420,19 @@ def _write_controller_build_receipt(
 ) -> RuntimeImageReceipt:
     """Publish the exact filesystem receipt a completed Controller build leaves."""
 
-    staged = storage.prepare_path()
+    staged = storage.root / "staged-build.part"
     staged.write_bytes(archive)
     return storage.commit(
         staged,
         receipt=RuntimeImageReceipt(
             schema_version=2,
-            source="controller-build",
             distribution_publisher="vonk",
             distribution_slug="cached",
             distribution_content_sha256=distribution_content_sha256,
-            registry_manifest_digest=None,
-            platform_manifest_digest=image_digest,
             image_digest=image_digest,
             oci_archive_sha256=hashlib.sha256(archive).hexdigest(),
             image_bytes=len(archive),
             local_image_config_id="sha256:" + "c" * 64,
-            local_image_reference=None,
             architecture="linux-arm64",
             runtime_interface="vonk.runtime.v1",
             archive_path=str(staged),
@@ -546,7 +522,6 @@ def test_nonforced_availability_dispatch_reuses_build_resolved_after_queue(
             assert archive_path.read_bytes() == archive
             return PulledImageEvidence(
                 manifest_digest=image_digest,
-                requested_manifest_digest=None,
                 config_id="sha256:" + "c" * 64,
                 local_reference="localhost/vonk/cached@" + image_digest,
                 architecture=expected_architecture,
@@ -643,7 +618,6 @@ def test_present_archive_without_receipt_is_reprepared_not_rebuilt(
             assert archive_path.read_bytes() == archive
             return PulledImageEvidence(
                 manifest_digest=image_digest,
-                requested_manifest_digest=None,
                 config_id="sha256:" + "c" * 64,
                 local_reference="localhost/vonk/cached@" + image_digest,
                 architecture=expected_architecture,
@@ -726,17 +700,13 @@ def test_legacy_unreadable_build_receipt_is_replaced_from_verified_bytes(
         json.dumps(
             {
                 "schema_version": 2,
-                "source": "controller-build",
                 "distribution_publisher": "vonk",
                 "distribution_slug": "cached",
                 "distribution_content_sha256": revision.content_digest,
-                "registry_manifest_digest": None,
-                "platform_manifest_digest": image_digest,
                 "image_digest": image_digest,
                 "oci_archive_sha256": archive_digest,
                 "image_bytes": len(archive),
                 "local_image_config_id": "sha256:" + "c" * 64,
-                "local_image_reference": None,
                 "architecture": "linux-arm64",
                 "runtime_interface": "vonk.runtime.v1",
                 "runtime_interface_label": "v1",
@@ -777,7 +747,6 @@ def test_legacy_unreadable_build_receipt_is_replaced_from_verified_bytes(
             assert archive_path.read_bytes() == archive
             return PulledImageEvidence(
                 manifest_digest=image_digest,
-                requested_manifest_digest=None,
                 config_id="sha256:" + "c" * 64,
                 local_reference="localhost/vonk/cached@" + image_digest,
                 architecture=expected_architecture,
@@ -899,8 +868,6 @@ def test_resolution_reuses_the_present_receipt_for_the_shared_identity(
                 semantic_version="1.2.3",
                 build_digest="sha256:" + "a" * 64,
                 binary_digest="1" * 64,
-                self_test_passed=True,
-                capabilities=["recipe.build.v1", "recipe.image.import.v1"],
                 last_seen_at=now,
             )
         )
@@ -997,9 +964,8 @@ def test_build_resolution_reuses_notes_only_revision_when_inputs_match(
         assert current is not None
         document = copy.deepcopy(current.document)
         _json_object(document["metadata"])["title"] = "Editorially renamed recipe"
-        canonical = RecipeDefinition.model_validate(document)
-        document = canonical.model_dump(mode="json")
-        content_digest = content_sha256(canonical)
+        read_recipe(document)
+        content_digest = document_sha256(document)
         newer_revision = CatalogDocumentRevision(
             id="notes-revision-" + "1" * 19,
             document_id=current.document_id,
@@ -1097,12 +1063,11 @@ def test_build_plan_rejects_a_stale_resolution_but_keeps_live_admission(
         current = session.get(CatalogDocumentRevision, revision.id)
         assert current is not None
         document = copy.deepcopy(current.document)
-        _json_object(_json_object(document["execution"])["build"])["arguments"] = [
-            {"name": "changed", "value": "yes"}
-        ]
-        canonical = RecipeDefinition.model_validate(document)
-        document = canonical.model_dump(mode="json")
-        content_digest = content_sha256(canonical)
+        _json_object(_json_object(document["execution"])["build"])["network"] = {
+            "hosts": ["pypi.org"]
+        }
+        read_recipe(document)
+        content_digest = document_sha256(document)
         newer_revision = CatalogDocumentRevision(
             id="new-revision-" + "1" * 25,
             document_id=current.document_id,
@@ -1382,25 +1347,14 @@ def test_build_plan_passes_the_installed_agent_claim_boundary(tmp_path: Path) ->
     plan = RecipeBuildService(sessions, bundles=bundles).plan(
         revision.id, node_id, now=now
     )
-    payload_digest = hashlib.sha256(
-        canonical_payload(ProtocolOperation.RECIPE_BUILD, plan.agent_payload)
-    ).hexdigest()
-
     claim = AgentClaim(
-        schema_version=1,
-        job_id="00000000-0000-4000-8000-000000000001",
-        operation_id="00000000-0000-4000-8000-000000000002",
-        attempt=1,
         fence="00000000-0000-4000-8000-000000000003",
-        node_id=node_id,
         operation=ProtocolOperation.RECIPE_BUILD,
-        authority_revision="a" * 64,
-        payload_digest=payload_digest,
         payload=RecipeBuildRequest.model_validate(plan.agent_payload),
         deadline=now,
     )
 
-    assert claim.payload["platform"] == "linux/arm64"
+    assert claim.payload["dockerfile"] == "Dockerfile"
 
 
 def test_starting_build_atomically_reserves_temporary_disk_and_memory(
@@ -1481,7 +1435,6 @@ def test_starting_build_atomically_reserves_temporary_disk_and_memory(
         ("running", "success"),
         ("waiting-for-operator", "success"),
         ("running", "failed"),
-        ("waiting-for-operator", "mismatch"),
     ],
 )
 def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
@@ -1517,36 +1470,12 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
         stored_job.state = source_state
         child.current_attempt = 1
         child_id = child.id
-        node = session.get(AgentNode, node_id)
-        assert node is not None
-        node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
-    if source_state == "waiting-for-operator":
-        with sessions.begin() as session:
-            node = session.get(AgentNode, node_id)
-            assert node is not None
-            node.capabilities = [
-                capability
-                for capability in node.capabilities
-                if capability != "recipe.build.cleanup.v1"
-            ]
-        operations.cancel(
-            original.id,
-            actor="admin",
-            request_id="d75c1b26-f9f5-48b0-94a3-8190bf7c181f",
-            reason="remove recipe cache",
-        )
-        with sessions.begin() as session:
-            node = session.get(AgentNode, node_id)
-            assert node is not None
-            node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
-        assert operations.reconcile_cancelled_builds()
-    else:
-        operations.cancel(
-            original.id,
-            actor="admin",
-            request_id="d75c1b26-f9f5-48b0-94a3-8190bf7c181f",
-            reason="remove recipe cache",
-        )
+    operations.cancel(
+        original.id,
+        actor="admin",
+        request_id="d75c1b26-f9f5-48b0-94a3-8190bf7c181f",
+        reason="remove recipe cache",
+    )
     with sessions() as session:
         original_job = session.get(Job, original.id)
         assert original_job is not None and original_job.state == source_state
@@ -1584,11 +1513,9 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
         node_id,
         succeeded=source_state == "running",
         evidence={
-            "build_input_sha256": plan.build_input_sha256,
             "image_bytes": 500,
             "image_digest": "sha256:" + "b" * 64,
             "oci_layout_sha256": "c" * 64,
-            "policy": {"dockerfile": "Dockerfile", "findings": [], "passed": True},
         }
         if source_state == "running"
         else {"reason": "execution stopped after cancellation"},
@@ -1599,19 +1526,7 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
         )
         removed = session.get(RecipeBuild, plan.build_id)
         assert removed is not None and removed.state == "failed"
-    evidence = {
-        "schema_version": 1,
-        "build_id": plan.build_id,
-        "operation_id": child_id,
-        "stopped": True,
-    }
-    if outcome == "mismatch":
-        evidence["operation_id"] = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-        with pytest.raises(RecipeOperationConflict, match="cleanup evidence"):
-            operations.record_node_result(
-                cleanup_id, node_id, succeeded=True, evidence=evidence
-            )
-    elif outcome == "failed":
+    if outcome == "failed":
         operations.record_node_result(
             cleanup_id,
             node_id,
@@ -1619,9 +1534,7 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
             evidence={"reason": "systemd stop failed"},
         )
     else:
-        operations.record_node_result(
-            cleanup_id, node_id, succeeded=True, evidence=evidence
-        )
+        operations.record_node_result(cleanup_id, node_id, succeeded=True, evidence={})
     with sessions() as session:
         remaining = session.scalar(
             select(ResourceReservation).where(
@@ -1812,15 +1725,9 @@ def test_successful_build_retry_converges_original_and_new_request_keys(
         node_id,
         succeeded=True,
         evidence={
-            "build_input_sha256": plan.build_input_sha256,
             "image_bytes": 500,
             "image_digest": "sha256:" + "b" * 64,
             "oci_layout_sha256": "c" * 64,
-            "policy": {
-                "dockerfile": "Dockerfile",
-                "findings": [],
-                "passed": True,
-            },
         },
     )
     assert succeeded.state == "succeeded"
@@ -1897,6 +1804,8 @@ def test_forced_image_build_resumes_after_worker_restart(
                         "runtime": runtime,
                         "recipe_revision_id": revision.id,
                         "build_input_sha256": plan.build_input_sha256,
+                        # The worker that held this claim died with its lease.
+                        "claim_until": (now - timedelta(seconds=1)).isoformat(),
                     },
                     current_attempt=1,
                     created_at=now,
@@ -1932,11 +1841,9 @@ def test_forced_image_build_resumes_after_worker_restart(
             node_id,
             succeeded=True,
             evidence={
-                "build_input_sha256": plan.build_input_sha256,
                 "image_bytes": 500,
                 "image_digest": "sha256:" + "b" * 64,
                 "oci_layout_sha256": "c" * 64,
-                "policy": {"dockerfile": "Dockerfile", "findings": [], "passed": True},
             },
         )
 
@@ -2002,6 +1909,11 @@ def test_forced_image_build_resumes_after_worker_restart(
         jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.build.v1")))
         assert len(jobs) == 2
         assert all(job.state == "succeeded" for job in jobs)
+
+    with sessions.begin() as session:
+        finished = session.get(Job, parent_id)
+        assert finished is not None
+        finished.state = "succeeded"
 
     # A separate explicit download still requests a fresh build.
     new_parent_id = "00000000-0000-4000-8000-000000000732"
@@ -2093,16 +2005,13 @@ def test_build_plan_accepts_public_network_only_with_egress_boundary_capability(
     tmp_path: Path,
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(
-        tmp_path, network={"mode": "public", "hosts": ["pypi.org"]}
+        tmp_path, network={"hosts": ["pypi.org"]}
     )
 
     plan = RecipeBuildService(sessions, bundles=bundles).plan(
         revision.id, node_id, now=now
     )
-    assert plan.agent_payload["network"] == {
-        "mode": "public",
-        "hosts": ["pypi.org"],
-    }
+    assert plan.agent_payload["network"] == {"hosts": ["pypi.org"]}
 
     # Job claims report executable operations; probed host capabilities are
     # recorded separately by inventory. Exercise the contact write that happens
@@ -2121,19 +2030,11 @@ def test_build_plan_accepts_public_network_only_with_egress_boundary_capability(
         AgentJobService(sessions, clock=lambda: now).claim(
             node_id,
             "builder-serial",
-            30,
-            capabilities=[
-                "agent.runtime.rust.v1",
-                "recipe.build.v1",
-                "recipe.image.import.v1",
-            ],
             runtime_identity={
                 "architecture": "linux-arm64",
                 "semantic_version": "1.2.3",
                 "build_digest": "sha256:" + "a" * 64,
                 "binary_digest": "1" * 64,
-                "self_test_passed": True,
-                "observation_receipt_public_key": "d" * 64,
             },
         )
         is None
@@ -2148,7 +2049,7 @@ def test_public_build_rejects_stale_inventory_without_egress_capability(
     tmp_path: Path,
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(
-        tmp_path, network={"mode": "public", "hosts": ["pypi.org"]}
+        tmp_path, network={"hosts": ["pypi.org"]}
     )
     newer = now + timedelta(seconds=1)
     InventoryRepository(sessions, clock=lambda: newer).record(
@@ -2243,15 +2144,9 @@ def test_build_result_refreshes_upload_evidence_after_a_retried_attempt(
             stale_session,
             stale_build,
             {
-                "build_input_sha256": plan.build_input_sha256,
                 "image_bytes": 500,
                 "image_digest": new_image,
                 "oci_layout_sha256": new_layout,
-                "policy": {
-                    "dockerfile": "Dockerfile",
-                    "findings": [],
-                    "passed": True,
-                },
             },
             now=now,
         )
@@ -2259,84 +2154,6 @@ def test_build_result_refreshes_upload_evidence_after_a_retried_attempt(
     finally:
         stale_session.rollback()
         stale_session.close()
-
-
-def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> None:
-    sessions, bundles, now, node_id, revision = setup(tmp_path)
-    builds = RecipeBuildService(sessions, bundles=bundles)
-    plan = builds.plan(revision.id, node_id, now=now)
-    operations = RecipeOperationService(
-        sessions,
-        install_admission=InstallAdmissionService(sessions),
-        run_admission=RunAdmissionService(sessions),
-        agent_jobs=RecordingQueue(),
-        clock=lambda: now,
-        builds=builds,
-    )
-    operation_view = operations.build(
-        plan,
-        build_input_sha256=plan.build_input_sha256,
-        actor="admin",
-        request_id="frozen-policy-result",
-    )
-    image_digest = "sha256:" + "b" * 64
-    layout_digest = "c" * 64
-    with sessions.begin() as session:
-        build = session.get(RecipeBuild, plan.build_id)
-        assert build is not None
-        build.image_digest = image_digest
-        build.oci_layout_sha256 = layout_digest
-        build.image_bytes = 500
-        agent_operation = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == operation_view.id
-            )
-        )
-        assert agent_operation is not None
-        operation_id = agent_operation.id
-
-    message = AgentResult.parse(
-        {
-            "schema_version": 1,
-            "job_id": operation_view.id,
-            "operation_id": operation_id,
-            "attempt": 1,
-            "fence": "33333333-3333-4333-8333-333333333333",
-            "node_id": node_id,
-            "deadline": "2026-08-11T20:30:00+00:00",
-            "state": "succeeded",
-            "result": {
-                "build_input_sha256": plan.build_input_sha256,
-                "image_bytes": 500,
-                "image_digest": image_digest,
-                "oci_layout_sha256": layout_digest,
-                "policy": {
-                    "dockerfile": "Dockerfile",
-                    "findings": [],
-                    "passed": True,
-                },
-            },
-        }
-    )
-    with sessions.begin() as session:
-        agent_operation = session.get(AgentOperation, operation_id)
-        assert agent_operation is not None
-        agent_operation.state = "succeeded"
-        operations.consume_agent_result(session, agent_operation, object(), message)
-
-    with sessions() as session:
-        build = session.get(RecipeBuild, plan.build_id)
-        assert build is not None and build.state == "succeeded"
-        job = session.get(Job, operation_view.id)
-        assert job is not None and job.state == "succeeded"
-        result = job.result
-        assert result is not None
-        evidence = _json_object(result["node_evidence"])
-        assert _json_object(_json_object(evidence[node_id])["policy"])["findings"] == []
-        assert (
-            session.scalar(select(NodeArtifact).where(NodeArtifact.node_id == node_id))
-            is None
-        )
 
 
 def _authorize_distribution_fixture(sessions, plan, revision, now):
@@ -2349,17 +2166,13 @@ def _authorize_distribution_fixture(sessions, plan, revision, now):
         assert build.image_bytes is not None
         receipt = RuntimeImageReceipt(
             schema_version=2,
-            source="controller-build",
             distribution_publisher=revision.publisher,
             distribution_slug=revision.slug,
             distribution_content_sha256=revision.content_digest,
-            registry_manifest_digest=None,
             image_digest=build.image_digest,
-            platform_manifest_digest=build.image_digest,
             oci_archive_sha256=build.oci_layout_sha256,
             image_bytes=build.image_bytes,
             local_image_config_id="sha256:" + "c" * 64,
-            local_image_reference=None,
             architecture="linux-arm64",
             runtime_interface="vonk.runtime.v1",
             runtime_interface_label="v1",
@@ -2405,7 +2218,6 @@ def test_distribution_reimports_one_build_digest_for_every_mapped_node(
                 node_id=target,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["recipe.image.import.v1"],
             )
         )
         session.add(
@@ -2464,7 +2276,6 @@ def test_distribution_reimports_one_build_digest_for_every_mapped_node(
     assert {item[1]["image_digest"] for item in distribution.targets} == {
         "sha256:" + "b" * 64
     }
-    assert distribution.targets[0][1]["kind"] == "recipe.image.import.v1"
 
 
 def test_image_distribution_replans_when_the_submitted_digest_is_stale(
@@ -2491,7 +2302,6 @@ def test_image_distribution_replans_when_the_submitted_digest_is_stale(
                 node_id=target,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["recipe.image.import.v1"],
             )
         )
         mapping = ClusterMapping(

@@ -52,14 +52,23 @@ def _canonical_harness_from(platform_root: Path):
     file path instead.
     """
 
-    source = platform_root / "control" / "src" / "vonk_control" / "harnesses" / "canonical_metadata.py"
+    source = (
+        platform_root
+        / "control"
+        / "src"
+        / "vonk_control"
+        / "harnesses"
+        / "canonical_metadata.py"
+    )
     if not source.is_file():
         raise LibraryValidationError("platform canonical harness metadata is missing")
     source_key = hashlib.sha256(str(source.resolve()).encode()).hexdigest()[:16]
     module_name = f"_vonk_platform_canonical_metadata_{source_key}"
     spec = importlib.util.spec_from_file_location(module_name, source)
     if spec is None or spec.loader is None:
-        raise LibraryValidationError("platform canonical harness metadata is unavailable")
+        raise LibraryValidationError(
+            "platform canonical harness metadata is unavailable"
+        )
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     try:
@@ -97,11 +106,7 @@ def _scan_secrets(root: Path, platform_root: Path) -> None:
         if platform_root != root:
             excluded_root = platform_root
     for path in root.rglob("*"):
-        if (
-            not path.is_file()
-            or ".git" in path.parts
-            or "__pycache__" in path.parts
-        ):
+        if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
             continue
         if excluded_root is not None:
             try:
@@ -123,9 +128,13 @@ def _scan_secrets(root: Path, platform_root: Path) -> None:
         try:
             payload = path.read_bytes()
         except OSError as error:
-            raise LibraryValidationError(f"{path}: cannot read for secret scan") from error
+            raise LibraryValidationError(
+                f"{path}: cannot read for secret scan"
+            ) from error
         if any(marker in payload for marker in _SECRET_MARKERS):
-            raise LibraryValidationError(f"{path}: possible private credential in recipe library")
+            raise LibraryValidationError(
+                f"{path}: possible private credential in recipe library"
+            )
     package_root = root / "packages"
     if not package_root.is_dir():
         return
@@ -133,11 +142,15 @@ def _scan_secrets(root: Path, platform_root: Path) -> None:
         try:
             archive = tarfile.open(archive_path, mode="r:gz")  # noqa: SIM115 - closed below
         except (OSError, tarfile.TarError) as error:
-            raise LibraryValidationError(f"{archive_path}: package archive is unreadable") from error
+            raise LibraryValidationError(
+                f"{archive_path}: package archive is unreadable"
+            ) from error
         try:
             with archive:
                 for member in archive.getmembers():
-                    if not member.isreg() or member.name.endswith(_ARCHIVE_PAYLOAD_SUFFIXES):
+                    if not member.isreg() or member.name.endswith(
+                        _ARCHIVE_PAYLOAD_SUFFIXES
+                    ):
                         continue
                     content_file = archive.extractfile(member)
                     payload = content_file.read() if content_file is not None else b""
@@ -146,7 +159,9 @@ def _scan_secrets(root: Path, platform_root: Path) -> None:
                             f"{archive_path}:{member.name}: possible private credential in recipe package"
                         )
         except tarfile.TarError as error:
-            raise LibraryValidationError(f"{archive_path}: package archive is unreadable") from error
+            raise LibraryValidationError(
+                f"{archive_path}: package archive is unreadable"
+            ) from error
 
 
 def _dockerfile_build_inputs(payload: bytes, label: str) -> list[dict[str, str]]:
@@ -163,10 +178,14 @@ def _dockerfile_build_inputs(payload: bytes, label: str) -> list[dict[str, str]]
         platform = match.group(1) or "linux/arm64"
         reference = match.group(2)
         if "@sha256:" not in reference:
-            raise LibraryValidationError(f"{label}: every Dockerfile FROM must pin a digest")
+            raise LibraryValidationError(
+                f"{label}: every Dockerfile FROM must pin a digest"
+            )
         key = (reference, platform)
         if key not in seen:
-            inputs.append({"kind": "oci-image", "reference": reference, "platform": platform})
+            inputs.append(
+                {"kind": "oci-image", "reference": reference, "platform": platform}
+            )
             seen.add(key)
     if not inputs:
         raise LibraryValidationError(f"{label}: Dockerfile has no FROM image")
@@ -196,28 +215,29 @@ def _matches_selected_model_file(
 
 def _validate_v2_package(
     package_bytes: bytes,
-    recipe: Any,
-    models: Mapping[tuple[str, str], Any],
+    recipe_document: Mapping[str, object],
+    models: Mapping[tuple[str, str], tuple[str, Any]],
     package_label: str,
 ) -> None:
     """Validate one self-contained v2 package without hydrating remote files."""
-    from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+    from vonk_forge_contracts import document_sha256, read_model, read_recipe
 
-    expected_recipe = RecipeDefinition.model_validate(recipe)
-    expected_recipe_dump = expected_recipe.model_dump(
-        mode="json", exclude_unset=False, exclude_none=False
-    )
+    expected_recipe = read_recipe(recipe_document)
     try:
         archive = tarfile.open(  # noqa: SIM115 - the archive is closed by the context below
             fileobj=io.BytesIO(package_bytes), mode="r:gz"
         )
     except (OSError, tarfile.TarError) as error:
-        raise LibraryValidationError(f"{package_label}: invalid gzip archive") from error
+        raise LibraryValidationError(
+            f"{package_label}: invalid gzip archive"
+        ) from error
     with archive:
         members = archive.getmembers()
         names = [member.name for member in members]
         if len(names) != len(set(names)):
-            raise LibraryValidationError(f"{package_label}: archive contains duplicate paths")
+            raise LibraryValidationError(
+                f"{package_label}: archive contains duplicate paths"
+            )
         for name, member in zip(names, members, strict=True):
             path = PurePosixPath(name)
             if (
@@ -225,10 +245,16 @@ def _validate_v2_package(
                 or path.is_absolute()
                 or any(part in {"", ".", ".."} for part in path.parts)
             ):
-                raise LibraryValidationError(f"{package_label}: archive contains unsafe member {name}")
+                raise LibraryValidationError(
+                    f"{package_label}: archive contains unsafe member {name}"
+                )
             if name.startswith(_ARCHIVE_PAYLOAD_PREFIXES):
-                raise LibraryValidationError(f"{package_label}: archive contains model or OCI payload {name}")
-        if [name for name in names if PurePosixPath(name).name == "recipe.json"] != ["recipe.json"]:
+                raise LibraryValidationError(
+                    f"{package_label}: archive contains model or OCI payload {name}"
+                )
+        if [name for name in names if PurePosixPath(name).name == "recipe.json"] != [
+            "recipe.json"
+        ]:
             raise LibraryValidationError(
                 f"{package_label}: archive must contain exactly one recipe.json entrypoint"
             )
@@ -237,25 +263,35 @@ def _validate_v2_package(
         except KeyError:
             manifest_member = None
         if manifest_member is None:
-            raise LibraryValidationError(f"{package_label}: archive manifest is missing")
+            raise LibraryValidationError(
+                f"{package_label}: archive manifest is missing"
+            )
         try:
             manifest = json.load(manifest_member)
         except (TypeError, UnicodeError, json.JSONDecodeError) as error:
-            raise LibraryValidationError(f"{package_label}: archive manifest is invalid") from error
+            raise LibraryValidationError(
+                f"{package_label}: archive manifest is invalid"
+            ) from error
         if (
             not isinstance(manifest, Mapping)
             or manifest.get("schema_version") != 2
             or manifest.get("kind") != "recipe-package"
             or manifest.get("package_type") != "recipe"
         ):
-            raise LibraryValidationError(f"{package_label}: archive manifest kind is invalid")
+            raise LibraryValidationError(
+                f"{package_label}: archive manifest kind is invalid"
+            )
         entries = manifest.get("files")
         if not isinstance(entries, list):
-            raise LibraryValidationError(f"{package_label}: archive manifest files are invalid")
+            raise LibraryValidationError(
+                f"{package_label}: archive manifest files are invalid"
+            )
         declared: dict[str, Mapping[str, object]] = {}
         for entry in entries:
             if not isinstance(entry, Mapping):
-                raise LibraryValidationError(f"{package_label}: archive manifest entry is invalid")
+                raise LibraryValidationError(
+                    f"{package_label}: archive manifest entry is invalid"
+                )
             name = entry.get("path")
             size = entry.get("size")
             digest = entry.get("sha256")
@@ -268,11 +304,15 @@ def _validate_v2_package(
                 or not isinstance(digest, str)
                 or _SHA256.fullmatch(digest) is None
             ):
-                raise LibraryValidationError(f"{package_label}: archive manifest entry is invalid")
+                raise LibraryValidationError(
+                    f"{package_label}: archive manifest entry is invalid"
+                )
             declared[name] = entry
         payload_names = set(names) - {"manifest.json"}
         if set(declared) != payload_names:
-            raise LibraryValidationError(f"{package_label}: archive manifest closure is incomplete")
+            raise LibraryValidationError(
+                f"{package_label}: archive manifest closure is incomplete"
+            )
         for name, entry in declared.items():
             member = archive.extractfile(name)
             content = member.read() if member is not None else None
@@ -281,17 +321,26 @@ def _validate_v2_package(
                 or len(content) != entry["size"]
                 or hashlib.sha256(content).hexdigest() != entry["sha256"]
             ):
-                raise LibraryValidationError(f"{package_label}: archive file identity is stale: {name}")
+                raise LibraryValidationError(
+                    f"{package_label}: archive file identity is stale: {name}"
+                )
         recipe_member = archive.extractfile("recipe.json")
         if recipe_member is None:
-            raise LibraryValidationError(f"{package_label}: recipe entrypoint is missing")
+            raise LibraryValidationError(
+                f"{package_label}: recipe entrypoint is missing"
+            )
         try:
-            actual_recipe = RecipeDefinition.model_validate(json.load(recipe_member))
+            actual_document = json.load(recipe_member)
+            read_recipe(actual_document)
         except (TypeError, UnicodeError, json.JSONDecodeError, ValueError) as error:
-            raise LibraryValidationError(f"{package_label}: recipe entrypoint is invalid") from error
-        recipe_digest = content_sha256(actual_recipe)
-        if actual_recipe.model_dump(mode="json", exclude_unset=False, exclude_none=False) != expected_recipe_dump:
-            raise LibraryValidationError(f"{package_label}: recipe entrypoint does not match the index")
+            raise LibraryValidationError(
+                f"{package_label}: recipe entrypoint is invalid"
+            ) from error
+        recipe_digest = document_sha256(actual_document)
+        if actual_document != recipe_document:
+            raise LibraryValidationError(
+                f"{package_label}: recipe entrypoint does not match the index"
+            )
         if manifest.get("recipe_content_sha256") != recipe_digest:
             raise LibraryValidationError(f"{package_label}: recipe digest is stale")
 
@@ -309,35 +358,42 @@ def _validate_v2_package(
             except KeyError:
                 model_member = None
             if model_member is None:
-                raise LibraryValidationError(f"{package_label}: exact Model snapshot is missing: {model_path}")
+                raise LibraryValidationError(
+                    f"{package_label}: exact Model snapshot is missing: {model_path}"
+                )
             try:
-                model = ModelDefinition.model_validate(json.load(model_member))
+                model_document = json.load(model_member)
+                model = read_model(model_document)
             except (TypeError, UnicodeError, json.JSONDecodeError, ValueError) as error:
-                raise LibraryValidationError(f"{package_label}: Model snapshot is invalid: {model_path}") from error
-            if content_sha256(model) != reference.content_sha256:
-                raise LibraryValidationError(f"{package_label}: Model snapshot digest is stale: {model_path}")
+                raise LibraryValidationError(
+                    f"{package_label}: Model snapshot is invalid: {model_path}"
+                ) from error
+            if document_sha256(model_document) != reference.content_sha256:
+                raise LibraryValidationError(
+                    f"{package_label}: Model snapshot digest is stale: {model_path}"
+                )
             catalog_model = models.get(model_key)
-            if catalog_model is None or content_sha256(catalog_model) != reference.content_sha256:
-                raise LibraryValidationError(f"{package_label}: Model snapshot is not the catalog Model")
+            if catalog_model is None or catalog_model[0] != reference.content_sha256:
+                raise LibraryValidationError(
+                    f"{package_label}: Model snapshot is not the catalog Model"
+                )
             pending.extend(model.dependencies)
-            if model.supersedes is not None:
-                pending.append(model.supersedes)
         package_models = {
-            name for name in names if name.startswith("models/") and name.endswith(".json")
+            name
+            for name in names
+            if name.startswith("models/") and name.endswith(".json")
         }
         expected_models = {f"models/{slug}.json" for _publisher, slug in seen_models}
         if package_models != expected_models:
-            raise LibraryValidationError(f"{package_label}: Model snapshot closure is incomplete")
+            raise LibraryValidationError(
+                f"{package_label}: Model snapshot closure is incomplete"
+            )
 
-        execution = expected_recipe.execution
-        source_context = (
-            PurePosixPath(execution.build.context.path)
-            if execution.mode == "build"
-            else None
-        )
+        build = expected_recipe.execution.build
+        source_context = PurePosixPath(build.context.path)
         selected_model_files: set[tuple[str, str, int]] = set()
         for model_key in seen_models:
-            catalog_model = models[model_key]
+            _digest, catalog_model = models[model_key]
             selected_model_files.update(
                 (PurePosixPath(item.path).as_posix(), item.sha256, item.size_bytes)
                 for item in catalog_model.files
@@ -350,8 +406,6 @@ def _validate_v2_package(
                 expected_fixture_paths.update(request.input_slots.values())
 
         def is_source_member(name: str) -> bool:
-            if source_context is None:
-                return False
             try:
                 PurePosixPath(name).relative_to(source_context)
             except ValueError:
@@ -359,7 +413,11 @@ def _validate_v2_package(
             return True
 
         for name in names:
-            if name == "manifest.json" or name == "recipe.json" or name in expected_models:
+            if (
+                name == "manifest.json"
+                or name == "recipe.json"
+                or name in expected_models
+            ):
                 continue
             member = archive.extractfile(name)
             content = member.read() if member is not None else b""
@@ -377,35 +435,42 @@ def _validate_v2_package(
                 f"{package_label}: package member is outside declared namespaces: {name}"
             )
 
-        if execution.mode == "build":
-            build = execution.build
-            context = build.context.path
-            if any(
-                path != context and not path.startswith(context + "/")
-                for path in (build.dockerfile, *(patch.path for patch in build.patches))
-            ):
-                raise LibraryValidationError(f"{package_label}: build input escapes its context")
-            if not any(name.startswith(context + "/") for name in payload_names):
-                raise LibraryValidationError(f"{package_label}: build context is missing: {context}")
-            required = {build.dockerfile, *(patch.path for patch in build.patches)}
-            missing = sorted(required - payload_names)
-            if missing:
-                raise LibraryValidationError(
-                    f"{package_label}: source closure is missing: {', '.join(missing)}"
-                )
-            dockerfile_member = archive.extractfile(build.dockerfile)
-            if dockerfile_member is None:
-                raise LibraryValidationError(f"{package_label}: Dockerfile is missing")
-            inputs = _dockerfile_build_inputs(dockerfile_member.read(), f"{package_label}/{build.dockerfile}")
-            if manifest.get("build_inputs") != inputs:
-                raise LibraryValidationError(f"{package_label}: build inputs are stale")
-            if not any(
-                item["reference"].split("@sha256:", 1)[0].split(":", 1)[0] == build.base_image.repository
-                and item["reference"].endswith("@sha256:" + build.base_image.digest)
-                and item["platform"] == build.base_image.platform
-                for item in inputs
-            ):
-                raise LibraryValidationError(f"{package_label}: base image is absent from build inputs")
+        context = build.context.path
+        if any(
+            path != context and not path.startswith(context + "/")
+            for path in (build.dockerfile, *(patch.path for patch in build.patches))
+        ):
+            raise LibraryValidationError(
+                f"{package_label}: build input escapes its context"
+            )
+        if not any(name.startswith(context + "/") for name in payload_names):
+            raise LibraryValidationError(
+                f"{package_label}: build context is missing: {context}"
+            )
+        required = {build.dockerfile, *(patch.path for patch in build.patches)}
+        missing = sorted(required - payload_names)
+        if missing:
+            raise LibraryValidationError(
+                f"{package_label}: source closure is missing: {', '.join(missing)}"
+            )
+        dockerfile_member = archive.extractfile(build.dockerfile)
+        if dockerfile_member is None:
+            raise LibraryValidationError(f"{package_label}: Dockerfile is missing")
+        inputs = _dockerfile_build_inputs(
+            dockerfile_member.read(), f"{package_label}/{build.dockerfile}"
+        )
+        if manifest.get("build_inputs") != inputs:
+            raise LibraryValidationError(f"{package_label}: build inputs are stale")
+        if not any(
+            item["reference"].split("@sha256:", 1)[0].split(":", 1)[0]
+            == build.base_image.repository
+            and item["reference"].endswith("@sha256:" + build.base_image.digest)
+            and item["platform"] == "linux/arm64"
+            for item in inputs
+        ):
+            raise LibraryValidationError(
+                f"{package_label}: base image is absent from build inputs"
+            )
         for check in expected_recipe.validation.serving.checks:
             request = check.request
             if getattr(request, "transport", None) == "job":
@@ -422,7 +487,13 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
     if not (contract_root / "vonk_forge_contracts").is_dir():
         raise LibraryValidationError("central contracts package is missing")
     sys.path.insert(0, str(contract_root))
-    from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+    import vonk_forge_contracts
+    from vonk_forge_contracts import (
+        CONTRACT_VERSION,
+        document_sha256,
+        read_model,
+        read_recipe,
+    )
     from vonk_forge_contracts.resolver import (
         ContractResolutionError,
         validate_model_references,
@@ -430,34 +501,64 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
         validate_recipe_package_paths,
     )
 
-    model_root, recipe_root, package_root = (library_root / name for name in ("models", "recipes", "packages"))
+    model_root, recipe_root, package_root = (
+        library_root / name for name in ("models", "recipes", "packages")
+    )
     if not model_root.is_dir() or not recipe_root.is_dir() or not package_root.is_dir():
-        raise LibraryValidationError("schema-2 library requires models, recipes, and packages")
-    models: dict[tuple[str, str], ModelDefinition] = {}
+        raise LibraryValidationError(
+            "schema-2 library requires models, recipes, and packages"
+        )
+    # Validate the candidate with its own contract, never the Controller's pin.
+    loaded_from = Path(vonk_forge_contracts.__file__).resolve()
+    if not loaded_from.is_relative_to(contract_root.resolve()):
+        raise LibraryValidationError(
+            f"candidate contract is shadowed by {loaded_from.parent}"
+        )
+    models: dict[tuple[str, str], tuple[str, Any]] = {}
     for path in sorted(model_root.glob("*.json")):
         try:
-            model = ModelDefinition.model_validate(json.loads(path.read_bytes()))
+            document = json.loads(path.read_bytes())
+            model = read_model(document)
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
-            raise LibraryValidationError(f"{path}: ModelDefinition is invalid") from error
+            raise LibraryValidationError(
+                f"{path}: ModelDefinition is invalid"
+            ) from error
         key = (model.identity.publisher, model.identity.slug)
         if key in models:
             raise LibraryValidationError(f"{path}: duplicate exact Model identity")
-        models[key] = model
+        models[key] = (document_sha256(document), model)
     if not models:
         raise LibraryValidationError("schema-2 library contains no Models")
+    by_digest = dict(models.values())
     try:
-        validate_model_references(models.values())
+        validate_model_references(by_digest)
     except ContractResolutionError as error:
-        raise LibraryValidationError(f"model reference graph is invalid: {error}") from error
+        raise LibraryValidationError(
+            f"model reference graph is invalid: {error}"
+        ) from error
     canonical_harness = _canonical_harness_from(platform_root)
     recipe_keys: set[tuple[str, str]] = set()
     digests: list[str] = []
     try:
         index = json.loads((library_root / "catalog-index.json").read_bytes())
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise LibraryValidationError("schema-2 catalog-index.json is unreadable") from error
-    if not isinstance(index, Mapping) or index.get("schema_version") != 2 or index.get("kind") != "recipe-library-index":
-        raise LibraryValidationError("catalog index must be a schema-2 recipe-library index")
+        raise LibraryValidationError(
+            "schema-2 catalog-index.json is unreadable"
+        ) from error
+    if (
+        not isinstance(index, Mapping)
+        or index.get("schema_version") != 2
+        or index.get("kind") != "recipe-library-index"
+    ):
+        raise LibraryValidationError(
+            "catalog index must be a schema-2 recipe-library index"
+        )
+    if index.get("contract_version") != CONTRACT_VERSION or not isinstance(
+        index.get("updated_at"), str
+    ):
+        raise LibraryValidationError(
+            "catalog index does not name its contract version and update time"
+        )
     entity_rows = index.get("catalog_entities")
     if not isinstance(entity_rows, list):
         raise LibraryValidationError("catalog index catalog entities are invalid")
@@ -466,17 +567,25 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
         if not isinstance(row, Mapping) or not isinstance(row.get("document"), Mapping):
             raise LibraryValidationError("catalog index Model row is invalid")
         try:
-            indexed_model = ModelDefinition.model_validate(row["document"])
+            indexed_model = read_model(row["document"])
         except ValueError as error:
-            raise LibraryValidationError("catalog index Model document is invalid") from error
+            raise LibraryValidationError(
+                "catalog index Model document is invalid"
+            ) from error
         key = (indexed_model.identity.publisher, indexed_model.identity.slug)
-        if key in indexed_models or row.get("content_sha256") != content_sha256(indexed_model):
-            raise LibraryValidationError("catalog index Model identity is stale or duplicated")
+        if key in indexed_models or row.get("content_sha256") != document_sha256(
+            row["document"]
+        ):
+            raise LibraryValidationError(
+                "catalog index Model identity is stale or duplicated"
+            )
         if row.get("source_path") != f"models/{indexed_model.identity.slug}.json":
             raise LibraryValidationError("catalog index Model source path is invalid")
         indexed_models[key] = indexed_model
     if set(indexed_models) != set(models):
-        raise LibraryValidationError("catalog index and Model directory identities differ")
+        raise LibraryValidationError(
+            "catalog index and Model directory identities differ"
+        )
     rows = index.get("recipes")
     if not isinstance(rows, list):
         raise LibraryValidationError("catalog index recipes are invalid")
@@ -489,34 +598,41 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
             raise LibraryValidationError("catalog index recipe identity is missing")
         key = (str(identity.get("publisher")), str(identity.get("slug")))
         if key in indexed:
-            raise LibraryValidationError(f"catalog index duplicates recipe {key[0]}/{key[1]}")
+            raise LibraryValidationError(
+                f"catalog index duplicates recipe {key[0]}/{key[1]}"
+            )
         indexed[key] = row
     for path in sorted(recipe_root.glob("*.json")):
         try:
-            recipe = RecipeDefinition.model_validate(json.loads(path.read_bytes()))
+            recipe_document = json.loads(path.read_bytes())
+            recipe = read_recipe(recipe_document)
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
-            raise LibraryValidationError(f"{path}: RecipeDefinition is invalid") from error
+            raise LibraryValidationError(
+                f"{path}: RecipeDefinition is invalid"
+            ) from error
         key = (recipe.identity.publisher, recipe.identity.slug)
         if path.name != f"{recipe.identity.slug}.json" or key in recipe_keys:
-            raise LibraryValidationError(f"{path}: Recipe identity or filename is duplicated/invalid")
+            raise LibraryValidationError(
+                f"{path}: Recipe identity or filename is duplicated/invalid"
+            )
         recipe_keys.add(key)
         try:
-            validate_recipe_models(recipe, models.values())
+            validate_recipe_models(recipe, by_digest)
             # The package, rather than a sibling checkout, is the source of
             # truth for closure membership.  Validate the declared path
             # grammar here; _validate_v2_package verifies the archive bytes.
-            closure: set[str] = set()
-            if recipe.execution.mode == "build":
-                build = recipe.execution.build
-                closure.update((build.context.path, build.dockerfile))
-                closure.update(patch.path for patch in build.patches)
+            build = recipe.execution.build
+            closure: set[str] = {build.context.path, build.dockerfile}
+            closure.update(patch.path for patch in build.patches)
             for check in recipe.validation.serving.checks:
                 request = check.request
                 if getattr(request, "transport", None) == "job":
                     closure.update((request.fixture, *request.input_slots.values()))
             validate_recipe_package_paths(recipe, closure)
         except (ContractResolutionError, ValueError) as error:
-            raise LibraryValidationError(f"{path}: Recipe model/closure resolution failed: {error}") from error
+            raise LibraryValidationError(
+                f"{path}: Recipe model/closure resolution failed: {error}"
+            ) from error
         try:
             harness = canonical_harness(recipe.runtime.engine)
         except ValueError as error:
@@ -534,13 +650,22 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
                 f"{recipe.topology.mode}"
             )
         row = indexed.get(key)
-        digest = content_sha256(recipe)
+        digest = document_sha256(recipe_document)
         if row is None or row.get("content_sha256") != digest:
-            raise LibraryValidationError(f"{path}: catalog index digest does not match RecipeDefinition")
+            raise LibraryValidationError(
+                f"{path}: catalog index digest does not match RecipeDefinition"
+            )
         package = row.get("package")
         package_path = package.get("path") if isinstance(package, Mapping) else None
-        if not isinstance(package, Mapping) or package.get("recipe_content_sha256") != digest or not isinstance(package_path, str) or not package_path.startswith("packages/"):
-            raise LibraryValidationError(f"{path}: package metadata does not bind the Recipe digest")
+        if (
+            not isinstance(package, Mapping)
+            or package.get("recipe_content_sha256") != digest
+            or not isinstance(package_path, str)
+            or not package_path.startswith("packages/")
+        ):
+            raise LibraryValidationError(
+                f"{path}: package metadata does not bind the Recipe digest"
+            )
         package_posix = PurePosixPath(package_path)
         if (
             package_posix.is_absolute()
@@ -548,26 +673,47 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
             or package_posix.parts[0:1] != ("packages",)
             or package_posix.name != f"{recipe.identity.slug}.tar.gz"
         ):
-            raise LibraryValidationError(f"{path}: package path escapes the package root")
+            raise LibraryValidationError(
+                f"{path}: package path escapes the package root"
+            )
         if (
-            package.get("media_type") != "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
+            package.get("media_type")
+            != "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
             or package.get("minimum_consumer_schema") != 2
         ):
-            raise LibraryValidationError(f"{path}: package metadata contract is invalid")
+            raise LibraryValidationError(
+                f"{path}: package metadata contract is invalid"
+            )
         package_file = library_root.joinpath(*package_posix.parts)
         try:
             if package_file.is_symlink() or not package_file.is_file():
                 raise OSError("package file is not a regular file")
             package_bytes = package_file.read_bytes()
         except OSError as error:
-            raise LibraryValidationError(f"{path}: immutable recipe package is missing") from error
-        if package.get("sha256") != hashlib.sha256(package_bytes).hexdigest() or package.get("expected_bytes") != len(package_bytes):
-            raise LibraryValidationError(f"{path}: immutable recipe package identity is stale")
-        _validate_v2_package(package_bytes, recipe, models, package_path)
+            raise LibraryValidationError(
+                f"{path}: immutable recipe package is missing"
+            ) from error
+        if package.get("sha256") != hashlib.sha256(
+            package_bytes
+        ).hexdigest() or package.get("expected_bytes") != len(package_bytes):
+            raise LibraryValidationError(
+                f"{path}: immutable recipe package identity is stale"
+            )
+        _validate_v2_package(package_bytes, recipe_document, models, package_path)
         digests.append(digest)
     if set(indexed) != recipe_keys:
-        raise LibraryValidationError("catalog index and recipe directory identities differ")
-    return {"schema_version": 2, "catalog_entity_count": len(models), "recipe_count": len(digests), "recipe_content_sha256": digests, "secret_scan": "passed", "package_check": "identity-verified", "contract_source": "contracts/"}
+        raise LibraryValidationError(
+            "catalog index and recipe directory identities differ"
+        )
+    return {
+        "schema_version": 2,
+        "catalog_entity_count": len(models),
+        "recipe_count": len(digests),
+        "recipe_content_sha256": digests,
+        "secret_scan": "passed",
+        "package_check": "identity-verified",
+        "contract_source": "contracts/",
+    }
 
 
 def validate(library_root: Path, platform_root: Path) -> dict[str, Any]:
@@ -578,7 +724,10 @@ def validate(library_root: Path, platform_root: Path) -> dict[str, Any]:
             f"recipe-library root is unavailable: {library_root}"
         )
     _scan_secrets(library_root, platform_root)
-    if not (library_root / "models").is_dir() or not (library_root / "contracts").is_dir():
+    if (
+        not (library_root / "models").is_dir()
+        or not (library_root / "contracts").is_dir()
+    ):
         raise LibraryValidationError(
             "schema-2 library requires models and contracts directories"
         )

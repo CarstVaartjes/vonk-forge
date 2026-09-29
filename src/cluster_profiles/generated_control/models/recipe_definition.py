@@ -13,11 +13,10 @@ from typing import cast
 from typing import Literal, cast
 
 if TYPE_CHECKING:
-  from ..models.recipe_build_execution import RecipeBuildExecution
   from ..models.recipe_embedding_settings import RecipeEmbeddingSettings
+  from ..models.recipe_execution import RecipeExecution
   from ..models.recipe_generation_settings import RecipeGenerationSettings
   from ..models.recipe_identity import RecipeIdentity
-  from ..models.recipe_image_execution import RecipeImageExecution
   from ..models.recipe_job_interface import RecipeJobInterface
   from ..models.recipe_job_settings import RecipeJobSettings
   from ..models.recipe_metadata import RecipeMetadata
@@ -42,22 +41,30 @@ class RecipeDefinition:
     """ The sole public recipe authoring contract.
 
         Attributes:
-            execution (RecipeBuildExecution | RecipeImageExecution):
+            execution (RecipeExecution): The platform builds every recipe image from its pinned base and context.
             identity (RecipeIdentity):
             interfaces (list[RecipeJobInterface | RecipeOpenAIInterface]):
             metadata (RecipeMetadata):
             models (list[RecipeModelSelection]):
             provenance (RecipeProvenance):
-            release (RecipeRelease):
+            release (RecipeRelease): The version this recipe runs.
+
+                When the upstream project publishes versions, this is the upstream version
+                and its release date (for example ``1.6`` released 2026-09-17). A recipe
+                whose upstream has no versions carries its own semantic version instead.
+                The recipe library's own version follows the contract, not recipe content.
             runtime (RecipeRuntime):
             settings (RecipeEmbeddingSettings | RecipeGenerationSettings | RecipeJobSettings):
-            topology (RecipeTopology):
+            topology (RecipeTopology): Roles and their start order; everything else follows from node_count.
+
+                One node runs alone. More nodes share one connected fabric: losing a rank
+                withdraws the endpoint, recovery restarts the workers and then the
+                entrypoint, and stopping always starts with the endpoint owner.
             validation (RecipeValidation):
             kind (Literal['recipe'] | Unset):  Default: 'recipe'.
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    execution: RecipeBuildExecution | RecipeImageExecution
+    execution: RecipeExecution
     identity: RecipeIdentity
     interfaces: list[RecipeJobInterface | RecipeOpenAIInterface]
     metadata: RecipeMetadata
@@ -69,18 +76,16 @@ class RecipeDefinition:
     topology: RecipeTopology
     validation: RecipeValidation
     kind: Literal['recipe'] | Unset = 'recipe'
-    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_build_execution import RecipeBuildExecution # noqa: PLC0415
         from ..models.recipe_embedding_settings import RecipeEmbeddingSettings # noqa: PLC0415
+        from ..models.recipe_execution import RecipeExecution # noqa: PLC0415
         from ..models.recipe_generation_settings import RecipeGenerationSettings # noqa: PLC0415
         from ..models.recipe_identity import RecipeIdentity # noqa: PLC0415
-        from ..models.recipe_image_execution import RecipeImageExecution # noqa: PLC0415
         from ..models.recipe_job_interface import RecipeJobInterface # noqa: PLC0415
         from ..models.recipe_job_settings import RecipeJobSettings # noqa: PLC0415
         from ..models.recipe_metadata import RecipeMetadata # noqa: PLC0415
@@ -91,12 +96,7 @@ class RecipeDefinition:
         from ..models.recipe_runtime import RecipeRuntime # noqa: PLC0415
         from ..models.recipe_topology import RecipeTopology # noqa: PLC0415
         from ..models.recipe_validation import RecipeValidation # noqa: PLC0415
-        execution: dict[str, Any]
-        if isinstance(self.execution, RecipeImageExecution):
-            execution = self.execution.to_dict()
-        else:
-            execution = self.execution.to_dict()
-
+        execution = self.execution.to_dict()
 
         identity = self.identity.to_dict()
 
@@ -142,8 +142,6 @@ class RecipeDefinition:
 
         kind = self.kind
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -162,8 +160,6 @@ class RecipeDefinition:
         })
         if kind is not UNSET:
             field_dict["kind"] = kind
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -171,11 +167,10 @@ class RecipeDefinition:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_build_execution import RecipeBuildExecution # noqa: PLC0415
         from ..models.recipe_embedding_settings import RecipeEmbeddingSettings # noqa: PLC0415
+        from ..models.recipe_execution import RecipeExecution # noqa: PLC0415
         from ..models.recipe_generation_settings import RecipeGenerationSettings # noqa: PLC0415
         from ..models.recipe_identity import RecipeIdentity # noqa: PLC0415
-        from ..models.recipe_image_execution import RecipeImageExecution # noqa: PLC0415
         from ..models.recipe_job_interface import RecipeJobInterface # noqa: PLC0415
         from ..models.recipe_job_settings import RecipeJobSettings # noqa: PLC0415
         from ..models.recipe_metadata import RecipeMetadata # noqa: PLC0415
@@ -187,26 +182,9 @@ class RecipeDefinition:
         from ..models.recipe_topology import RecipeTopology # noqa: PLC0415
         from ..models.recipe_validation import RecipeValidation # noqa: PLC0415
         d = dict(src_dict)
-        def _parse_execution(data: object) -> RecipeBuildExecution | RecipeImageExecution:
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                execution_type_0 = RecipeImageExecution.from_dict(data)
+        execution = RecipeExecution.from_dict(d.pop("execution"))
 
 
-
-                return execution_type_0
-            except (TypeError, ValueError, AttributeError, KeyError):
-                pass
-            if not isinstance(data, dict):
-                raise TypeError()
-            execution_type_1 = RecipeBuildExecution.from_dict(data)
-
-
-
-            return execution_type_1
-
-        execution = _parse_execution(d.pop("execution"))
 
 
         identity = RecipeIdentity.from_dict(d.pop("identity"))
@@ -317,10 +295,6 @@ class RecipeDefinition:
         if kind != 'recipe' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'recipe', got '{kind}'")
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         recipe_definition = cls(
             execution=execution,
             identity=identity,
@@ -334,7 +308,6 @@ class RecipeDefinition:
             topology=topology,
             validation=validation,
             kind=kind,
-            schema_version=schema_version,
         )
 
         return recipe_definition

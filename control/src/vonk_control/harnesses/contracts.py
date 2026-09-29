@@ -28,24 +28,23 @@ class HarnessBinding:
 
 @dataclass(frozen=True, slots=True)
 class HarnessProjection:
-    """A shell-free, security-complete projection for one mapped rank."""
+    """A shell-free projection for one mapped rank.
+
+    The platform always runs linux/arm64 images as a non-root user with a
+    read-only root, no capabilities and no new privileges.
+    """
 
     slug: str
     contract_version: int
     command: tuple[str, ...]
     image: str
     network_mode: str
-    architecture: str
     user: str
-    no_new_privileges: bool
-    capabilities: tuple[str, ...]
     model_mounts: tuple[HarnessMount, ...]
     output_mount: HarnessMount
     input_mount: HarnessMount | None = None
     environment: tuple[tuple[str, str], ...] = ()
     writable_paths: tuple[RuntimeWritablePath, ...] = ()
     telemetry: EngineTelemetryContract | None = None
-    read_only_root: bool = True
     binding: HarnessBinding | None = None
-    devices: tuple[str, ...] = ()
-    host_network: bool = False
+    gpu: bool = False

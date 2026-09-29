@@ -6,6 +6,7 @@ import time
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 import httpx2
 from sqlalchemy import create_engine
@@ -19,7 +20,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 
 def _drain(cache: ModelCacheService, operation_id: str) -> None:
@@ -67,11 +68,11 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
         for key, value in (("weights-a", b"weights-a"), ("weights-b", b"weights-b"))
     ]
     model = ModelDefinition.model_validate(model_raw)
-    model_digest = content_sha256(model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
 
     recipe_raw = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text()
     )
     recipe_raw["models"][0]["model"]["content_sha256"] = model_digest
@@ -80,7 +81,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
             "id": key,
             "file_id": key,
             "roles": ["entrypoint"],
-            "mount": {"target": f"/models/{key}.bin", "read_only": True},
+            "mount": {"target": f"/models/{key}.bin"},
         }
         for key in ("weights-a", "weights-b")
     ]
@@ -102,7 +103,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
         library_commit="0" * 40,
         source_path="recipes/synthetic-tiny.json",
         document=recipe.model_dump(mode="json"),
-        expected_content_sha256=content_sha256(recipe),
+        expected_content_sha256=document_sha256(recipe.model_dump(mode="json")),
         dependency_documents=[model.model_dump(mode="json")],
         source_bundle_sha256="c" * 64,
     ).id
@@ -132,44 +133,64 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     image_archive = b"healthy runtime image"
     image_archive_sha256 = hashlib.sha256(image_archive).hexdigest()
 
-    class ImageTransport:
-        calls = 0
+    storage = FilesystemRuntimeImageStorage(tmp_path / "image-cache")
+    image_builds: list[str] = []
 
-        def pull_and_export(
-            self, reference: str, destination: Path, **_: object
+    def builder(*_args: object, claim: Any, **_kwargs: object):
+        # The production builder reuses a verified archive; only a missing
+        # archive is built.
+        archive = storage.root / image_archive_sha256
+        if not archive.exists():
+            image_builds.append(str(claim.operation_id))
+            archive.write_bytes(image_archive)
+        return {
+            "state": "succeeded",
+            "build_id": "00000000-0000-4000-8000-000000000900",
+            "build_input_sha256": "f" * 64,
+            "image_digest": "sha256:" + "e" * 64,
+            "oci_layout_sha256": image_archive_sha256,
+            "image_bytes": len(image_archive),
+        }
+
+    class ImageTransport:
+        def inspect_archive(
+            self,
+            archive: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            expected_archive_sha256: str,
+            expected_archive_bytes: int,
         ) -> PulledImageEvidence:
-            del reference
-            self.calls += 1
-            destination.write_bytes(image_archive)
             return PulledImageEvidence(
                 manifest_digest="sha256:" + "e" * 64,
-                requested_manifest_digest="sha256:" + "d" * 64,
                 config_id="sha256:" + "f" * 64,
-                local_reference="localhost/vonk/recovery@sha256:" + "e" * 64,
-                architecture="linux/arm64",
-                runtime_interface="v1",
-                archive_sha256=image_archive_sha256,
-                archive_bytes=len(image_archive),
+                local_reference="docker-archive:" + str(archive),
+                architecture=expected_architecture,
+                runtime_interface=expected_runtime_interface,
+                archive_sha256=expected_archive_sha256,
+                archive_bytes=expected_archive_bytes,
             )
 
-        def inspect_archive(self, archive: Path, **_: object) -> PulledImageEvidence:
-            raise AssertionError(archive)
-
-    image_transport = ImageTransport()
     service = RecipeImageAvailabilityService(
         sessions,
-        storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
+        storage=storage,
         authority=lambda recipe_revision_id, *, force=False: (
             recipe,
             {
                 "architecture": "linux/arm64",
                 "interface": "vonk.runtime.v1",
                 "image_bytes": len(image_archive),
+                "build_input_sha256": "f" * 64,
             },
         ),
-        transport=image_transport,
+        transport=ImageTransport(),
+        builder=builder,
+        # This test is about model recovery; image authorization has its own.
+        receipt_writer=lambda *_args: None,
         model_cache=cache,
         clock=lambda: datetime.now(UTC),
+        max_parallel_builds=2,
     )
     seeded_parent = service.start(
         recipe_revision_id,
@@ -182,7 +203,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     assert seeded_parent.state == "succeeded"
     assert seeded_parent.model_child is not None
     assert seeded_parent.model_child["id"] == seeded.id
-    assert image_transport.calls == 1
+    assert len(image_builds) == 1
 
     missing_digest = hashlib.sha256(b"weights-a").hexdigest()
     retained_digest = hashlib.sha256(b"weights-b").hexdigest()
@@ -211,7 +232,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     assert resumed_waiting.state == "partial"
     assert resumed_waiting.model_child is not None
     assert resumed_waiting.model_child["id"] == new_parent.model_child["id"]
-    assert image_transport.calls == 1
+    assert len(image_builds) == 1
 
     _drain(cache, str(new_parent.model_child["id"]))
     assert requests == ["/models/synthetic-tiny/resolve/" + "0" * 40 + "/weights-a.bin"]
@@ -229,7 +250,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     assert service.run_pending(limit=2) == 2
     assert service.get(resumed_parent.id).state == "succeeded"
     assert service.get(new_parent.id).state == "succeeded"
-    assert image_transport.calls == 1
+    assert len(image_builds) == 1
 
     cache.close()
     client.close()

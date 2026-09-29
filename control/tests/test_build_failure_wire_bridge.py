@@ -31,6 +31,7 @@ from vonk_control.models import (
     User,
 )
 
+from .agent_fences import fenced_operation
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_agent_restart_recovery_wire_bridge import (
     _certificate_files,
@@ -178,7 +179,6 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             "semantic_version": builder.semantic_version,
             "build_digest": builder.build_digest,
             "binary_digest": builder.binary_digest,
-            "self_test_passed": builder.self_test_passed,
         }
     jobs = AgentJobService(
         sessions,
@@ -236,12 +236,10 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             jobs,
             node_id,
             "build-wire-serial",
-            30,
-            capabilities=("agent.runtime.rust.v1", "recipe.build.v1"),
             runtime_identity=runtime_identity,
         )
         assert first_claim is not None
-        assert first_claim.job_id == build_job.id
+        assert fenced_operation(sessions, first_claim).parent_job_id == build_job.id
         assert first_claim.operation == "recipe.build.v1"
         accepted_request = RecipeBuildRequest.model_validate_json(
             canonical_message(first_claim.payload)
@@ -256,6 +254,7 @@ def test_native_source_fetch_failure_reaches_availability_owner(
                 tmp_path / "agent-state",
                 source_server,
                 certs,
+                node_id=node_id,
             ),
         )
         assert result.state == "failed"
@@ -273,8 +272,10 @@ def test_native_source_fetch_failure_reaches_availability_owner(
         # fenced queue boundary before the parent is allowed to classify it.
         jobs.record_result(result)
         with sessions() as session:
-            accepted_job = session.get(Job, result.job_id)
-            stored_operation = session.get(AgentOperation, result.operation_id)
+            accepted_job = session.get(Job, build_job.id)
+            stored_operation = session.get(
+                AgentOperation, fenced_operation(sessions, first_claim).id
+            )
             assert accepted_job is not None and stored_operation is not None
             assert accepted_job.state == "failed"
             assert stored_operation.state == "failed"
@@ -339,12 +340,13 @@ def test_native_source_fetch_failure_reaches_availability_owner(
                 jobs,
                 node_id,
                 "build-wire-serial",
-                30,
-                capabilities=("agent.runtime.rust.v1", "recipe.build.v1"),
                 runtime_identity=runtime_identity,
             )
             assert second_claim is not None
-            assert second_claim.job_id == jobs_for_build[1].id
+            assert (
+                fenced_operation(sessions, second_claim).parent_job_id
+                == jobs_for_build[1].id
+            )
             assert (
                 RecipeBuildRequest.model_validate_json(
                     canonical_message(second_claim.payload)

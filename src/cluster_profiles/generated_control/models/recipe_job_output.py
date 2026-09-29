@@ -9,7 +9,6 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.recipe_output_slot import RecipeOutputSlot
@@ -27,12 +26,10 @@ class RecipeJobOutput:
     """
         Attributes:
             max_total_bytes (int):
-            path (Literal['/outputs']):
             slots (list[RecipeOutputSlot]):
      """
 
     max_total_bytes: int
-    path: Literal['/outputs']
     slots: list[RecipeOutputSlot]
 
 
@@ -42,8 +39,6 @@ class RecipeJobOutput:
     def to_dict(self) -> dict[str, Any]:
         from ..models.recipe_output_slot import RecipeOutputSlot # noqa: PLC0415
         max_total_bytes = self.max_total_bytes
-
-        path = self.path
 
         slots = []
         for slots_item_data in self.slots:
@@ -57,7 +52,6 @@ class RecipeJobOutput:
 
         field_dict.update({
             "max_total_bytes": max_total_bytes,
-            "path": path,
             "slots": slots,
         })
 
@@ -71,10 +65,6 @@ class RecipeJobOutput:
         d = dict(src_dict)
         max_total_bytes = d.pop("max_total_bytes")
 
-        path = cast(Literal['/outputs'] , d.pop("path"))
-        if path != '/outputs':
-            raise ValueError(f"path must match const '/outputs', got '{path}'")
-
         slots = []
         _slots = d.pop("slots")
         for slots_item_data in (_slots):
@@ -87,7 +77,6 @@ class RecipeJobOutput:
 
         recipe_job_output = cls(
             max_total_bytes=max_total_bytes,
-            path=path,
             slots=slots,
         )
 

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -16,12 +17,11 @@ from vonk_agent_protocol import (
     CompiledExecutionPlan,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
-    RestartVonkUnitOperation,
-    ScheduleRebootOperation,
     canonical_message,
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.host_helper import (
+    ConfirmPackageActivationOperation,
     HostRuntimeRequest,
     RecipeReconciliationIdentity,
 )
@@ -66,10 +66,9 @@ from vonk_control.recipe_start_payloads import (
     build_recipe_start_payload,
 )
 from vonk_control.recipe_stop_payloads import (
-    stop_payload_from_job_run,
     stop_payload_from_start,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 NOW = datetime(2036, 7, 1, 12, 0, tzinfo=UTC)
 REQUEST_ID = "10000000-0000-4000-8000-000000000001"
@@ -133,7 +132,7 @@ def service_stop_runtime_service() -> tuple[HostRuntimeAuthorityService, str, st
         start = RecipeStartPayload.model_validate_json(
             canonical_message(start_operation.payload)
         )
-        stop = stop_payload_from_start(start, node_id, cancel_pending_start=False)
+        stop = stop_payload_from_start(start, cancel_pending_start=False)
         stop_payload = json.loads(canonical_message(stop))
         parent_payload: dict[str, object] = {
             "schema_version": 1,
@@ -215,7 +214,11 @@ def test_controller_issues_exact_short_lived_host_grant() -> None:
     authority = issuer()
     grant = authority.issue_grant(
         node_id="spk_" + "1" * 32,
-        operation=RestartVonkUnitOperation(type="restart-vonk-unit", unit="agent"),
+        operation=ConfirmPackageActivationOperation(
+            type="confirm-package-activation",
+            package_sha256="a" * 64,
+            attempt_nonce="b" * 64,
+        ),
         expires_in_seconds=90,
     )
 
@@ -235,9 +238,6 @@ def test_controller_signs_exact_job_bound_container_runtime_request() -> None:
         operation=ExecuteContainerRuntimeRequestOperation(
             type="execute-container-runtime-request",
             action=ContainerRuntimeAction.START.value,
-            job_id="20000000-0000-4000-8000-000000000002",
-            operation_id="30000000-0000-4000-8000-000000000003",
-            attempt=2,
             fence="40000000-0000-4000-8000-000000000004",
             request_sha256="a" * 64,
             start_plan_sha256="b" * 64,
@@ -252,9 +252,6 @@ def test_controller_signs_exact_job_bound_container_runtime_request() -> None:
     assert grant.claims.operation.to_mapping() == {
         "type": "execute-container-runtime-request",
         "action": "start",
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 2,
         "fence": "40000000-0000-4000-8000-000000000004",
         "request_sha256": "a" * 64,
         "start_plan_sha256": "b" * 64,
@@ -270,8 +267,10 @@ def test_controller_refuses_unbounded_host_grants(seconds: object) -> None:
     with pytest.raises(HostHelperAuthorityError, match="expiry"):
         issuer().issue_grant(
             node_id="spk_" + "1" * 32,
-            operation=ScheduleRebootOperation(
-                type="schedule-reboot", delay_seconds=120
+            operation=ConfirmPackageActivationOperation(
+                type="confirm-package-activation",
+                package_sha256="a" * 64,
+                attempt_nonce="b" * 64,
             ),
             expires_in_seconds=seconds,
         )
@@ -281,7 +280,7 @@ def test_controller_refuses_mapping_shaped_or_untyped_operations() -> None:
     with pytest.raises(HostHelperAuthorityError, match="operation"):
         issuer().issue_grant(
             node_id="spk_" + "1" * 32,
-            operation={"type": "restart-vonk-unit", "unit": "agent"},
+            operation={"type": "confirm-package-activation"},
             expires_in_seconds=30,
         )
 
@@ -290,10 +289,9 @@ def runtime_service(
     *,
     lease_seconds: int = 60,
     operation_kind: str = "recipe.start",
-    operation_payload: dict[str, object] | None = None,
+    operation_payload: Mapping[str, object] | None = None,
     cancel_requested: bool = False,
     node_intent: int = 1,
-    include_stop_hook: bool = False,
 ) -> HostRuntimeAuthorityService:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -311,13 +309,13 @@ def runtime_service(
     lifecycle = operation_kind in {"recipe.start", "recipe.job.run.v1"}
     recipe_raw = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     recipe_raw["identity"].update(publisher="vonk-forge", slug="authority-test")
     recipe = RecipeDefinition.model_validate_json(canonical_message(recipe_raw))
-    recipe_document = json.loads(canonical_message(recipe))
-    recipe_digest = content_sha256(recipe)
+    recipe_document = recipe_raw
+    recipe_digest = document_sha256(recipe_raw)
     collective = (
         operation_kind == "recipe.start"
         and operation_payload is not None
@@ -332,11 +330,8 @@ def runtime_service(
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
         fixture["identity"]["recipe_revision_sha256"] = recipe_digest
         if collective:
-            fixture["topology"].update(
-                name="dual", mode="distributed", node_count=2, backend="mp"
-            )
-            fixture["security"]["devices"] = ["nvidia.com/gpu=all"]
-        image_digest = fixture["runtime"]["image_digest"]
+            fixture["topology"].update(name="dual", node_count=2)
+        image_digest = fixture["runtime_image"]["image_digest"]
         deadline = (NOW + timedelta(minutes=5)).isoformat()
 
         def build_start(
@@ -349,13 +344,9 @@ def runtime_service(
                 run_id=run_id,
                 installation_id=installation_id,
                 recipe_revision_id=revision_id,
-                recipe_content_sha256=recipe_digest,
                 mapping_id=mapping_id,
-                mapping_generation=1,
                 run_generation=1,
-                image_digest=image_digest,
                 plan_digest=plan_digest,
-                alias="authority-test",
                 placement=RecipeStartPlacement(
                     node_id=target_node,
                     rank=rank,
@@ -366,13 +357,11 @@ def runtime_service(
                     memory_kind="unified",
                     fabric_address=local_address if distributed else None,
                 ),
-                endpoint_address=local_address,
                 compiled_endpoint_address=("192.0.2.10" if rank == 0 else None)
                 if distributed
                 else "192.0.2.10",
                 world_size=len(target_nodes),
                 compiled_execution_plan=fixture,
-                local_address=local_address if distributed else None,
                 master_address="192.0.2.10" if distributed else None,
                 master_port=29500 if distributed else None,
                 phase=phase,
@@ -429,23 +418,15 @@ def runtime_service(
         )
         vector = json.loads(vector_path.read_text(encoding="utf-8"))
         request_document = vector["payload"]
-        if include_stop_hook:
-            compiled = request_document["compiled_execution_plan"]
-            assert isinstance(compiled, dict)
-            lifecycle = compiled["lifecycle"]
-            assert isinstance(lifecycle, dict)
-            lifecycle["post_stop"] = [["/usr/bin/true"]]
         request_document.update(
             {
                 "job_id": "b0000000-0000-4000-8000-00000000000b",
                 "run_id": run_id,
                 "installation_id": installation_id,
                 "mapping_id": mapping_id,
-                "mapping_generation": 1,
                 "run_generation": 1,
                 "recipe_revision_id": revision_id,
                 "plan_digest": plan_digest,
-                "recipe_content_sha256": recipe_digest,
             }
         )
         request_document["compiled_execution_plan"]["identity"][
@@ -469,15 +450,7 @@ def runtime_service(
         phases = []
 
     operation_digest = hashlib.sha256(canonical_message(operation_document)).hexdigest()
-    authority_revision = (
-        job_run_request.recipe_content_sha256
-        if job_run_request is not None
-        else RecipeStartPayload.model_validate_json(
-            canonical_message(operation_document)
-        ).recipe_content_sha256
-        if operation_kind == "recipe.start"
-        else "b" * 64
-    )
+    authority_revision = recipe_digest if lifecycle else "b" * 64
     compiled_by_node: dict[str, CompiledExecutionPlan] = {}
     if job_run_request is not None:
         compiled_by_node[node_id] = job_run_request.compiled_execution_plan
@@ -515,7 +488,6 @@ def runtime_service(
                 AgentNode(
                     node_id=target_node,
                     state="active",
-                    capabilities=[operation_kind],
                     workload_intent_ordinal=node_intent,
                 )
             )
@@ -529,15 +501,9 @@ def runtime_service(
             )
         )
         if lifecycle:
-            if job_run_request is not None:
-                recipe_digest = job_run_request.recipe_content_sha256
-                image_digest = job_run_request.image_digest
-            else:
-                start = RecipeStartPayload.model_validate_json(
-                    canonical_message(operation_document)
-                )
-                recipe_digest = start.recipe_content_sha256
-                image_digest = start.image_digest
+            image_digest = next(
+                iter(compiled_by_node.values())
+            ).runtime_image.image_digest
 
             install_nodes = []
             run_nodes = []
@@ -545,7 +511,7 @@ def runtime_service(
                 compiled = compiled_by_node[target_node]
                 placement = compiled.runtime.placement
                 role = placement.role
-                required_bytes = compiled.identity.model_artifact_bytes
+                required_bytes = sum(item.size_bytes for item in compiled.artifacts)
                 install_nodes.append(
                     StoredInstallNodePlan(
                         node_id=target_node,
@@ -573,7 +539,7 @@ def runtime_service(
                         port=placement.port or 8000,
                         allowed=True,
                         inventory_observed_at=NOW.isoformat(),
-                        memory_kind=placement.memory_kind,
+                        memory_kind="unified",
                         memory_pool="shared",
                         required_memory_bytes=placement.reserved_memory_bytes,
                         available_memory_bytes=None,
@@ -781,7 +747,7 @@ def runtime_service(
                     run_id=run_id,
                     operation_id=job_id,
                     request_id="b1000000-0000-4000-8000-00000000000b",
-                    interface=job_run_request.interface,
+                    interface=job_contract.interface,
                     parameters={},
                     output_limits=job_run_request.output_limits.model_dump(
                         mode="json", exclude_none=True
@@ -789,7 +755,7 @@ def runtime_service(
                     compiled_contract=job_contract.model_dump(
                         mode="json", exclude_none=True
                     ),
-                    contract_sha256=job_run_request.contract_sha256,
+                    contract_sha256="c" * 64,
                     state="running",
                     input_manifest={
                         "files": [
@@ -801,7 +767,7 @@ def runtime_service(
                     },
                     input_manifest_sha256=job_run_request.input_manifest_sha256,
                     input_total_bytes=job_run_request.input_total_bytes,
-                    timeout_seconds=job_run_request.timeout_seconds,
+                    timeout_seconds=job_contract.timeout_seconds,
                     actor="test",
                     created_at=NOW,
                     updated_at=NOW,
@@ -832,9 +798,6 @@ def test_agent_upgrade_authority_binds_the_live_attempt_and_exact_signed_package
 
     grant = service.issue_agent_upgrade_grant(
         node_id="spk_" + "1" * 32,
-        job_id="20000000-0000-4000-8000-000000000002",
-        operation_id="30000000-0000-4000-8000-000000000003",
-        attempt=2,
         fence="40000000-0000-4000-8000-000000000004",
         package_sha256=package["package_sha256"],
         package_signature=package["package_signature"],
@@ -851,9 +814,6 @@ def test_agent_upgrade_authority_binds_the_live_attempt_and_exact_signed_package
     with pytest.raises(HostHelperAuthorityError, match="stale"):
         service.issue_agent_upgrade_grant(
             node_id="spk_" + "1" * 32,
-            job_id="20000000-0000-4000-8000-000000000002",
-            operation_id="30000000-0000-4000-8000-000000000003",
-            attempt=2,
             fence="40000000-0000-4000-8000-000000000004",
             package_sha256="c" * 64,
             package_signature=package["package_signature"],
@@ -867,9 +827,6 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
     binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
     grant = service.issue_grant(
         node_id="spk_" + "1" * 32,
-        job_id="20000000-0000-4000-8000-000000000002",
-        operation_id="30000000-0000-4000-8000-000000000003",
-        attempt=2,
         fence="40000000-0000-4000-8000-000000000004",
         action=ContainerRuntimeAction.START,
         request_sha256="e" * 64,
@@ -893,9 +850,6 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
 
     inspect = service.issue_grant(
         node_id="spk_" + "1" * 32,
-        job_id="20000000-0000-4000-8000-000000000002",
-        operation_id="30000000-0000-4000-8000-000000000003",
-        attempt=2,
         fence="40000000-0000-4000-8000-000000000004",
         action=ContainerRuntimeAction.RUN_INSPECT,
         request_sha256="f" * 64,
@@ -911,9 +865,6 @@ def test_job_run_stop_grant_preserves_logical_and_runtime_target_identity() -> N
     binding = runtime_plan_binding(service, ContainerRuntimeAction.STOP)
     grant = service.issue_grant(
         node_id="spk_" + "1" * 32,
-        job_id="20000000-0000-4000-8000-000000000002",
-        operation_id="30000000-0000-4000-8000-000000000003",
-        attempt=2,
         fence="40000000-0000-4000-8000-000000000004",
         action=ContainerRuntimeAction.STOP,
         request_sha256="e" * 64,
@@ -945,9 +896,6 @@ def test_service_stop_grant_signs_exact_durable_prior_start() -> None:
     )
     grant = service.issue_grant(
         node_id="spk_" + "1" * 32,
-        job_id=job_id,
-        operation_id=operation_id,
-        attempt=1,
         fence=fence,
         action=ContainerRuntimeAction.STOP,
         request_sha256="e" * 64,
@@ -979,9 +927,6 @@ def test_job_run_stop_rejects_wrong_runtime_target() -> None:
     with pytest.raises(HostHelperAuthorityError, match="lifecycle binding"):
         service.issue_grant(
             node_id="spk_" + "1" * 32,
-            job_id="20000000-0000-4000-8000-000000000002",
-            operation_id="30000000-0000-4000-8000-000000000003",
-            attempt=2,
             fence="40000000-0000-4000-8000-000000000004",
             action=ContainerRuntimeAction.STOP,
             request_sha256="e" * 64,
@@ -990,52 +935,10 @@ def test_job_run_stop_rejects_wrong_runtime_target() -> None:
         )
 
 
-def test_hook_bearing_job_run_stop_fails_closed_before_signing() -> None:
-    service = runtime_service(
-        operation_kind="recipe.job.run.v1",
-        cancel_requested=True,
-        include_stop_hook=True,
-    )
-    with service._sessions() as session:
-        operation = session.get(AgentOperation, "30000000-0000-4000-8000-000000000003")
-        assert operation is not None
-        job_plan = RecipeJobRunRequest.model_validate_json(
-            canonical_message(operation.payload)
-        )
-        stop = stop_payload_from_job_run(
-            job_plan,
-            "spk_" + "1" * 32,
-            cancel_pending_start=True,
-        )
-    binding = {
-        "start_plan_sha256": None,
-        "stop_plan_sha256": hashlib.sha256(canonical_message(stop)).hexdigest(),
-        "run_generation": job_plan.run_generation,
-        "runtime_run_id": job_plan.run_id,
-        "runtime_target_id": job_plan.job_id,
-        "runtime_installation_id": job_plan.installation_id,
-    }
-    with pytest.raises(HostHelperAuthorityError, match="lifecycle authority"):
-        service.issue_grant(
-            node_id="spk_" + "1" * 32,
-            job_id="20000000-0000-4000-8000-000000000002",
-            operation_id="30000000-0000-4000-8000-000000000003",
-            attempt=2,
-            fence="40000000-0000-4000-8000-000000000004",
-            action=ContainerRuntimeAction.STOP,
-            request_sha256="e" * 64,
-            certificate_serial="certificate-1",
-            **binding,
-        )
-
-
 def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
     service = runtime_service(operation_payload={"phase": "collective-readiness"})
-    common = {
+    common: dict[str, Any] = {
         "node_id": "spk_" + "1" * 32,
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 2,
         "fence": "40000000-0000-4000-8000-000000000004",
         "request_sha256": "e" * 64,
         "certificate_serial": "certificate-1",
@@ -1062,11 +965,8 @@ def test_cancellation_permits_only_stop_under_the_original_live_fence(
         node_intent=node_intent,
     )
 
-    arguments = {
+    arguments: dict[str, Any] = {
         "node_id": "spk_" + "1" * 32,
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 2,
         "fence": "40000000-0000-4000-8000-000000000004",
         "request_sha256": "e" * 64,
         "certificate_serial": "certificate-1",
@@ -1098,9 +998,6 @@ def test_superseded_attempt_needs_recorded_cancellation_even_for_stop() -> None:
         with pytest.raises(HostHelperAuthorityError, match="stale"):
             service.issue_grant(
                 node_id="spk_" + "1" * 32,
-                job_id="20000000-0000-4000-8000-000000000002",
-                operation_id="30000000-0000-4000-8000-000000000003",
-                attempt=2,
                 fence="40000000-0000-4000-8000-000000000004",
                 action=action,
                 request_sha256="e" * 64,
@@ -1114,11 +1011,8 @@ def test_collective_cancellation_can_stop_but_cannot_extend_old_work() -> None:
         cancel_requested=True,
         node_intent=2,
     )
-    arguments = {
+    arguments: dict[str, Any] = {
         "node_id": "spk_" + "1" * 32,
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 2,
         "fence": "40000000-0000-4000-8000-000000000004",
         "request_sha256": "e" * 64,
         "certificate_serial": "certificate-1",
@@ -1153,9 +1047,6 @@ def test_long_attempt_lease_does_not_extend_the_cancellation_deadline() -> None:
     with pytest.raises(HostHelperAuthorityError, match="stale"):
         service.issue_grant(
             node_id="spk_" + "1" * 32,
-            job_id="20000000-0000-4000-8000-000000000002",
-            operation_id="30000000-0000-4000-8000-000000000003",
-            attempt=2,
             fence="40000000-0000-4000-8000-000000000004",
             action=ContainerRuntimeAction.STOP,
             request_sha256="e" * 64,
@@ -1167,9 +1058,6 @@ def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> Non
     with pytest.raises(HostHelperAuthorityError, match="action"):
         runtime_service().issue_grant(
             node_id="spk_" + "1" * 32,
-            job_id="20000000-0000-4000-8000-000000000002",
-            operation_id="30000000-0000-4000-8000-000000000003",
-            attempt=2,
             fence="40000000-0000-4000-8000-000000000004",
             action=ContainerRuntimeAction.IMAGE_IMPORT,
             request_sha256="e" * 64,
@@ -1178,11 +1066,8 @@ def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> Non
 
 
 def test_runtime_preflight_grant_is_bound_to_its_own_fenced_operation() -> None:
-    arguments = {
+    arguments: dict[str, Any] = {
         "node_id": "spk_" + "1" * 32,
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 2,
         "fence": "40000000-0000-4000-8000-000000000004",
         "action": ContainerRuntimeAction.RUNTIME_PREFLIGHT,
         "request_sha256": "e" * 64,
@@ -1209,9 +1094,6 @@ def test_runtime_authority_never_issues_a_grant_past_the_attempt_lease() -> None
     with pytest.raises(HostHelperAuthorityError, match="lease"):
         service.issue_grant(
             node_id="spk_" + "1" * 32,
-            job_id="20000000-0000-4000-8000-000000000002",
-            operation_id="30000000-0000-4000-8000-000000000003",
-            attempt=2,
             fence="40000000-0000-4000-8000-000000000004",
             action=ContainerRuntimeAction.START,
             request_sha256="e" * 64,
@@ -1276,8 +1158,6 @@ def test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity()
         semantic_version="0.1.2",
         build_digest="sha256:" + "d" * 64,
         binary_digest="c" * 64,
-        self_test_passed=True,
-        observation_receipt_public_key="4" * 64,
     )
     grant = service.issue_package_activation_grant(
         node_id=receipt.node_id,
@@ -1326,9 +1206,6 @@ OUTSIDE_INSTALLATION_ID = "90000000-0000-4000-8000-000000000009"
 
 class _CleanupGrantArguments(TypedDict):
     node_id: str
-    job_id: str
-    operation_id: str
-    attempt: int
     fence: str
     action: ContainerRuntimeAction
     request_sha256: str
@@ -1338,20 +1215,13 @@ class _CleanupGrantArguments(TypedDict):
 
 def cleanup_grant_arguments(installation_id: str) -> _CleanupGrantArguments:
     request = HostRuntimeRequest(
-        schema_version=1,
         action="installation-cleanup",
-        job_id="20000000-0000-4000-8000-000000000002",
-        operation_id="30000000-0000-4000-8000-000000000003",
-        attempt=2,
         fence="40000000-0000-4000-8000-000000000004",
         arguments=[],
         installation_id=installation_id,
     )
     return {
         "node_id": "spk_" + "1" * 32,
-        "job_id": request.job_id,
-        "operation_id": request.operation_id,
-        "attempt": request.attempt,
         "fence": request.fence,
         "action": ContainerRuntimeAction.INSTALLATION_CLEANUP,
         "request_sha256": hashlib.sha256(canonical_message(request)).hexdigest(),
@@ -1365,7 +1235,6 @@ def test_cleanup_grants_bind_only_installations_in_canonical_operation_payload()
 ):
     operation_kind = "recipe.uninstall"
     payload = RecipeUninstallPayload(
-        schema_version=1,
         installation_id=INSTALLATION_ID,
         plan_digest="a" * 64,
         recipe_content_sha256="b" * 64,
@@ -1407,7 +1276,6 @@ def test_runtime_authority_rejects_installation_binding_on_noncleanup_action() -
 
 def test_cleanup_authority_rejects_malformed_persisted_payload() -> None:
     payload = {
-        "schema_version": 1,
         "installation_id": INSTALLATION_ID,
         "plan_digest": "a" * 64,
         "recipe_content_sha256": "b" * 64,
@@ -1424,6 +1292,7 @@ def test_runtime_grant_request_enforces_cleanup_identity_and_null_policy() -> No
     document: dict[str, object] = {}
     document.update(cleanup_grant_arguments(INSTALLATION_ID))
     document.pop("certificate_serial")
+    document.pop("node_id")
     document["action"] = "installation-cleanup"
     document["expires_in_seconds"] = 30
     assert (
@@ -1469,15 +1338,7 @@ def test_runtime_grant_request_enforces_cleanup_identity_and_null_policy() -> No
 
 def reconciliation_identity() -> RecipeReconciliationIdentity:
     return RecipeReconciliationIdentity(
-        schema_version=1,
-        node_id="spk_" + "1" * 32,
-        installation_id=INSTALLATION_ID,
-        install_operation_id="a0000000-0000-4000-8000-00000000000a",
-        install_operation_payload_sha256="a" * 64,
-        plan_digest="b" * 64,
-        recipe_revision_id="b0000000-0000-4000-8000-00000000000b",
-        recipe_content_sha256="c" * 64,
-        compiled_spec_canonical_sha256="d" * 64,
+        installation_id=INSTALLATION_ID, plan_digest="b" * 64
     )
 
 
@@ -1510,11 +1371,7 @@ def reconciliation_grant_arguments(
 ) -> _ReconciliationGrantArguments:
     arguments = cleanup_grant_arguments(identity.installation_id)
     request = HostRuntimeRequest(
-        schema_version=1,
         action="installation-cleanup",
-        job_id=arguments["job_id"],
-        operation_id=arguments["operation_id"],
-        attempt=arguments["attempt"],
         fence=arguments["fence"],
         arguments=[],
         installation_id=identity.installation_id,
@@ -1544,14 +1401,8 @@ def test_reconciliation_grant_signs_the_exact_leased_cleanup_identity() -> None:
 @pytest.mark.parametrize(
     "changed",
     [
-        {"node_id": "spk_" + "2" * 32},
         {"installation_id": SECOND_INSTALLATION_ID},
-        {"install_operation_id": OUTSIDE_INSTALLATION_ID},
-        {"install_operation_payload_sha256": "e" * 64},
         {"plan_digest": "e" * 64},
-        {"recipe_revision_id": OUTSIDE_INSTALLATION_ID},
-        {"recipe_content_sha256": "e" * 64},
-        {"compiled_spec_canonical_sha256": "e" * 64},
     ],
 )
 def test_reconciliation_grant_refuses_substituted_source_identity(changed) -> None:
@@ -1569,17 +1420,9 @@ def test_reconciliation_grant_refuses_missing_identity_or_unbound_request() -> N
     wrong_request["request_sha256"] = "f" * 64
     with pytest.raises(HostHelperAuthorityError):
         service.issue_grant(**wrong_request)
-    with service._sessions.begin() as session:
-        operation = session.get(AgentOperation, "30000000-0000-4000-8000-000000000003")
-        assert operation is not None
-        operation.payload_digest = "f" * 64
-    with pytest.raises(HostHelperAuthorityError):
-        service.issue_grant(**arguments)
 
 
-@pytest.mark.parametrize(
-    "changes", [{"fence": OUTSIDE_INSTALLATION_ID}, {"attempt": 1}]
-)
+@pytest.mark.parametrize("changes", [{"fence": OUTSIDE_INSTALLATION_ID}])
 def test_reconciliation_grant_refuses_stale_attempt(changes) -> None:
     arguments = reconciliation_grant_arguments(reconciliation_identity())
     with pytest.raises(HostHelperAuthorityError):
@@ -1598,7 +1441,6 @@ def test_reconciliation_grant_refuses_cancelled_or_expired_authority() -> None:
 
 def test_ordinary_uninstall_cannot_supply_reconciliation_authority() -> None:
     payload = RecipeUninstallPayload(
-        schema_version=1,
         installation_id=INSTALLATION_ID,
         plan_digest="a" * 64,
         recipe_content_sha256="b" * 64,

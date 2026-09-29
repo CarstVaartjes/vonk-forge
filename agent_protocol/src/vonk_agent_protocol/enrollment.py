@@ -21,7 +21,6 @@ class EnrollmentEvidence(WireModel):
     hardware_fingerprint: str = Field(min_length=1, max_length=512)
     agent_digest: Digest
     boot_id: str = Field(min_length=1, max_length=128)
-    observation_receipt_public_key: Digest
 
     @field_validator("host_key_fingerprint", "hardware_fingerprint", "boot_id")
     @classmethod

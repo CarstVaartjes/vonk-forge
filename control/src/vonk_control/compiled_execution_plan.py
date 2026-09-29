@@ -76,11 +76,10 @@ def _safe_path(value: str, *, absolute: bool, max_length: int = 512) -> str:
 
 
 class ExecutionMount(_StrictModel):
-    """The platform-owned mount used by one selected model file."""
+    """The platform-owned read-only mount used by one selected model file."""
 
     source: str = Field(min_length=1, max_length=512)
     target: str = Field(min_length=1, max_length=512)
-    read_only: bool
 
     @field_validator("source")
     @classmethod
@@ -196,7 +195,6 @@ class CompiledModelArtifact(_StrictModel):
     # public ModelFile.path ceiling.
     materialized_path: str = Field(min_length=1, max_length=1024)
     model: ModelCatalogIdentity
-    distribution_object: DistributionObjectReceipt
 
     @field_validator("path")
     @classmethod
@@ -219,23 +217,7 @@ class CompiledModelArtifact(_StrictModel):
         return sorted(value)
 
     @model_validator(mode="after")
-    def exact_object_and_mount_are_bound(self) -> CompiledModelArtifact:
-        if self.distribution_object.kind != "model":
-            raise ValueError(
-                "model artifact must reference a model distribution object"
-            )
-        if self.distribution_object.name != self.path:
-            raise ValueError(
-                "model distribution object name does not match selected path"
-            )
-        if self.distribution_object.sha256 != self.sha256:
-            raise ValueError(
-                "model distribution object digest does not match selected file"
-            )
-        if self.distribution_object.bytes != self.bytes:
-            raise ValueError(
-                "model distribution object bytes do not match selected file"
-            )
+    def mount_is_bound(self) -> CompiledModelArtifact:
         if self.bytes == 0 and any(
             role.casefold() in _WEIGHT_ROLES for role in self.roles
         ):
@@ -243,8 +225,6 @@ class CompiledModelArtifact(_StrictModel):
         expected_source = f"/run/vonk/models/{self.selection_id}"
         if self.mount.source != expected_source:
             raise ValueError("model mount source must be the selection root")
-        if not self.mount.read_only:
-            raise ValueError("model mounts must be read-only")
         expected_materialized = f"{expected_source}/{self.path}"
         if self.materialized_path != expected_materialized:
             raise ValueError(
@@ -254,69 +234,20 @@ class CompiledModelArtifact(_StrictModel):
 
 
 class CompiledRuntimeImage(_StrictModel):
-    """The exact OCI archive that the Controller gives to each Spark."""
+    """The exact Controller-built linux/arm64 OCI archive given to each Spark."""
 
     image_digest: ImageDigest
     oci_layout_sha256: Digest
     image_bytes: int = Field(ge=1, le=16 * 1024**4)
-    architecture: Literal["linux-arm64"]
-    runtime_interface: str = Field(min_length=1, max_length=128)
-    source: Literal["published", "controller-build"]
-    build_id: str | None = Field(default=None, min_length=1, max_length=128)
-    distribution_object: DistributionObjectReceipt
-    # These identities are intentionally distinct.  A multi-platform
-    # registry manifest, the selected linux-arm64 child manifest, the
-    # imported OCI config and the Controller archive are different objects.
-    registry_manifest_digest: ImageDigest | None = None
-    platform_manifest_digest: ImageDigest
+    build_id: str = Field(min_length=1, max_length=128)
+    # The imported OCI config differs from the image (manifest) digest.
     local_image_config_id: ImageDigest
-    local_image_reference: str | None = Field(
-        default=None, min_length=1, max_length=512
-    )
     runtime_interface_label: str = Field(min_length=1, max_length=128)
-
-    @model_validator(mode="after")
-    def exact_archive_is_bound(self) -> CompiledRuntimeImage:
-        if self.distribution_object.kind != "oci-archive":
-            raise ValueError("runtime image must reference an OCI archive object")
-        if self.distribution_object.name != "image.oci.tar":
-            raise ValueError("runtime image distribution object name is not canonical")
-        if self.distribution_object.sha256 != self.oci_layout_sha256:
-            raise ValueError("OCI archive digest does not match the layout digest")
-        if self.distribution_object.bytes != self.image_bytes:
-            raise ValueError("OCI archive bytes do not match the image receipt")
-        if self.source == "published" and self.build_id is not None:
-            raise ValueError("published image receipts cannot claim a Controller build")
-        if self.source == "published" and self.registry_manifest_digest is None:
-            raise ValueError("published image receipts require a registry manifest")
-        if self.source == "controller-build" and self.build_id is None:
-            raise ValueError("Controller-built image receipts require a build id")
-        if (
-            self.source == "controller-build"
-            and self.registry_manifest_digest is not None
-        ):
-            raise ValueError(
-                "Controller-built image receipts cannot claim a registry manifest"
-            )
-        if self.platform_manifest_digest != self.image_digest:
-            raise ValueError(
-                "runtime image digest must identify the selected platform manifest"
-            )
-        parent = self.platform_manifest_digest
-        expected_reference = (
-            f"localhost/vonk/compiled-runtime-{self.oci_layout_sha256}@{parent}"
-        )
-        if self.local_image_reference not in (None, expected_reference):
-            raise ValueError(
-                "runtime local image reference is not bound to its receipt"
-            )
-        return self
 
 
 class CompiledExecutionPlan(_StrictModel):
     """Internal verified execution plan consumed by distribution/install."""
 
-    schema_version: Literal[2] = 2
     recipe_revision_sha256: Digest
     harness_sha256: Digest
     execution_sha256: Digest
@@ -343,10 +274,6 @@ class CompiledExecutionPlan(_StrictModel):
                 artifact.model.publisher,
                 artifact.model.slug,
                 artifact.model.content_sha256,
-                artifact.distribution_object.name,
-                artifact.distribution_object.sha256,
-                artifact.distribution_object.bytes,
-                artifact.distribution_object.kind,
             )
             physical_key = (artifact.selection_id, artifact.path)
             previous = by_physical.get(physical_key)
@@ -369,104 +296,6 @@ class CompiledExecutionPlan(_StrictModel):
             raise ValueError("model artifact-set bytes do not match selected receipts")
         return self
 
-    def reusable_identity_document(self) -> dict[str, object]:
-        """Return the execution/cache identity without catalog provenance.
-
-        Requested recipe/model document digests and build source labels are
-        retained on the plan for authorization and evidence.  They are not
-        reusable byte identities: unchanged files, mounts, settings and image
-        bytes must remain reusable when editorial catalog facts change.
-        """
-
-        artifacts = []
-        for item in sorted(
-            self.artifacts,
-            key=lambda value: (value.selection_id, value.file_id, value.path),
-        ):
-            artifacts.append(
-                {
-                    "selection_id": item.selection_id,
-                    "file_id": item.file_id,
-                    "path": item.path,
-                    "sha256": item.sha256,
-                    "bytes": item.bytes,
-                    "roles": list(item.roles),
-                    "mount": item.mount.model_dump(mode="json"),
-                    "materialized_path": item.materialized_path,
-                    "distribution_object": item.distribution_object.model_dump(
-                        mode="json"
-                    ),
-                }
-            )
-        image = self.runtime_image
-        return {
-            "schema_version": self.schema_version,
-            "harness_sha256": self.harness_sha256,
-            "execution_sha256": self.execution_sha256,
-            "model_artifact_set_sha256": self.model_artifact_set_sha256,
-            "model_artifact_set_bytes": self.model_artifact_set_bytes,
-            "artifacts": artifacts,
-            "runtime_image": {
-                "image_digest": image.image_digest,
-                "oci_layout_sha256": image.oci_layout_sha256,
-                "image_bytes": image.image_bytes,
-                "architecture": image.architecture,
-                "runtime_interface": image.runtime_interface,
-                "registry_manifest_digest": image.registry_manifest_digest,
-                "platform_manifest_digest": image.platform_manifest_digest,
-                "local_image_config_id": image.local_image_config_id,
-                "local_image_reference": image.local_image_reference,
-                "runtime_interface_label": image.runtime_interface_label,
-                "distribution_object": image.distribution_object.model_dump(
-                    mode="json"
-                ),
-            },
-        }
-
-    @property
-    def reusable_identity_sha256(self) -> str:
-        payload = json.dumps(
-            self.reusable_identity_document(),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return hashlib.sha256(payload).hexdigest()
-
-    def to_agent_payload(self) -> dict[str, object]:
-        """Project only verified delivery and launch facts to the agent.
-
-        In particular, ``recipe_revision_sha256``, ``source`` and ``build_id``
-        are Controller evidence; upstream repository/revision/credential data
-        is absent entirely.
-        """
-
-        return {
-            "schema_version": self.schema_version,
-            "identity": {
-                "harness_sha256": self.harness_sha256,
-                "execution_sha256": self.execution_sha256,
-                "model_artifact_set_sha256": self.model_artifact_set_sha256,
-                "model_artifact_set_bytes": self.model_artifact_set_bytes,
-            },
-            "artifacts": [item.model_dump(mode="json") for item in self.artifacts],
-            "runtime_image": {
-                "image_digest": self.runtime_image.image_digest,
-                "oci_layout_sha256": self.runtime_image.oci_layout_sha256,
-                "image_bytes": self.runtime_image.image_bytes,
-                "architecture": self.runtime_image.architecture,
-                "runtime_interface": self.runtime_image.runtime_interface,
-                "registry_manifest_digest": self.runtime_image.registry_manifest_digest,
-                "platform_manifest_digest": self.runtime_image.platform_manifest_digest,
-                "local_image_config_id": self.runtime_image.local_image_config_id,
-                "local_image_reference": self.runtime_image.local_image_reference,
-                "runtime_interface_label": self.runtime_image.runtime_interface_label,
-                "distribution_object": self.runtime_image.distribution_object.model_dump(
-                    mode="json"
-                ),
-            },
-        }
-
     def to_compiled_launch_payload(
         self,
         runtime_spec: Mapping[str, object],
@@ -484,7 +313,6 @@ class CompiledExecutionPlan(_StrictModel):
         """
 
         spec = _mapping(runtime_spec, "runtime spec")
-        identity = _mapping(spec.get("identity"), "runtime identity")
         runtime = _mapping(spec.get("runtime"), "runtime")
         security = _mapping(spec.get("security"), "security")
         lifecycle = _mapping(spec.get("lifecycle"), "lifecycle")
@@ -522,13 +350,6 @@ class CompiledExecutionPlan(_StrictModel):
                 raise CompiledExecutionPlanError(
                     "compiled runtime environment is invalid"
                 )
-            # Secret values are resolved by the Controller-owned secret
-            # projection.  A recipe authoring value may never cross this
-            # boundary as an opaque upstream handle.
-            if value.get("secret") not in (None, ""):
-                raise CompiledExecutionPlanError(
-                    "compiled runtime secret projection is unavailable"
-                )
             environment.append({"name": name, "value": rendered})
 
         raw_mounts = security.get("mounts", ())
@@ -539,12 +360,7 @@ class CompiledExecutionPlan(_StrictModel):
             mount = _mapping(raw, "compiled security mount")
             source = mount.get("source")
             target = mount.get("target")
-            read_only = mount.get("read_only")
-            if (
-                type(source) is not str
-                or type(target) is not str
-                or type(read_only) is not bool
-            ):
+            if type(source) is not str or type(target) is not str:
                 raise CompiledExecutionPlanError("compiled security mounts are invalid")
             if source == "/run/vonk/models" or source.startswith("/run/vonk/models/"):
                 source = "model"
@@ -556,25 +372,12 @@ class CompiledExecutionPlan(_StrictModel):
                 raise CompiledExecutionPlanError(
                     "compiled security mount is not Controller-owned"
                 )
-            mounts.append({"source": source, "target": target, "read_only": read_only})
+            mounts.append({"source": source, "target": target})
 
         def _required_int(value: object, label: str, *, minimum: int = 0) -> int:
             if type(value) is not int or value < minimum:
                 raise CompiledExecutionPlanError(f"{label} is invalid")
             return value
-
-        raw_devices = security.get("devices", ())
-        if not isinstance(raw_devices, Sequence) or isinstance(
-            raw_devices, (str, bytes)
-        ):
-            raise CompiledExecutionPlanError("compiled security devices are invalid")
-        raw_capabilities = security.get("capabilities", ())
-        if not isinstance(raw_capabilities, Sequence) or isinstance(
-            raw_capabilities, (str, bytes)
-        ):
-            raise CompiledExecutionPlanError(
-                "compiled security capabilities are invalid"
-            )
 
         if "port" not in placement:
             raise CompiledExecutionPlanError("runtime port is missing")
@@ -605,22 +408,13 @@ class CompiledExecutionPlan(_StrictModel):
                 placement.get("memory_floor_bytes"),
                 "runtime memory floor",
             ),
-            "memory_kind": placement.get("memory_kind"),
         }
         if type(placement_doc["role"]) is not str or not placement_doc["role"]:
             raise CompiledExecutionPlanError("runtime role is invalid")
-        if type(placement_doc["memory_kind"]) is not str or placement_doc[
-            "memory_kind"
-        ] not in {"unified", "host", "accelerator"}:
-            raise CompiledExecutionPlanError("runtime memory kind is invalid")
 
-        declared_network_mode = security.get("network_mode")
-        if (
-            declared_network_mode not in {"none", "bridge"}
-            or security.get("host_network") is not False
-        ):
+        if security.get("network_mode") not in {"none", "bridge"}:
             raise CompiledExecutionPlanError(
-                "compiled security has an unsupported network mode or host networking"
+                "compiled security has an unsupported network mode"
             )
         network_mode = (
             "bridge"
@@ -637,63 +431,35 @@ class CompiledExecutionPlan(_StrictModel):
                 "sha256": item.sha256,
                 "size_bytes": item.bytes,
                 "roles": list(item.roles),
-                "mount": {
-                    "target": item.mount.target,
-                    "read_only": item.mount.read_only,
-                },
+                "mount": {"target": item.mount.target},
                 "model": item.model.model_dump(mode="json"),
-                "distribution_object": item.distribution_object.model_dump(mode="json"),
             }
             for item in self.artifacts
         ]
-        runtime_image = self.runtime_image.model_dump(mode="json")
-        parent = runtime_image["platform_manifest_digest"]
-        runtime_image["local_image_reference"] = (
-            f"localhost/vonk/compiled-runtime-{runtime_image['oci_layout_sha256']}@{parent}"
-        )
         payload: dict[str, object] = {
-            "schema_version": 2,
             "identity": {
                 "recipe_revision_sha256": self.recipe_revision_sha256,
-                "execution_sha256": self.execution_sha256,
-                "harness_sha256": self.harness_sha256,
-                "build_input_sha256": identity.get("build_input_sha256"),
                 "model_artifact_set_sha256": self.model_artifact_set_sha256,
-                "model_artifact_bytes": self.model_artifact_set_bytes,
             },
             "runtime": {
                 "executable": executable,
                 "argv": argv,
                 "env": environment,
-                "image_digest": self.runtime_image.image_digest,
                 "placement": placement_doc,
-                "telemetry": runtime["telemetry"],
             },
             "artifacts": artifacts,
-            "runtime_image": runtime_image,
+            "runtime_image": self.runtime_image.model_dump(mode="json"),
             "security": {
-                "devices": list(raw_devices),
-                "capabilities": list(raw_capabilities),
+                "gpu": security.get("gpu"),
                 "network_mode": network_mode,
-                "host_network": security.get("host_network"),
-                "privileged": security.get("privileged"),
                 "user": security.get("user"),
                 "mounts": mounts,
-                "read_only_root": security.get("read_only_root"),
-                "no_new_privileges": security.get("no_new_privileges"),
             },
             "topology": {
                 "name": topology.get("name"),
-                "mode": topology.get("mode"),
-                "backend": topology.get("backend"),
                 "node_count": topology.get("node_count"),
-                "world_size": placement_doc["world_size"],
-                "rank": placement_doc["rank"],
-                "role": placement_doc["role"],
             },
             "lifecycle": {
-                "pre_start": lifecycle.get("pre_start"),
-                "post_stop": lifecycle.get("post_stop"),
                 "stop_timeout_seconds": lifecycle.get("stop_timeout_seconds"),
             },
         }
@@ -787,7 +553,6 @@ def execution_identity_document(
         )
     dependencies.sort(key=lambda item: str(item["selection_id"]))
     return {
-        "schema_version": 2,
         "harness_sha256": identity.get("harness_sha256"),
         "runtime": spec.get("runtime"),
         "security": spec.get("security"),
@@ -963,10 +728,6 @@ def compile_verified_execution_plan(
             source.bytes,
             model.get("publisher"),
             model.get("slug"),
-            source.distribution_object.name,
-            source.distribution_object.sha256,
-            source.distribution_object.bytes,
-            source.distribution_object.kind,
         )
         physical_key = (selection_id, path)
         previous_physical = selected_physical.get(physical_key)
@@ -987,7 +748,6 @@ def compile_verified_execution_plan(
             "mount": item.get("mount"),
             "materialized_path": f"/run/vonk/models/{selection_id}/{path}",
             "model": model,
-            "distribution_object": source.distribution_object.model_dump(mode="json"),
         }
         try:
             artifacts.append(CompiledModelArtifact.model_validate(artifact_data))
@@ -1012,10 +772,9 @@ def compile_verified_execution_plan(
         ) from error
     runtime = _mapping(spec.get("runtime"), "runtime")
     runtime_image_reference = runtime.get("image")
-    expected_runtime_digest = image.registry_manifest_digest or image.image_digest
     if not isinstance(
         runtime_image_reference, str
-    ) or not runtime_image_reference.endswith(f"@{expected_runtime_digest}"):
+    ) or not runtime_image_reference.endswith(f"@{image.image_digest}"):
         raise CompiledExecutionPlanError(
             "verified runtime image does not match the compiled runtime projection"
         )

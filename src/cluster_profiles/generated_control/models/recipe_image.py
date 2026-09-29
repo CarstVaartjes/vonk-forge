@@ -8,7 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from typing import Literal, cast
 
 
 
@@ -24,12 +23,10 @@ class RecipeImage:
     """
         Attributes:
             digest (str):
-            platform (Literal['linux/arm64']):
             repository (str):
      """
 
     digest: str
-    platform: Literal['linux/arm64']
     repository: str
 
 
@@ -39,8 +36,6 @@ class RecipeImage:
     def to_dict(self) -> dict[str, Any]:
         digest = self.digest
 
-        platform = self.platform
-
         repository = self.repository
 
 
@@ -48,7 +43,6 @@ class RecipeImage:
 
         field_dict.update({
             "digest": digest,
-            "platform": platform,
             "repository": repository,
         })
 
@@ -61,15 +55,10 @@ class RecipeImage:
         d = dict(src_dict)
         digest = d.pop("digest")
 
-        platform = cast(Literal['linux/arm64'] , d.pop("platform"))
-        if platform != 'linux/arm64':
-            raise ValueError(f"platform must match const 'linux/arm64', got '{platform}'")
-
         repository = d.pop("repository")
 
         recipe_image = cls(
             digest=digest,
-            platform=platform,
             repository=repository,
         )
 

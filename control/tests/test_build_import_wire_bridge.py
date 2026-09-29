@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 import uuid
@@ -97,7 +96,6 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
     build_request = RecipeBuildRequest.model_validate(build_wire["payload"])
     build_evidence = RecipeBuildEvidence.model_validate(build_wire["evidence"])
     assert build_request.build_input_sha256 == plan.build_input_sha256
-    assert build_evidence.build_input_sha256 == plan.build_input_sha256
 
     with sessions.begin() as session:
         build = session.get(RecipeBuild, plan.build_id)
@@ -156,17 +154,8 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
         )
         assert operation is not None
         import_claim = AgentClaim(
-            schema_version=1,
-            job_id=operation.parent_job_id,
-            operation_id=operation.id,
-            attempt=1,
             fence=str(uuid.uuid4()),
-            node_id=operation.node_id,
             operation=ProtocolOperation.RECIPE_IMAGE_IMPORT,
-            authority_revision=operation.authority_revision,
-            payload_digest=hashlib.sha256(
-                canonical_message(operation.payload)
-            ).hexdigest(),
             payload=RecipeImageImportRequest.model_validate(operation.payload),
             deadline=now,
         )
@@ -174,7 +163,6 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
     import_request = RecipeImageImportRequest.model_validate(import_wire["payload"])
     import_evidence = RecipeImageImportEvidence.model_validate(import_wire["evidence"])
     assert import_request.build_id == plan.build_id
-    assert import_evidence.build_id == plan.build_id
 
     with sessions.begin() as session:
         operation = session.scalar(
@@ -222,7 +210,6 @@ def test_cancelled_build_cleanup_crosses_the_real_wire_boundary(
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
         child = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == original.id)
         )
@@ -279,15 +266,11 @@ def test_build_wire_rejects_scalar_coercion(tmp_path: Path) -> None:
         .plan(revision.id, node_id, now=now)
         .agent_payload
     )
-    for field, value in (("schema_version", True), ("source_bundle_bytes", 1.0)):
+    for field, value in (("source_bundle_bytes", 1.0), ("source_bundle_bytes", True)):
         malformed = dict(payload)
         malformed[field] = value
         with pytest.raises(ValueError):
             RecipeBuildRequest.model_validate(malformed)
-    malformed = dict(payload)
-    malformed["arguments"] = [{"name": "build_arg", "value": 1.0}]
-    with pytest.raises(ValueError):
-        RecipeBuildRequest.model_validate(malformed)
 
 
 def test_build_wire_schema_publishes_runtime_scalar_constraints() -> None:
@@ -301,11 +284,6 @@ def test_build_wire_schema_publishes_runtime_scalar_constraints() -> None:
     }
     environment = schema["$defs"]["RecipeBuildEnvironmentArgument"]
     assert environment["properties"]["name"]["pattern"] == r"^[A-Z][A-Z0-9_]{0,127}$"
-    argument = schema["$defs"]["RecipeBuildArgument"]["properties"]["name"]
-    assert argument["pattern"] == r"^[a-z][a-z0-9._-]{0,63}$"
-    assert argument["maxLength"] == 64
-    assert schema["properties"]["target"]["anyOf"][0]["pattern"] == r"^[A-Za-z0-9._-]+$"
-    assert schema["properties"]["schema_version"]["const"] == 1
 
 
 @pytest.mark.parametrize(
@@ -313,7 +291,7 @@ def test_build_wire_schema_publishes_runtime_scalar_constraints() -> None:
     (
         (("capabilities",), ["SYS_ADMIN"]),
         (("capabilities",), ["DAC_OVERRIDE", "DAC_OVERRIDE"]),
-        (("network", "mode"), "public"),
+        (("network", "hosts"), ["localhost"]),
         (("limits", "gpu"), 1),
         (("options", "layer_compression"), "zstd"),
     ),

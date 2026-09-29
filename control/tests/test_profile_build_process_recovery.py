@@ -83,15 +83,18 @@ class _PreparedArtifactExecutor(RecordingArtifactExecutor):
         if phase.subphase == "target-copy" and phase.kind in {"transfer", "verify"}:
             evidence = _target_copy_evidence(plan, phase, kwargs["progress"])
             if phase.kind == "verify":
+                image = (
+                    plan.preparation.runtime_image
+                    if plan.preparation is not None
+                    else plan.build
+                )
                 return PhaseExecution(
                     result={
                         "verified": True,
-                        "verified_digests": evidence["verified_digests"],
+                        "verified_digests": list(plan.storage.artifact_digests),
                         "verified_build_id": plan.recipe_build_id,
-                        "verified_image_digest": evidence["verified_image_digest"],
-                        "verified_oci_layout_sha256": evidence[
-                            "verified_oci_layout_sha256"
-                        ],
+                        "verified_image_digest": image.image_digest,
+                        "verified_oci_layout_sha256": image.oci_layout_sha256,
                     }
                 )
             return PhaseExecution(result=evidence)
@@ -124,7 +127,7 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
                 build = session.get(RecipeBuild, job.payload["owner_id"])
                 assert build is not None
             storage = FilesystemRuntimeImageStorage(root / "runtime-images")
-            staged = storage.prepare_path()
+            staged = storage.root / "staged-build.part"
             staged.write_bytes((root / "expected-build.archive").read_bytes())
             expected = RuntimeImageReceipt.model_validate_json(
                 (root / "expected-build.receipt.json").read_text()
@@ -144,15 +147,9 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
                 job.targets[0],
                 succeeded=True,
                 evidence={
-                    "build_input_sha256": build.build_input_sha256,
                     "image_digest": receipt.image_digest,
                     "oci_layout_sha256": receipt.oci_archive_sha256,
                     "image_bytes": receipt.image_bytes,
-                    "policy": {
-                        "passed": True,
-                        "findings": [],
-                        "dockerfile": "Dockerfile",
-                    },
                 },
             )
         elif job.kind == "recipe.install":
@@ -166,9 +163,7 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
                     job.id,
                     node_id,
                     succeeded=True,
-                    evidence={"stopped": True}
-                    if job.kind == "recipe.stop"
-                    else {"removed": True},
+                    evidence={},
                 )
         elif job.kind == "runtime.preflight.v1":
             complete_preflight(
@@ -409,7 +404,6 @@ def test_profile_recovers_after_worker_process_death(
         changed = original.model_copy(
             update={
                 "image_digest": "sha256:" + "b" * 64,
-                "platform_manifest_digest": "sha256:" + "b" * 64,
             }
         )
         (tmp_path / "expected-build.receipt.json").write_text(changed.model_dump_json())

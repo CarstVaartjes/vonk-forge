@@ -33,11 +33,11 @@ NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
 STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
-STOP_RESULT = {"stopped": True}
-PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl"
+STOP_RESULT: dict[str, object] = {}
+PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl"
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (
-    ROOT / "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
+    ROOT / "inventory/wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl"
 )
 PUBLIC_CONTRACTS_WHEEL_HASH = hashlib.sha256(
     PUBLIC_CONTRACTS_WHEEL.read_bytes()
@@ -67,7 +67,6 @@ def service(tmp_path):
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    capabilities=[],
                     workload_intent_ordinal=1,
                 )
             )
@@ -105,15 +104,8 @@ def enqueue(service: AgentJobService, sessions, clock) -> None:
 
 def raw_stop_claim(payload: dict[str, object]) -> dict[str, object]:
     return {
-        "schema_version": 1,
-        "job_id": "00000000-0000-4000-8000-000000000001",
-        "operation_id": "00000000-0000-4000-8000-000000000002",
-        "attempt": 1,
         "fence": "00000000-0000-4000-8000-000000000003",
-        "node_id": NODE_A,
         "operation": "recipe.stop",
-        "authority_revision": COMMIT,
-        "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
         "payload": payload,
         "deadline": "2026-08-03T12:00:00+00:00",
     }
@@ -121,13 +113,7 @@ def raw_stop_claim(payload: dict[str, object]) -> dict[str, object]:
 
 def raw_result(result: dict[str, object]) -> dict[str, object]:
     return {
-        "schema_version": 1,
-        "job_id": "00000000-0000-4000-8000-000000000001",
-        "operation_id": "00000000-0000-4000-8000-000000000002",
-        "attempt": 1,
         "fence": "00000000-0000-4000-8000-000000000003",
-        "node_id": NODE_A,
-        "deadline": "2026-08-03T12:00:00+00:00",
         "state": "succeeded",
         "result": result,
     }
@@ -137,13 +123,13 @@ def test_cross_node_claim_is_denied(service) -> None:
     jobs, sessions, clock = service
     enqueue(jobs, sessions, clock)
 
-    assert claim_agent(jobs, NODE_B, "serial-b", 30) is None
+    assert claim_agent(jobs, NODE_B, "serial-b") is None
 
 
 def test_revoked_certificate_cannot_publish_result(service) -> None:
     jobs, sessions, clock = service
     enqueue(jobs, sessions, clock)
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     with sessions.begin() as session:
         certificate = session.get(AgentCertificate, "serial-a")
@@ -202,7 +188,7 @@ def test_payload_and_result_documents_are_size_limited(service) -> None:
         AgentClaim.parse(oversized_claim)
 
     jobs.enqueue(parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     with pytest.raises(AgentProtocolError, match="large"):
         AgentResult.parse(raw_result({"value": "x" * (MAX_DOCUMENT_BYTES + 1)}))
@@ -211,10 +197,10 @@ def test_payload_and_result_documents_are_size_limited(service) -> None:
 def test_stale_fence_cannot_publish_success(service) -> None:
     jobs, sessions, clock = service
     enqueue(jobs, sessions, clock)
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
     clock.advance(31)
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with pytest.raises(StaleAgentAttempt):
         jobs.succeed(first, STOP_RESULT)
@@ -250,9 +236,9 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         if package["name"] == "vonk-forge-public-contracts"
     )
 
-    assert '"vonk-agent-protocol==3.0.1"' in control_project
+    assert '"vonk-agent-protocol==4.0.0"' in control_project
     assert protocol_sources == [
-        {"path": "../inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl"}
+        {"path": "../inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl"}
     ]
     assert control_lock["package"][
         next(
@@ -262,7 +248,7 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         )
     ]["wheels"] == [
         {
-            "filename": "vonk_agent_protocol-3.0.1-py3-none-any.whl",
+            "filename": "vonk_agent_protocol-4.0.0-py3-none-any.whl",
             "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
         }
     ]
@@ -283,10 +269,10 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     assert "COPY control/pyproject.toml ./" in dockerfile
     assert "COPY control/src ./src" in dockerfile
     assert (
-        "COPY inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl /wheels/"
+        "COPY inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl /wheels/"
         in dockerfile
     )
-    assert "/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl" in dockerfile
+    assert "/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl" in dockerfile
     assert (
         "python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels /agent-protocol"
         not in dockerfile
@@ -298,7 +284,7 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     )
     assert "/public-contracts/contracts" in dockerfile
     assert (
-        "COPY inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl /wheels/"
+        "COPY inventory/wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl /wheels/"
         not in dockerfile
     )
     dockerignore = set(dockerignore_path.read_text().splitlines())
@@ -313,8 +299,8 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         "!control/src/**",
         "!control/web/**",
         "control/.venv",
-        "!inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl",
-        "!inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
+        "!inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl",
+        "!inventory/wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl",
     } <= dockerignore
     assert "!agent_protocol/src/**" not in dockerignore
     assert {
@@ -366,14 +352,14 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
     )
 
     assert direct_url["url"].endswith(
-        "/inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl"
+        "/inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl"
     )
     assert package["source"] == {
-        "path": "../inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl"
+        "path": "../inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl"
     }
     assert package["wheels"] == [
         {
-            "filename": "vonk_agent_protocol-3.0.1-py3-none-any.whl",
+            "filename": "vonk_agent_protocol-4.0.0-py3-none-any.whl",
             "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
         }
     ]
@@ -424,7 +410,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
                 from importlib.resources import files
                 from vonk_agent_protocol import AgentProtocolError, DistributionObject
                 from vonk_control.recipe_runtime_specs import compile_runtime_spec
-                from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+                from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
                 def rejects(value):
                     try:
@@ -433,9 +419,11 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
                         return True
                     return False
 
-                recipe = RecipeDefinition.model_validate(json.loads(files("vonk_forge_contracts").joinpath("examples/recipe-image.json").read_text()))
-                model = ModelDefinition.model_validate(json.loads(files("vonk_forge_contracts").joinpath("examples/model-definition.json").read_text()))
-                compiled = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+                recipe = json.loads(files("vonk_forge_contracts").joinpath("examples/recipe-source-build.json").read_text())
+                model = json.loads(files("vonk_forge_contracts").joinpath("examples/model-definition.json").read_text())
+                RecipeDefinition.model_validate(recipe)
+                ModelDefinition.model_validate(model)
+                compiled = compile_runtime_spec(recipe, models={document_sha256(model): model}, package_handle={"image_digest": "d" * 64, "image_reference": "localhost/vonk/build@sha256:" + "d" * 64, "paths": ["context.tar", "Dockerfile"]}, role="entrypoint", rank=0)
                 empty = DistributionObject.parse({"name": "support/empty.safetensors", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "bytes": 0, "kind": "model"})
                 inconsistent = rejects({"name": "support/empty.safetensors", "sha256": "0" * 64, "bytes": 0, "kind": "model"})
                 print(json.dumps({"protocol": importlib.metadata.version("vonk-agent-protocol"), "contracts": importlib.metadata.version("vonk-forge-public-contracts"), "model": ModelDefinition.__name__, "recipe": RecipeDefinition.__name__, "distribution": DistributionObject.__name__, "zero_byte_model": empty.bytes == 0, "inconsistent_zero_byte_rejected": inconsistent, "compiled_interface": compiled["runtime"]["interface"], "compiled_image": compiled["runtime"]["image"]}))
@@ -449,15 +437,15 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
     installed = json.loads(result.stdout)
 
     assert installed == {
-        "protocol": "3.0.1",
-        "contracts": "0.1.0",
+        "protocol": "4.0.0",
+        "contracts": "2.0.0",
         "model": "ModelDefinition",
         "recipe": "RecipeDefinition",
         "distribution": "DistributionObject",
         "zero_byte_model": True,
         "inconsistent_zero_byte_rejected": True,
         "compiled_interface": "vonk.runtime.v1",
-        "compiled_image": "registry.example/vonk/vllm@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "compiled_image": "localhost/vonk/build@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     }
 
 

@@ -6,7 +6,6 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
 
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
@@ -33,20 +32,16 @@ def recipe_requirements(
     *,
     source_build: bool,
     minimum_free_bytes: int,
-    architecture: Literal["linux-arm64", "linux-amd64"] = "linux-arm64",
 ) -> RuntimePreflightRequest:
     """Read the canonical topology; engine arguments are not an allowlist."""
-    from .recipe_runtime_specs import recipe_fabric
+    from .recipe_runtime_specs import recipe_topology
 
-    fabric = recipe_fabric(document)
+    fabric = recipe_topology(document)
     return RuntimePreflightRequest(
-        schema_version=1,
-        architecture=architecture,
         source_build=source_build,
         minimum_free_bytes=minimum_free_bytes,
-        fabric_connectivity=fabric.connectivity,
-        fabric_minimum_mbps=fabric.minimum_bandwidth_mbps,
-        mandatory_capabilities=[],
+        fabric_connectivity=fabric.fabric_connectivity,
+        fabric_minimum_mbps=fabric.fabric_minimum_bandwidth_mbps,
     )
 
 
@@ -64,7 +59,7 @@ def mandatory_capabilities(request: RuntimePreflightRequest) -> tuple[str, ...]:
         capabilities.extend(("runroot_length", "podman_build", "podman_run"))
     if request.fabric_connectivity != "none":
         capabilities.append("fabric")
-    return tuple(dict.fromkeys((*capabilities, *request.mandatory_capabilities)))
+    return tuple(capabilities)
 
 
 def admission_blockers(
@@ -87,13 +82,6 @@ def admission_blockers(
             RuntimePreflightBlocker(
                 "runtime_preflight.host_changed",
                 "Spark host policy changed or its current fingerprint is unavailable; rerun preflight.",
-            ),
-        )
-    if result.request_sha256 != request_digest(request):
-        return (
-            RuntimePreflightBlocker(
-                "runtime_preflight.requirements_changed",
-                "Preflight does not cover this recipe's exact requirements.",
             ),
         )
     if result.observed_at > now or now - result.observed_at > maximum_age:
@@ -153,17 +141,3 @@ def latest_result(
         return None
     # AgentOperationAttempt stores the validated result payload.
     return RuntimePreflightResult.model_validate(raw)
-
-
-def node_fingerprint(capabilities: list[str]) -> str | None:
-    """Current host observation arrives with each authenticated agent claim."""
-    import re
-
-    fingerprints = [
-        value.removeprefix("runtime.preflight.fingerprint.")
-        for value in capabilities
-        if value.startswith("runtime.preflight.fingerprint.")
-    ]
-    if len(fingerprints) == 1 and re.fullmatch(r"[0-9a-f]{64}", fingerprints[0]):
-        return fingerprints[0]
-    return None

@@ -23,7 +23,7 @@ from vonk_control.compiled_execution_plan import (
     execution_identity_sha256,
 )
 from vonk_control.execution_plan_service import _bind_runtime_artifacts
-from vonk_forge_contracts import ModelDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from control.tests.test_catalog_entities import _model
 from control.tests.test_compiled_execution_plan import _image, _spec
@@ -111,7 +111,7 @@ def main() -> None:
     model_document["files"] = model_files
     _json_object(model_document["identity"])["slug"] = "compiled-plan-fixture"
     model = ModelDefinition.model_validate(model_document)
-    model_digest = content_sha256(model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
     for artifact in artifacts:
         _json_object(artifact["model"]).update(
             publisher=model.identity.publisher,

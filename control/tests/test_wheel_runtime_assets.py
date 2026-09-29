@@ -33,9 +33,6 @@ def test_control_wheel_packages_current_runtime_assets(tmp_path: Path) -> None:
     with zipfile.ZipFile(wheel) as archive:
         members = set(archive.namelist())
 
-    # The test report is a canonical Pydantic contract now, so the retired
-    # hand-written runtime schema is no longer packaged.
-    assert "vonk_control/schemas/test-report-v1.schema.json" not in members
     assert "vonk_control/schema_resources.py" not in members
     assert (
         not {
@@ -53,7 +50,7 @@ def test_control_wheel_packages_current_runtime_assets(tmp_path: Path) -> None:
     fixture = tmp_path / "synthetic-canonical-recipe.json"
     fixture.write_bytes(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_bytes()
     )
     smoke = subprocess.run(
@@ -63,12 +60,9 @@ def test_control_wheel_packages_current_runtime_assets(tmp_path: Path) -> None:
             (
                 "import json, sys\n"
                 "sys.path.insert(0, sys.argv[1])\n"
-                "from vonk_forge_contracts import RecipeDefinition, TestReport\n"
+                "from vonk_forge_contracts import read_recipe\n"
                 "from vonk_control import catalog_revision_contract, catalog_service\n"
-                "RecipeDefinition.model_validate("
-                "json.load(open(sys.argv[2], encoding='utf-8')))\n"
-                "assert catalog_revision_contract.TestReport is TestReport\n"
-                "assert catalog_service.TestReport is TestReport\n"
+                "read_recipe(json.load(open(sys.argv[2], encoding='utf-8')))\n"
             ),
             str(wheel),
             str(fixture),

@@ -11,7 +11,6 @@ import pytest
 from vonk_agent_protocol import AgentClaim, DistributionAssignment, canonical_message
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
-from vonk_agent_protocol.telemetry import TelemetrySeries
 
 ROOT = Path(__file__).parents[2]
 
@@ -84,25 +83,9 @@ def test_inventory_native_datetimes_preserve_declared_offset(timestamp: str) -> 
     assert probe("InventoryRequest", canonical_message(document)) == expected
 
 
-def test_optional_native_timestamps_keep_presence_policy_and_microseconds() -> None:
-    document = json.loads(
-        (ROOT / "agent_protocol/fixtures/typify-telemetry-series.json").read_text()
-    )
-    for received_at in [None, "2026-09-08T15:00:00.123000Z"]:
-        document["received_at"] = received_at
-        value = TelemetrySeries.model_validate(document)
-        expected = canonical_message(value)
-        assert probe("TelemetrySeries", canonical_message(document)) == expected
-        assert ("received_at" in json.loads(expected)) == (received_at is not None)
-
-
 def test_actual_snapshot_producer_uses_the_same_native_timestamp_bytes() -> None:
     value = RecipeRunObservationsWire.model_validate(
-        {
-            "schema_version": 2,
-            "observed_at": "2026-09-08T15:00:00.123000+02:00",
-            "runs": [],
-        }
+        {"observed_at": "2026-09-08T15:00:00.123000+02:00", "runs": []}
     )
     expected = canonical_message(value)
     assert probe("RecipeRunObservationsWire", expected) == expected
@@ -111,13 +94,6 @@ def test_actual_snapshot_producer_uses_the_same_native_timestamp_bytes() -> None
 def test_actual_distribution_producer_uses_the_same_native_timestamp_bytes() -> None:
     value = DistributionAssignment.parse(
         {
-            "schema_version": 2,
-            "assignment_id": "10000000-0000-4000-8000-000000000001",
-            "plan_digest": "a" * 64,
-            "generation": 1,
-            "node_id": "spk_" + "b" * 32,
-            "expires_at": "2026-09-08T15:00:00.123000+00:00",
-            "model_artifact_set_sha256": "c" * 64,
             "objects": [
                 {"name": "model.bin", "sha256": "d" * 64, "bytes": 1, "kind": "model"},
                 {

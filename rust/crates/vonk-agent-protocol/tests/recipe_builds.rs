@@ -11,25 +11,16 @@ fn parse_operation(
     let payload: vonk_agent_protocol::generated::AgentClaimPayload =
         serde_json::from_value(payload)?;
     let claim = AgentClaim {
-        attempt: 1,
-        authority_revision: "c".repeat(64),
         deadline: DateTime::parse_from_rfc3339("2026-08-07T12:05:00+00:00").unwrap(),
         fence: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
-        job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000004").unwrap(),
-        node_id: format!("spk_{}", "0".repeat(32)),
         operation: operation.parse().unwrap(),
-        operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
-        payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
         payload,
-        schema_version: 1,
     };
     RecipeOperationRequest::parse(&claim)
 }
 
 fn build_payload() -> serde_json::Value {
     json!({
-        "schema_version": 1,
-        "kind": "recipe.build.v1",
         "adapter": {"adapter_sha256": "4444444444444444444444444444444444444444444444444444444444444444", "definition": {"adapter_id": "vonk.runtime-contract.vllm.v1", "containerfile": "ARG VONK_RECIPE_IMAGE\nFROM ${VONK_RECIPE_IMAGE}\n", "engine": "vllm", "image_user": "10001:10001"}},
         "build_id": "00000000-0000-4000-8000-000000000009",
         "recipe_revision_id": "00000000-0000-4000-8000-000000000001",
@@ -44,9 +35,7 @@ fn build_payload() -> serde_json::Value {
         "base_image_storage_bytes": 68719476736_u64,
         "capabilities": [],
         "dockerfile": "Dockerfile",
-        "platform": "linux/arm64",
-        "arguments": [{"name": "runtime-version", "value": "1"}],
-        "network": {"mode": "none", "hosts": []},
+        "network": {"hosts": []},
         "options": {
             "additional_contexts": [], "annotations": [], "environment": [],
             "format": "oci", "identity_label": true, "ignorefile": null,
@@ -57,18 +46,13 @@ fn build_payload() -> serde_json::Value {
             "skip_unused_stages": true, "squash": "none", "timestamp": null,
             "unset_environment": [], "unset_labels": []
         },
-        "target": null,
         "limits": {
             "cpu_cores": 8,
             "memory_bytes": 8589934592_u64,
             "temporary_bytes": 68719476736_u64,
             "processes": 4096,
             "timeout_seconds": 3600,
-            "output_bytes": 67108864,
-            "gpu": 0,
-            "privileged": false,
-            "host_mounts": false,
-            "container_socket": false
+            "output_bytes": 67108864
         }
     })
 }
@@ -180,7 +164,7 @@ fn build_payload_is_closed_and_declarative() {
     ));
 
     let mut unsafe_payload = build_payload();
-    unsafe_payload["limits"]["privileged"] = json!(true);
+    unsafe_payload["limits"]["gpu"] = json!(1);
     assert!(parse_operation("recipe.build.v1", unsafe_payload).is_err());
 
     let mut command = build_payload();
@@ -198,17 +182,6 @@ fn build_payload_rejects_every_sys_capability() {
             "{capability} must never cross the recipe build contract"
         );
     }
-}
-
-#[test]
-fn build_network_requires_a_consistent_mode_and_host_declaration() {
-    let mut payload = build_payload();
-    payload["network"] = json!({"mode": "none", "hosts": ["pypi.org"]});
-    assert!(parse_operation("recipe.build.v1", payload).is_err());
-
-    let mut payload = build_payload();
-    payload["network"] = json!({"mode": "public", "hosts": []});
-    assert!(parse_operation("recipe.build.v1", payload).is_err());
 }
 
 #[test]
@@ -232,7 +205,7 @@ fn build_network_rejects_private_and_metadata_destinations() {
         "metadata.google.internal",
     ] {
         let mut payload = build_payload();
-        payload["network"] = json!({"mode": "public", "hosts": [host]});
+        payload["network"] = json!({"hosts": [host]});
         assert!(
             parse_operation("recipe.build.v1", payload).is_err(),
             "private or metadata host was accepted: {host}"
@@ -243,8 +216,6 @@ fn build_network_rejects_private_and_metadata_destinations() {
 #[test]
 fn image_import_binds_one_exact_build_and_layout() {
     let payload = json!({
-        "schema_version": 1,
-        "kind": "recipe.image.import.v1",
         "build_id": "00000000-0000-4000-8000-000000000001",
         "mapping_id": "00000000-0000-4000-8000-000000000002",
         "mapping_generation": 1,

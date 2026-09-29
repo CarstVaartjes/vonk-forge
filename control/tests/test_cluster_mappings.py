@@ -25,7 +25,7 @@ from vonk_control.models import (
     ClusterMapping,
     ClusterMappingNode,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
 MODEL_REVISION_ID = "00000000-0000-4000-8000-000000000011"
@@ -43,7 +43,7 @@ def _canonical_catalog_documents() -> tuple[ModelDefinition, RecipeDefinition]:
     )
     raw_recipe = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     raw_recipe["identity"]["slug"] = "glm-5-2-triple"
@@ -56,22 +56,15 @@ def _canonical_catalog_documents() -> tuple[ModelDefinition, RecipeDefinition]:
     worker.update({"name": "worker", "count": 2, "endpoint_owner": False})
     raw_recipe["topology"] = {
         "name": "triple-tp3",
-        "mode": "tensor_parallel",
         "node_count": 3,
         "roles": [entrypoint, worker],
         "parallelism": {
-            "world_size": 3,
             "tensor": 3,
             "pipeline": 1,
             "data": 1,
             "backend": "tcp",
         },
-        "fabric": {
-            "connectivity": "full_mesh",
-            "minimum_bandwidth_mbps": 10000,
-        },
         "start_order": ["worker", "entrypoint"],
-        "stop_order": ["entrypoint", "worker"],
     }
     return model, RecipeDefinition.model_validate(raw_recipe)
 
@@ -80,8 +73,8 @@ def _seed_canonical_catalog(
     sessions: sessionmaker, now: datetime
 ) -> CatalogDocumentRevision:
     model, recipe = _canonical_catalog_documents()
-    model_digest = content_sha256(model)
-    recipe_digest = content_sha256(recipe)
+    model_digest = document_sha256(model.model_dump(mode="json"))
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     with sessions.begin() as session:
         session.add_all(
             [
@@ -184,7 +177,6 @@ def setup(tmp_path: Path):
                 node_id=node_id,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["agent.runtime.rust.v1", "runtime.vonk.v1"],
             )
             for node_id in node_ids
         )
@@ -204,10 +196,10 @@ def setup(tmp_path: Path):
                 artifact_store_read_only=False,
                 capabilities=(
                     "runtime.vonk.v1",
-                    "fabric.full_mesh.mbps.10000",
+                    "fabric.connected.mbps.200000",
                 ),
                 fabric_address=f"192.168.100.{index}",
-                fabric_bandwidth_mbps=10_000,
+                fabric_bandwidth_mbps=200_000,
                 memory_pool="shared",
             )
         )
@@ -315,38 +307,6 @@ def test_mapping_rejects_wrong_node_count_and_missing_required_fabric(
 
     with pytest.raises(ClusterMappingError) as caught:
         service.preview(revision.id, node_ids, {}, "admin")
-    assert caught.value.code == "topology.fabric_insufficient"
-
-
-def test_mapping_does_not_trust_fabric_from_claim_capabilities(tmp_path: Path) -> None:
-    sessions, now, node_ids, revision = setup(tmp_path)
-    with sessions.begin() as session:
-        node = session.get(AgentNode, node_ids[0])
-        assert node is not None
-        node.capabilities = [
-            "runtime.vonk.v1",
-            "fabric.full_mesh.mbps.1000000",
-        ]
-    InventoryRepository(sessions, clock=lambda: now + timedelta(seconds=1)).record(
-        InventorySnapshotInput(
-            node_id=node_ids[0],
-            observed_at=now + timedelta(seconds=1),
-            disk_total_bytes=1_000,
-            disk_free_bytes=900,
-            host_memory_total_bytes=1_000,
-            host_memory_free_bytes=900,
-            gpu_memory_total_bytes=1_000,
-            gpu_memory_free_bytes=900,
-            gpu_count=1,
-            artifact_store_read_only=False,
-            capabilities=("runtime.vonk.v1",),
-            memory_pool="shared",
-        )
-    )
-
-    with pytest.raises(ClusterMappingError) as caught:
-        ClusterMappingService(sessions).preview(revision.id, node_ids, {}, "admin")
-
     assert caught.value.code == "topology.fabric_insufficient"
 
 

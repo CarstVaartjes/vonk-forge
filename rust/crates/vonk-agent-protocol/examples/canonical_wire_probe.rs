@@ -2,7 +2,7 @@
 use std::io::{self, Read, Write};
 use vonk_agent_protocol::{
     AgentClaim, HostRuntimeRequest, OperationProgress, RecipeOperationRequest,
-    SignedHostHelperGrant, canonical_generated_json, generated, hex_sha256,
+    SignedHostHelperGrant, canonical_generated_json, generated,
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model = std::env::args()
@@ -33,13 +33,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "RecipeRunObservationsWire" => {
             let value: vonk_agent_protocol::RecipeRunObservationsWire =
                 serde_json::from_slice(&input)?;
-            for run in &value.runs {
-                run.validate()?;
-            }
-            canonical_generated_json(&value)?
-        }
-        "TelemetrySeries" => {
-            let value: generated::TelemetrySeries = serde_json::from_slice(&input)?;
             canonical_generated_json(&value)?
         }
         "RecipeStartPayload" => {
@@ -70,17 +63,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "recipe.job.run.v1"
             };
             let claim = AgentClaim {
-                attempt: 1,
-                authority_revision: "a".repeat(64),
                 deadline: "2099-01-01T00:00:00+00:00".parse()?,
                 fence: uuid::Uuid::new_v4(),
-                job_id: uuid::Uuid::new_v4(),
-                node_id: format!("spk_{}", "1".repeat(32)),
                 operation: operation.parse()?,
-                operation_id: uuid::Uuid::new_v4(),
-                payload_digest: hex_sha256(&bytes),
                 payload,
-                schema_version: 1,
             };
             RecipeOperationRequest::parse(&claim)?;
             bytes

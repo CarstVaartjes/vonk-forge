@@ -46,15 +46,10 @@ def test_control_contract_change_selects_backend_and_generation() -> None:
     assert selected["web"] is False
 
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        "src/cluster_profiles/schemas/control-openapi.json",
-        "schemas/control-openapi.json",
-    ],
-)
-def test_packaged_openapi_change_selects_generated_gate(path: str) -> None:
-    selected = _module().select([path], "pull_request")
+def test_packaged_openapi_change_selects_generated_gate() -> None:
+    selected = _module().select(
+        ["src/cluster_profiles/schemas/control-openapi.json"], "pull_request"
+    )
     assert selected["generated"] is True
 
 
@@ -124,7 +119,7 @@ def test_deleted_rust_file_selects_rust_family(tmp_path: Path) -> None:
         "scripts/generate-agent-wire",
         "control/src/vonk_control/harnesses/canonical_metadata.py",
         "src/cluster_profiles/compiler.py",
-        "inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl",
+        "inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl",
     ],
 )
 def test_launch_contract_inputs_select_controller_and_wire_checks(path: str) -> None:

@@ -72,18 +72,13 @@ def test_skopeo_image_stage_has_no_host_socket_or_privileged_runtime_contract() 
     assert "/var/tmp" in runtime
 
 
-def test_skopeo_production_transport_uses_real_inspect_copy_and_archive_commands() -> (
-    None
-):
+def test_skopeo_production_transport_inspects_the_stored_archive() -> None:
     source = (ROOT / "control/src/vonk_control/runtime_image_preparation.py").read_text(
         encoding="utf-8"
     )
     assert 'executable: str = "/usr/bin/skopeo"' in source
     assert '"inspect"' in source
-    assert '"copy"' in source
-    assert 'f"docker-archive:{destination}"' in source
     assert 'f"docker-archive:{archive}"' in source
-    assert "docker://{reference}" in source
     assert "--override-arch" in source
     assert "--override-os" in source
 
@@ -95,6 +90,5 @@ def test_skopeo_digest_and_platform_arguments_are_bounded() -> None:
     assert re.search(
         r"def _platform_args\(architecture: str\).*?override-arch", source, re.DOTALL
     )
-    assert "expected_manifest" in source
     assert "runtime_image.digest_mismatch" in source
     assert "runtime_image.architecture_mismatch" in source

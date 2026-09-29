@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -16,7 +15,6 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
-    DistributionAssignment,
     DistributionObject,
     OperationMemberProgress,
     OperationProgress,
@@ -26,6 +24,7 @@ from vonk_agent_protocol import (
 from .agent_jobs import AgentJobService
 from .bounded_json import sequence
 from .distribution import DistributionError, DistributionService
+from .distribution_assignment import NodeDistributionAssignment
 from .model_cache import ModelCacheNotFound
 from .model_cache_contract import ModelCacheDownloadResult
 from .models import (
@@ -95,7 +94,7 @@ def _phase_receipt(
         assignments = normalized.get("assignments")
         if isinstance(assignments, Mapping):
             normalized["assignments"] = {
-                node_id: DistributionAssignment.parse(raw)
+                node_id: NodeDistributionAssignment.parse(raw)
                 if isinstance(raw, Mapping)
                 else raw
                 for node_id, raw in assignments.items()
@@ -140,13 +139,8 @@ def _evidence_projection(
             **{
                 key: value[key]
                 for key in (
-                    "verified",
-                    "verified_digests",
                     "downloaded_bytes",
                     "copied_bytes",
-                    "verified_image_digest",
-                    "imported_image_digest",
-                    "verified_oci_layout_sha256",
                     "error",
                     "reason",
                     "uncertain",
@@ -214,7 +208,6 @@ class DurableDistributionPhaseExecutor:
                                 node_id: self._target_bytes(plan, node_id)
                                 for node_id in cached
                             },
-                            verified_registry_manifest_digest=plan.image_digest,
                         ),
                         phase=phase,
                     )
@@ -357,7 +350,7 @@ class DurableDistributionPhaseExecutor:
                 if not isinstance(assignment, Mapping):
                     return declared
                 try:
-                    parsed = DistributionAssignment.parse(assignment)
+                    parsed = NodeDistributionAssignment.parse(assignment)
                 except (TypeError, ValueError):
                     return None
                 if parsed.node_id != node_id:
@@ -546,7 +539,6 @@ class DurableDistributionPhaseExecutor:
         cached_nodes: Sequence[str] = (),
         cached_target_totals: Mapping[str, int] | None = None,
         verified_image_digest: str | None = None,
-        verified_registry_manifest_digest: str | None = None,
         verified_oci_layout_sha256: str | None = None,
         evidence: Sequence[Mapping[str, object]] = (),
     ) -> dict[str, object]:
@@ -563,7 +555,6 @@ class DurableDistributionPhaseExecutor:
                 if verified_image_digest is not None
                 else resolved_image_digest
             ),
-            verified_registry_manifest_digest=verified_registry_manifest_digest,
             verified_oci_layout_sha256=(
                 verified_oci_layout_sha256
                 if verified_oci_layout_sha256 is not None
@@ -626,7 +617,7 @@ class DurableDistributionPhaseExecutor:
                 or set(assignments).intersection(cached)
                 or set(assignments).union(cached) != set(phase.node_ids)
                 or any(
-                    DistributionAssignment.parse(raw).node_id != node_id
+                    NodeDistributionAssignment.parse(raw).node_id != node_id
                     for node_id, raw in assignments.items()
                 )
             ):
@@ -641,7 +632,7 @@ class DurableDistributionPhaseExecutor:
         actor: str,
         request_key: str,
         cached: tuple[str, ...],
-        assignments: Mapping[str, DistributionAssignment],
+        assignments: Mapping[str, NodeDistributionAssignment],
         target_order: tuple[str, ...],
         workload_intent_ordinal: int,
         target_bytes: int | None = None,
@@ -763,11 +754,7 @@ class DurableDistributionPhaseExecutor:
                     node_id,
                     "artifact.distribution.v1",
                     plan.plan_digest,
-                    {
-                        "schema_version": 1,
-                        "authority_revision": plan.plan_digest,
-                        "plan_digest": plan.plan_digest,
-                    },
+                    {"plan_digest": plan.plan_digest},
                     operation_id=str(uuid.uuid4()),
                 )
             return child.id
@@ -846,21 +833,11 @@ class DurableDistributionPhaseExecutor:
                 runtime_receipt = candidate.get("runtime_image")
                 if isinstance(runtime_receipt, Mapping):
                     candidate = {**candidate, **runtime_receipt}
-                if candidate.get("source") == "published":
-                    image_digest = candidate.get("image_digest") or image_digest
-                    layout_digest = (
-                        candidate.get(
-                            "oci_layout_sha256", candidate.get("oci_archive_sha256")
-                        )
-                        or layout_digest
-                    )
-                    image_bytes = candidate.get("image_bytes") or image_bytes
-                else:
-                    image_digest = image_digest or candidate.get("image_digest")
-                    layout_digest = layout_digest or candidate.get(
-                        "oci_layout_sha256", candidate.get("oci_archive_sha256")
-                    )
-                    image_bytes = image_bytes or candidate.get("image_bytes")
+                image_digest = image_digest or candidate.get("image_digest")
+                layout_digest = layout_digest or candidate.get(
+                    "oci_layout_sha256", candidate.get("oci_archive_sha256")
+                )
+                image_bytes = image_bytes or candidate.get("image_bytes")
                 build_id = build_id or candidate.get("build_id")
                 if image_digest and layout_digest and image_bytes is not None:
                     break
@@ -903,8 +880,7 @@ class DurableDistributionPhaseExecutor:
                 select(RuntimeImageAuthorization.id).where(
                     RuntimeImageAuthorization.state == "authorized",
                     RuntimeImageAuthorization.oci_archive_sha256 == archive_sha256,
-                    RuntimeImageAuthorization.platform_manifest_digest
-                    == expected_image_digest,
+                    RuntimeImageAuthorization.image_digest == expected_image_digest,
                     RuntimeImageAuthorization.image_bytes == image_bytes,
                 )
             )
@@ -955,79 +931,44 @@ class DurableDistributionPhaseExecutor:
     ) -> DistributionObject:
         if not image_digest or not layout_digest or image_bytes < 1:
             raise RuntimeError("verified OCI runtime image identity is unavailable")
+        if build_id is None:
+            raise RuntimeError("verified OCI runtime image build is unavailable")
         with self._sessions() as session:
-            if build_id is not None:
-                build = session.get(RecipeBuild, build_id)
-                if (
-                    build is None
-                    or build.state != "succeeded"
-                    or build.image_digest != image_digest
-                    or build.oci_layout_sha256 != layout_digest
-                    or build.image_bytes != image_bytes
-                ):
-                    raise RuntimeError("OCI build authority changed")
-                if plan.recipe_revision_id is not None:
-                    authorization = session.scalar(
-                        select(RuntimeImageAuthorization).where(
-                            RuntimeImageAuthorization.recipe_revision_id
-                            == plan.recipe_revision_id,
-                            RuntimeImageAuthorization.source == "controller-build",
-                            RuntimeImageAuthorization.build_id == build.id,
-                            RuntimeImageAuthorization.effective_execution_key
-                            == effective_execution_key,
-                            RuntimeImageAuthorization.platform_manifest_digest
-                            == image_digest,
-                            RuntimeImageAuthorization.oci_archive_sha256
-                            == layout_digest,
-                            RuntimeImageAuthorization.image_bytes == image_bytes,
-                            RuntimeImageAuthorization.state == "authorized",
-                        )
+            build = session.get(RecipeBuild, build_id)
+            if (
+                build is None
+                or build.state != "succeeded"
+                or build.image_digest != image_digest
+                or build.oci_layout_sha256 != layout_digest
+                or build.image_bytes != image_bytes
+            ):
+                raise RuntimeError("OCI build authority changed")
+            if plan.recipe_revision_id is not None:
+                authorization = session.scalar(
+                    select(RuntimeImageAuthorization).where(
+                        RuntimeImageAuthorization.recipe_revision_id
+                        == plan.recipe_revision_id,
+                        RuntimeImageAuthorization.build_id == build.id,
+                        RuntimeImageAuthorization.effective_execution_key
+                        == effective_execution_key,
+                        RuntimeImageAuthorization.image_digest == image_digest,
+                        RuntimeImageAuthorization.oci_archive_sha256 == layout_digest,
+                        RuntimeImageAuthorization.image_bytes == image_bytes,
+                        RuntimeImageAuthorization.state == "authorized",
                     )
-                    if authorization is None:
-                        raise RuntimeError(
-                            "current recipe is not authorized for OCI build receipt"
-                        )
-                    if not self._archive_is_published(
-                        authorization.platform_manifest_digest,
-                        authorization.oci_archive_sha256,
-                        authorization.image_bytes,
-                    ):
-                        raise RuntimeError(
-                            "runtime_image.authorization_invalid: "
-                            "OCI build receipt authority changed"
-                        )
-            else:
-                if plan.recipe_revision_id is not None:
-                    authorization = session.scalar(
-                        select(RuntimeImageAuthorization).where(
-                            RuntimeImageAuthorization.recipe_revision_id
-                            == plan.recipe_revision_id,
-                            RuntimeImageAuthorization.source == "published",
-                            RuntimeImageAuthorization.effective_execution_key
-                            == effective_execution_key,
-                            RuntimeImageAuthorization.platform_manifest_digest
-                            == image_digest,
-                            RuntimeImageAuthorization.oci_archive_sha256
-                            == layout_digest,
-                            RuntimeImageAuthorization.image_bytes == image_bytes,
-                            RuntimeImageAuthorization.state == "authorized",
-                        )
+                )
+                if authorization is None:
+                    raise RuntimeError(
+                        "current recipe is not authorized for OCI build receipt"
                     )
-                    if authorization is None or not self._archive_is_published(
-                        authorization.platform_manifest_digest,
-                        authorization.oci_archive_sha256,
-                        authorization.image_bytes,
-                    ):
-                        raise RuntimeError(
-                            "runtime_image.authorization_invalid: "
-                            "published runtime image receipt authority changed"
-                        )
-                elif not self._archive_is_published(
-                    image_digest, layout_digest, image_bytes
+                if not self._archive_is_published(
+                    authorization.image_digest,
+                    authorization.oci_archive_sha256,
+                    authorization.image_bytes,
                 ):
                     raise RuntimeError(
                         "runtime_image.authorization_invalid: "
-                        "published runtime image receipt authority changed"
+                        "OCI build receipt authority changed"
                     )
         return DistributionObject(
             name="image.oci.tar",
@@ -1045,7 +986,7 @@ class DurableDistributionPhaseExecutor:
         *,
         image_digest: str,
         model_set_digest: str,
-    ) -> DistributionAssignment:
+    ) -> NodeDistributionAssignment:
         generation = getattr(getattr(plan, "mapping", None), "mapping_generation", None)
         if type(generation) is not int or generation < 1:
             generation = 1
@@ -1055,9 +996,8 @@ class DurableDistributionPhaseExecutor:
         assignment_bytes = bytearray(hashlib.sha256(seed.encode("utf-8")).digest()[:16])
         assignment_bytes[6] = (assignment_bytes[6] & 0x0F) | 0x40
         assignment_bytes[8] = (assignment_bytes[8] & 0x3F) | 0x80
-        return DistributionAssignment.parse(
+        return NodeDistributionAssignment.parse(
             {
-                "schema_version": 2,
                 "assignment_id": str(uuid.UUID(bytes=bytes(assignment_bytes))),
                 "plan_digest": plan.plan_digest,
                 "generation": generation,
@@ -1116,13 +1056,11 @@ class DurableDistributionPhaseExecutor:
         targets: tuple[str, ...],
         cached: tuple[str, ...],
     ) -> Mapping[str, object]:
-        """Validate terminal agent receipts for every non-cached target."""
-        expected_digests = set(plan.storage.artifact_digests)
+        """Require a terminal agent result from every non-cached target."""
         preparation = plan.preparation
         expected_image = plan.image_digest or (
             preparation.runtime_image.image_digest if preparation is not None else None
         )
-        expected_registry = plan.image_digest
         expected_layout = plan.build.oci_layout_sha256 or (
             preparation.runtime_image.oci_layout_sha256
             if preparation is not None
@@ -1144,9 +1082,6 @@ class DurableDistributionPhaseExecutor:
             if isinstance(candidate_image, str) and isinstance(candidate_layout, str):
                 expected_image = candidate_image
                 expected_layout = candidate_layout
-                candidate_registry = runtime_receipt.get("registry_manifest_digest")
-                if isinstance(candidate_registry, str):
-                    expected_registry = candidate_registry
                 break
         # A preview may have planned the build and left plan image fields
         # empty. Only a strict assignment emitted by this executor can supply
@@ -1163,7 +1098,7 @@ class DurableDistributionPhaseExecutor:
                 ):
                     continue
                 try:
-                    assignment = DistributionAssignment.parse(assignment_raw)
+                    assignment = NodeDistributionAssignment.parse(assignment_raw)
                 except (TypeError, ValueError):
                     continue
                 if (
@@ -1223,27 +1158,11 @@ class DurableDistributionPhaseExecutor:
             raise RuntimeError(
                 "verification requires terminal evidence from every target"
             )
-        for node_id in missing:
-            receipt = receipts[node_id]
-            if receipt.get("verified") is not True:
-                raise RuntimeError(f"target {node_id} did not verify its distribution")
-            digests = receipt.get("verified_digests")
-            if not isinstance(digests, list) or set(digests) != expected_digests:
-                raise RuntimeError(f"target {node_id} model evidence is incomplete")
-            if receipt.get("verified_image_digest") != expected_image:
-                raise RuntimeError(f"target {node_id} image evidence is not exact")
-            if receipt.get("imported_image_digest") != expected_image:
-                raise RuntimeError(f"target {node_id} image import evidence is missing")
-            if receipt.get("verified_oci_layout_sha256") != expected_layout:
-                raise RuntimeError(
-                    f"target {node_id} OCI archive evidence is not exact"
-                )
         return self._verification_result(
             plan,
             progress,
             cached_nodes=sorted(cached_nodes),
             verified_image_digest=expected_image,
-            verified_registry_manifest_digest=expected_registry,
             verified_oci_layout_sha256=expected_layout,
             evidence=[dict(receipts[node_id]) for node_id in sorted(receipts)],
         )
@@ -1287,10 +1206,6 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         self._runtime_image_futures: dict[
             tuple[str, int, int], Future[Mapping[str, object] | None]
         ] = {}
-        self._runtime_image_progress: dict[
-            tuple[str, int, int], tuple[str, int, int | None]
-        ] = {}
-        self._runtime_image_progress_lock = threading.Lock()
 
     def close(self) -> None:
         """Leave image preparation checkpoints resumable during shutdown."""
@@ -1316,17 +1231,6 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 key = (request_key, phase.index, item_index)
                 future = self._runtime_image_futures.get(key)
                 if future is None:
-
-                    def record_progress(
-                        stage: str, completed: int, total: int | None
-                    ) -> None:
-                        with self._runtime_image_progress_lock:
-                            self._runtime_image_progress[key] = (
-                                stage,
-                                completed,
-                                total,
-                            )
-
                     self._runtime_image_futures[key] = self._runtime_image_pool.submit(
                         self._prepare_runtime_image,
                         plan,
@@ -1335,7 +1239,6 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                         actor=actor,
                         request_key=request_key,
                         progress=progress,
-                        transfer_progress=record_progress,
                         wait_for_busy_owner=True,
                     )
                     return PhaseExecution(
@@ -1346,23 +1249,13 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                         ),
                     )
                 if not future.done():
-                    with self._runtime_image_progress_lock:
-                        transfer_progress = self._runtime_image_progress.get(key)
-                    detail = (
-                        "Runtime image preparation is still running in the background."
-                    )
-                    if transfer_progress is not None:
-                        stage, completed, total = transfer_progress
-                        detail = f"Runtime image {stage}: {completed} bytes transferred"
-                        if total is not None:
-                            detail += f" of {total} bytes"
                     return PhaseExecution(
                         waiting=True,
-                        status_reason=detail,
+                        status_reason=(
+                            "Runtime image preparation is still running in the background."
+                        ),
                     )
                 del self._runtime_image_futures[key]
-                with self._runtime_image_progress_lock:
-                    self._runtime_image_progress.pop(key, None)
                 runtime_result = future.result()
             else:
                 runtime_result = self._prepare_runtime_image(
@@ -1523,7 +1416,6 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         actor: str,
         request_key: str,
         progress: Mapping[str, object],
-        transfer_progress: Callable[[str, int, int | None], None] | None = None,
         wait_for_busy_owner: bool = False,
     ) -> Mapping[str, object] | None:
         """Prepare one Controller image and authorize every target execution.
@@ -1560,19 +1452,16 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 if plan.recipe_build_id is not None
                 else None
             )
-            package_handle = None
-            execution = revision.document.get("execution")
-            if isinstance(execution, Mapping) and execution.get("mode") == "build":
-                if build is None or build.state != "succeeded":
-                    raise RuntimeError(
-                        "runtime image preparation build receipt is unavailable"
-                    )
-                package_handle = {
-                    "image_digest": build.image_digest,
-                    "image_reference": f"localhost/vonk/recipe-build@{build.image_digest}",
-                    "build_input_sha256": build.build_input_sha256,
-                    "platform": "linux/arm64",
-                }
+            if build is None or build.state != "succeeded":
+                raise RuntimeError(
+                    "runtime image preparation build receipt is unavailable"
+                )
+            package_handle = {
+                "image_digest": build.image_digest,
+                "image_reference": f"localhost/vonk/recipe-build@{build.image_digest}",
+                "build_input_sha256": build.build_input_sha256,
+                "platform": "linux/arm64",
+            }
             entities = resolve_recipe_entities(session, revision.document)
             parameters = (
                 dict(plan.mapping.parameters) if plan.mapping is not None else {}
@@ -1650,11 +1539,6 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 runtime_spec,
                 build,
                 before_publish=before_publish,
-                **(
-                    {"progress": transfer_progress}
-                    if transfer_progress is not None
-                    else {}
-                ),
             )
             to_mapping = getattr(receipt, "to_mapping", None)
             prepared = to_mapping() if callable(to_mapping) else receipt

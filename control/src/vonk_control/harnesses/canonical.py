@@ -89,51 +89,6 @@ def _digest(value: object) -> str:
     return hashlib.sha256(_canonical_json(value)).hexdigest()
 
 
-def _unwrap(value: object, label: str) -> object:
-    if isinstance(value, (RecipeDefinition, ModelDefinition)):
-        return value
-    document = getattr(value, "document", None)
-    if isinstance(document, Mapping):
-        return document
-    if isinstance(value, Mapping):
-        return value
-    raise HarnessCompileError(f"{label} projection is invalid")
-
-
-def _recipe(value: object) -> RecipeDefinition:
-    if isinstance(value, RecipeDefinition):
-        return value
-    try:
-        raw = _unwrap(value, "recipe")
-        if not isinstance(raw, Mapping):
-            raise TypeError
-        return RecipeDefinition.model_validate(raw)
-    except Exception as error:
-        raise HarnessCompileError(
-            "recipe does not satisfy RecipeDefinition v2"
-        ) from error
-
-
-def _models(values: object) -> tuple[ModelDefinition, ...]:
-    if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
-        raise HarnessCompileError("canonical model projections are missing")
-    result: list[ModelDefinition] = []
-    for value in values:
-        if isinstance(value, ModelDefinition):
-            result.append(value)
-            continue
-        try:
-            raw = _unwrap(value, "model")
-            if not isinstance(raw, Mapping):
-                raise TypeError
-            result.append(ModelDefinition.model_validate(raw))
-        except Exception as error:
-            raise HarnessCompileError(
-                "canonical model projection is invalid"
-            ) from error
-    return tuple(result)
-
-
 def _scalar(value: object, label: str) -> str:
     if type(value) is bool:
         rendered = "true" if value else "false"
@@ -187,10 +142,7 @@ def _package_value(package: object, *names: str) -> object:
     return None
 
 
-def _image(recipe: RecipeDefinition, package: object) -> tuple[str, str]:
-    if recipe.execution.mode == "image":
-        image = recipe.execution.image
-        return f"{image.repository}@sha256:{image.digest}", image.digest
+def _image(package: object) -> tuple[str, str]:
     digest = _package_value(package, "image_digest", "built_image_digest", "digest")
     if type(digest) is str and digest.startswith("sha256:"):
         digest = digest[7:]
@@ -198,9 +150,6 @@ def _image(recipe: RecipeDefinition, package: object) -> tuple[str, str]:
         raise HarnessCompileError(
             "source-build recipe requires an exact built image receipt"
         )
-    platform = _package_value(package, "platform", "image_platform")
-    if platform is not None and platform != "linux/arm64":
-        raise HarnessCompileError("built image receipt must target linux/arm64")
     reference = _package_value(package, "image_reference", "reference")
     if reference is None:
         repository = (
@@ -293,10 +242,6 @@ def _environment(
     """
     supplied: list[tuple[str, str]] = []
     for item in recipe.runtime.environment:
-        if item.secret is not None:
-            raise HarnessCompileError(
-                "runtime secret requires the platform secret projection"
-            )
         if item.name == RUNTIME_REQUIREMENT_DECLARATION:
             supplied.append(
                 (item.name, _scalar(item.value, "runtime requirement declaration"))
@@ -344,13 +289,13 @@ def _merge_environment(
 
 
 def _model_mounts(
-    recipe: RecipeDefinition, models: tuple[ModelDefinition, ...], role: str
+    recipe: RecipeDefinition, models: Mapping[str, ModelDefinition], role: str
 ) -> tuple[tuple[dict[str, object], HarnessMount], ...]:
     try:
         validate_recipe_models(recipe, models)
     except ContractResolutionError as error:
         raise HarnessCompileError(str(error)) from error
-    by_identity = {(m.identity.publisher, m.identity.slug): m for m in models}
+    by_identity = {(m.identity.publisher, m.identity.slug): m for m in models.values()}
     selected: list[tuple[dict[str, object], HarnessMount]] = []
     mounts_by_key: dict[tuple[str, str], HarnessMount] = {}
     target_owner: dict[str, str] = {}
@@ -382,11 +327,7 @@ def _model_mounts(
                         "file_id": selector.file_id,
                         "path": files[selector.file_id].path,
                         "roles": list(selector.roles),
-                        "mount": {
-                            "source": source,
-                            "target": selector.mount.target,
-                            "read_only": True,
-                        },
+                        "mount": {"source": source, "target": selector.mount.target},
                         "model": {
                             "publisher": selection.model.publisher,
                             "slug": selection.model.slug,
@@ -450,23 +391,9 @@ def _distributed_args(
     )
 
 
-def _harness_security(slug: str, topology: object) -> tuple[tuple[str, ...], bool]:
-    metadata = canonical_harness(slug)
-    devices = (
-        ("nvidia.com/gpu=all",)
-        if "nvidia-gpu" in metadata.capability_requirements
-        else ()
-    )
-    host_network = (
-        "host-network" in metadata.security_exceptions
-        and getattr(topology, "mode", None) == "distributed"
-    )
-    return devices, host_network
-
-
 def compile_canonical_harness(
     recipe: RecipeDefinition,
-    models: tuple[ModelDefinition, ...],
+    models: Mapping[str, ModelDefinition],
     package: object,
     *,
     role: str,
@@ -491,7 +418,7 @@ def compile_canonical_harness(
         offset += item.count
     if rank >= offset + role_decl.count or rank < offset:
         raise HarnessCompileError("mapped topology role and rank are inconsistent")
-    image, image_digest = _image(recipe, package)
+    image, image_digest = _image(package)
     environment, runtime_paths = _environment(recipe)
     mounts = _model_mounts(recipe, models, role)
     command = list(_argv(recipe, _settings(recipe, settings)))
@@ -517,7 +444,6 @@ def compile_canonical_harness(
         if "--output-dir" not in command:
             command.extend(("--output-dir", "/outputs"))
     _validate_argv_size(command)
-    devices, _host_network = _harness_security(slug, topology)
     model_mounts: list[HarnessMount] = []
     for _artifact, mount in mounts:
         if mount not in model_mounts:
@@ -529,11 +455,8 @@ def compile_canonical_harness(
         command=tuple(command),
         image=image,
         network_mode="none",
-        architecture="linux/arm64",
         user="10001:10001",
-        no_new_privileges=True,
-        capabilities=(),
-        devices=devices,
+        gpu="nvidia-gpu" in canonical_harness(slug).capability_requirements,
         model_mounts=tuple(model_mounts),
         output_mount=HarnessMount(
             "/run/vonk/outputs", "/outputs", read_only=False, isolated=True
@@ -546,7 +469,6 @@ def compile_canonical_harness(
         environment=environment,
         writable_paths=runtime_paths,
         telemetry=telemetry_contract(slug),
-        read_only_root=True,
         binding=HarnessBinding(
             harness_content_sha256=canonical_harness(slug).content_sha256,
             execution_content_sha256=_digest(recipe.execution.model_dump(mode="json")),

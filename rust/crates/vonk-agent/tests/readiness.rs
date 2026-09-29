@@ -15,9 +15,7 @@ fn identity(build: char, binary: char) -> AgentRuntimeIdentity {
         build_digest: format!("sha256:{}", build.to_string().repeat(64)),
         binary_digest: binary.to_string().repeat(64),
         architecture: AgentRuntimeIdentityArchitecture::LinuxAmd64,
-        self_test_passed: true,
         package_activation: None,
-        observation_receipt_public_key: "d".repeat(64),
     }
 }
 

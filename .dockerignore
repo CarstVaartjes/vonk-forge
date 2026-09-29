@@ -62,8 +62,8 @@ deploy/compose/hermes-agent/*
 !deploy/compose/hermes-agent/provision-litellm-key.py
 !inventory/
 !inventory/wheels/
-!inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl
-!inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl
+!inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl
+!inventory/wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl
 **/__pycache__/**
 **/*.py[cod]
 **/.dev

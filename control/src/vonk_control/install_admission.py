@@ -57,7 +57,6 @@ from .runtime_image_preparation import require_runtime_image_authorization
 from .runtime_preflight import (
     admission_blockers,
     latest_result,
-    node_fingerprint,
     recipe_requirements,
     request_digest,
 )
@@ -245,23 +244,14 @@ class InstallAdmissionService:
                 or revision.content_digest is None
             ):
                 raise ValueError("recipe revision is not resolved")
-            source_build = _is_source_build(revision.document)
-            if source_build:
-                if build is None:
-                    raise ValueError(
-                        "successful recipe build does not match the mapping"
-                    )
-                if (
-                    build.state != "succeeded"
-                    or build.image_digest is None
-                    or build.image_bytes is None
-                    or build.oci_layout_sha256 is None
-                ):
-                    raise ValueError(
-                        "successful recipe build does not match the mapping"
-                    )
-            elif build is not None:
-                raise ValueError("published image install cannot use a recipe build")
+            if (
+                build is None
+                or build.state != "succeeded"
+                or build.image_digest is None
+                or build.image_bytes is None
+                or build.oci_layout_sha256 is None
+            ):
+                raise ValueError("successful recipe build does not match the mapping")
             mapping_nodes = tuple(
                 session.scalars(
                     select(ClusterMappingNode)
@@ -291,7 +281,7 @@ class InstallAdmissionService:
                         node.node_id,
                         requirements_sha256=request_digest(preflight_request),
                     ),
-                    current_fingerprint=node_fingerprint(node.capabilities),
+                    current_fingerprint=node.preflight_fingerprint,
                     now=int(now.timestamp()),
                 )
                 for node in nodes
@@ -387,12 +377,7 @@ class InstallAdmissionService:
             capabilities_by_node = {
                 node.node_id: tuple(
                     sorted(
-                        {
-                            capability
-                            for capability in node.capabilities
-                            if not capability.startswith("fabric.")
-                        }
-                        | set(
+                        set(
                             known_inventory[node.node_id].capabilities
                             if node.node_id in known_inventory
                             else ()
@@ -419,26 +404,9 @@ class InstallAdmissionService:
                 topology_reason = AdmissionReason(error.code, str(error))
             recipe_digest = revision.content_digest
             mapping_generation = mapping.generation
-            image_digest = (
-                build.image_digest
-                if build is not None
-                else _compiled_image_digest(compiled_plan_by_node)
-                or _recipe_image_digest(revision.document)
-            )
-            image_bytes = (
-                build.image_bytes
-                if build is not None
-                else _compiled_image_bytes(compiled_plan_by_node)
-            )
-            if image_digest is None:
-                raise ValueError("recipe install image digest is unavailable")
-        topology = recipe_topology(document)
-        roles = topology.get("roles")
-        if not isinstance(roles, list):
-            raise TypeError("recipe topology roles are invalid")
-        role_by_name = {
-            str(role["name"]): role for role in roles if isinstance(role, dict)
-        }
+            image_digest = build.image_digest
+            image_bytes = build.image_bytes
+        role_by_name = {role.name: role for role in recipe_topology(document).roles}
         plans: list[InstallNodePlan] = []
         for mapping_node in mapping_nodes:
             blockers: list[AdmissionReason] = [
@@ -448,8 +416,6 @@ class InstallAdmissionService:
             warnings: list[AdmissionReason] = []
             if topology_reason is not None:
                 blockers.append(topology_reason)
-            if legal_admission.blocker is not None:
-                blockers.append(AdmissionReason(*legal_admission.blocker))
             if legal_admission.warning is not None:
                 warnings.append(AdmissionReason(*legal_admission.warning))
             if (
@@ -463,12 +429,9 @@ class InstallAdmissionService:
                     AdmissionReason("install.compiled_plan_unavailable", detail)
                 )
             role = role_by_name.get(mapping_node.role)
-            if role is None or not isinstance(role.get("resources"), dict):
+            if role is None:
                 raise TypeError("mapping role is absent from recipe topology")
-            resources = role["resources"]
-            disk = resources.get("disk")
-            if not isinstance(disk, dict):
-                raise TypeError("role disk resources are invalid")
+            disk = role.resources.disk
             compiled_plan = compiled_plan_by_node.get(mapping_node.node_id)
             compiled_artifacts = (
                 compiled_plan.get("artifacts")
@@ -508,14 +471,14 @@ class InstallAdmissionService:
                         "Controller-issued runtime image receipt is unavailable.",
                     )
                 )
-            elif image_bytes > int(disk["image_bytes"]):
+            elif image_bytes > disk.image_bytes:
                 warnings.append(
                     AdmissionReason(
                         "install.image_size_underdeclared",
                         "Image exceeds the recipe's estimate; disk admission uses its verified size.",
                     )
                 )
-            if actual_artifact_bytes > int(disk["artifact_bytes"]):
+            if actual_artifact_bytes > disk.artifact_bytes:
                 warnings.append(
                     AdmissionReason(
                         "install.artifact_size_underdeclared",
@@ -804,22 +767,13 @@ class InstallAdmissionService:
             else None
         )
         revision = _active_recipe_revision(session, plan.recipe_revision_id)
-        source_build = revision is not None and _is_source_build(revision.document)
         if (
             mapping is None
             or mapping.state != "ready"
-            or (
-                source_build
-                and (
-                    build is None
-                    or build.state != "succeeded"
-                    or build.image_digest != plan.image_digest
-                )
-            )
-            or (
-                not source_build
-                and (build is not None or not _compiled_plan_image_matches(plan))
-            )
+            or revision is None
+            or build is None
+            or build.state != "succeeded"
+            or build.image_digest != plan.image_digest
         ):
             raise InstallPlanConflict("mapping or build changed while reserving")
         mapping_nodes = tuple(
@@ -989,63 +943,6 @@ def _primary_model_sha256(document: Mapping[str, object]) -> str:
     return digest
 
 
-def _is_source_build(document: Mapping[str, object]) -> bool:
-    execution = document.get("execution")
-    return isinstance(execution, Mapping) and execution.get("mode") == "build"
-
-
-def _recipe_image_digest(document: Mapping[str, object]) -> str:
-    execution = document.get("execution")
-    image = execution.get("image") if isinstance(execution, Mapping) else None
-    digest = image.get("digest") if isinstance(image, Mapping) else None
-    if (
-        isinstance(digest, str)
-        and len(digest) == 64
-        and all(character in "0123456789abcdef" for character in digest)
-    ):
-        return f"sha256:{digest}"
-    if isinstance(digest, str) and digest.startswith("sha256:") and len(digest) == 71:
-        return digest
-    raise InstallPlanConflict("install.runtime_image_identity_unavailable")
-
-
-def _compiled_image_bytes(
-    compiled_plans: Mapping[str, Mapping[str, object]],
-) -> int | None:
-    values: set[int] = set()
-    for payload in compiled_plans.values():
-        runtime_image = payload.get("runtime_image")
-        value = (
-            runtime_image.get("image_bytes")
-            if isinstance(runtime_image, Mapping)
-            else None
-        )
-        if type(value) is int and value > 0:
-            values.add(value)
-    return values.pop() if len(values) == 1 else None
-
-
-def _compiled_image_digest(
-    compiled_plans: Mapping[str, Mapping[str, object]],
-) -> str | None:
-    values: set[str] = set()
-    for payload in compiled_plans.values():
-        runtime_image = payload.get("runtime_image")
-        value = (
-            runtime_image.get("image_digest")
-            if isinstance(runtime_image, Mapping)
-            else None
-        )
-        if isinstance(value, str) and value.startswith("sha256:") and len(value) == 71:
-            values.add(value)
-    return values.pop() if len(values) == 1 else None
-
-
-def _compiled_plan_image_matches(plan: InstallPlan) -> bool:
-    digest = _compiled_image_digest(plan.compiled_plan_by_node)
-    return digest is not None and digest == plan.image_digest
-
-
 def _compiled_build_matches(
     payload: Mapping[str, object], build: RecipeBuild, recipe_digest: str
 ) -> bool:
@@ -1054,9 +951,7 @@ def _compiled_build_matches(
     return (
         isinstance(identity, Mapping)
         and identity.get("recipe_revision_sha256") == recipe_digest
-        and identity.get("build_input_sha256") == build.build_input_sha256
         and isinstance(image, Mapping)
-        and image.get("source") == "controller-build"
         and image.get("build_id") == build.id
         and image.get("image_digest") == build.image_digest
         and image.get("oci_layout_sha256") == build.oci_layout_sha256
@@ -1065,19 +960,15 @@ def _compiled_build_matches(
 
 
 def authorize_installation_runtime_images(session: Session, plan: InstallPlan) -> None:
-    """Recheck current SQL grants while acceptance owns its short transaction."""
+    """Recheck current SQL grants while acceptance owns its short transaction.
+
+    A grant of this exact archive to the current recipe revision suffices.
+    """
     for payload in plan.compiled_plan_by_node.values():
-        identity = payload["identity"]
-        if not isinstance(identity, Mapping):
-            raise TypeError("compiled execution identity is unavailable")
-        execution_key = identity.get("execution_sha256")
-        if not isinstance(execution_key, str):
-            raise TypeError("compiled execution key is unavailable")
         require_runtime_image_authorization(
             session,
             recipe_revision_id=plan.recipe_revision_id,
             current_content_digest=plan.recipe_content_sha256,
-            effective_execution_key=execution_key,
             receipt=CompiledRuntimeImage.model_validate(payload["runtime_image"]),
         )
 

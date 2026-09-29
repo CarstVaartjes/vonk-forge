@@ -16,8 +16,6 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
-    RecipeReconcilePayload,
-    RecipeReconcileResult,
     canonical_message,
 )
 from vonk_control.auth import CursorCodec
@@ -110,7 +108,7 @@ from vonk_control.runtime_preflight import latest_result
 
 from .preflight_fixtures import record_passing_preflight
 
-_FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
+_FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import (
     NOW,
@@ -220,27 +218,10 @@ def _child_operation_id(view: RunSwitchOperation) -> str:
 
 
 def _target_copy_evidence(plan, phase, progress=None) -> dict[str, object]:
-    runtime_image = getattr(getattr(plan, "preparation", None), "runtime_image", None)
-    image_digest = getattr(runtime_image, "image_digest", None) or getattr(
-        plan, "image_digest", "sha256:" + "1" * 64
-    )
-    layout_digest = getattr(runtime_image, "oci_layout_sha256", None) or getattr(
-        getattr(plan, "build", None), "oci_layout_sha256", "3" * 64
-    )
-    if isinstance(progress, dict):
-        for candidate in reversed(progress.get("phase_results", [])):
-            if isinstance(candidate, dict):
-                image_digest = image_digest or candidate.get("image_digest")
-                layout_digest = layout_digest or candidate.get("oci_layout_sha256")
+    del progress
     node_id = phase.node_ids[0] if getattr(phase, "node_ids", ()) else "spk_" + "0" * 32
     return {
         "node_id": node_id,
-        "verified": True,
-        "verified_digests": list(getattr(plan.storage, "artifact_digests", ()))
-        or [MODEL_ARTIFACT],
-        "verified_image_digest": image_digest,
-        "imported_image_digest": image_digest,
-        "verified_oci_layout_sha256": layout_digest,
         "copied_bytes": getattr(plan.storage, "missing_spark_bytes", 0),
     }
 
@@ -263,17 +244,13 @@ def _runtime_receipt(
     build_id = build_id or getattr(plan, "recipe_build_id", None)
     return {
         "schema_version": 2,
-        "source": "controller-build",
         "distribution_publisher": "test",
         "distribution_slug": "recipe",
         "distribution_content_sha256": "a" * 64,
-        "registry_manifest_digest": None,
-        "platform_manifest_digest": image,
         "image_digest": image,
         "oci_archive_sha256": layout,
         "image_bytes": size,
-        "local_image_config_id": None,
-        "local_image_reference": "localhost/test",
+        "local_image_config_id": "sha256:" + "4" * 64,
         "architecture": "linux-arm64",
         "runtime_interface": "vonk.runtime.v1",
         "archive_path": "/tmp/runtime-image.oci.tar",
@@ -368,11 +345,8 @@ class ModelCacheManifestProvider(ModelCacheService):
 
 
 class RecordingArtifactExecutor:
-    def __init__(
-        self, *, child_transfer: bool = False, bad_verify: bool = False
-    ) -> None:
+    def __init__(self, *, child_transfer: bool = False) -> None:
         self.child_transfer = child_transfer
-        self.bad_verify = bad_verify
         self.calls: list[str] = []
         self.children: dict[str, SimpleNamespace] = {}
 
@@ -395,7 +369,7 @@ class RecordingArtifactExecutor:
                 result=None,
             )
         if phase.kind == "verify":
-            digests = ["d" * 64] if self.bad_verify else [MODEL_ARTIFACT]
+            digests = [MODEL_ARTIFACT]
             runtime_image = getattr(
                 getattr(plan, "preparation", None), "runtime_image", None
             )
@@ -1475,7 +1449,6 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
             assert archive.read_bytes() == expected_archive
             return PulledImageEvidence(
                 manifest_digest=image_digest,
-                requested_manifest_digest=None,
                 config_id="sha256:" + "4" * 64,
                 local_reference="oci-archive:" + str(archive),
                 architecture=expected_architecture,
@@ -1698,9 +1671,6 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
         compiled_plans = installation.plan["compiled_execution_plans"]
         assert isinstance(compiled_plans, dict)
         assert compiled_plans
-        assert all(
-            payload["schema_version"] == 2 for payload in compiled_plans.values()
-        )
     assert executor.events == ["model-download", "runtime-image", "runtime-plan"]
 
     assert service.tick() is True
@@ -2212,6 +2182,13 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
         )
     assert stale_ids
 
+    with switch.sessions() as session:
+        stale_digests = {
+            operation.node_id: operation.payload_digest
+            for operation in (session.get(AgentOperation, item) for item in stale_ids)
+            if operation is not None
+        }
+
     def order_stale_receipts(*, latest: bool) -> None:
         with switch.sessions.begin() as session:
             for operation_id in stale_ids:
@@ -2236,7 +2213,7 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
                 assert receipt.observed_at == int(NOW.timestamp())
                 with switch.sessions() as session:
                     selected = latest_result(
-                        session, node_id, requirements_sha256=receipt.request_sha256
+                        session, node_id, requirements_sha256=stale_digests[node_id]
                     )
                 assert selected is not None
                 assert selected.observed_at == int(stale_time.timestamp()), (
@@ -2244,7 +2221,7 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
                     view.status_reason,
                     switch.executor.events,
                     switch.compiler.compiles,
-                    receipt.request_sha256,
+                    stale_digests[node_id],
                 )
 
     view = switch.service.get(switch.operation.operation_id)
@@ -2298,7 +2275,6 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         node.binary_digest = "a" * 64
-        node.capabilities = ["recipe.build.v1"]
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -2451,7 +2427,6 @@ def test_first_profile_preparation_preview_replans_a_missing_build_archive(
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         node.binary_digest = "a" * 64
-        node.capabilities = [*node.capabilities, "recipe.build.v1"]
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -2545,7 +2520,7 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
 
     import copy
 
-    from vonk_forge_contracts import RecipeDefinition, content_sha256
+    from vonk_forge_contracts import RecipeDefinition, document_sha256
 
     sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
     with sessions.begin() as session:
@@ -2556,7 +2531,6 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         node.binary_digest = "a" * 64
-        node.capabilities = [*node.capabilities, "recipe.build.v1"]
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -2592,7 +2566,7 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
             schema_version=2,
             state="active",
             document=canonical.model_dump(mode="json"),
-            content_digest=content_sha256(canonical),
+            content_digest=document_sha256(canonical.model_dump(mode="json")),
             artifact_key="b" * 64,
             execution_key="c" * 64,
             projected=copy.deepcopy(revision.projected),
@@ -2606,7 +2580,7 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
         reused_plan = RecipeBuildPlan(
             build_id=build.id,
             recipe_revision_id=successor_id,
-            recipe_content_sha256=content_sha256(canonical),
+            recipe_content_sha256=document_sha256(canonical.model_dump(mode="json")),
             builder_node_id=build.builder_node_id,
             source_bundle_sha256=build.source_bundle_sha256,
             build_input_sha256=build.build_input_sha256,
@@ -2772,7 +2746,6 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
                 state="active",
                 architecture="linux-arm64",
                 binary_digest="a" * 64,
-                capabilities=["recipe.build.v1"],
             )
         )
     InventoryRepository(sessions, clock=lambda: NOW).record(
@@ -2864,7 +2837,6 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         node.binary_digest = "a" * 64
-        node.capabilities = ["recipe.build.v1"]
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -3225,7 +3197,7 @@ def test_switch_replaces_the_run_that_holds_the_nodes_capacity(
     assert [stop.run_id for stop in plan.stops] == [run_id]
 
 
-def test_artifact_child_checkpoint_retries_digest_mismatch_without_accepting_bytes(
+def test_artifact_child_checkpoint_advances_to_verify(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -3264,33 +3236,6 @@ def test_artifact_child_checkpoint_retries_digest_mismatch_without_accepting_byt
     )
     assert service.tick() is True
     assert service.get(operation.operation_id).current_phase == "verify"
-
-    bad_artifacts = RecordingArtifactExecutor(bad_verify=True)
-    bad_service = _service(
-        sessions,
-        lifecycle._clock(),
-        lifecycle,
-        bad_artifacts,
-        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
-    )
-    bad_plan = bad_service.preview(request, actor="admin")
-    bad_operation = bad_service.apply(
-        RunSwitchApplyRequest(
-            **request.model_dump(),
-            plan_digest=bad_plan.plan_digest,
-            request_key=str(uuid.uuid4()),
-        ),
-        actor="admin",
-    )
-    assert bad_service._advance(bad_operation.operation_id) is True
-    assert bad_service._advance(bad_operation.operation_id) is True
-    waiting = bad_service.get(bad_operation.operation_id)
-    assert waiting.state == "running"
-    assert waiting.status_reason is not None
-    assert "artifact-digest-verification-mismatch" in waiting.status_reason
-    assert waiting.result is not None
-    assert waiting.result.retry_attempt is not None
-    assert waiting.result.retry_attempt > 1
 
 
 def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -> None:
@@ -3371,11 +3316,7 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
         "evidence": [
             {
                 "node_id": nodes[0],
-                "verified": True,
-                "verified_digests": [MODEL_ARTIFACT],
-                "verified_image_digest": "sha256:" + "1" * 64,
-                "imported_image_digest": "sha256:" + "1" * 64,
-                "verified_oci_layout_sha256": runtime_image.oci_layout_sha256,
+                "downloaded_bytes": 1024,
             }
         ],
     }
@@ -3387,7 +3328,6 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert any(
         isinstance(item, RunSwitchTargetTransferEvidenceResult)
         and item.node_id == nodes[0]
-        and item.verified is True
         for item in _result(completed_transfer).phase_results
     )
     # The next durable tick consumes the persisted transfer receipts and runs
@@ -4661,8 +4601,6 @@ def _make_install_specs_missing_placement_authority(
     sessions,
     installation_id: str,
     nodes: tuple[str, ...],
-    *,
-    resumable: bool = True,
 ) -> None:
     """Represent an exact old successful install with an invalid launch schema."""
 
@@ -4690,9 +4628,7 @@ def _make_install_specs_missing_placement_authority(
             compiled = payload["compiled_execution_plan"]
             placement = compiled["runtime"]["placement"]
             assert "memory_floor_bytes" in placement
-            assert "memory_kind" in placement
             placement.pop("memory_floor_bytes")
-            placement.pop("memory_kind")
             payload["compiled_execution_plan"] = compiled
             operation.payload = payload
             operation.payload_digest = hashlib.sha256(
@@ -4712,13 +4648,6 @@ def _make_install_specs_missing_placement_authority(
                 )
             )
             stored_plan["compiled_execution_plans"][operation.node_id] = compiled
-            agent_node = session.get(AgentNode, operation.node_id)
-            assert agent_node is not None
-            agent_node.capabilities = sorted(
-                set(agent_node.capabilities or [])
-                | {"recipe.reconcile", "recipe.reconcile.v1"}
-                | ({"agent.lifecycle.resume.exact.v1"} if resumable else set())
-            )
         plan_digest = installation_plan_digest_from_stored_document(stored_plan)
         stored_plan["plan_digest"] = plan_digest
         installation.plan_digest = plan_digest
@@ -4741,42 +4670,13 @@ def _make_install_specs_missing_placement_authority(
 def _record_successful_reconcile_member(
     sessions, lifecycle, job_id: str, node_id: str
 ) -> dict[str, object]:
-    with sessions() as session:
+    with sessions.begin() as session:
         child = session.scalar(
             select(AgentOperation).where(
                 AgentOperation.parent_job_id == job_id,
                 AgentOperation.node_id == node_id,
             )
         )
-        assert child is not None
-        payload = RecipeReconcilePayload.model_validate(child.payload)
-        source_operation = session.get(AgentOperation, payload.install_operation_id)
-        assert source_operation is not None
-        source_attempt = session.scalar(
-            select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == source_operation.id,
-                AgentOperationAttempt.attempt == source_operation.current_attempt,
-            )
-        )
-        assert source_attempt is not None
-        receipt = RecipeReconcileResult(
-            reconciled=True,
-            node_id=payload.node_id,
-            installation_id=payload.installation_id,
-            install_operation_id=payload.install_operation_id,
-            install_operation_payload_sha256=(payload.install_operation_payload_sha256),
-            plan_digest=payload.plan_digest,
-            recipe_revision_id=payload.recipe_revision_id,
-            recipe_content_sha256=payload.recipe_content_sha256,
-            compiled_spec_canonical_sha256=(payload.compiled_spec_canonical_sha256),
-            removed_bytes=1,
-            cleanup_receipt_sha256=hashlib.sha256(
-                f"cleanup:{node_id}".encode()
-            ).hexdigest(),
-        )
-        evidence = receipt.model_dump(mode="json")
-    with sessions.begin() as session:
-        child = session.get(AgentOperation, child.id)
         assert child is not None
         child.current_attempt = 1
         session.add(
@@ -4785,13 +4685,13 @@ def _record_successful_reconcile_member(
                 attempt=1,
                 fence=str(uuid.uuid4()),
                 lease_deadline=NOW + timedelta(minutes=1),
-                agent_certificate_serial=source_attempt.agent_certificate_serial,
+                agent_certificate_serial="serial-0",
                 state="succeeded",
-                result=evidence,
+                result={},
             )
         )
-    lifecycle.record_node_result(job_id, node_id, succeeded=True, evidence=evidence)
-    return evidence
+    lifecycle.record_node_result(job_id, node_id, succeeded=True, evidence={})
+    return {}
 
 
 def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_strict(
@@ -4808,7 +4708,7 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_s
         request_id=str(uuid.uuid4()),
     )
     _make_install_specs_missing_placement_authority(
-        sessions, installation.owner_id, nodes, resumable=False
+        sessions, installation.owner_id, nodes
     )
     service = _service(
         sessions,
@@ -4816,27 +4716,6 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_s
         lifecycle,
         RecordingArtifactExecutor(),
     )
-
-    upgrade_required = service.preview_cleanup(
-        RunSwitchCleanupPreviewRequest(
-            installation_id=installation.owner_id,
-            cleanup_mode="reconcile",
-        ),
-        actor="admin",
-    )
-    assert not upgrade_required.allowed
-    assert any(
-        reason.code == "run-switch.reconcile.agent_upgrade_required"
-        and "agent.lifecycle.resume.exact.v1" in reason.detail
-        for reason in upgrade_required.blockers
-    ), [(reason.code, reason.detail) for reason in upgrade_required.blockers]
-    with sessions.begin() as session:
-        for node_id in nodes:
-            agent_node = session.get(AgentNode, node_id)
-            assert agent_node is not None
-            agent_node.capabilities = sorted(
-                set(agent_node.capabilities or []) | {"agent.lifecycle.resume.exact.v1"}
-            )
 
     plan = service.preview_cleanup(
         RunSwitchCleanupPreviewRequest(
@@ -4853,8 +4732,7 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_s
         nodes
     )
     assert all(
-        target.state == "pending" and target.cleanup_receipt_sha256 is None
-        for target in plan.reconciliation_authority.targets
+        target.state == "pending" for target in plan.reconciliation_authority.targets
     )
     with pytest.raises(
         RecipeOperationConflict, match="stored installation plan is invalid"
@@ -4866,7 +4744,7 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_s
         )
 
 
-def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts(
+def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
@@ -4921,37 +4799,7 @@ def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts
             )
         )
         assert [item.node_id for item in child_operations] == sorted(nodes)
-        receipts: dict[str, dict[str, object]] = {}
         for index, child in enumerate(child_operations):
-            payload = RecipeReconcilePayload.model_validate(child.payload)
-            receipt = RecipeReconcileResult(
-                reconciled=True,
-                node_id=payload.node_id,
-                installation_id=payload.installation_id,
-                install_operation_id=payload.install_operation_id,
-                install_operation_payload_sha256=(
-                    payload.install_operation_payload_sha256
-                ),
-                plan_digest=payload.plan_digest,
-                recipe_revision_id=payload.recipe_revision_id,
-                recipe_content_sha256=payload.recipe_content_sha256,
-                compiled_spec_canonical_sha256=(payload.compiled_spec_canonical_sha256),
-                removed_bytes=1,
-                cleanup_receipt_sha256=hashlib.sha256(
-                    f"cleanup:{child.node_id}".encode()
-                ).hexdigest(),
-            )
-            evidence = receipt.model_dump(mode="json")
-            receipts[child.node_id] = evidence
-            source_operation = session.get(AgentOperation, payload.install_operation_id)
-            assert source_operation is not None
-            source_attempt = session.scalar(
-                select(AgentOperationAttempt).where(
-                    AgentOperationAttempt.operation_id == source_operation.id,
-                    AgentOperationAttempt.attempt == source_operation.current_attempt,
-                )
-            )
-            assert source_attempt is not None
             child.current_attempt = 1
             session.add(
                 AgentOperationAttempt(
@@ -4959,15 +4807,13 @@ def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts
                     attempt=1,
                     fence=str(uuid.uuid4()),
                     lease_deadline=NOW + timedelta(minutes=1),
-                    agent_certificate_serial=source_attempt.agent_certificate_serial,
+                    agent_certificate_serial=f"serial-{index}",
                     state="succeeded",
-                    result=evidence,
+                    result={},
                 )
             )
 
-    lifecycle.record_node_result(
-        child_id, nodes[0], succeeded=True, evidence=receipts[nodes[0]]
-    )
+    lifecycle.record_node_result(child_id, nodes[0], succeeded=True, evidence={})
     with sessions() as session:
         held = tuple(
             session.scalars(
@@ -4978,9 +4824,7 @@ def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts
         )
         assert held and all(item.state == "active" for item in held)
 
-    lifecycle.record_node_result(
-        child_id, nodes[1], succeeded=True, evidence=receipts[nodes[1]]
-    )
+    lifecycle.record_node_result(child_id, nodes[1], succeeded=True, evidence={})
     with sessions() as session:
         row = session.get(RecipeInstallation, installation.owner_id)
         assert row is not None and row.state == "uninstalled"
@@ -5005,13 +4849,10 @@ def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts
         if isinstance(item, RunSwitchCleanupVerifyResult)
     )
     assert cleanup_result.cleanup_mode == "reconcile"
-    assert cleanup_result.exact_reconciliation_receipts is True
-    assert {item.node_id for item in cleanup_result.reconciliation_receipts} == set(
-        nodes
-    )
+    assert cleanup_result.final_verified is True
 
 
-def test_new_reconcile_review_reuses_exact_partial_receipt_and_releases_last_claim(
+def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
@@ -5055,9 +4896,7 @@ def test_new_reconcile_review_reuses_exact_partial_receipt_and_releases_last_cla
     first_child_id = _child_operation_id(service.get(first.operation_id))
     assert first_child_id is not None
 
-    first_receipt = _record_successful_reconcile_member(
-        sessions, lifecycle, first_child_id, nodes[0]
-    )
+    _record_successful_reconcile_member(sessions, lifecycle, first_child_id, nodes[0])
     lifecycle.record_node_result(
         first_child_id,
         nodes[1],
@@ -5107,16 +4946,9 @@ def test_new_reconcile_review_reuses_exact_partial_receipt_and_releases_last_cla
     ]
     assert retry_plan.reconciliation_authority is not None
     assert [
-        (target.node_id, target.state, target.cleanup_receipt_sha256)
+        (target.node_id, target.state)
         for target in retry_plan.reconciliation_authority.targets
-    ] == [
-        (
-            nodes[0],
-            "reconciled",
-            first_receipt["cleanup_receipt_sha256"],
-        ),
-        (nodes[1], "pending", None),
-    ]
+    ] == [(nodes[0], "reconciled"), (nodes[1], "pending")]
     retry = service.apply_cleanup(
         RunSwitchCleanupApplyRequest(
             installation_id=installation.owner_id,
@@ -5186,7 +5018,7 @@ def test_scoped_cleanup_removes_the_installation_through_run_switch(
             child_id,
             node_id,
             succeeded=True,
-            evidence={"uninstalled": True, "removed_model_bytes": 1},
+            evidence={},
         )
 
     for _ in range(4):

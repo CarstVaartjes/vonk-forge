@@ -12,7 +12,6 @@ from ..models.recipe_job_interface_adapter import check_recipe_job_interface_ada
 from ..models.recipe_job_interface_adapter import RecipeJobInterfaceAdapter
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.recipe_job_input import RecipeJobInput
@@ -32,13 +31,11 @@ class RecipeJobInterface:
         Attributes:
             adapter (RecipeJobInterfaceAdapter):
             output (RecipeJobOutput):
-            path (Literal['/outputs']):
             input_ (None | RecipeJobInput | Unset):
      """
 
     adapter: RecipeJobInterfaceAdapter
     output: RecipeJobOutput
-    path: Literal['/outputs']
     input_: None | RecipeJobInput | Unset = UNSET
 
 
@@ -51,8 +48,6 @@ class RecipeJobInterface:
         adapter: str = self.adapter
 
         output = self.output.to_dict()
-
-        path = self.path
 
         input_: dict[str, Any] | None | Unset
         if isinstance(self.input_, Unset):
@@ -68,7 +63,6 @@ class RecipeJobInterface:
         field_dict.update({
             "adapter": adapter,
             "output": output,
-            "path": path,
         })
         if input_ is not UNSET:
             field_dict["input"] = input_
@@ -91,10 +85,6 @@ class RecipeJobInterface:
 
 
 
-
-        path = cast(Literal['/outputs'] , d.pop("path"))
-        if path != '/outputs':
-            raise ValueError(f"path must match const '/outputs', got '{path}'")
 
         def _parse_input_(data: object) -> None | RecipeJobInput | Unset:
             if data is None:
@@ -119,7 +109,6 @@ class RecipeJobInterface:
         recipe_job_interface = cls(
             adapter=adapter,
             output=output,
-            path=path,
             input_=input_,
         )
 

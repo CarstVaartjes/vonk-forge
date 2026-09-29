@@ -16,7 +16,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import RecipeStartPayload, canonical_message
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .distributed_lifecycle import (
     DistributedLifecycleError,
@@ -58,9 +58,6 @@ _SINGLETON_RECOVERY_RECHECK_SECONDS = 5
 _SINGLETON_RECOVERY_MAX_ATTEMPTS = 5
 _SINGLETON_RECOVERY_COOLDOWN_SECONDS = 300
 
-_DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
-_EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
-
 
 def _active_recipe_revision(
     session: Session, revision_id: str
@@ -74,10 +71,8 @@ def _active_recipe_revision(
     ):
         return None
     try:
-        recipe = RecipeDefinition.model_validate(revision.document)
+        recipe = read_recipe(revision.document)
     except (TypeError, ValueError):
-        return None
-    if content_sha256(recipe) != revision.content_digest:
         return None
     return revision, recipe
 
@@ -243,7 +238,7 @@ class DistributedRecoveryCoordinator:
                     worked = (
                         _schedule_singleton_recovery_wait(
                             run,
-                            "singleton recovery waits for a fresh exact signed "
+                            "singleton recovery waits for a fresh exact "
                             "absence observation",
                             now,
                         )
@@ -269,7 +264,6 @@ class DistributedRecoveryCoordinator:
                         run.plan = run_plan_document(run_plan)
                         for node in run_nodes:
                             node.observed_run_generation = None
-                            node.observation_receipt_sha256 = None
                             node.observation_process_running = None
                             node.observation_observed_at = None
                             node.observation_endpoint_ready = None
@@ -289,7 +283,6 @@ class DistributedRecoveryCoordinator:
                         run_plan["run_generation"] = run.run_generation
                         run.plan = run_plan_document(run_plan)
                         run_nodes[0].observed_run_generation = None
-                        run_nodes[0].observation_receipt_sha256 = None
                         run_nodes[0].observation_process_running = None
                         run_nodes[0].observation_observed_at = None
                         run_nodes[0].observation_endpoint_ready = None
@@ -455,14 +448,13 @@ def enforce_recovery_deadline(
 
 
 def _proves_fresh_absence(run: RecipeRun, node: RunNode, now: datetime) -> bool:
-    """Require a current-generation signed receipt that reports no process."""
+    """Require a current-generation observation that reports no process."""
 
     if (
         node.state != "failed"
         or node.observed_run_generation != run.run_generation
         or node.observation_process_running is not False
-        or not isinstance(node.observation_receipt_sha256, str)
-        or _DIGEST.fullmatch(node.observation_receipt_sha256) is None
+        or node.observation_observed_at is None
     ):
         return False
     try:
@@ -521,7 +513,7 @@ def _singleton_recovery_authority(
     next_run_generation: int,
     start_timeout_seconds: int,
 ) -> dict[str, object] | None:
-    """Rebuild one exact accepted persistent Start after signed absence."""
+    """Rebuild one exact accepted persistent Start after observed absence."""
 
     if not _proves_fresh_absence(run, run_node, now):
         return None
@@ -541,8 +533,7 @@ def _singleton_recovery_authority(
             "singleton recovery installation authority is missing"
         )
     revision, recipe = resolved
-    topology = recipe.topology.model_dump(mode="json")
-    if topology.get("mode") != "single" or topology.get("node_count") != 1:
+    if recipe.topology.distributed:
         return None
     nodes = tuple(
         session.scalars(
@@ -617,45 +608,13 @@ def _singleton_recovery_authority(
         or mapping.endpoint_owner_node_id != run_node.node_id
     ):
         raise DistributedLifecycleError("singleton recovery mapping is stale")
-    lifecycle = recipe.runtime.model_dump(mode="json").get("lifecycle")
-    if not isinstance(lifecycle, Mapping):
-        raise DistributedLifecycleError(
-            "singleton recovery lifecycle authority is invalid"
-        )
-    for hook_name in ("pre_start", "post_stop"):
-        hooks = lifecycle.get(hook_name, [])
-        if not isinstance(hooks, list):
-            raise DistributedLifecycleError(
-                "singleton recovery lifecycle authority is invalid"
-            )
-        if hooks:
-            raise DistributedLifecycleError(
-                f"singleton recovery does not replay the recipe {hook_name} hook; "
-                "reconcile its effects and submit a new authorized run"
-            )
-    stop_timeout = (
-        lifecycle.get("stop_timeout_seconds")
-        if isinstance(lifecycle, Mapping)
-        else None
-    )
-    if type(stop_timeout) is not int or not 1 <= stop_timeout <= 600:
-        raise DistributedLifecycleError("singleton recovery stop timeout is invalid")
+    stop_timeout = recipe.runtime.lifecycle.stop_timeout_seconds
     start_timeout = validate_distributed_start_timeout_seconds(start_timeout_seconds)
     deadline = _aware(now) + timedelta(seconds=start_timeout + stop_timeout)
     agent_node = session.get(AgentNode, run_node.node_id)
-    required_capabilities = {
-        "recipe.stop",
-        _EXACT_RUN_INSPECTION_CAPABILITY,
-        "recipe.run.inspect.receipt.v1",
-    }
-    if (
-        agent_node is None
-        or agent_node.state != "active"
-        or not required_capabilities <= set(agent_node.capabilities or ())
-        or not isinstance(agent_node.observation_receipt_public_key, str)
-    ):
+    if agent_node is None or agent_node.state != "active":
         raise DistributedLifecycleError(
-            "singleton recovery requires exact Stop and signed observation support"
+            "singleton recovery requires exact Stop and observation support"
         )
     presence = session.scalar(
         select(AgentPresence)
@@ -689,11 +648,7 @@ def _singleton_recovery_authority(
     compiled_plan = accepted_start_payload.get("compiled_execution_plan")
     if not isinstance(compiled_plan, Mapping):
         raise DistributedLifecycleError("accepted Start plan is invalid")
-    expected_lifecycle = {
-        "pre_start": lifecycle.get("pre_start", []),
-        "post_stop": lifecycle.get("post_stop", []),
-        "stop_timeout_seconds": stop_timeout,
-    }
+    expected_lifecycle = {"stop_timeout_seconds": stop_timeout}
     for label, plan in (
         ("installed", install_compiled_plan),
         ("accepted Start", compiled_plan),
@@ -710,30 +665,32 @@ def _singleton_recovery_authority(
             )
     accepted_compiled_identity = compiled_plan.get("identity")
     install_compiled_identity = install_compiled_plan.get("identity")
+    accepted_placement = accepted_start.compiled_execution_plan.runtime.placement
     if (
-        accepted_start.schema_version != 2
-        or str(accepted_start.run_id) != run.id
+        str(accepted_start.run_id) != run.id
         or str(accepted_start.installation_id) != installation.id
         or str(accepted_start.recipe_revision_id) != revision.id
-        or accepted_start.recipe_content_sha256 != revision.content_digest
         or str(accepted_start.mapping_id) != run.mapping_id
-        or accepted_start.mapping_generation != run.mapping_generation
         or accepted_start.run_generation != run.run_generation
-        or accepted_start.image_digest != installation.image_digest
         # The Job-level binding selects the Start; the exact per-node payload
         # that recovery replays must name the same run plan.
         or accepted_start.plan_digest != run.plan_digest
-        or accepted_start.alias != run.alias
-        or accepted_start.rank != run_node.rank
-        or accepted_start.role != run_node.role
-        or accepted_start.port != run_node.port
-        or accepted_start.reserved_memory_bytes != run_node.reserved_memory_bytes
-        or accepted_start.memory_floor_bytes != memory_floor
-        or accepted_start.memory_kind != memory_kind
-        or accepted_start.world_size != 1
-        or accepted_start.local_address is not None
-        or accepted_start.master_address is not None
-        or accepted_start.master_port is not None
+        or (
+            accepted_placement.rank,
+            accepted_placement.role,
+            accepted_placement.port,
+            accepted_placement.reserved_memory_bytes,
+            accepted_placement.memory_floor_bytes,
+            accepted_placement.world_size,
+        )
+        != (
+            run_node.rank,
+            run_node.role,
+            run_node.port,
+            run_node.reserved_memory_bytes,
+            memory_floor,
+            1,
+        )
         or accepted_start.phase is not None
         or not isinstance(accepted_compiled_identity, Mapping)
         or not isinstance(install_compiled_identity, Mapping)
@@ -753,13 +710,9 @@ def _singleton_recovery_authority(
             run_id=run.id,
             installation_id=installation.id,
             recipe_revision_id=revision.id,
-            recipe_content_sha256=revision.content_digest,
             mapping_id=run.mapping_id,
-            mapping_generation=run.mapping_generation,
             run_generation=next_run_generation,
-            image_digest=installation.image_digest,
             plan_digest=run.plan_digest,
-            alias=run.alias,
             placement=RecipeStartPlacement(
                 run_node.node_id,
                 run_node.rank,
@@ -770,11 +723,9 @@ def _singleton_recovery_authority(
                 memory_kind,
                 None,
             ),
-            endpoint_address=presence.management_address,
             compiled_endpoint_address=presence.management_address,
             world_size=1,
             compiled_execution_plan=compiled_plan,
-            local_address=None,
             master_address=None,
             master_port=None,
         )
@@ -844,7 +795,7 @@ def _accepted_start_authority(
             if isinstance(job.payload.get("recovery"), Mapping)
             and job.state == "succeeded"
             and _start_binds_current_run_plan(session, job, run)
-            and _launch_generation(job, node_id) == run.run_generation
+            and _launch_generation(session, job, node_id) == run.run_generation
         )
         start = current[-1] if current else None
         if start is None:
@@ -900,11 +851,19 @@ def _accepted_start_authority(
     return start, ordinal
 
 
-def _launch_generation(job: Job, node_id: str) -> int | None:
-    result = job.result
-    evidence = result.get("launch_evidence") if isinstance(result, Mapping) else None
-    launch = evidence.get(node_id) if isinstance(evidence, Mapping) else None
-    generation = launch.get("run_generation") if isinstance(launch, Mapping) else None
+def _launch_generation(session: Session, job: Job, node_id: str) -> int | None:
+    """The run generation the node's fenced Start of this job launched."""
+    payload = session.scalar(
+        select(AgentOperation.payload)
+        .where(
+            AgentOperation.parent_job_id == job.id,
+            AgentOperation.node_id == node_id,
+            AgentOperation.state == "succeeded",
+        )
+        .order_by(AgentOperation.created_at.desc(), AgentOperation.id.desc())
+        .limit(1)
+    )
+    generation = payload.get("run_generation") if isinstance(payload, Mapping) else None
     return generation if type(generation) is int else None
 
 
@@ -1371,13 +1330,9 @@ def _validate_multi_start_payload(
             run_id=run.id,
             installation_id=installation.id,
             recipe_revision_id=installation.recipe_revision_id,
-            recipe_content_sha256=recipe_digest,
             mapping_id=run.mapping_id,
-            mapping_generation=run.mapping_generation,
             run_generation=expected_generation,
-            image_digest=installation.image_digest,
             plan_digest=run.plan_digest,
-            alias=run.alias,
             placement=RecipeStartPlacement(
                 node_id,
                 planned_node.rank,
@@ -1388,11 +1343,9 @@ def _validate_multi_start_payload(
                 planned_node.memory_kind,
                 planned_node.fabric_address,
             ),
-            endpoint_address=endpoint_address,
             compiled_endpoint_address=endpoint_address if endpoint_owner else None,
             world_size=len(targets),
             compiled_execution_plan=compiled.model_dump(mode="json"),
-            local_address=planned_node.fabric_address if len(targets) > 1 else None,
             master_address=master_address,
             master_port=master_port,
             phase="rank-launch" if deadline is not None else None,
@@ -1429,42 +1382,18 @@ def _recovery_authority(
     if installation is None or resolved is None or installation.image_digest is None:
         raise DistributedLifecycleError("distributed recovery authority is missing")
     revision, recipe = resolved
-    topology = recipe.topology.model_dump(mode="json")
-    runtime = recipe.runtime.model_dump(mode="json")
-    lifecycle = runtime.get("lifecycle")
-    if topology.get("mode") != "distributed" or not isinstance(lifecycle, Mapping):
-        return None
+    topology = recipe.topology
+    # A distributed topology withdraws its endpoint on rank loss and recovers
+    # by restarting the workers and then the entrypoint.
     readiness = canonical_distributed_readiness(
         topology=topology,
         interfaces=[
             interface.model_dump(mode="json") for interface in recipe.interfaces
         ],
-        lifecycle=lifecycle,
     )
     if readiness is None:
         return None
-    for hook_name in ("pre_start", "post_stop"):
-        hooks = lifecycle.get(hook_name, [])
-        if not isinstance(hooks, list):
-            raise DistributedLifecycleError(
-                "distributed recovery lifecycle authority is invalid"
-            )
-        if hooks:
-            raise DistributedLifecycleError(
-                f"distributed recovery does not replay the recipe {hook_name} "
-                "hook; reconcile its effects and submit a new authorized run"
-            )
-    failure = lifecycle.get("failure")
-    if (
-        not isinstance(failure, Mapping)
-        or failure.get("rank_loss") != "withdraw-endpoint"
-        or failure.get("recovery") != "restart-worker-then-entrypoint"
-        or readiness.get("strategy") != "endpoint-owner-after-all-ranks"
-    ):
-        return None
-    stop_timeout = lifecycle.get("stop_timeout_seconds")
-    if type(stop_timeout) is not int or not 1 <= stop_timeout <= 600:
-        raise DistributedLifecycleError("distributed recovery timeout is invalid")
+    stop_timeout = recipe.runtime.lifecycle.stop_timeout_seconds
     nodes = tuple(
         session.scalars(
             select(RunNode).where(RunNode.run_id == run.id).order_by(RunNode.rank)
@@ -1472,7 +1401,7 @@ def _recovery_authority(
     )
     if (
         tuple(node.rank for node in nodes) != tuple(range(len(nodes)))
-        or len(nodes) != topology.get("node_count")
+        or len(nodes) != topology.node_count
         or failed_rank not in {node.rank for node in nodes}
     ):
         raise DistributedLifecycleError("distributed recovery rank set is invalid")
@@ -1542,31 +1471,10 @@ def _recovery_authority(
     # probe timeout. Ordered stops have their own per-role execution budget.
     # Persist the total once: phase advances, retries and route publication all
     # retain this exact deadline instead of granting time again after each stop.
-    stop_order = topology.get("stop_order")
-    if not isinstance(stop_order, list) or not stop_order:
-        raise DistributedLifecycleError("distributed recovery order is invalid")
+    stop_order = topology.stop_order
     start_deadline = (
         now + startup_budget + timedelta(seconds=stop_timeout * len(stop_order))
     ).isoformat()
-    advertised = {
-        node.node_id: set(node.capabilities or ())
-        for node in session.scalars(
-            select(AgentNode).where(
-                AgentNode.node_id.in_([run_node.node_id for run_node in nodes])
-            )
-        )
-    }
-    if any(
-        not {
-            _DISTRIBUTED_START_CAPABILITY,
-            _EXACT_RUN_INSPECTION_CAPABILITY,
-        }
-        <= advertised.get(run_node.node_id, set())
-        for run_node in nodes
-    ):
-        raise DistributedLifecycleError(
-            "distributed recovery requires two-phase exact-observation agent support"
-        )
     start_payloads: dict[str, tuple[str, dict[str, object]]] = {}
     for node in nodes:
         plan = by_rank[node.rank]
@@ -1594,13 +1502,9 @@ def _recovery_authority(
                 run_id=run.id,
                 installation_id=installation.id,
                 recipe_revision_id=revision.id,
-                recipe_content_sha256=revision.content_digest,
                 mapping_id=run.mapping_id,
-                mapping_generation=run.mapping_generation,
                 run_generation=run.run_generation,
-                image_digest=installation.image_digest,
                 plan_digest=run.plan_digest,
-                alias=run.alias,
                 placement=RecipeStartPlacement(
                     node.node_id,
                     node.rank,
@@ -1611,15 +1515,11 @@ def _recovery_authority(
                     memory_kind,
                     local_address,
                 ),
-                endpoint_address=(
-                    presences[node.node_id] if endpoint_owner else local_address
-                ),
                 compiled_endpoint_address=(
                     presences[node.node_id] if endpoint_owner else None
                 ),
                 world_size=len(nodes),
                 compiled_execution_plan=compiled_plan,
-                local_address=local_address,
                 master_address=master_address,
                 master_port=master_port,
                 phase="rank-launch",
@@ -1630,13 +1530,10 @@ def _recovery_authority(
                 "distributed recovery start payload is invalid"
             ) from error
         start_payloads[node.role] = (node.node_id, payload)
-    start_order = topology.get("start_order")
-    stop_order = topology.get("stop_order")
+    start_order = topology.start_order
     roles = {node.role for node in nodes}
     if (
-        not isinstance(start_order, list)
-        or not isinstance(stop_order, list)
-        or set(start_order) != roles
+        set(start_order) != roles
         or set(stop_order) != roles
         or len(start_order) != len(roles)
         or len(stop_order) != len(roles)

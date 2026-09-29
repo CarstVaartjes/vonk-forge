@@ -20,31 +20,19 @@ T = TypeVar("T", bound="RecipeUninstallResult")
 
 @_attrs_define
 class RecipeUninstallResult:
-    """
-        Attributes:
-            removed_model_bytes (int):
-            uninstalled (bool):
+    """ An uninstall succeeds with an empty result.
+
      """
 
-    removed_model_bytes: int
-    uninstalled: bool
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        removed_model_bytes = self.removed_model_bytes
-
-        uninstalled = self.uninstalled
-
 
         field_dict: dict[str, Any] = {}
 
-        field_dict.update({
-            "removed_model_bytes": removed_model_bytes,
-            "uninstalled": uninstalled,
-        })
 
         return field_dict
 
@@ -52,14 +40,7 @@ class RecipeUninstallResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        d = dict(src_dict)
-        removed_model_bytes = d.pop("removed_model_bytes")
-
-        uninstalled = d.pop("uninstalled")
-
         recipe_uninstall_result = cls(
-            removed_model_bytes=removed_model_bytes,
-            uninstalled=uninstalled,
         )
 
         return recipe_uninstall_result

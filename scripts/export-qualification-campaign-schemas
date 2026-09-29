@@ -10,9 +10,6 @@ from pathlib import Path
 from vonk_forge_contracts.qualification_authority import (
     campaign_authority_json_schema,
     campaign_manifest_json_schema,
-    recovery_coverage_consumption_json_schema,
-    recovery_coverage_receipt_json_schema,
-    recovery_coverage_use_json_schema,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,11 +19,8 @@ def rendered() -> dict[Path, str]:
     """Every tracked campaign schema file and the content it must have."""
 
     schemas = {
-        "qualification-authority-v4.schema.json": campaign_authority_json_schema(),
+        "qualification-authority-v5.schema.json": campaign_authority_json_schema(),
         "qualification-campaign-manifest-v2.schema.json": campaign_manifest_json_schema(),
-        "recovery-coverage-consumption-v1.schema.json": recovery_coverage_consumption_json_schema(),
-        "recovery-coverage-receipt-v1.schema.json": recovery_coverage_receipt_json_schema(),
-        "recovery-coverage-use-v1.schema.json": recovery_coverage_use_json_schema(),
     }
     return {
         ROOT / directory / name: json.dumps(schema, sort_keys=True, indent=2) + "\n"

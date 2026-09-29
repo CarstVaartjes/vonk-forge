@@ -31,7 +31,6 @@ from vonk_control.models import (
 
 from .test_profile_capacity_admission import _capacity_profile
 from .test_recipe_operations import (
-    RECEIPT_SIGNER,
     installed_recipe,
     started_recipe,
 )
@@ -120,17 +119,17 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         with sessions.begin() as session:
             template = session.get(AgentNode, nodes[0])
             assert template is not None
-            capabilities = tuple(template.capabilities)
+            capabilities = (
+                "runtime.vonk.v1",
+                "recipe.operations.v1",
+                "fabric.connected.mbps.200000",
+            )
             session.add(
                 AgentNode(
                     node_id=unrelated_node,
                     state="active",
                     protocol_version=1,
                     architecture=template.architecture,
-                    observation_receipt_public_key=RECEIPT_SIGNER.public_key()
-                    .public_bytes_raw()
-                    .hex(),
-                    capabilities=list(capabilities),
                     last_seen_at=now,
                 )
             )
@@ -170,7 +169,7 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                 capabilities=capabilities,
                 memory_pool="shared",
                 fabric_address=f"192.168.100.{4 + index}",
-                fabric_bandwidth_mbps=1000,
+                fabric_bandwidth_mbps=200000,
             )
         )
     profiles.update(
@@ -260,9 +259,7 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         )
     assert [item.node_id for item in agent_operations] == [nodes[0]]
 
-    lifecycle.record_node_result(
-        stop_job.id, nodes[0], succeeded=True, evidence={"stopped": True}
-    )
+    lifecycle.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
     for _ in range(40):
         planner.tick()
         profiles.tick()

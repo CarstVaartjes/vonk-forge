@@ -28,7 +28,7 @@ from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalResult,
 )
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import content_sha256
+from vonk_forge_contracts import document_sha256
 
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 from .test_recipe_image_availability import (
@@ -36,6 +36,7 @@ from .test_recipe_image_availability import (
     ARCHIVE_SHA,
     _add_head,
     _add_revision,
+    _build_id,
     _recipe,
     _reference_receipt,
     _runtime,
@@ -59,10 +60,10 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     now = datetime.now(UTC)
     codec = TokenCodec(_TOKEN_KEY)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     revision_id = "rev-cli-rm-263"
-    recipe_digest = content_sha256(recipe)
-    receipt = _reference_receipt().model_copy(
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
+    receipt = _reference_receipt(_build_id(revision_id)).model_copy(
         update={
             "distribution_publisher": recipe.identity.publisher,
             "distribution_slug": recipe.identity.slug,
@@ -76,21 +77,19 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
-                source="published",
                 original_content_digest=recipe_digest,
                 effective_execution_key=revision.execution_key,
-                registry_manifest_digest=receipt.registry_manifest_digest,
-                platform_manifest_digest=receipt.platform_manifest_digest,
+                image_digest=receipt.image_digest,
                 local_image_config_id=receipt.local_image_config_id,
                 oci_archive_sha256=receipt.oci_archive_sha256,
                 image_bytes=receipt.image_bytes,
-                build_id=None,
+                build_id=receipt.build_id,
                 authorized_at=now,
             )
         )
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "managed-artifacts")
-    staged = storage.prepare_path()
+    staged = storage.root / "staged.part"
     staged.write_bytes(ARCHIVE)
     assert hashlib.sha256(staged.read_bytes()).hexdigest() == ARCHIVE_SHA
     published = storage.commit(staged, receipt=receipt)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import hashlib
 import io
 import json
@@ -32,8 +31,6 @@ from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionP
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
-    HostHelperGrantClaims,
-    HostHelperSignature,
     InstallVonkDebOperation,
     PackageRollbackAuthority,
     RecipeStopPayload,
@@ -60,7 +57,6 @@ from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
-    RecipeRunObservationPendingError,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -72,26 +68,20 @@ from vonk_control.models import (
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    InstallationNode,
     Job,
     NodeInventorySnapshot,
     NodeTelemetrySample,
     RecipeBuild,
-    RecipeInstallation,
     RecipeRun,
     RecipeSourceBundle,
     RunNode,
-    RuntimeImageAuthorization,
 )
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
-from vonk_control.recipe_execution_contract import (
-    installation_plan_document,
-)
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+from .agent_fences import fenced_attempt, fenced_operation
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -117,20 +107,13 @@ _STOP_PLAN = AgentCompiledExecutionPlan.model_validate_json(
     )
 )
 STOP_PAYLOAD = RecipeStopPayload(
-    schema_version=2,
     run_id="00000000-0000-4000-8000-000000000001",
     target_runtime_id="00000000-0000-4000-8000-000000000001",
     run_generation=1,
-    node_id=NODE_A,
     installation_id="00000000-0000-4000-8000-000000000002",
     recipe_revision_id="00000000-0000-4000-8000-000000000003",
-    recipe_content_sha256=_STOP_PLAN.identity.recipe_revision_sha256,
     mapping_id="00000000-0000-4000-8000-000000000004",
-    mapping_generation=1,
-    plan_digest=_STOP_PLAN.identity.execution_sha256,
-    rank=_STOP_PLAN.runtime.placement.rank,
-    role=_STOP_PLAN.runtime.placement.role,
-    world_size=_STOP_PLAN.runtime.placement.world_size,
+    plan_digest="a" * 64,
     compiled_execution_plan=_STOP_PLAN,
     cancel_pending_start=True,
 ).model_dump(mode="json")
@@ -138,8 +121,6 @@ STOP_PAYLOAD = RecipeStopPayload(
 
 def image_import_payload(digest: str) -> dict[str, object]:
     return {
-        "schema_version": 1,
-        "kind": "recipe.image.import.v1",
         "build_id": "00000000-0000-4000-8000-000000000010",
         "mapping_id": "00000000-0000-4000-8000-000000000011",
         "mapping_generation": 1,
@@ -155,19 +136,14 @@ PACKAGED_RUNTIME_IDENTITY = {
     "binary_digest": "c" * 64,
     "build_digest": "sha256:" + "b" * 64,
     "semantic_version": "1.2.3",
-    "self_test_passed": True,
-    "observation_receipt_public_key": "d" * 64,
 }
 
 
 def _canonical_recipe_fixture(
     slug: str, *, source: str = "published"
 ) -> tuple[dict[str, object], str]:
-    example = (
-        "recipe-source-build.json"
-        if source == "controller-build"
-        else "recipe-image.json"
-    )
+    del source
+    example = "recipe-source-build.json"
     raw = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", example)
@@ -176,7 +152,7 @@ def _canonical_recipe_fixture(
     raw["identity"]["slug"] = slug
     recipe = RecipeDefinition.model_validate(raw)
     document = recipe.model_dump(mode="json")
-    return document, content_sha256(recipe)
+    return document, document_sha256(recipe.model_dump(mode="json"))
 
 
 def _compiled_plan_fixture(
@@ -327,10 +303,7 @@ class CurrentAgentClient(TestClient):
             and headers.get("x-vonk-agent-verified") == "1"
         ):
             body = {
-                "capabilities": CAPABILITIES,
-                "lease_seconds": 60,
-                "node_id": headers["x-vonk-agent-node"],
-                "protocol_version": 3,
+                "protocol_version": 4,
                 "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
                 "wait_seconds": 0,
             }
@@ -360,7 +333,6 @@ def make_agent_system(tmp_path, *, engine=None):
                 AgentNode(
                     node_id=node,
                     state="active",
-                    capabilities=[],
                     workload_intent_ordinal=1,
                 )
             )
@@ -439,13 +411,10 @@ def telemetry_payload(
     boot_id: str = "00000000-0000-4000-8000-000000000001",
 ) -> dict[str, object]:
     return {
-        "schema_version": 1,
         "samples": [
             {
                 "boot_id": boot_id,
                 "observed_at": (observed_at or clock.now).isoformat(),
-                "cpu_utilization_percent": 12.5,
-                "load_average_1m": 1.25,
                 "memory_total_bytes": 128_000_000_000,
                 "memory_available_bytes": 64_000_000_000,
                 "disk_total_bytes": 1_000_000_000_000,
@@ -453,26 +422,6 @@ def telemetry_payload(
                 "gpu_utilization_percent": 25.0,
                 "gpu_memory_total_bytes": 128_000_000_000,
                 "gpu_memory_free_bytes": 63_000_000_000,
-                "temperature_c": 41.5,
-                "power_watts": 17.25,
-                "network_receive_bytes_per_second": 1024.5,
-                "network_transmit_bytes_per_second": 512.25,
-                "gap_samples": 0,
-                "details": {
-                    "accelerator_name": "NVIDIA GB10",
-                    "accelerator_performance_state": "P0",
-                },
-                "metrics": {
-                    "schema_version": 2,
-                    "series": [],
-                    "capabilities": [],
-                    "runtimes": [],
-                    "workloads": [],
-                    "provenance": {
-                        "collector": "test",
-                        "collector_version": "1",
-                    },
-                },
             }
         ],
     }
@@ -487,8 +436,7 @@ def chunked_asgi_telemetry(
 
     async def request() -> tuple[int, int]:
         chunks = [
-            b'{"schema_version":1,"samples":[],"padding":"'
-            + b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
+            b'{"samples":[],"padding":"' + b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
             b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
             b'"}',
         ]
@@ -541,73 +489,6 @@ def chunked_asgi_telemetry(
         return int(start["status"]), reads
 
     return asyncio.run(request())
-
-
-@pytest.mark.parametrize("series_count", [143, 512])
-def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
-    agent_system,
-    series_count: int,
-) -> None:
-    from vonk_agent_protocol import TelemetryRequest
-    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
-
-    client, services, _, clock = agent_system
-    payload = telemetry_payload(clock)
-    samples = payload["samples"]
-    assert isinstance(samples, list)
-    sampled = samples[0]
-    assert isinstance(sampled, dict)
-    series = [
-        {
-            "key": f"device.metric_{index}",
-            "scope": "node",
-            "process_name": "測" * 128,
-            "value": "測" * 256,
-            "unit": "state",
-            "source": "native-collector",
-            "measurement_kind": "measured",
-            "observed_at": sampled["observed_at"],
-            "freshness": "fresh",
-            "freshness_threshold_seconds": 6.0,
-            "support_status": "available",
-            "aggregation": "last",
-        }
-        for index in range(series_count)
-    ]
-    sampled["metrics"] = {
-        "schema_version": 2,
-        "series": series,
-        "capabilities": [],
-        "runtimes": [],
-        "workloads": [],
-        "provenance": {
-            "collector": "native-collector",
-            "collector_version": "2",
-            "host_uptime_seconds": 1,
-            "source_observed_at": sampled["observed_at"],
-        },
-    }
-    encoded = canonical_message(payload)
-    assert 64 * 1024 < len(encoded) < MAX_TELEMETRY_REPORT_BYTES
-    assert (
-        len(TelemetryRequest.parse(payload).samples[0].metrics.series) == series_count
-    )
-    response = client.post(
-        "/agent/telemetry",
-        headers={
-            **agent_headers(NODE_A, "serial-a"),
-            "content-type": "application/json",
-        },
-        content=encoded,
-    )
-    assert response.status_code == 204, response.text
-    with services.sessions() as session:
-        row = session.scalar(select(NodeTelemetrySample))
-        assert row is not None
-        assert [item["key"] for item in row.metrics["series"]] == [
-            item["key"] for item in series
-        ]
-        assert all(item["value"] == "測" * 256 for item in row.metrics["series"])
 
 
 def test_agent_posts_authenticated_telemetry_for_certificate_node(
@@ -696,22 +577,7 @@ def test_telemetry_rejects_more_than_sixteen_samples(agent_system) -> None:
     response = client.post(
         "/agent/telemetry",
         headers=agent_headers(NODE_A, "serial-a"),
-        json={"schema_version": 1, "samples": samples},
-    )
-    assert response.status_code == 422
-
-
-@pytest.mark.parametrize("schema_version", [True, 1.0])
-def test_telemetry_schema_version_is_exact_integer(
-    agent_system, schema_version: object
-) -> None:
-    client, _, _, clock = agent_system
-    payload = telemetry_payload(clock)
-    payload["schema_version"] = schema_version
-    response = client.post(
-        "/agent/telemetry",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=payload,
+        json={"samples": samples},
     )
     assert response.status_code == 422
 
@@ -743,13 +609,12 @@ def test_telemetry_requires_every_fixed_core_metric(agent_system) -> None:
 @pytest.mark.parametrize(
     "document",
     [
-        '{"schema_version":1,"schema_version":1,"samples":[]}',
+        '{"samples":[],"samples":[]}',
         (
-            '{"schema_version":1,"samples":[{'
+            '{"samples":[{'
             '"boot_id":"00000000-0000-4000-8000-000000000001",'
             '"observed_at":"2026-08-03T12:00:00+00:00",'
-            '"observed_at":"2026-08-03T12:00:01+00:00",'
-            '"gap_samples":0}]}'
+            '"observed_at":"2026-08-03T12:00:01+00:00"}]}'
         ),
     ],
 )
@@ -834,22 +699,13 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
 def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_system):
     client, services, _, clock = agent_system
     identity = RecipeReconciliationIdentity(
-        schema_version=1,
-        node_id=NODE_A,
         installation_id="70000000-0000-4000-8000-000000000007",
-        install_operation_id="80000000-0000-4000-8000-000000000008",
-        install_operation_payload_sha256="a" * 64,
         plan_digest="b" * 64,
-        recipe_revision_id="90000000-0000-4000-8000-000000000009",
-        recipe_content_sha256="c" * 64,
-        compiled_spec_canonical_sha256="d" * 64,
     )
+    job_id = str(uuid.uuid4())
+    operation_id = str(uuid.uuid4())
     request = HostRuntimeRequest(
-        schema_version=1,
         action="installation-cleanup",
-        job_id=str(uuid.uuid4()),
-        operation_id=str(uuid.uuid4()),
-        attempt=1,
         fence=str(uuid.uuid4()),
         arguments=[],
         installation_id=identity.installation_id,
@@ -858,7 +714,7 @@ def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_syste
     with services.sessions.begin() as session:
         session.add(
             Job(
-                id=request.job_id,
+                id=job_id,
                 request_id=str(uuid.uuid4()),
                 kind="recipe.reconcile",
                 state="running",
@@ -873,8 +729,8 @@ def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_syste
         )
         session.add(
             AgentOperation(
-                id=request.operation_id,
-                parent_job_id=request.job_id,
+                id=operation_id,
+                parent_job_id=job_id,
                 node_id=NODE_A,
                 kind="recipe.reconcile",
                 payload=json.loads(canonical_message(identity)),
@@ -890,7 +746,7 @@ def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_syste
         session.add(
             AgentOperationAttempt(
                 id=str(uuid.uuid4()),
-                operation_id=request.operation_id,
+                operation_id=operation_id,
                 attempt=1,
                 fence=request.fence,
                 lease_deadline=clock.now + timedelta(minutes=1),
@@ -902,10 +758,6 @@ def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_syste
     authority = HostRuntimeAuthorityService(services.sessions, signer, clock=clock)
     object.__setattr__(services, "host_runtime_authority", authority)
     body = {
-        "node_id": NODE_A,
-        "job_id": request.job_id,
-        "operation_id": request.operation_id,
-        "attempt": request.attempt,
         "fence": request.fence,
         "action": request.action,
         "installation_id": request.installation_id,
@@ -946,9 +798,6 @@ def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_syste
 
 class _HostGrantKwargs(TypedDict):
     node_id: str
-    job_id: str
-    operation_id: str
-    attempt: int
     fence: str
     action: ContainerRuntimeAction
     request_sha256: str
@@ -966,9 +815,6 @@ class _HostGrantKwargs(TypedDict):
 
 class _HostUpgradeGrantKwargs(TypedDict):
     node_id: str
-    job_id: str
-    operation_id: str
-    attempt: int
     fence: str
     package_sha256: str
     package_signature: str
@@ -981,8 +827,6 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 ) -> None:
     client, services, _, clock = agent_system
     request_id = "00000000-0000-4000-8000-000000000005"
-    job_id = "00000000-0000-4000-8000-000000000002"
-    operation_id = "00000000-0000-4000-8000-000000000003"
     fence = "00000000-0000-4000-8000-000000000004"
 
     host_issuer = HostHelperGrantIssuer(
@@ -1001,9 +845,6 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
             operation = ExecuteContainerRuntimeRequestOperation(
                 type="execute-container-runtime-request",
                 action=kwargs["action"].value,
-                job_id=kwargs["job_id"],
-                operation_id=kwargs["operation_id"],
-                attempt=kwargs["attempt"],
                 fence=kwargs["fence"],
                 request_sha256=kwargs["request_sha256"],
                 start_plan_sha256=kwargs["start_plan_sha256"],
@@ -1063,10 +904,6 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     )
     headers = agent_headers(NODE_A, "serial-a")
     common = {
-        "node_id": NODE_A,
-        "job_id": job_id,
-        "operation_id": operation_id,
-        "attempt": 1,
         "fence": fence,
         "expires_in_seconds": 30,
     }
@@ -1090,7 +927,8 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
         SignedHostHelperGrant.parse(host_response.json()["grant"]),
         SignedHostHelperGrant,
     )
-    assert host.grant_calls[0]["job_id"] == job_id
+    assert host.grant_calls[0]["node_id"] == NODE_A
+    assert host.grant_calls[0]["fence"] == fence
     assert host.grant_calls[0]["runtime_target_id"] == (
         "10000000-0000-4000-8000-000000000001"
     )
@@ -1144,11 +982,7 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
     agent_system,
 ) -> None:
     client, _services, _, clock = agent_system
-    payload = {
-        "schema_version": 2,
-        "observed_at": clock.now.isoformat(),
-        "runs": [],
-    }
+    payload = {"observed_at": clock.now.isoformat(), "runs": []}
 
     assert (
         client.post(
@@ -1165,7 +999,7 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
         client.post(
             "/agent/recipe-runs/observations",
             headers=agent_headers(NODE_A, "serial-a"),
-            json=payload | {"schema_version": 1},
+            json=payload | {"observed_at": clock.now.replace(tzinfo=None).isoformat()},
         ).status_code
         == 422
     )
@@ -1578,7 +1412,6 @@ def valid_enrollment_body(token: str) -> bytes:
                 "hardware_fingerprint": "hardware",
                 "agent_digest": "a" * 64,
                 "boot_id": "boot",
-                "observation_receipt_public_key": "d" * 64,
             },
         }
     ).encode("utf-8")
@@ -1747,16 +1580,6 @@ def test_untrusted_proxy_and_malformed_forwarded_identity_are_rejected(
     )
 
 
-def test_verified_identity_cannot_claim_other_node(agent_system) -> None:
-    client, _, _, _ = agent_system
-    response = client.post(
-        "/agent/claim",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={"node_id": NODE_B},
-    )
-    assert response.status_code == 403
-
-
 def test_claim_requires_a_trusted_policy_bounded_source(agent_system) -> None:
     client, services, _, _ = agent_system
     missing = agent_headers(NODE_A, "serial-a")
@@ -1847,15 +1670,13 @@ def test_claim_rejects_retired_supervisor_identity_fields(
         "binary_digest": "c" * 64,
         "build_digest": "sha256:" + "c" * 64,
         "semantic_version": "1.2.3",
-        "self_test_passed": True,
-        "observation_receipt_public_key": "d" * 64,
         removed_field: removed_value,
     }
 
     response = client.post(
         "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
-        json={"node_id": NODE_A, "runtime_identity": runtime_identity},
+        json={"runtime_identity": runtime_identity},
     )
 
     assert response.status_code == 422
@@ -1875,14 +1696,11 @@ def test_claim_accepts_independently_valid_packaged_build_and_binary_digests(
         "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
-            "node_id": NODE_A,
             "runtime_identity": {
                 "architecture": architecture,
                 "binary_digest": "c" * 64,
                 "build_digest": "sha256:" + "b" * 64,
                 "semantic_version": "1.2.3",
-                "self_test_passed": True,
-                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -1897,28 +1715,7 @@ def test_authenticated_claim_requires_packaged_runtime_identity(agent_system) ->
         "POST",
         "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
-        json={"capabilities": CAPABILITIES, "node_id": NODE_A},
-    )
-
-    assert response.status_code == 422
-
-
-def test_claim_rejects_failed_runtime_self_test(agent_system) -> None:
-    client, _services, _, _clock = agent_system
-
-    response = client.post(
-        "/agent/claim",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "node_id": NODE_A,
-            "runtime_identity": {
-                "architecture": "linux-arm64",
-                "binary_digest": "c" * 64,
-                "build_digest": "sha256:" + "c" * 64,
-                "semantic_version": "1.2.3",
-                "self_test_passed": False,
-            },
-        },
+        json={"protocol_version": 4},
     )
 
     assert response.status_code == 422
@@ -1934,14 +1731,11 @@ def test_claim_api_rejects_noncanonical_runtime_architecture(
         "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
-            "node_id": NODE_A,
             "runtime_identity": {
                 "architecture": architecture,
                 "binary_digest": "c" * 64,
                 "build_digest": "sha256:" + "c" * 64,
                 "semantic_version": "1.2.3",
-                "self_test_passed": True,
-                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -1959,14 +1753,11 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
     response = client.post(
         "/agent/claim",
         json={
-            "node_id": NODE_A,
             "runtime_identity": {
                 "architecture": "linux-arm64",
                 "binary_digest": "c" * 64,
                 "build_digest": "sha256:" + "b" * 64,
                 "semantic_version": "1.2.3",
-                "self_test_passed": True,
-                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -1989,10 +1780,7 @@ def test_claim_rejects_unknown_structural_fields(
 ) -> None:
     client, _services, _, _clock = agent_system
     payload = {
-        "capabilities": CAPABILITIES,
-        "lease_seconds": 30,
-        "node_id": NODE_A,
-        "protocol_version": 3,
+        "protocol_version": 4,
         "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
     }
     if nested:
@@ -2012,7 +1800,7 @@ def test_claim_rejects_unknown_structural_fields(
     assert response.status_code == 422
 
 
-@pytest.mark.parametrize("field", ("lease_seconds", "wait_seconds"))
+@pytest.mark.parametrize("field", ("protocol_version", "wait_seconds"))
 def test_claim_rejects_string_encoded_numeric_fields(
     agent_system,
     field: str,
@@ -2022,9 +1810,7 @@ def test_claim_rejects_string_encoded_numeric_fields(
         "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
-            "capabilities": CAPABILITIES,
-            "node_id": NODE_A,
-            "protocol_version": 3,
+            "protocol_version": 4,
             "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
             field: "30",
         },
@@ -2048,25 +1834,16 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
     claim = client.post(
         "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
-        json={"protocol_version": 3},
+        json={"protocol_version": 4},
     ).json()
     with services.sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         node.last_seen_at = None
     clock.now += timedelta(seconds=5)
-    progress = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {"progress": {"phase": "checking"}}
+    progress = {key: claim[key] for key in ("fence",)} | {
+        "progress": {"phase": "checking"}
+    }
 
     def reject_post_commit(_source) -> None:
         raise AssertionError("presence must be written inside the queue transaction")
@@ -2087,7 +1864,7 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
-        assert node.protocol_version == 3
+        assert node.protocol_version == 4
         presence = session.get(AgentPresence, NODE_A)
         assert presence is not None
         assert presence.management_address == "10.0.0.43"
@@ -2109,25 +1886,17 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
     claim = client.post(
         "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
-        json={"protocol_version": 3},
+        json={"protocol_version": 4},
     ).json()
     with services.sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         node.last_seen_at = None
     clock.now += timedelta(seconds=5)
-    result = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {"state": "succeeded", "result": {"stopped": True}}
+    result = {key: claim[key] for key in ("fence",)} | {
+        "state": "succeeded",
+        "result": {},
+    }
 
     def reject_post_commit(_source) -> None:
         raise AssertionError("presence must be written inside the queue transaction")
@@ -2148,7 +1917,7 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
-        assert node.protocol_version == 3
+        assert node.protocol_version == 4
         presence = session.get(AgentPresence, NODE_A)
         assert presence is not None
         assert presence.management_address == "10.0.0.44"
@@ -2167,18 +1936,7 @@ def test_failed_stop_result_never_writes_health_observation(agent_system) -> Non
     claim = client.post(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
-    result = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {
+    result = {key: claim[key] for key in ("fence",)} | {
         "state": "failed",
         "result": {"status": "failed", "error_code": "stop_failed"},
     }
@@ -2198,9 +1956,7 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
     untrusted = client.post(
         "/agent/claim",
         json={
-            "lease_seconds": 30,
-            "node_id": NODE_A,
-            "protocol_version": 3,
+            "protocol_version": 4,
             "wait_seconds": 0,
         },
     )
@@ -2218,9 +1974,7 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         "a" * 64,
         STOP_PAYLOAD,
     )
-    claim = client.post(
-        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
-    ).json()
+    client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a")).json()
     with services.sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         presence = session.get(AgentPresence, NODE_A)
@@ -2231,19 +1985,9 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         node.protocol_version = None
     clock.now += timedelta(seconds=5)
     stale = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "node_id",
-            "deadline",
-        )
-    } | {
         "fence": str(uuid.uuid4()),
         "state": "succeeded",
-        "result": {"stopped": True},
+        "result": {},
     }
 
     rejected = client.post(
@@ -2267,8 +2011,9 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         assert presence.observed_at.replace(tzinfo=UTC) == observed_at
 
 
-def test_boolean_protocol_advertisement_is_rejected_without_recording_contact(
-    agent_system,
+@pytest.mark.parametrize("version", (True, 3, 5))
+def test_unsupported_protocol_version_is_rejected_without_recording_contact(
+    agent_system, version: object
 ) -> None:
     client, services, _, _ = agent_system
 
@@ -2276,9 +2021,7 @@ def test_boolean_protocol_advertisement_is_rejected_without_recording_contact(
         "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
-            "lease_seconds": 30,
-            "node_id": NODE_A,
-            "protocol_version": True,
+            "protocol_version": version,
             "wait_seconds": 0,
         },
     )
@@ -2328,35 +2071,19 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
     claim = client.post(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
-    result = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    }
-    foreign = {
-        **result,
-        "node_id": NODE_B,
-        "state": "succeeded",
-        "result": {"stopped": True},
-    }
+    result = {key: claim[key] for key in ("fence",)}
+    foreign = {**result, "state": "succeeded", "result": {}}
     assert (
         client.post(
-            "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=foreign
+            "/agent/result", headers=agent_headers(NODE_B, "serial-b"), json=foreign
         ).status_code
-        == 403
+        == 422
     )
     stale = {
         **result,
         "fence": str(uuid.uuid4()),
         "state": "succeeded",
-        "result": {"stopped": True},
+        "result": {},
     }
     assert (
         client.post(
@@ -2376,18 +2103,10 @@ def test_expired_exact_result_is_retained_as_diagnostic_without_completing_job(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
     clock.now += timedelta(seconds=61)
-    result = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {"state": "succeeded", "result": {"stopped": True}}
+    result = {key: claim[key] for key in ("fence",)} | {
+        "state": "succeeded",
+        "result": {},
+    }
 
     response = client.post(
         "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
@@ -2400,7 +2119,7 @@ def test_expired_exact_result_is_retained_as_diagnostic_without_completing_job(
             )
         )
         assert attempt.state == "expired"
-        assert attempt.result == {"stopped": True}
+        assert attempt.result == {}
         assert session.get(Job, job.id).state != "succeeded"
 
 
@@ -2472,10 +2191,8 @@ def test_bootstrap_requires_the_host_helper_authority(
 def test_recipe_run_disposition_names_only_runs_the_controller_never_owned(
     agent_system,
 ) -> None:
-    # Live regression: a Spark kept a run directory whose metadata the agent
-    # could no longer parse, so it could not build an observation binding and
-    # skipped the run every sweep forever.  The run id alone must answer
-    # whether an owner exists, and a known run must never be named unowned.
+    # A Spark can retain a run this Controller never owned; the run id alone
+    # must answer whether an owner exists, and a known run is never unowned.
     client, services, _, clock = agent_system
     known_run_id = "70000000-0000-4000-8000-000000000071"
     with services.sessions.begin() as session:
@@ -2515,217 +2232,23 @@ def test_recipe_run_disposition_names_only_runs_the_controller_never_owned(
     assert anonymous.status_code == 401
 
 
-def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
+def test_recipe_run_observation_report_applies_process_state_per_run(
     agent_system,
 ) -> None:
     client, services, _, clock = agent_system
-
-    class ExactObservationAuthority:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, object]] = []
-            self.probes: list[dict[str, object]] = []
-            self.pending = False
-            self.unowned = False
-
-        def issue_unowned_recipe_run_probe_grant(self, **values):
-            self.probes.append(values)
-            if not self.unowned:
-                return None
-            self.unowned = False
-            return self.issue_recipe_run_observation_grant(**values)
-
-        def issue_recipe_run_observation_grant(self, **values):
-            self.calls.append(values)
-            if self.pending:
-                raise RecipeRunObservationPendingError(
-                    "recipe run observation grant is already pending"
-                )
-            assert values["certificate_serial"] == "serial-a"
-            assert values["expires_in_seconds"] == 10
-            return "f" * 64, SignedHostHelperGrant(
-                schema_version=1,
-                claims=HostHelperGrantClaims(
-                    schema_version=1,
-                    authority="vonk.host-maintenance-helper",
-                    request_id="70000000-0000-4000-8000-000000000007",
-                    node_id=NODE_A,
-                    issued_at=1_800_000_000,
-                    expires_at=1_800_000_010,
-                    operation=ExecuteContainerRuntimeRequestOperation(
-                        type="execute-container-runtime-request",
-                        action="run-inspect",
-                        job_id=values["job_id"],
-                        operation_id=values["operation_id"],
-                        attempt=values["attempt"],
-                        fence=values["fence"],
-                        request_sha256=values["request_sha256"],
-                        observation_identity_sha256="f" * 64,
-                    ),
-                ),
-                signature=HostHelperSignature(
-                    algorithm="ed25519", key_id="0" * 64, value="0" * 128
-                ),
-            )
-
-    authority = ExactObservationAuthority()
-    object.__setattr__(services, "host_runtime_authority", authority)
-    run_id = "10000000-0000-4000-8000-000000000001"
-    request = {
-        "schema_version": 1,
-        "node_id": NODE_A,
-        "run_id": run_id,
-        "installation_id": "20000000-0000-4000-8000-000000000002",
-        "recipe_revision_id": "30000000-0000-4000-8000-000000000003",
-        "recipe_content_sha256": "a" * 64,
-        "mapping_id": "40000000-0000-4000-8000-000000000004",
-        "mapping_generation": 2,
-        "run_generation": 3,
-        "image_digest": "b" * 64,
-        "artifact_set_digest": "c" * 64,
-        "model_identity": "publisher/model@revision",
-        "rank": 1,
-        "role": "worker",
-        "world_size": 2,
-        "local_address": "192.168.100.3",
-        "master_address": "192.168.100.2",
-        "master_port": 29500,
-        "port": 8888,
-        "runtime_arguments_sha256": "d" * 64,
-        "job_id": run_id,
-        "operation_id": "50000000-0000-4000-8000-000000000005",
-        "attempt": 3,
-        "fence": "60000000-0000-4000-8000-000000000006",
-        "request_sha256": "e" * 64,
-        "expires_in_seconds": 10,
-    }
-
-    accepted = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=request,
-    )
-    wrong_node = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={**request, "node_id": NODE_B},
-    )
-    unknown_field = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={**request, "command": "docker inspect"},
-    )
-    maximum_model_identity = "p/" + "m" * 951 + "@" + "r" * 70
-    maximum_identity = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={**request, "model_identity": maximum_model_identity},
-    )
-    oversized_identity = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={**request, "model_identity": maximum_model_identity + "x"},
-    )
-
-    assert accepted.status_code == 200
-    assert accepted.json() == {
-        "schema_version": 1,
-        "observation_identity_sha256": "f" * 64,
-        "grant": {
-            "schema_version": 1,
-            "claims": {
-                "schema_version": 1,
-                "authority": "vonk.host-maintenance-helper",
-                "request_id": "70000000-0000-4000-8000-000000000007",
-                "node_id": NODE_A,
-                "issued_at": 1_800_000_000,
-                "expires_at": 1_800_000_010,
-                "operation": {
-                    "type": "execute-container-runtime-request",
-                    "action": "run-inspect",
-                    "job_id": run_id,
-                    "operation_id": request["operation_id"],
-                    "attempt": request["attempt"],
-                    "fence": request["fence"],
-                    "request_sha256": request["request_sha256"],
-                    "observation_identity_sha256": "f" * 64,
-                },
-            },
-            "signature": {
-                "algorithm": "ed25519",
-                "key_id": "0" * 64,
-                "value": "0" * 128,
-            },
-        },
-    }
-    assert wrong_node.status_code == 409
-    assert unknown_field.status_code == 422
-    assert maximum_identity.status_code == 200
-    assert oversized_identity.status_code == 422
-    assert len(maximum_model_identity) == 1024
-    assert len(authority.calls) == 2
-    assert len(authority.probes) == 2
-    assert "x-vonk-recipe-run-disposition" not in accepted.headers
-
-    # A run this Controller has no record of gets a read-only probe, named so
-    # the agent can retire its local lifecycle instead of asking forever.
-    authority.unowned = True
-    unowned = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=request,
-    )
-    assert unowned.status_code == 200
-    assert unowned.headers["x-vonk-recipe-run-disposition"] == "unowned"
-    assert unowned.json() == accepted.json()
-    assert len(authority.calls) == 3
-
-    identity_fields = {
-        key: value
-        for key, value in request.items()
-        if key
-        not in {
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "request_sha256",
-            "expires_in_seconds",
-        }
-    }
-    naive_item_time = client.post(
-        "/agent/recipe-runs/observations",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "schema_version": 2,
-            "observed_at": clock.now.isoformat(),
-            "runs": [
-                {
-                    **identity_fields,
-                    "observed_at": clock.now.replace(tzinfo=None).isoformat(),
-                    "observation_identity_sha256": "f" * 64,
-                    "endpoint_ready": None,
-                    "grant": {"schema_version": 1},
-                    "helper_receipt": {"schema_version": 1},
-                }
-            ],
-        },
-    )
-    assert naive_item_time.status_code == 422
-    assert "timezone-aware" in naive_item_time.text
-
-    starting_run_id = "70000000-0000-4000-8000-000000000007"
+    run_id = "70000000-0000-4000-8000-000000000007"
     with services.sessions.begin() as session:
         session.add(
             RecipeRun(
-                id=starting_run_id,
+                id=run_id,
                 installation_id="80000000-0000-4000-8000-000000000008",
                 mapping_id="90000000-0000-4000-8000-000000000009",
                 mapping_generation=1,
-                run_generation=1,
-                alias="starting-exact",
+                run_generation=2,
+                alias="observed",
                 plan_digest="1" * 64,
                 plan={"schema_version": 1, "observation_schema_version": 2},
-                state="starting",
+                state="running",
                 route_state="withdrawn",
                 actor="admin",
                 created_at=clock.now,
@@ -2734,50 +2257,50 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
         )
         session.add(
             RunNode(
-                run_id=starting_run_id,
+                run_id=run_id,
                 node_id=NODE_A,
                 rank=0,
-                role="entrypoint",
-                state="starting",
+                role="worker",
+                state="running",
                 port=8888,
                 reserved_memory_bytes=1,
-                updated_at=clock.now,
+                updated_at=clock.now - timedelta(seconds=1),
             )
         )
-    starting_request = {
-        **request,
-        "run_id": starting_run_id,
-        "job_id": starting_run_id,
-        "run_generation": 1,
-        "attempt": 1,
-    }
-    too_early = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=starting_request,
-    )
-    assert too_early.status_code == 425
-    assert too_early.json() == {"detail": "recipe run observation is not ready"}
-    assert len(authority.calls) == 3
 
-    # An unconsumed grant for the same run is the authority's bounded "not
-    # yet".  It must stay distinguishable from a rejected request, or the
-    # agent reads a live run as unauthorized and abandons the whole sweep.
-    authority.pending = True
-    already_pending = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=request,
-    )
-    authority.pending = False
-    assert already_pending.status_code == 409
-    assert (
-        already_pending.headers["x-vonk-error-code"]
-        == "controller.recipe_run.observation_pending"
-    )
-    assert already_pending.json() == {
-        "detail": "recipe run observation grant is already pending"
+    def report(*runs: dict[str, object], observed_at: datetime = clock.now):
+        return client.post(
+            "/agent/recipe-runs/observations",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json={"observed_at": observed_at.isoformat(), "runs": list(runs)},
+        )
+
+    run: dict[str, object] = {
+        "run_id": run_id,
+        "run_generation": 2,
+        "process_running": False,
+        "endpoint_ready": None,
     }
+    stale_generation = report(run | {"run_generation": 1})
+    assert stale_generation.status_code == 422
+    assert "generation is stale" in stale_generation.text
+    unassigned = report(run | {"run_id": str(uuid.uuid4())})
+    assert unassigned.status_code == 422
+    assert "not assigned" in unassigned.text
+
+    # A report taken before the rank last changed never overwrites it.
+    stale_report = report(run, observed_at=clock.now - timedelta(seconds=2))
+    assert stale_report.status_code == 422
+    assert "stale" in stale_report.text
+
+    assert report(run | {"run_id": str(uuid.uuid4())}, run).status_code == 204
+    with services.sessions() as session:
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert node is not None
+        assert node.state == "failed"
+        assert node.observed_run_generation == 2
+        assert node.observation_process_running is False
+        assert node.observation_observed_at is not None
 
 
 def test_rust_agent_enrollment_shape_remains_controller_compatible(
@@ -2822,263 +2345,6 @@ def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
     assert calls == 1
 
 
-@pytest.mark.parametrize("source", ["published", "controller-build"])
-def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
-    agent_system, source: str
-) -> None:
-    client, services, _, clock = agent_system
-    document, digest = _canonical_recipe_fixture(f"agent-spec-{source}", source=source)
-    recipe = RecipeDefinition.model_validate(document)
-    recipe_id = str(uuid.uuid4())
-    revision_id = str(uuid.uuid4())
-    mapping_id = str(uuid.uuid4())
-    installation_id = str(uuid.uuid4())
-    build_id = str(uuid.uuid4()) if source == "controller-build" else None
-    payload = _compiled_plan_fixture(digest, source=source, build_id=build_id)
-    plan = AgentCompiledExecutionPlan.model_validate(payload)
-    image = plan.runtime_image
-    image_digest = image.image_digest
-    with services.sessions.begin() as session:
-        session.add(
-            CatalogDocument(
-                id=recipe_id,
-                kind="recipe",
-                publisher="vonk-forge",
-                slug=recipe.identity.slug,
-                title=recipe.metadata.title,
-                created_by="administrator",
-                created_at=clock.now,
-                updated_at=clock.now,
-            )
-        )
-        session.add(
-            CatalogDocumentRevision(
-                id=revision_id,
-                document_id=recipe_id,
-                kind="recipe",
-                publisher="vonk-forge",
-                slug=recipe.identity.slug,
-                revision_number=1,
-                schema_version=2,
-                state="active",
-                document=document,
-                content_digest=digest,
-                created_by="administrator",
-                created_at=clock.now,
-            )
-        )
-        session.add(
-            ClusterMapping(
-                id=mapping_id,
-                recipe_revision_id=revision_id,
-                topology_name=recipe.topology.name,
-                generation=1,
-                node_count=1,
-                state="ready",
-                parameters={},
-                placement_digest="e" * 64,
-                endpoint_owner_node_id=NODE_A,
-                created_by="administrator",
-                created_at=clock.now,
-                updated_at=clock.now,
-            )
-        )
-        session.add(
-            ClusterMappingNode(
-                mapping_id=mapping_id,
-                node_id=NODE_A,
-                rank=0,
-                role="entrypoint",
-                endpoint_owner=True,
-                created_at=clock.now,
-            )
-        )
-        if build_id is not None:
-            session.add(
-                RecipeBuild(
-                    id=build_id,
-                    recipe_revision_id=revision_id,
-                    builder_node_id=NODE_A,
-                    source_bundle_sha256="a" * 64,
-                    build_input_sha256="f" * 64,
-                    state="succeeded",
-                    policy_report={"passed": True},
-                    plan={"schema_version": 2},
-                    image_digest=image_digest,
-                    oci_layout_sha256=image.oci_layout_sha256,
-                    image_bytes=image.image_bytes,
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                )
-            )
-        session.add(
-            RecipeInstallation(
-                id=installation_id,
-                recipe_revision_id=revision_id,
-                mapping_id=mapping_id,
-                mapping_generation=1,
-                recipe_build_id=build_id,
-                image_digest=image_digest,
-                plan_digest="b" * 64,
-                plan=installation_plan_document(
-                    {
-                        "schema_version": 1,
-                        "mapping_id": mapping_id,
-                        "mapping_generation": 1,
-                        "recipe_build_id": build_id,
-                        "image_digest": image_digest,
-                        "recipe_revision_id": revision_id,
-                        "recipe_content_sha256": digest,
-                        "allowed": True,
-                        "plan_digest": "b" * 64,
-                        "nodes": [
-                            {
-                                "node_id": NODE_A,
-                                "rank": 0,
-                                "role": "entrypoint",
-                                "allowed": True,
-                                "inventory_observed_at": None,
-                                "free_bytes": 1024,
-                                "active_reserved_bytes": 0,
-                                "reused_bytes": 0,
-                                "required_download_bytes": 0,
-                                "required_bytes": 1024,
-                                "required_payload_bytes": 1024,
-                                "disk_floor_bytes": 0,
-                                "free_after_bytes": 0,
-                                "blockers": [],
-                                "warnings": [],
-                            }
-                        ],
-                        "compiled_execution_plans": {NODE_A: payload},
-                    }
-                ),
-                state="installing",
-                actor="administrator",
-                created_at=clock.now,
-                updated_at=clock.now,
-            )
-        )
-        session.add(
-            InstallationNode(
-                installation_id=installation_id,
-                node_id=NODE_A,
-                rank=0,
-                role="entrypoint",
-                state="installing",
-                required_bytes=1024,
-                installed_bytes=0,
-                updated_at=clock.now,
-            )
-        )
-
-    endpoint = f"/agent/recipe-installations/{installation_id}/spec"
-    response = client.get(endpoint, headers=agent_headers(NODE_A, "serial-a"))
-    assert response.status_code == 409
-    assert (
-        response.json()["detail"] == "recipe specification execution receipts are stale"
-    )
-
-    with services.sessions.begin() as session:
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=revision_id,
-                source=source,
-                original_content_digest=digest,
-                effective_execution_key=plan.identity.execution_sha256,
-                registry_manifest_digest=image.registry_manifest_digest,
-                platform_manifest_digest=image.platform_manifest_digest,
-                local_image_config_id=image.local_image_config_id,
-                oci_archive_sha256=image.oci_layout_sha256,
-                image_bytes=image.image_bytes,
-                build_id=build_id,
-                authorized_at=clock.now,
-                state="authorized",
-            )
-        )
-
-    resolved = client.get(endpoint, headers=agent_headers(NODE_A, "serial-a"))
-    assert resolved.status_code == 200
-    assert resolved.json() == payload
-    assert resolved.json()["schema_version"] == 2
-    assert resolved.content == canonical_message(
-        AgentCompiledExecutionPlan.model_validate(payload)
-    )
-    openapi = client.get("/openapi.json").json()
-    spec_route = openapi["paths"]["/agent/recipe-installations/{installation_id}/spec"][
-        "get"
-    ]
-    schema_ref = spec_route["responses"]["200"]["content"]["application/json"][
-        "schema"
-    ]["$ref"]
-    assert schema_ref.startswith("#/components/schemas/")
-    resolved_schema = openapi["components"]["schemas"][schema_ref.rsplit("/", 1)[-1]]
-    canonical_schema = AgentCompiledExecutionPlan.model_json_schema()
-    assert resolved_schema["type"] == canonical_schema["type"] == "object"
-    assert (
-        resolved_schema["additionalProperties"]
-        == canonical_schema["additionalProperties"]
-        == False
-    )
-    assert resolved_schema["required"] == canonical_schema["required"]
-    assert set(resolved_schema["properties"]) == set(canonical_schema["properties"])
-
-    tampered = copy.deepcopy(payload)
-    tampered_image = tampered["runtime_image"]
-    assert isinstance(tampered_image, dict)
-    tampered_image["local_image_config_id"] = "sha256:" + "0" * 64
-    with services.sessions.begin() as session:
-        installation = session.get(RecipeInstallation, installation_id)
-        assert installation is not None
-        persisted_plan = copy.deepcopy(installation.plan)
-        assert isinstance(persisted_plan, dict)
-        compiled_plans = persisted_plan.get("compiled_execution_plans")
-        assert isinstance(compiled_plans, dict)
-        compiled_plans[NODE_A] = tampered
-        installation.plan = persisted_plan
-    rejected = client.get(endpoint, headers=agent_headers(NODE_A, "serial-a"))
-    assert rejected.status_code == 409
-    assert (
-        rejected.json()["detail"] == "recipe specification execution receipts are stale"
-    )
-
-    with services.sessions.begin() as session:
-        installation = session.get(RecipeInstallation, installation_id)
-        assert installation is not None
-        persisted_plan = copy.deepcopy(installation.plan)
-        assert isinstance(persisted_plan, dict)
-        compiled_plans = persisted_plan.get("compiled_execution_plans")
-        assert isinstance(compiled_plans, dict)
-        compiled_plans[NODE_A] = payload
-        installation.plan = persisted_plan
-        if build_id is not None:
-            build = session.get(RecipeBuild, build_id)
-            assert build is not None
-            build.image_bytes = 999
-        else:
-            installation.recipe_build_id = str(uuid.uuid4())
-    rejected_build_authority = client.get(
-        endpoint, headers=agent_headers(NODE_A, "serial-a")
-    )
-    assert rejected_build_authority.status_code == 409
-    assert (
-        rejected_build_authority.json()["detail"]
-        == "recipe specification execution receipts are stale"
-    )
-    assert (
-        client.get(
-            f"/agent/recipe-installations/{uuid.uuid4()}/spec",
-            headers=agent_headers(NODE_A, "serial-a"),
-        ).status_code
-        == 404
-    )
-    assert (
-        client.get(endpoint, headers=agent_headers(NODE_B, "serial-b")).status_code
-        == 404
-    )
-    assert client.get(endpoint).status_code == 401
-
-
 def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
     agent_system,
 ) -> None:
@@ -3119,7 +2385,6 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
             "hardware_fingerprint": "hardware",
             "agent_digest": "a" * 64,
             "boot_id": "boot",
-            "observation_receipt_public_key": "d" * 64,
         },
     }
     issued = client.post("/agent/enroll", json=body)
@@ -3294,18 +2559,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
     claim = client.post(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
-    result = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {
+    result = {key: claim[key] for key in ("fence",)} | {
         "state": "failed",
         "result": {"status": "failed", "error_code": "stop_failed"},
     }
@@ -3332,7 +2586,9 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         attempt = (
             session.query(AgentOperationAttempt).filter_by(fence=claim["fence"]).one()
         )
-        parent_job = session.get(Job, claim["job_id"])
+        parent_job = session.get(
+            Job, fenced_operation(services.sessions, claim["fence"]).parent_job_id
+        )
         assert attempt.result["status"] == "failed"
         assert attempt.result["error_code"] == "stop_failed"
         if with_diagnostics:
@@ -3346,7 +2602,8 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         from vonk_control.failure_evidence import FailureEvidenceService
 
         evidence = FailureEvidenceService(services.sessions, clock=clock)
-        bundle = evidence.read(claim["operation_id"], claim["attempt"])
+        fenced = fenced_attempt(services.sessions, claim["fence"])
+        bundle = evidence.read(fenced.operation_id, fenced.attempt)
         assert "should-never-persist" not in bundle.model_dump_json()
         assert "/proc: permission denied" in bundle.diagnostics.stderr.text
 
@@ -3379,18 +2636,10 @@ def test_failed_result_error_code_obeys_the_shared_contract_rule(
     claim = client.post(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
-    result = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {"state": "failed", "result": failure}
+    result = {key: claim[key] for key in ("fence",)} | {
+        "state": "failed",
+        "result": failure,
+    }
 
     response = client.post(
         "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
@@ -3413,18 +2662,7 @@ def test_failed_result_rejection_names_the_failing_field_and_rule(
     claim = client.post(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
-    envelope = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {"state": "failed"}
+    envelope = {key: claim[key] for key in ("fence",)} | {"state": "failed"}
 
     malformed = client.post(
         "/agent/result",
@@ -3529,27 +2767,15 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
         NODE_A,
         "artifact.distribution.v1",
         "a" * 64,
-        {
-            "schema_version": 1,
-            "authority_revision": "a" * 64,
-            "plan_digest": "a" * 64,
-        },
+        {"plan_digest": "a" * 64},
     )
     claim = client.post(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
-    envelope = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {"state": "failed", "result": INCIDENT_DISTRIBUTION_FAILURE}
+    envelope = {key: claim[key] for key in ("fence",)} | {
+        "state": "failed",
+        "result": INCIDENT_DISTRIBUTION_FAILURE,
+    }
 
     response = client.post(
         "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=envelope
@@ -3559,7 +2785,7 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
     with services.sessions() as session:
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == claim["operation_id"]
+                AgentOperationAttempt.fence == claim["fence"]
             )
         )
         assert attempt is not None
@@ -3590,18 +2816,7 @@ def test_boundary_failures_record_a_correlated_operator_reason(agent_system) -> 
     claim = client.post(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
-    envelope = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    }
+    envelope = {key: claim[key] for key in ("fence",)}
 
     rejected = client.post(
         "/agent/result",
@@ -3611,8 +2826,9 @@ def test_boundary_failures_record_a_correlated_operator_reason(agent_system) -> 
 
     assert rejected.status_code == 422
     with services.sessions() as session:
-        operation = session.get(AgentOperation, claim["operation_id"])
-        job = session.get(Job, claim["job_id"])
+        fenced = fenced_operation(services.sessions, claim["fence"])
+        operation = session.get(AgentOperation, fenced.id)
+        job = session.get(Job, fenced.parent_job_id)
         assert operation is not None and operation.status_reason is not None
         assert operation.status_reason.startswith("result refused: invalid-result")
         assert "attempt=1" in operation.status_reason
@@ -3627,7 +2843,9 @@ def test_boundary_failures_record_a_correlated_operator_reason(agent_system) -> 
 
     assert heartbeat.status_code == 409
     with services.sessions() as session:
-        operation = session.get(AgentOperation, claim["operation_id"])
+        operation = session.get(
+            AgentOperation, fenced_operation(services.sessions, claim["fence"]).id
+        )
         assert operation is not None and operation.status_reason is not None
         assert operation.status_reason.startswith("heartbeat refused: stale-attempt")
         assert "attempt=1" in operation.status_reason
@@ -3654,22 +2872,11 @@ def test_a_concluded_operation_never_acquires_a_boundary_refusal_note(
     claim = client.post(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
-    envelope = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    }
+    envelope = {key: claim[key] for key in ("fence",)}
     completed = client.post(
         "/agent/result",
         headers=agent_headers(NODE_A, "serial-a"),
-        json=envelope | {"state": "succeeded", "result": {"stopped": True}},
+        json=envelope | {"state": "succeeded", "result": {}},
     )
     assert completed.status_code == 204, completed.text
     with services.sessions() as session:
@@ -3709,18 +2916,10 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
     claim = client.post(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
-    result = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {"state": "failed", "result": {"unexpected": "unstructured failure"}}
+    result = {key: claim[key] for key in ("fence",)} | {
+        "state": "failed",
+        "result": {"unexpected": "unstructured failure"},
+    }
 
     response = client.post(
         "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
@@ -3763,18 +2962,7 @@ def test_recipe_job_failure_uses_its_typed_exit_result_at_authenticated_ingress(
     )
     assert claim_response.status_code == 200
     claim = claim_response.json()
-    result = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    }
+    result = {key: claim[key] for key in ("fence",)}
     result.update(
         state="failed", result=dict(job_result, exit_code=1, reason="runtime failed")
     )
@@ -3796,7 +2984,7 @@ def test_agent_validation_errors_are_canonical_json(agent_system) -> None:
     response = client.post(
         "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
-        json={"lease_seconds": 0, "node_id": NODE_A, "wait_seconds": 0},
+        json={"wait_seconds": -1},
     )
 
     assert response.status_code == 422
@@ -3812,7 +3000,7 @@ def test_claim_endpoint_long_poll_wakes_when_work_is_enqueued(agent_system) -> N
             client.post,
             "/agent/claim",
             headers=agent_headers(NODE_A, "serial-a"),
-            json={"node_id": NODE_A, "lease_seconds": 30, "wait_seconds": 1},
+            json={"wait_seconds": 1},
         )
         time.sleep(0.05)
         operation = services.operations.enqueue(
@@ -3821,7 +3009,9 @@ def test_claim_endpoint_long_poll_wakes_when_work_is_enqueued(agent_system) -> N
         response = waiting.result(timeout=1)
 
     assert response.status_code == 200
-    assert response.json()["operation_id"] == operation.id
+    assert (
+        fenced_operation(services.sessions, response.json()["fence"]).id == operation.id
+    )
     assert time.monotonic() - started < 0.8
 
 
@@ -4060,32 +3250,6 @@ def test_enrollment_evidence_has_a_fixed_bounded_schema(agent_system) -> None:
     assert response.status_code == 403
 
 
-def test_enrollment_rejects_malformed_observation_receipt_public_key(
-    agent_system,
-) -> None:
-    client, services, _, _ = agent_system
-    token = enrollment_grant(services)
-    body = json.loads(valid_enrollment_body(token))
-    body["evidence"]["observation_receipt_public_key"] = "not-lower-hex"
-
-    response = client.post("/agent/enroll", json=body)
-
-    assert response.status_code == 403
-    assert_grant_consumed(services, token)
-
-
-def test_enrollment_rejects_receipt_less_evidence(agent_system) -> None:
-    client, services, _, _ = agent_system
-    token = enrollment_grant(services)
-    body = json.loads(valid_enrollment_body(token))
-    body["evidence"].pop("observation_receipt_public_key")
-
-    response = client.post("/agent/enroll", json=body)
-
-    assert response.status_code == 403
-    assert_grant_consumed(services, token)
-
-
 def test_artifact_access_is_owned_content_addressed_and_range_bounded(
     agent_system,
 ) -> None:
@@ -4148,8 +3312,6 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
         "recipe.image.import.v1",
         "a" * 64,
         {
-            "schema_version": 1,
-            "kind": "recipe.image.import.v1",
             "build_id": "00000000-0000-4000-8000-000000000010",
             "mapping_id": "00000000-0000-4000-8000-000000000011",
             "mapping_generation": 1,
@@ -4396,29 +3558,19 @@ def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None
 @pytest.mark.parametrize(
     "missing",
     (
-        "capabilities",
-        "lease_seconds",
-        "node_id",
         "protocol_version",
         "runtime_identity",
         "wait_seconds",
-        "observation_receipt_public_key",
     ),
 )
 def test_claim_requires_the_current_agent_document(agent_system, missing: str) -> None:
     client, _services, _sessions, _clock = agent_system
     body = {
-        "capabilities": CAPABILITIES,
-        "lease_seconds": 30,
-        "node_id": NODE_A,
-        "protocol_version": 3,
+        "protocol_version": 4,
         "runtime_identity": dict(PACKAGED_RUNTIME_IDENTITY),
         "wait_seconds": 0,
     }
-    if missing == "observation_receipt_public_key":
-        del body["runtime_identity"][missing]
-    else:
-        del body[missing]
+    del body[missing]
     # Use the raw request method: the convenience test client must not refill
     # deliberately missing fields and hide a production boundary regression.
     response = client.request(

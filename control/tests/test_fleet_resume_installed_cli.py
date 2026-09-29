@@ -31,6 +31,7 @@ from vonk_control.models import (
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.operator_projection_api import FleetOperatorServices
 
+from .agent_fences import fenced_attempt, fenced_operation
 from .test_agent_upgrades import NODE_A, OLD_IDENTITY, PACKAGE, SOURCE
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
@@ -55,12 +56,10 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
                     architecture="linux-arm64",
                     semantic_version="0.1.0",
                     build_digest=OLD_IDENTITY["build_digest"],
                     binary_digest=OLD_IDENTITY["binary_digest"],
-                    self_test_passed=True,
                     last_seen_at=now,
                 )
             )
@@ -145,8 +144,6 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
         first_attempt = operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         assert first_attempt is not None
@@ -157,13 +154,13 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
         child_attempt = operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         assert child_attempt is not None
-        assert child_attempt.operation_id == first_attempt.operation_id
-        assert child_attempt.attempt == 2
+        child_operation_id = fenced_operation(sessions, child_attempt).id
+        child_attempt_number = fenced_attempt(sessions, child_attempt).attempt
+        assert child_operation_id == fenced_operation(sessions, first_attempt).id
+        assert child_attempt_number == 2
         operations.fail(child_attempt, "agent upgrade request is invalid")
         clock_value[0] += timedelta(minutes=2)
         # Rollouts no longer park, but a rollout parked for an operator by an
@@ -171,7 +168,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
         # that row must still recheck the caller at the registered route.
         with sessions.begin() as session:
             job = session.get(Job, job_id)
-            child = session.get(AgentOperation, child_attempt.operation_id)
+            child = session.get(AgentOperation, child_operation_id)
             assert job is not None and child is not None
             assert job.state == "queued"
             job.state = "waiting-for-operator"
@@ -187,7 +184,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             assert job is not None and child is not None
             assert job.state == "waiting-for-operator"
             assert child.state == "waiting-for-operator"
-            assert child.id == child_attempt.operation_id
+            assert child.id == child_operation_id
             original_identity = (
                 job.id,
                 job.request_id,
@@ -279,7 +276,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
         ]
         with sessions() as session:
             job = session.get(Job, job_id)
-            child = session.get(AgentOperation, child_attempt.operation_id)
+            child = session.get(AgentOperation, child_operation_id)
             assert job is not None and child is not None
             after_denial = (
                 job.id,
@@ -342,11 +339,11 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
 
         with sessions() as session:
             job = session.get(Job, job_id)
-            child = session.get(AgentOperation, child_attempt.operation_id)
+            child = session.get(AgentOperation, child_operation_id)
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(
-                    AgentOperationAttempt.operation_id == child_attempt.operation_id,
-                    AgentOperationAttempt.attempt == child_attempt.attempt,
+                    AgentOperationAttempt.operation_id == child_operation_id,
+                    AgentOperationAttempt.attempt == child_attempt_number,
                 )
             )
             children = tuple(
@@ -358,9 +355,9 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             assert job.state == "queued"
             assert child.state == "waiting-for-operator"
             assert child.retry_disposition == "retry"
-            assert child.retry_disposition_attempt == child_attempt.attempt
+            assert child.retry_disposition_attempt == child_attempt_number
             assert job.request_id == request_key
-            assert len(children) == 1 and children[0].id == child_attempt.operation_id
+            assert len(children) == 1 and children[0].id == child_operation_id
             assert (
                 job.id,
                 job.request_id,
@@ -401,8 +398,6 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             operations.claim(
                 NODE_A,
                 "serial-a",
-                30,
-                capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
                 runtime_identity=OLD_IDENTITY,
             )
             is None

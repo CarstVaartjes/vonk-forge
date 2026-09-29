@@ -5,9 +5,7 @@
 use std::io::{self, BufRead, Write};
 
 use vonk_agent::pair::validate_enrollment_response;
-use vonk_agent::{
-    CLAIM_CAPABILITIES, client::claim_request_document, runtime_identity::AgentRuntimeIdentity,
-};
+use vonk_agent::{client::claim_request_document, runtime_identity::AgentRuntimeIdentity};
 use vonk_agent_protocol::{EnrollmentRequest, canonical_json, parse_strict};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,24 +17,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let bytes = match arguments.as_slice() {
             [mode] if mode == "--request" => {
                 let request: EnrollmentRequest = parse_strict(line.as_bytes())?;
-                request.evidence.validate()?;
                 canonical_json(&request)?
             }
             [mode, node_id] if mode == "--issued" => {
                 let issued = validate_enrollment_response(200, line.as_bytes(), node_id)?;
                 canonical_json(&issued)?
             }
-            [mode, node_id] if mode == "--claim" => {
+            [mode] if mode == "--claim" => {
                 let identity: AgentRuntimeIdentity = parse_strict(line.as_bytes())?;
-                claim_request_document(
-                    node_id,
-                    CLAIM_CAPABILITIES,
-                    Some("spark-wire-probe"),
-                    0,
-                    &identity,
-                )?
+                claim_request_document(None, Some("spark-wire-probe"), 0, &identity)?
             }
-            _ => return Err("expected --request, --issued NODE_ID or --claim NODE_ID".into()),
+            _ => return Err("expected --request, --issued NODE_ID or --claim".into()),
         };
         output.write_all(&bytes)?;
         output.write_all(b"\n")?;

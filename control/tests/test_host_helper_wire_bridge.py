@@ -9,13 +9,11 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.host_helper import (
+    ConfirmPackageActivationOperation,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     RecipeReconciliationIdentity,
-    RestartVonkUnitOperation,
     SignedHostHelperGrant,
-    SignedRecipeRunObservationReceipt,
-    recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_control.host_helper_authority import HostHelperGrantIssuer
 
@@ -46,7 +44,11 @@ def test_python_issuer_matches_the_rust_verified_host_grant_fixture() -> None:
     )
     grant = issuer.issue_grant(
         node_id="spk_11111111111111111111111111111111",
-        operation=RestartVonkUnitOperation(type="restart-vonk-unit", unit="agent"),
+        operation=ConfirmPackageActivationOperation(
+            type="confirm-package-activation",
+            package_sha256="a" * 64,
+            attempt_nonce="b" * 64,
+        ),
         expires_in_seconds=60,
     )
     raw = (FIXTURES / "host-helper-grant-python-issued.json").read_bytes().rstrip(b"\n")
@@ -57,18 +59,6 @@ def test_python_issuer_matches_the_rust_verified_host_grant_fixture() -> None:
         bytes.fromhex(parsed.signature.value),
         b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\x00"
         + canonical_message(parsed.claims.to_mapping()),
-    )
-
-
-def test_rust_signed_receipt_fixture_is_a_controller_verifiable_wire_message() -> None:
-    raw = (FIXTURES / "recipe-run-observation-receipt.json").read_bytes().rstrip(b"\n")
-    receipt = SignedRecipeRunObservationReceipt.parse(json.loads(raw))
-
-    assert canonical_message(receipt.to_mapping()) == raw
-    assert receipt.claims.request_id == "10000000-0000-4000-8000-000000000001"
-    ed25519.Ed25519PublicKey.from_public_bytes(PUBLIC_KEY).verify(
-        bytes.fromhex(receipt.signature.value),
-        recipe_run_observation_receipt_signing_bytes(receipt.claims),
     )
 
 
@@ -89,9 +79,6 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
             self,
             *,
             node_id: str,
-            job_id: str,
-            operation_id: str,
-            attempt: int,
             fence: str,
             action: ContainerRuntimeAction,
             request_sha256: str,
@@ -111,9 +98,6 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
                 operation=ExecuteContainerRuntimeRequestOperation(
                     type="execute-container-runtime-request",
                     action=action.value,
-                    job_id=job_id,
-                    operation_id=operation_id,
-                    attempt=attempt,
                     fence=fence,
                     request_sha256=request_sha256,
                     start_plan_sha256=start_plan_sha256,
@@ -122,17 +106,12 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
                     runtime_run_id=runtime_run_id,
                     runtime_target_id=runtime_target_id,
                     runtime_installation_id=runtime_installation_id,
-                    observation_identity_sha256="b" * 64,
                 ),
                 expires_in_seconds=expires_in_seconds,
             )
 
     object.__setattr__(services, "host_runtime_authority", RecordingHostAuthority())
     request = {
-        "node_id": NODE_A,
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 1,
         "fence": "40000000-0000-4000-8000-000000000004",
         "action": "run-inspect",
         "request_sha256": "a" * 64,
@@ -155,34 +134,15 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
         check=False,
     )
     assert produced.returncode == 0, produced.stderr.decode()
-    receipt_raw = produced.stdout.rstrip(b"\n")
-    receipt = SignedRecipeRunObservationReceipt.parse(json.loads(receipt_raw))
-    assert canonical_message(receipt.to_mapping()) == receipt_raw
-    receipt_public_key = ed25519.Ed25519PrivateKey.from_private_bytes(
-        bytes([23]) * 32
-    ).public_key()
-    receipt_public_key.verify(
-        bytes.fromhex(receipt.signature.value),
-        recipe_run_observation_receipt_signing_bytes(receipt.claims),
-    )
-    assert receipt.claims.request_id == grant.claims.request_id
-    assert receipt.claims.request_sha256 == request["request_sha256"]
-    assert receipt.claims.observation_identity_sha256 is not None
+    assert produced.stdout == grant_bytes
 
 
 def test_python_reconciliation_grant_is_verified_unchanged_by_rust(
     host_helper_wire_probe: Path,
 ) -> None:
     identity = RecipeReconciliationIdentity(
-        schema_version=1,
-        node_id=NODE_A,
         installation_id="70000000-0000-4000-8000-000000000007",
-        install_operation_id="80000000-0000-4000-8000-000000000008",
-        install_operation_payload_sha256="a" * 64,
         plan_digest="b" * 64,
-        recipe_revision_id="90000000-0000-4000-8000-000000000009",
-        recipe_content_sha256="c" * 64,
-        compiled_spec_canonical_sha256="d" * 64,
     )
     issuer = HostHelperGrantIssuer(
         ed25519.Ed25519PrivateKey.from_private_bytes(PRIVATE_SEED),
@@ -194,9 +154,6 @@ def test_python_reconciliation_grant_is_verified_unchanged_by_rust(
         operation=ExecuteContainerRuntimeRequestOperation(
             type="execute-container-runtime-request",
             action="installation-cleanup",
-            job_id="20000000-0000-4000-8000-000000000002",
-            operation_id="30000000-0000-4000-8000-000000000003",
-            attempt=2,
             fence="40000000-0000-4000-8000-000000000004",
             request_sha256="e" * 64,
             installation_id=identity.installation_id,
@@ -211,9 +168,7 @@ def test_python_reconciliation_grant_is_verified_unchanged_by_rust(
     assert verified.returncode == 0, verified.stderr.decode()
     assert verified.stdout.rstrip(b"\n") == raw
     tampered = json.loads(raw)
-    tampered["claims"]["operation"]["reconciliation_identity"][
-        "compiled_spec_canonical_sha256"
-    ] = "f" * 64
+    tampered["claims"]["operation"]["reconciliation_identity"]["plan_digest"] = "f" * 64
     refused = subprocess.run(
         [str(host_helper_wire_probe)],
         input=canonical_message(tampered),

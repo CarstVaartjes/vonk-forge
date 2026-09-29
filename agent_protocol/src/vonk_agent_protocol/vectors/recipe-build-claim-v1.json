@@ -1,8 +1,6 @@
 {
   "schema_version": 1,
   "base_payload": {
-    "schema_version": 1,
-    "kind": "recipe.build.v1",
     "adapter": {
       "adapter_sha256": "4538e83a53e5098102dffd407584c81eb17c7b2b24179b1e186e469eb1d6c1be",
       "definition": {
@@ -27,15 +25,7 @@
     "base_image_storage_bytes": 68719476736,
     "capabilities": [],
     "dockerfile": "containers/runtime/Dockerfile",
-    "platform": "linux/arm64",
-    "arguments": [
-      {
-        "name": "runtime-version",
-        "value": "1"
-      }
-    ],
     "network": {
-      "mode": "none",
       "hosts": []
     },
     "options": {
@@ -65,11 +55,7 @@
       "temporary_bytes": 68719476736,
       "processes": 4096,
       "timeout_seconds": 3600,
-      "output_bytes": 67108864,
-      "gpu": 0,
-      "privileged": false,
-      "host_mounts": false,
-      "container_socket": false
+      "output_bytes": 67108864
     }
   },
   "cases": [
@@ -106,32 +92,11 @@
           "op": "set",
           "path": [
             "network",
-            "mode"
-          ],
-          "value": "public"
-        },
-        {
-          "op": "set",
-          "path": [
-            "network",
             "hosts"
           ],
           "value": [
             "pypi.org"
           ]
-        }
-      ]
-    },
-    {
-      "name": "valid target stage",
-      "valid": true,
-      "changes": [
-        {
-          "op": "set",
-          "path": [
-            "target"
-          ],
-          "value": "runtime-final"
         }
       ]
     },
@@ -265,19 +230,6 @@
       ]
     },
     {
-      "name": "invalid target stage",
-      "valid": false,
-      "changes": [
-        {
-          "op": "set",
-          "path": [
-            "target"
-          ],
-          "value": "runtime/final"
-        }
-      ]
-    },
-    {
       "name": "missing top-level field",
       "valid": false,
       "changes": [
@@ -399,19 +351,6 @@
       ]
     },
     {
-      "name": "unsupported platform",
-      "valid": false,
-      "changes": [
-        {
-          "op": "set",
-          "path": [
-            "platform"
-          ],
-          "value": "linux/amd64"
-        }
-      ]
-    },
-    {
       "name": "dockerfile above 512 UTF-8 bytes",
       "valid": false,
       "changes": [
@@ -420,7 +359,7 @@
           "path": [
             "dockerfile"
           ],
-          "value": "\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c/Dockerfile"
+          "value": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界/Dockerfile"
         }
       ]
     },
@@ -559,47 +498,9 @@
       ]
     },
     {
-      "name": "unsafe build privilege",
-      "valid": false,
-      "changes": [
-        {
-          "op": "set",
-          "path": [
-            "limits",
-            "privileged"
-          ],
-          "value": true
-        }
-      ]
-    },
-    {
-      "name": "inconsistent none network",
-      "valid": false,
-      "changes": [
-        {
-          "op": "set",
-          "path": [
-            "network",
-            "hosts"
-          ],
-          "value": [
-            "pypi.org"
-          ]
-        }
-      ]
-    },
-    {
       "name": "private public-network host",
       "valid": false,
       "changes": [
-        {
-          "op": "set",
-          "path": [
-            "network",
-            "mode"
-          ],
-          "value": "public"
-        },
         {
           "op": "set",
           "path": [
@@ -609,38 +510,6 @@
           "value": [
             "169.254.169.254"
           ]
-        }
-      ]
-    },
-    {
-      "name": "non-scalar argument",
-      "valid": false,
-      "changes": [
-        {
-          "op": "set",
-          "path": [
-            "arguments",
-            0,
-            "value"
-          ],
-          "value": [
-            "1"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "argument integer outside signed range",
-      "valid": false,
-      "changes": [
-        {
-          "op": "set",
-          "path": [
-            "arguments",
-            0,
-            "value"
-          ],
-          "value": 9223372036854775808
         }
       ]
     }

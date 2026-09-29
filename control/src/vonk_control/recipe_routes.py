@@ -17,7 +17,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import read_recipe
 
 from .distributed_lifecycle import DistributedLifecycleError
 from .distributed_recovery import enforce_recovery_deadline
@@ -936,8 +936,7 @@ class RecipeRouteService:
                 for node in nodes:
                     if (
                         node.observed_run_generation != run.run_generation
-                        or not isinstance(node.observation_receipt_sha256, str)
-                        or _DIGEST.fullmatch(node.observation_receipt_sha256) is None
+                        or node.observation_observed_at is None
                     ):
                         raise RecipeRouteNotReady(
                             "recipe rank is awaiting current exact observation",
@@ -1036,15 +1035,11 @@ def _primary_model_alias(session: Session, run: RecipeRun) -> str:
             "recipe runtime interface authority is stale", run_id=run.id
         )
     try:
-        recipe = RecipeDefinition.model_validate(revision.document)
+        recipe = read_recipe(revision.document)
     except (TypeError, ValueError) as error:
         raise RecipeRouteError(
             "recipe runtime interface authority is invalid", run_id=run.id
         ) from error
-    if content_sha256(recipe) != revision.content_digest:
-        raise RecipeRouteError(
-            "recipe runtime interface authority is stale", run_id=run.id
-        )
     interfaces = recipe.model_dump(mode="json").get("interfaces")
     interface = None
     if isinstance(interfaces, list):

@@ -201,9 +201,15 @@ def _adapter_directories(engine: str) -> tuple[str, ...]:
 
 
 def _topology_mode(topology: object) -> object:
-    if isinstance(topology, Mapping):
-        return topology.get("mode")
-    return getattr(topology, "mode", None)
+    """Single or distributed, derived from the topology's node count."""
+    node_count = (
+        topology.get("node_count")
+        if isinstance(topology, Mapping)
+        else getattr(topology, "node_count", None)
+    )
+    if type(node_count) is not int or node_count < 1:
+        return None
+    return "distributed" if node_count > 1 else "single"
 
 
 __all__ = [

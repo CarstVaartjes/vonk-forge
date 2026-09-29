@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import DistributionAssignment, DistributionObject
+from vonk_agent_protocol import DistributionObject
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distribution import (
     CompositeVerifiedObjectSource,
@@ -20,6 +20,7 @@ from vonk_control.distribution import (
     ModelCacheVerifiedObjectSource,
     RecipeBuildVerifiedObjectSource,
 )
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.model_cache import (
     ModelCacheConflict,
     ModelCacheResolutionError,
@@ -33,7 +34,7 @@ from vonk_control.models import (
     FleetProfile,
     RecipeBuild,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 NODE_A = "spk_" + "a" * 32
@@ -51,8 +52,8 @@ def controller(tmp_path: Path):
     with sessions.begin() as session:
         session.add_all(
             [
-                AgentNode(node_id=NODE_A, state="active", capabilities=[]),
-                AgentNode(node_id=NODE_B, state="active", capabilities=[]),
+                AgentNode(node_id=NODE_A, state="active"),
+                AgentNode(node_id=NODE_B, state="active"),
             ]
         )
     cache = ModelCacheService(
@@ -139,7 +140,7 @@ def _seed_recipe_reference(
     slug = f"acceptance-{recipe_id[:8]}"
     document = json.loads(
         resources.files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     document["identity"] = {"publisher": publisher, "slug": slug}
@@ -151,7 +152,7 @@ def _seed_recipe_reference(
     }
     definition = RecipeDefinition.model_validate(document)
     document = definition.model_dump(mode="json")
-    recipe_digest = content_sha256(definition)
+    recipe_digest = document_sha256(definition.model_dump(mode="json"))
     with sessions.begin() as session:
         session.add(
             CatalogDocument(
@@ -251,10 +252,9 @@ def _assignment(
     archive_sha256: str,
     archive_bytes: int,
     image_digest: str,
-) -> DistributionAssignment:
-    return DistributionAssignment.parse(
+) -> NodeDistributionAssignment:
+    return NodeDistributionAssignment.parse(
         {
-            "schema_version": 2,
             "assignment_id": str(uuid4()),
             "plan_digest": plan_digest,
             "generation": 1,
@@ -400,7 +400,7 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
                     == payload
                 )
 
-        wrong_set = DistributionAssignment.parse(
+        wrong_set = NodeDistributionAssignment.parse(
             assignments[0].to_mapping() | {"model_artifact_set_sha256": "f" * 64}
         )
         with pytest.raises(DistributionError) as error:

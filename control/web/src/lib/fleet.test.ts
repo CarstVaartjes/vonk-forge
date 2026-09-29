@@ -1,5 +1,4 @@
 import type {VisualFleetNode, VisualFleetSnapshot} from "../api/types";
-import {telemetryMetrics} from "../test-fixtures/telemetry";
 import {
   formatBytes,
   formatMetric,
@@ -59,8 +58,6 @@ function telemetry(observedAt: string, memory = 80): NonNullable<VisualFleetNode
       boot_id: "00000000-0000-0000-0000-000000000001",
       observed_at: observedAt,
       received_at: observedAt,
-      cpu_utilization_percent: 10,
-      load_average_1m: 1,
       memory_total_bytes: 100,
       memory_available_bytes: memory,
       disk_total_bytes: 100,
@@ -68,13 +65,6 @@ function telemetry(observedAt: string, memory = 80): NonNullable<VisualFleetNode
       gpu_utilization_percent: 20,
       gpu_memory_total_bytes: 100,
       gpu_memory_free_bytes: memory - 10,
-      temperature_c: 42,
-      power_watts: 18,
-      network_receive_bytes_per_second: 1024,
-      network_transmit_bytes_per_second: 512,
-      gap_samples: 0,
-      details: {accelerator_name: "NVIDIA GB10", accelerator_performance_state: "P0"},
-      metrics: telemetryMetrics(observedAt),
     },
   };
 }

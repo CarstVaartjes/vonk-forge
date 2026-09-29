@@ -28,12 +28,12 @@ fn direct_deserialization_validates_bounds_and_unknown_fields() {
 
 #[test]
 fn literal_integers_do_not_accept_boolean_or_float_equivalents() {
-    let value = json!({"schema_version":1,"architecture":"linux-arm64","source_build":false,
-        "minimum_free_bytes":0,"fabric_connectivity":"none","fabric_minimum_mbps":0,"mandatory_capabilities":[]});
+    let value = json!({"source_build":false,
+        "minimum_free_bytes":0,"fabric_connectivity":"none","fabric_minimum_mbps":0});
     assert!(serde_json::from_value::<RuntimePreflightRequest>(value.clone()).is_ok());
-    for invalid in [json!(true), json!(1.0), json!(2)] {
+    for invalid in [json!(true), json!(1.5), json!(-1)] {
         let mut value = value.clone();
-        value["schema_version"] = invalid;
+        value["fabric_minimum_mbps"] = invalid;
         assert!(serde_json::from_value::<RuntimePreflightRequest>(value).is_err());
     }
 }
@@ -58,34 +58,6 @@ fn canonical_default_values_are_materialized_without_hiding_required_fields() {
 }
 
 #[test]
-fn scalar_union_preserves_tokens_and_rejects_integer_and_float_overflow() {
-    use vonk_agent_protocol::generated::TelemetrySeries;
-    let fixture = include_str!("../../../../agent_protocol/fixtures/typify-telemetry-series.json");
-    let original: Value = serde_json::from_str(fixture).unwrap();
-    let parsed: TelemetrySeries = serde_json::from_str(fixture).unwrap();
-    assert_eq!(parsed.value, original["value"]);
-    for token in [
-        "9223372036854775808",
-        "-9223372036854775809",
-        "1e400",
-        "-1e400",
-    ] {
-        let mut document = original.clone();
-        document["value"] = serde_json::from_str(token).unwrap();
-        assert!(
-            serde_json::from_value::<TelemetrySeries>(document).is_err(),
-            "{token}"
-        );
-    }
-    for token in ["1.0", "9.223372036854776e18", "1e300", "-1e300"] {
-        let mut document = original.clone();
-        document["value"] = serde_json::from_str(token).unwrap();
-        let parsed: TelemetrySeries = serde_json::from_value(document.clone()).unwrap();
-        assert_eq!(parsed.value, document["value"]);
-    }
-}
-
-#[test]
 fn metadata_named_fields_keep_their_canonical_type() {
     use vonk_agent_protocol::generated::CompiledJobInputSlot;
     let fixture = json!({"id":"image","label":"Image","description":"input image","media_types":["image/png"],"extensions":[".png"],"min_files":0,"max_files":1,"max_file_bytes":1,"max_total_bytes":1});
@@ -94,26 +66,6 @@ fn metadata_named_fields_keep_their_canonical_type() {
     let mut value = fixture.clone();
     value["description"] = json!({"unexpected":"object"});
     assert!(serde_json::from_value::<CompiledJobInputSlot>(value).is_err());
-}
-
-#[test]
-fn inherited_observation_identity_is_generated_from_the_canonical_base() {
-    let observation: vonk_agent_protocol::RecipeRunObservationWire = serde_json::from_str(
-        include_str!("../../../../agent_protocol/fixtures/recipe-run-observation.json"),
-    )
-    .unwrap();
-    let binding = vonk_agent_protocol::RecipeRunInspectionBinding::from(&observation);
-    binding.validate().unwrap();
-    assert_eq!(binding.run_id, observation.run_id);
-    assert_eq!(
-        binding.runtime_arguments_sha256,
-        observation.runtime_arguments_sha256
-    );
-    let mut value = serde_json::to_value(observation).unwrap();
-    value.as_object_mut().unwrap().remove("endpoint_ready");
-    assert!(
-        serde_json::from_value::<vonk_agent_protocol::RecipeRunObservationWire>(value).is_err()
-    );
 }
 
 #[test]
@@ -155,26 +107,23 @@ fn optional_nulls_normalize_without_erasing_required_nulls_or_empty_defaults() {
         extension
     );
     assert_eq!(
-        output["runtime"]["telemetry"]["engine_version"],
-        Value::Null
+        output["runtime"]["executable"],
+        engine["runtime"]["executable"]
     );
 }
 
 #[test]
 fn helper_response_uses_required_nulls_and_strict_optional_diagnostics() {
     use vonk_agent_protocol::{canonical_generated_json, generated::HostHelperResponse};
-    let value =
-        json!({"schema_version":1,"request_id":null,"status":"rejected","evidence_sha256":null});
+    let value = json!({"schema_version":1,"request_id":null,"status":"rejected"});
     let response: HostHelperResponse = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(
         serde_json::from_slice::<Value>(&canonical_generated_json(&response).unwrap()).unwrap(),
         value
     );
-    for field in ["request_id", "evidence_sha256"] {
-        let mut missing = value.clone();
-        missing.as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<HostHelperResponse>(missing).is_err());
-    }
+    let mut missing = value.clone();
+    missing.as_object_mut().unwrap().remove("request_id");
+    assert!(serde_json::from_value::<HostHelperResponse>(missing).is_err());
     for invalid in [json!(true), json!(-1), json!(256), json!(1.0)] {
         let mut invalid_response = value.clone();
         invalid_response["exit_code"] = invalid;

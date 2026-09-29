@@ -77,8 +77,8 @@ cache gate succeeds, the Controller distributes the exact assets to all
 selected Sparks in parallel, skips verified local copies, safely stops and
 replaces conflicting workloads, and reports durable per-Spark progress and
 readiness. After the route is active, execute the Recipe's declared HTTP
-serving checks with `scripts/qualify-recipe --serving-url URL --evidence-ledger
-PATH` and retain that bounded result separately.
+serving checks with `scripts/qualify-recipe --serving-url URL`; it prints the
+bounded result as JSON.
 
 Target ongoing behavior stores one selected-profile record in PostgreSQL,
 pointing to the immutable accepted application snapshot as standing whole-fleet

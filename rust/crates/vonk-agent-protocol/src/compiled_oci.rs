@@ -182,10 +182,7 @@ pub struct CompiledOciPaths {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OciImageReceipt {
     pub image_digest: String,
-    pub registry_manifest_digest: Option<String>,
-    pub platform_manifest_digest: String,
     pub local_image_config_id: String,
-    pub runtime_interface: String,
     pub runtime_interface_label: String,
     pub archive_name: String,
     pub oci_layout_sha256: String,
@@ -204,12 +201,8 @@ pub struct OciMount {
 pub struct OciSecurityOptions {
     pub user: String,
     pub devices: Vec<String>,
-    pub capabilities: Vec<String>,
-    pub privileged: bool,
     /// Network mode is bound to the signed endpoint and native fabric placement.
     pub network_mode: OciNetworkMode,
-    pub read_only_root: bool,
-    pub no_new_privileges: bool,
     pub memory_bytes: u64,
     pub shared_memory_bytes: u64,
     pub pids_limit: u64,
@@ -381,8 +374,7 @@ pub fn project(
         }
         match mount.source.as_str() {
             "model"
-                if mount.read_only
-                    && (mount.target == "/models" || mount.target.starts_with("/models/"))
+                if (mount.target == "/models" || mount.target.starts_with("/models/"))
                     && plan
                         .artifacts
                         .iter()
@@ -390,7 +382,7 @@ pub fn project(
             {
                 saw_model = true
             }
-            "inputs" if has_job && mount.target == "/inputs" && mount.read_only => {
+            "inputs" if has_job && mount.target == "/inputs" => {
                 saw_inputs = true;
                 let source = paths
                     .input_root
@@ -402,7 +394,7 @@ pub fn project(
                     read_only: true,
                 });
             }
-            "outputs" if mount.target == "/outputs" && !mount.read_only => {
+            "outputs" if mount.target == "/outputs" => {
                 saw_outputs = true;
                 mounts.push(OciMount {
                     source: paths.output_root.clone(),
@@ -447,17 +439,13 @@ pub fn project(
         .collect();
     let security = OciSecurityOptions {
         user: plan.security.user.clone(),
-        devices: plan.security.devices.clone(),
-        capabilities: plan.security.capabilities.clone(),
-        privileged: plan.security.privileged,
+        devices: plan.security.devices(),
         network_mode: match plan.security.network_mode.as_str() {
             "none" => OciNetworkMode::None,
             "bridge" => OciNetworkMode::Bridge,
             "host" => OciNetworkMode::Host,
             _ => return Err(CompiledOciError::Invalid("unsupported network mode")),
         },
-        read_only_root: plan.security.read_only_root,
-        no_new_privileges: plan.security.no_new_privileges,
         memory_bytes: plan.runtime.placement.reserved_memory_bytes,
         shared_memory_bytes: (plan.runtime.placement.reserved_memory_bytes / 8)
             .clamp(64 * 1024 * 1024, 16 * 1024 * 1024 * 1024),
@@ -467,12 +455,9 @@ pub fn project(
     Ok(CompiledOciInvocation {
         image_receipt: OciImageReceipt {
             image_digest: plan.runtime_image.image_digest.clone(),
-            registry_manifest_digest: plan.runtime_image.registry_manifest_digest.clone(),
-            platform_manifest_digest: plan.runtime_image.platform_manifest_digest.clone(),
             local_image_config_id: plan.runtime_image.local_image_config_id.clone(),
-            runtime_interface: plan.runtime_image.runtime_interface.clone(),
             runtime_interface_label: plan.runtime_image.runtime_interface_label.clone(),
-            archive_name: plan.runtime_image.distribution_object.name.clone(),
+            archive_name: plan.runtime_image.distribution_object().name,
             oci_layout_sha256: plan.runtime_image.oci_layout_sha256.clone(),
             image_bytes: plan.runtime_image.image_bytes,
             archive_path: paths.image_archive.clone(),
@@ -507,39 +492,6 @@ pub fn start_arguments_for_paths(
             "no".to_owned(),
         ],
     );
-    Ok(arguments)
-}
-
-/// Project a lifecycle hook onto the same image and runtime options as the
-/// compiled workload, while removing options that only apply to its main run.
-pub fn hook_arguments(
-    main: &[String],
-    image: &str,
-    hook: &[String],
-) -> Result<Vec<String>, CompiledOciError> {
-    if hook.is_empty() || main.first().map(String::as_str) != Some("run") {
-        return Err(CompiledOciError::Invalid(
-            "invalid lifecycle hook invocation",
-        ));
-    }
-    let image_index = main
-        .iter()
-        .position(|value| value == image)
-        .ok_or(CompiledOciError::Invalid("compiled image is missing"))?;
-    let mut arguments = vec!["run".to_owned(), "--rm".to_owned()];
-    let mut index = 1;
-    while index < image_index {
-        match main[index].as_str() {
-            "--detach" => index += 1,
-            "--name" | "--restart" | "--publish" => index += 2,
-            _ => {
-                arguments.push(main[index].clone());
-                index += 1;
-            }
-        }
-    }
-    arguments.push(image.to_owned());
-    arguments.extend(hook.iter().cloned());
     Ok(arguments)
 }
 
@@ -584,30 +536,14 @@ fn validate_security(plan: &CompiledExecutionPlan) -> Result<(), CompiledOciErro
             || placement.local_address.is_none()
             || placement.master_address.is_none()
             || plan.endpoint.is_none()
-            || plan.security.devices != ["nvidia.com/gpu=all"])
+            || !plan.security.gpu)
     {
         return Err(CompiledOciError::Invalid(
             "native fabric placement is incomplete",
         ));
     }
-    if plan.security.privileged
-        || !plan.security.capabilities.is_empty()
-        || !plan.security.read_only_root
-        || !plan.security.no_new_privileges
-        || plan.security.network_mode.as_str() != expected_network_mode
-        || plan.security.devices.len() > 1
-        || plan
-            .security
-            .devices
-            .iter()
-            .any(|value| value != "nvidia.com/gpu=all")
-    {
+    if plan.security.network_mode.as_str() != expected_network_mode {
         return Err(CompiledOciError::Invalid("security override"));
-    }
-    if plan.security.host_network != native_fabric {
-        return Err(CompiledOciError::Invalid(
-            "host network mode is not authorized",
-        ));
     }
     Ok(())
 }
@@ -931,7 +867,7 @@ mod tests {
         let mut expected_post_image = vec!["/opt/vonk/bin/vllm".to_owned()];
         expected_post_image.extend(plan.runtime.argv.clone());
         assert_eq!(&podman[image_index + 1..], expected_post_image.as_slice());
-        assert_eq!(invocation.image, plan.runtime_image.local_image_reference);
+        assert_eq!(invocation.image, plan.runtime_image.local_image_reference());
         assert!(
             podman
                 .windows(2)
@@ -939,23 +875,6 @@ mod tests {
         );
         assert!(!podman[..image_index].contains(&"bridge".to_owned()));
         assert!(!podman[..image_index].contains(&"host".to_owned()));
-    }
-
-    #[test]
-    fn local_image_reference_is_derived_not_the_transported_copy() {
-        // Wrong implementation: the accessor cloned the transported field, so a
-        // plan read before validation could hand the container engine a
-        // Controller transport path -- or an empty reference -- instead of the
-        // immutable derivation the struct's own `validate()` requires.
-        let mut value = fixture();
-        let reference: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
-        let expected = reference.runtime_image.local_image_reference();
-        assert!(expected.starts_with("localhost/vonk/compiled-runtime-"));
-
-        value["runtime_image"]["local_image_reference"] = json!("");
-        let broken: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-        assert_eq!(broken.runtime_image.local_image_reference(), expected);
-        assert!(broken.validate().is_err());
     }
 
     #[test]
@@ -1024,15 +943,10 @@ mod tests {
 
         let start_plan = crate::recipe_start_tests::valid_start_plan();
         let request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::Start,
-            job_id: Uuid::new_v4(),
-            operation_id: Uuid::new_v4(),
-            attempt: 1,
             fence: Uuid::new_v4(),
             arguments,
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: Some(start_plan.run_generation),
@@ -1103,14 +1017,10 @@ mod tests {
     #[test]
     fn identical_receipts_may_be_reused_by_separate_selections() {
         let mut value = fixture();
-        let receipt = value["artifacts"][0]["distribution_object"].clone();
         let digest = value["artifacts"][0]["sha256"].clone();
         let bytes = value["artifacts"][0]["size_bytes"].clone();
-        value["identity"]["model_artifact_bytes"] = bytes.clone();
         value["artifacts"][1]["sha256"] = digest;
-        value["artifacts"][1]["size_bytes"] = bytes.clone();
-        value["artifacts"][1]["distribution_object"]["bytes"] = bytes;
-        value["artifacts"][1]["distribution_object"] = receipt;
+        value["artifacts"][1]["size_bytes"] = bytes;
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let invocation = project(&plan, &paths()).unwrap();
         assert_eq!(
@@ -1128,23 +1038,16 @@ mod tests {
     #[test]
     fn empty_support_file_remains_a_read_only_mount() {
         let mut value = fixture();
-        value["identity"]["model_artifact_bytes"] = json!(0);
         let artifact = &mut value["artifacts"][0];
         artifact["file_id"] = json!("tokenizer-config");
         artifact["path"] = json!("tokenizer_config.json");
         artifact["sha256"] = json!(crate::compiled_execution_plan::EMPTY_SHA256);
         artifact["size_bytes"] = json!(0);
         artifact["roles"] = json!(["tokenizer"]);
-        artifact["distribution_object"] = json!({
-            "name":"tokenizer_config.json",
-            "sha256":crate::compiled_execution_plan::EMPTY_SHA256,
-            "bytes":0,
-            "kind":"model"
-        });
         value["artifacts"] = json!([artifact.clone()]);
         value["security"]["mounts"] = json!([
-            {"source":"model","target":"/models/target","read_only":true},
-            {"source":"outputs","target":"/outputs","read_only":false}
+            {"source":"model","target":"/models/target"},
+            {"source":"outputs","target":"/outputs"}
         ]);
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let invocation = project(&plan, &paths()).unwrap();
@@ -1162,19 +1065,17 @@ mod tests {
         value["job"] = json!({
             "interface": "image-job",
             "input": {
-                "path": "/inputs",
                 "required": true,
                 "media_types": ["application/octet-stream"],
                 "max_bytes": 1024,
                 "slots": null
             },
-            "output_path": "/outputs",
             "timeout_seconds": 90
         });
         value["security"]["mounts"] = json!([
-            {"source":"model","target":"/models/target","read_only":true},
-            {"source":"inputs","target":"/inputs","read_only":true},
-            {"source":"outputs","target":"/outputs","read_only":false}
+            {"source":"model","target":"/models/target"},
+            {"source":"inputs","target":"/inputs"},
+            {"source":"outputs","target":"/outputs"}
         ]);
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let mut layout = paths();
@@ -1214,10 +1115,9 @@ mod tests {
             } else {
                 json!(null)
             };
-            value["topology"] = json!({"name":"dual", "mode":"distributed", "node_count":2, "world_size":2, "rank":rank, "role":role, "backend":"mp"});
-            value["security"]["host_network"] = json!(true);
+            value["topology"] = json!({"name":"dual", "node_count":2});
             value["security"]["network_mode"] = json!("host");
-            value["security"]["devices"] = json!(["nvidia.com/gpu=all"]);
+            value["security"]["gpu"] = json!(true);
             let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
             let mut installed_value = value.clone();
             for field in [
@@ -1229,7 +1129,6 @@ mod tests {
                 installed_value["runtime"]["placement"][field] = json!(null);
             }
             installed_value["security"]["network_mode"] = json!("none");
-            installed_value["security"]["host_network"] = json!(false);
             let installed: CompiledExecutionPlan = serde_json::from_value(installed_value).unwrap();
             assert!(crate::compiled_execution_plan::same_installed_workload(
                 &installed, &plan
@@ -1247,7 +1146,6 @@ mod tests {
                     .any(|args| args == ["--ulimit", "memlock=-1:-1"])
             );
             value["security"]["network_mode"] = json!("bridge");
-            value["security"]["host_network"] = json!(false);
             let wrong: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
             assert!(project(&wrong, &paths()).is_err());
         }
@@ -1256,24 +1154,9 @@ mod tests {
     #[test]
     fn unauthorized_host_network_mode_is_rejected() {
         let mut value = fixture();
-        value["security"]["host_network"] = json!(true);
+        value["security"]["network_mode"] = json!("host");
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         assert!(project(&plan, &paths()).is_err());
-    }
-
-    #[test]
-    fn endpoint_lifecycle_commands_remain_direct_argv_vectors() {
-        let mut value = fixture();
-        value["lifecycle"] = json!({
-            "pre_start": [["/opt/vonk/pre", "--network", "value"]],
-            "post_stop": [["/opt/vonk/post", ""]],
-            "stop_timeout_seconds": 45
-        });
-        let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-        let invocation = project(&plan, &paths()).unwrap();
-        assert_eq!(invocation.lifecycle.pre_start[0][1], "--network");
-        assert_eq!(invocation.lifecycle.post_stop[0][1], "");
-        assert_eq!(invocation.lifecycle.stop_timeout_seconds, 45);
     }
 
     #[test]
@@ -1281,7 +1164,7 @@ mod tests {
         let mut value = fixture();
         value["runtime"]["placement"]["endpoint_address"] = json!("192.168.1.211");
         value["security"]["network_mode"] = json!("bridge");
-        value["security"]["devices"] = json!(["nvidia.com/gpu=all"]);
+        value["security"]["gpu"] = json!(true);
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let invocation = project(&plan, &paths()).unwrap();
         assert_eq!(invocation.security.network_mode, OciNetworkMode::Bridge);

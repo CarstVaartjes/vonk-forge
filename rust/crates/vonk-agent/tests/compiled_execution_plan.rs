@@ -18,7 +18,6 @@ fn generated_python_workload_fixture_round_trips_through_rust() {
     let value = fixture();
     let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
     plan.validate().unwrap();
-    assert_eq!(plan.schema_version, 2);
     assert_eq!(plan.runtime.executable, "/opt/vonk/bin/vllm");
     assert_eq!(plan.artifacts.len(), 3);
     assert_eq!(plan.artifacts[0].path, "config.json");
@@ -31,33 +30,6 @@ fn generated_python_workload_fixture_round_trips_through_rust() {
             .contains(&"--served-model-name".to_owned())
     );
     assert_eq!(serde_json::to_value(plan).unwrap(), value);
-}
-
-#[test]
-fn recipe_topology_vocabulary_and_engine_backends_survive_validation() {
-    for mode in [
-        "single",
-        "distributed",
-        "tensor_parallel",
-        "pipeline_parallel",
-        "data_parallel",
-        "hybrid",
-        "ray",
-        "mpi",
-    ] {
-        for backend in ["tcp", "ucx", "future-engine-Δ"] {
-            let mut value = fixture();
-            value["topology"]["mode"] = json!(mode);
-            value["topology"]["backend"] = json!(backend);
-            let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-            plan.validate().unwrap();
-            assert_eq!(plan.topology.mode, mode);
-            assert_eq!(plan.topology.backend, backend);
-        }
-    }
-    let mut value = fixture();
-    value["topology"]["backend"] = json!("");
-    assert!(serde_json::from_value::<CompiledExecutionPlan>(value).is_err());
 }
 
 #[test]
@@ -74,7 +46,6 @@ fn endpoint_and_job_are_required_one_of_wire_keys() {
     value["job"] = json!({
         "interface": "artifact-job",
         "input": null,
-        "output_path": "/outputs",
         "timeout_seconds": 30
     });
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
@@ -89,7 +60,6 @@ fn compiled_job_input_round_trips_as_a_fixed_nested_contract() {
     value["job"] = json!({
         "interface": "artifact-job",
         "input": {
-            "path": "/inputs",
             "required": true,
             "media_types": ["application/json"],
             "max_bytes": 1024,
@@ -105,7 +75,6 @@ fn compiled_job_input_round_trips_as_a_fixed_nested_contract() {
                 "max_total_bytes": 1024
             }]
         },
-        "output_path": "/outputs",
         "timeout_seconds": 60
     });
     let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
@@ -156,7 +125,6 @@ fn canonical_unicode_space_and_max_length_model_identity_round_trip() {
     let publisher = format!("发布者 {}", "_".repeat(124));
     assert_eq!(publisher.chars().count(), 128);
     value["artifacts"][0]["path"] = json!(path);
-    value["artifacts"][0]["distribution_object"]["name"] = json!(path);
     value["artifacts"][0]["model"]["publisher"] = json!(publisher);
 
     let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
@@ -179,7 +147,6 @@ fn unsafe_model_path_and_publisher_values_remain_rejected() {
     ] {
         let mut value = fixture();
         value["artifacts"][0]["path"] = json!(path);
-        value["artifacts"][0]["distribution_object"]["name"] = json!(path);
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         assert!(plan.validate().is_err(), "{path}");
     }
@@ -211,19 +178,12 @@ fn duplicate_final_mount_target_is_rejected() {
 #[test]
 fn valid_empty_support_file_is_admitted_and_empty_weight_is_rejected() {
     let mut value = fixture();
-    value["identity"]["model_artifact_bytes"] = serde_json::json!(0);
     let artifact = &mut value["artifacts"][0];
     artifact["file_id"] = serde_json::json!("tokenizer-config");
     artifact["path"] = serde_json::json!("tokenizer_config.json");
     artifact["sha256"] = serde_json::json!(vonk_agent::workloads::EMPTY_SHA256);
     artifact["size_bytes"] = serde_json::json!(0);
     artifact["roles"] = serde_json::json!(["tokenizer"]);
-    artifact["distribution_object"] = serde_json::json!({
-        "name": "tokenizer_config.json",
-        "sha256": vonk_agent::workloads::EMPTY_SHA256,
-        "bytes": 0,
-        "kind": "model"
-    });
     value["artifacts"] = serde_json::json!([artifact.clone()]);
     let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
     plan.validate().unwrap();
@@ -278,11 +238,11 @@ fn opaque_argv_rejects_nul_and_token_or_total_overflow() {
 fn canonical_multi_model_mount_projection_is_admitted() {
     let mut value = fixture();
     value["security"]["mounts"] = json!([
-        {"source": "model", "target": "/models/target", "read_only": true},
-        {"source": "model", "target": "/models/draft", "read_only": true},
-        {"source": "model", "target": "/models/support", "read_only": true},
-        {"source": "inputs", "target": "/inputs", "read_only": true},
-        {"source": "outputs", "target": "/outputs", "read_only": false}
+        {"source": "model", "target": "/models/target"},
+        {"source": "model", "target": "/models/draft"},
+        {"source": "model", "target": "/models/support"},
+        {"source": "inputs", "target": "/inputs"},
+        {"source": "outputs", "target": "/outputs"}
     ]);
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     plan.validate().unwrap();
@@ -290,32 +250,30 @@ fn canonical_multi_model_mount_projection_is_admitted() {
 
 #[test]
 fn mount_source_and_target_policy_matches_python_matrix() {
-    for (source, target, read_only) in [
-        ("model", "/models", true),
-        ("model", "/models/secondary", true),
-        ("inputs", "/inputs", true),
-        ("outputs", "/outputs", false),
+    for (source, target) in [
+        ("model", "/models"),
+        ("model", "/models/secondary"),
+        ("inputs", "/inputs"),
+        ("outputs", "/outputs"),
     ] {
         let mut value = fixture();
         value["security"]["mounts"] = json!([{
             "source": source,
-            "target": target,
-            "read_only": read_only
+            "target": target
         }]);
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         plan.validate().unwrap();
     }
 
-    for (source, target, read_only) in [
-        ("model", "/inputs", true),
-        ("inputs", "/models", true),
-        ("outputs", "/models", false),
+    for (source, target) in [
+        ("model", "/inputs"),
+        ("inputs", "/models"),
+        ("outputs", "/models"),
     ] {
         let mut value = fixture();
         value["security"]["mounts"] = json!([{
             "source": source,
-            "target": target,
-            "read_only": read_only
+            "target": target
         }]);
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         assert!(matches!(
@@ -333,8 +291,7 @@ fn mount_projection_rejects_over_duplicate_or_unsafe_targets() {
         let index = mounts.len();
         mounts.push(json!({
             "source": "model",
-            "target": format!("/models/extra-{index}"),
-            "read_only": true
+            "target": format!("/models/extra-{index}")
         }));
     }
     let plan: CompiledExecutionPlan = serde_json::from_value(over).unwrap();

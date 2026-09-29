@@ -11,10 +11,16 @@ MIRROR = ROOT / "schemas"
 STANDALONE_SCHEMAS = {
     "install-release-manifest.schema.json",
 }
+# The packaged CLI OpenAPI document has no repository mirror.
+PACKAGE_ONLY_SCHEMAS = {"control-openapi.json"}
 
 
 def test_repository_schema_mirrors_match_canonical_package_schemas() -> None:
-    canonical_names = {path.name for path in CANONICAL.glob("*.json")}
+    canonical_names = {
+        path.name
+        for path in CANONICAL.glob("*.json")
+        if path.name not in PACKAGE_ONLY_SCHEMAS
+    }
     mirror_names = {
         path.name
         for path in MIRROR.glob("*.json")

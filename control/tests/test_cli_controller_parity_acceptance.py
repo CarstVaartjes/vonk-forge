@@ -36,7 +36,10 @@ from cluster_profiles import cli
 
 ROOT = Path(__file__).resolve().parents[2]
 schema_path = Path(
-    os.environ.get("VONK_OPERATOR_OPENAPI", str(ROOT / "schemas/control-openapi.json"))
+    os.environ.get(
+        "VONK_OPERATOR_OPENAPI",
+        str(ROOT / "src/cluster_profiles/schemas/control-openapi.json"),
+    )
 )
 OPENAPI = json.loads(schema_path.read_text())
 if "/api/model/library" not in OPENAPI.get("paths", {}):
@@ -51,7 +54,7 @@ OPERATION_ID = "00000000-0000-4000-8000-000000000100"
 PROFILE_ID = "00000000-0000-4000-8000-000000000101"
 NOW = "2026-09-10T10:00:00+00:00"
 SPARK = "spk_" + "1" * 32
-RECIPE_SELECTOR = "vonk-forge/synthetic-tiny-image"
+RECIPE_SELECTOR = "vonk-forge/synthetic-tiny-build"
 
 
 class ModelRequest(BaseModel):

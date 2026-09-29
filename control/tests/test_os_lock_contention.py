@@ -78,45 +78,6 @@ def test_reference_fence_claim_is_bounded_when_another_process_holds_it(
         pass
 
 
-def test_oci_layer_lock_claim_is_bounded_when_another_writer_holds_it(
-    tmp_path: Path,
-) -> None:
-    """A contended OCI layer lock fails retryably instead of parking the worker.
-
-    It fails on the wrong implementation that calls a blocking ``flock``, and
-    it also pins that the failure is retryable, because a preparation that
-    cannot take the lock must be rescheduled rather than reported as terminal.
-    """
-
-    lock_path = tmp_path / "layer.lock"
-    holder = _hold(lock_path)
-    try:
-        started = time.monotonic()
-        with (
-            lock_path.open("a+b") as lock,
-            pytest.raises(
-                runtime_image_preparation.RuntimeImagePreparationError,
-                match="same OCI index",
-            ) as failure,
-        ):
-            runtime_image_preparation._claim_registry_layer_lock(
-                lock, reference="registry.example/vonk/tiny"
-            )
-        assert failure.value.retryable is True
-        assert failure.value.recovery_actions == ("retry",)
-        assert time.monotonic() - started < 0.1, (
-            "OCI contention parked an image slot instead of rescheduling"
-        )
-    finally:
-        holder.terminate()
-        holder.wait(timeout=10)
-
-    with lock_path.open("a+b") as lock:
-        runtime_image_preparation._claim_registry_layer_lock(
-            lock, reference="registry.example/vonk/tiny"
-        )
-
-
 def test_publication_lock_claim_is_bounded_when_another_publisher_holds_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

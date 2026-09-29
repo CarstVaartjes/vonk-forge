@@ -1,19 +1,15 @@
 use std::io::{Read, Write};
 
-use ring::signature::{self, Ed25519KeyPair, KeyPair};
+use ring::signature;
 use thiserror::Error;
-use uuid::Uuid;
 use vonk_agent_protocol::{
-    HOST_HELPER_AUTHORITY, RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunObservationOutcome,
-    RecipeRunObservationReceipt, RecipeRunObservationReceiptClaims,
-    RecipeRunObservationReceiptSignature, canonical_json, hex_sha256,
-    host_helper_grant_signing_bytes, recipe_run_observation_receipt_signing_bytes,
+    HOST_HELPER_AUTHORITY, RecipeRunInspectionRequest, canonical_json, hex_sha256,
+    host_helper_grant_signing_bytes,
 };
 pub use vonk_agent_protocol::{
     HostHelperContainerRuntimeAction as ContainerRuntimeAction,
     HostHelperGrantClaims as GrantClaims, HostHelperGrantSignature as GrantSignature,
-    HostHelperOperation as HostOperation, HostHelperRestartUnit as RestartUnit,
-    SignedHostHelperGrant as SignedGrant,
+    HostHelperOperation as HostOperation, SignedHostHelperGrant as SignedGrant,
 };
 
 /// The same frame ceiling the agent frames against; declared once in the wire
@@ -90,17 +86,23 @@ impl GrantVerifier {
         })
     }
 
+    /// Only the agent group may talk to the helper at all.
+    pub fn authorize_peer(&self, peer: &PeerIdentity) -> Result<(), HelperError> {
+        if peer.primary_gid != self.allowed_gid
+            && !peer.supplementary_gids.contains(&self.allowed_gid)
+        {
+            return Err(HelperError::InvalidPeer);
+        }
+        Ok(())
+    }
+
     pub fn authorize(
         &self,
         grant: &SignedGrant,
         peer: &PeerIdentity,
         now: i64,
     ) -> Result<(), HelperError> {
-        if peer.primary_gid != self.allowed_gid
-            && !peer.supplementary_gids.contains(&self.allowed_gid)
-        {
-            return Err(HelperError::InvalidPeer);
-        }
+        self.authorize_peer(peer)?;
         grant
             .claims
             .validate()
@@ -139,42 +141,23 @@ pub fn parse_request(raw: &[u8]) -> Result<SignedGrant, HelperError> {
     Ok(request)
 }
 
-pub fn canonical_signing_bytes(claims: &GrantClaims) -> Result<Vec<u8>, HelperError> {
-    host_helper_grant_signing_bytes(claims).map_err(|_| HelperError::InvalidAuthorization)
+/// Parse the one ungranted frame: a read-only inspection of a managed run.
+pub fn parse_inspection_request(raw: &[u8]) -> Result<RecipeRunInspectionRequest, HelperError> {
+    if raw.is_empty() || raw.len() > MAX_MESSAGE_BYTES {
+        return Err(HelperError::InvalidMessage);
+    }
+    let request: RecipeRunInspectionRequest =
+        serde_json::from_slice(raw).map_err(|_| HelperError::InvalidMessage)?;
+    if canonical_json(&request).map_err(|_| HelperError::InvalidMessage)? != raw
+        || !valid_digest(&request.request_sha256)
+    {
+        return Err(HelperError::InvalidMessage);
+    }
+    Ok(request)
 }
 
-pub fn sign_observation_receipt(
-    signer: &Ed25519KeyPair,
-    node_id: &str,
-    request_id: Uuid,
-    request_sha256: &str,
-    observation_identity_sha256: &str,
-    outcome: RecipeRunObservationOutcome,
-    observed_at: i64,
-) -> Result<RecipeRunObservationReceipt, HelperError> {
-    let claims = RecipeRunObservationReceiptClaims {
-        schema_version: 1,
-        authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
-        node_id: node_id.to_owned(),
-        request_id,
-        request_sha256: request_sha256.to_owned(),
-        observation_identity_sha256: observation_identity_sha256.to_owned(),
-        outcome,
-        observed_at,
-    };
-    let signature = signer.sign(
-        &recipe_run_observation_receipt_signing_bytes(&claims)
-            .map_err(|_| HelperError::InvalidOperation)?,
-    );
-    Ok(RecipeRunObservationReceipt {
-        schema_version: 1,
-        claims,
-        signature: RecipeRunObservationReceiptSignature {
-            algorithm: "ed25519".to_owned(),
-            key_id: hex_sha256(signer.public_key().as_ref()),
-            value: hex::encode(signature.as_ref()),
-        },
-    })
+pub fn canonical_signing_bytes(claims: &GrantClaims) -> Result<Vec<u8>, HelperError> {
+    host_helper_grant_signing_bytes(claims).map_err(|_| HelperError::InvalidAuthorization)
 }
 
 pub fn artifact_signing_bytes(kind: &str, digest: &str) -> Result<Vec<u8>, HelperError> {
@@ -222,88 +205,4 @@ fn valid_signature(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-}
-
-#[cfg(test)]
-mod receipt_tests {
-    use super::{HelperError, sign_observation_receipt};
-    use ring::signature::{Ed25519KeyPair, KeyPair, UnparsedPublicKey};
-    use uuid::Uuid;
-    use vonk_agent_protocol::{
-        RecipeRunObservationOutcome, recipe_run_observation_receipt_signing_bytes,
-    };
-
-    #[test]
-    fn python_signed_receipt_fixture_verifies_with_the_shared_canonical_bytes() {
-        let raw = std::fs::read(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../agent_protocol/fixtures/recipe-run-observation-receipt.json"
-        ))
-        .unwrap();
-        let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);
-        let receipt: vonk_agent_protocol::RecipeRunObservationReceipt =
-            serde_json::from_slice(raw).unwrap();
-        receipt.validate().unwrap();
-        assert_eq!(vonk_agent_protocol::canonical_json(&receipt).unwrap(), raw);
-        assert_eq!(
-            receipt.signature.key_id,
-            "56fae12f7716462746a3a802817ca762f4e6217028b66e1a70a2a6a2e71b7fc7"
-        );
-        let public_key =
-            hex::decode("66cd608b928b88e50e0efeaa33faf1c43cefe07294b0b87e9fe0aba6a3cf7633")
-                .unwrap();
-        let signature = hex::decode(&receipt.signature.value).unwrap();
-        UnparsedPublicKey::new(&ring::signature::ED25519, &public_key)
-            .verify(
-                &recipe_run_observation_receipt_signing_bytes(&receipt.claims).unwrap(),
-                &signature,
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn signed_receipt_fixture_verifies_and_every_claim_is_covered() {
-        let signer = Ed25519KeyPair::from_seed_unchecked(&[19; 32]).unwrap();
-        let request_id = Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap();
-        let receipt = sign_observation_receipt(
-            &signer,
-            "spk_0123456789abcdef0123456789abcdef",
-            request_id,
-            &"a".repeat(64),
-            &"b".repeat(64),
-            RecipeRunObservationOutcome::NotRunning,
-            1_788_000_000,
-        )
-        .unwrap();
-        receipt.validate().unwrap();
-        let signature = hex::decode(&receipt.signature.value).unwrap();
-        UnparsedPublicKey::new(&ring::signature::ED25519, signer.public_key().as_ref())
-            .verify(
-                &recipe_run_observation_receipt_signing_bytes(&receipt.claims).unwrap(),
-                &signature,
-            )
-            .unwrap();
-
-        let mut changed = receipt;
-        changed.claims.request_id = Uuid::new_v4();
-        assert!(
-            UnparsedPublicKey::new(&ring::signature::ED25519, signer.public_key().as_ref())
-                .verify(
-                    &recipe_run_observation_receipt_signing_bytes(&changed.claims).unwrap(),
-                    &signature,
-                )
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn helper_io_errors_have_stable_redacted_diagnostics() {
-        let error = HelperError::Io(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "/var/lib/vonk-forge/private-key.pem",
-        ));
-        assert_eq!(error.code(), "helper.io_failed");
-        assert_eq!(error.safe_detail(), "helper I/O failed");
-        assert!(!error.safe_detail().contains("private-key"));
-    }
 }

@@ -110,7 +110,7 @@ impl AgentUpgradeExecutor<'_> {
         let response = tokio::task::spawn_blocking(move || call_helper(&body))
             .await
             .map_err(|_| AgentUpgradeError::HelperResponseInvalid)??;
-        validate_helper_response(&response, &request_id, &request.package_sha256)?;
+        validate_helper_response(&response, &request_id)?;
         if response.status != "package-installed" {
             return Err(AgentUpgradeError::HelperResponseInvalid);
         }
@@ -277,9 +277,8 @@ pub(crate) fn call_helper(body: &[u8]) -> Result<HelperResponse, AgentUpgradeErr
 pub(crate) fn validate_helper_response(
     response: &HelperResponse,
     expected_request_id: &str,
-    expected_package_sha256: &str,
 ) -> Result<(), AgentUpgradeError> {
-    if response.schema_version != 1 || response.observation_receipt.is_some() {
+    if response.schema_version != 1 || response.process_running.is_some() {
         return Err(AgentUpgradeError::HelperResponseInvalid);
     }
     if response.status == "rejected" {
@@ -288,7 +287,6 @@ pub(crate) fn validate_helper_response(
             .map(|id| id.to_string())
             .as_deref()
             .is_some_and(|value| value != expected_request_id)
-            || response.evidence_sha256.is_some()
             || response
                 .exit_code
                 .is_some_and(|value| !(0..=255).contains(&value))
@@ -313,13 +311,11 @@ pub(crate) fn validate_helper_response(
             None => AgentUpgradeError::HelperRejected,
         });
     }
-    let expected_evidence_sha256 = hex::encode(Sha256::digest(expected_package_sha256.as_bytes()));
     if response.request_id.map(|id| id.to_string()).as_deref() != Some(expected_request_id)
         || !matches!(
             response.status.as_str(),
             "package-installed" | "package-activation-confirmed"
         )
-        || response.evidence_sha256.as_deref() != Some(expected_evidence_sha256.as_str())
         || response.exit_code.is_some()
         || response.error_code.is_some()
     {
@@ -351,14 +347,7 @@ fn stable_helper_error_code(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{AgentUpgradeError, HelperResponse, validate_helper_response};
-    use sha2::{Digest, Sha256};
     use vonk_agent_protocol::{canonical_generated_json, parse_strict};
-
-    const PACKAGE_SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-    fn package_evidence_sha256() -> String {
-        hex::encode(Sha256::digest(PACKAGE_SHA256.as_bytes()))
-    }
 
     fn response(status: &str) -> HelperResponse {
         HelperResponse {
@@ -367,10 +356,9 @@ mod tests {
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: status.parse().unwrap(),
-            evidence_sha256: None,
             error_code: None,
             exit_code: None,
-            observation_receipt: None,
+            process_running: None,
         }
     }
 
@@ -381,60 +369,36 @@ mod tests {
         response.exit_code = Some(1);
         response.diagnostic = Some("permission denied\npassword=do-not-expose".into());
         let response = parse_strict(&canonical_generated_json(&response).unwrap()).unwrap();
-        let error = validate_helper_response(
-            &response,
-            "10000000-0000-4000-8000-000000000001",
-            PACKAGE_SHA256,
-        )
-        .unwrap_err();
+        let error = validate_helper_response(&response, "10000000-0000-4000-8000-000000000001")
+            .unwrap_err();
         assert!(error.diagnostic().unwrap().contains("permission denied"));
         assert!(!error.diagnostic().unwrap().contains("do-not-expose"));
     }
 
     #[test]
-    fn package_context_rejects_the_shared_observation_receipt_field() {
-        let receipt = serde_json::from_str(include_str!(
-            "../../../../agent_protocol/fixtures/recipe-run-observation-receipt.json"
-        ))
-        .unwrap();
+    fn package_context_rejects_the_shared_inspection_outcome_field() {
         let mut response = response("package-installed");
-        response.evidence_sha256 = Some(package_evidence_sha256());
-        response.observation_receipt = Some(receipt);
+        response.process_running = Some(true);
         let mut response: HelperResponse =
             parse_strict(&canonical_generated_json(&response).unwrap()).unwrap();
         assert!(matches!(
-            validate_helper_response(
-                &response,
-                "10000000-0000-4000-8000-000000000001",
-                PACKAGE_SHA256
-            ),
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
             Err(AgentUpgradeError::HelperResponseInvalid)
         ));
         response.status = "rejected".parse().unwrap();
-        response.evidence_sha256 = None;
         assert!(matches!(
-            validate_helper_response(
-                &response,
-                "10000000-0000-4000-8000-000000000001",
-                PACKAGE_SHA256
-            ),
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
             Err(AgentUpgradeError::HelperResponseInvalid)
         ));
     }
 
     #[test]
     fn accepts_rejection_without_optional_diagnostics() {
-        let response: HelperResponse = parse_strict(
-            br#"{"evidence_sha256":null,"request_id":null,"schema_version":1,"status":"rejected"}"#,
-        )
-        .unwrap();
+        let response: HelperResponse =
+            parse_strict(br#"{"request_id":null,"schema_version":1,"status":"rejected"}"#).unwrap();
         assert!(response.error_code.is_none());
         assert!(matches!(
-            validate_helper_response(
-                &response,
-                "10000000-0000-4000-8000-000000000001",
-                PACKAGE_SHA256
-            ),
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
             Err(AgentUpgradeError::HelperRejected)
         ));
     }
@@ -443,12 +407,8 @@ mod tests {
     fn accepts_stable_helper_rejection_diagnostics() {
         let mut response = response("rejected");
         response.error_code = Some("operation_failed".to_owned());
-        let error = validate_helper_response(
-            &response,
-            "10000000-0000-4000-8000-000000000001",
-            PACKAGE_SHA256,
-        )
-        .unwrap_err();
+        let error = validate_helper_response(&response, "10000000-0000-4000-8000-000000000001")
+            .unwrap_err();
         assert!(matches!(
             &error,
             AgentUpgradeError::HelperRejectedWithCode { .. }
@@ -464,12 +424,8 @@ mod tests {
         let mut response = response("rejected");
         response.error_code = Some("package_install_failed".to_owned());
         response.exit_code = Some(75);
-        let error = validate_helper_response(
-            &response,
-            "10000000-0000-4000-8000-000000000001",
-            PACKAGE_SHA256,
-        )
-        .unwrap_err();
+        let error = validate_helper_response(&response, "10000000-0000-4000-8000-000000000001")
+            .unwrap_err();
         assert_eq!(
             error.helper_diagnostics(),
             Some(("package_install_failed", Some(75)))
@@ -486,22 +442,14 @@ mod tests {
         response.error_code = Some("package_install_failed".to_owned());
         response.exit_code = Some(256);
         assert!(matches!(
-            validate_helper_response(
-                &response,
-                "10000000-0000-4000-8000-000000000001",
-                PACKAGE_SHA256
-            ),
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
             Err(AgentUpgradeError::HelperResponseInvalid)
         ));
 
         response.error_code = Some("operation_failed".to_owned());
         response.exit_code = Some(1);
         assert!(matches!(
-            validate_helper_response(
-                &response,
-                "10000000-0000-4000-8000-000000000001",
-                PACKAGE_SHA256
-            ),
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
             Err(AgentUpgradeError::HelperResponseInvalid)
         ));
     }
@@ -511,11 +459,7 @@ mod tests {
         let mut response = response("rejected");
         response.error_code = Some("dpkg stderr: secret".to_owned());
         assert!(matches!(
-            validate_helper_response(
-                &response,
-                "10000000-0000-4000-8000-000000000001",
-                PACKAGE_SHA256
-            ),
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
             Err(AgentUpgradeError::HelperResponseInvalid)
         ));
     }
@@ -523,23 +467,13 @@ mod tests {
     #[test]
     fn distinguishes_invalid_response_from_restart_not_observed() {
         let mut response = response("package-installed");
-        response.evidence_sha256 = Some(package_evidence_sha256());
         assert!(
-            validate_helper_response(
-                &response,
-                "10000000-0000-4000-8000-000000000001",
-                PACKAGE_SHA256
-            )
-            .is_ok()
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_ok()
         );
 
         response.request_id = Some("20000000-0000-4000-8000-000000000002".parse().unwrap());
         assert!(matches!(
-            validate_helper_response(
-                &response,
-                "10000000-0000-4000-8000-000000000001",
-                PACKAGE_SHA256
-            ),
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
             Err(AgentUpgradeError::HelperResponseInvalid)
         ));
         assert_eq!(
@@ -559,20 +493,6 @@ mod tests {
             handoff.contains("awaiting identity confirmation") && !handoff.contains("did not"),
             "the by-design install handoff must name its awaiting state, not a failure: {handoff:?}"
         );
-    }
-
-    #[test]
-    fn rejects_success_evidence_for_a_different_package() {
-        let mut response = response("package-installed");
-        response.evidence_sha256 = Some(hex::encode(Sha256::digest(b"different-package")));
-        assert!(matches!(
-            validate_helper_response(
-                &response,
-                "10000000-0000-4000-8000-000000000001",
-                PACKAGE_SHA256
-            ),
-            Err(AgentUpgradeError::HelperResponseInvalid)
-        ));
     }
 
     #[test]

@@ -14,7 +14,6 @@ from sqlalchemy import select
 from vonk_agent_protocol import AgentResult
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import (
-    AgentNode,
     AgentOperation,
     AgentOperationAttempt,
     AgentPresence,
@@ -38,22 +37,6 @@ from .test_run_switch_operations import (
     _record_successful_reconcile_member,
     _service,
 )
-
-_RECONCILE_CAPABILITIES = {
-    "recipe.reconcile",
-    "recipe.reconcile.v1",
-    "agent.lifecycle.resume.exact.v1",
-}
-
-
-def _enable_reconciliation(sessions, node_ids: tuple[str, ...]) -> None:
-    with sessions.begin() as session:
-        for node_id in node_ids:
-            node = session.get(AgentNode, node_id)
-            assert node is not None
-            node.capabilities = sorted(
-                set(node.capabilities or []) | _RECONCILE_CAPABILITIES
-            )
 
 
 def _record_original_install_attempts(sessions, installation_id: str) -> None:
@@ -104,7 +87,6 @@ def test_postgres_reconcile_lock_excludes_concurrent_group_start(
         node_ids,
         request_id=str(uuid.uuid4()),
     )
-    _enable_reconciliation(sessions, node_ids)
     _record_original_install_attempts(sessions, installation.owner_id)
     authority = lifecycle.preview_reconciliation_authority(installation.owner_id)
     start_plan = lifecycle.preview_run(installation.owner_id, "reconcile-race")
@@ -173,7 +155,7 @@ def test_postgres_reconcile_lock_excludes_concurrent_group_start(
         assert session.scalar(select(Job.id).where(Job.kind == "recipe.start")) is None
 
 
-def test_postgres_new_review_reuses_receipt_after_cancelled_rank_before_releasing_claims(
+def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
     tmp_path: Path, postgres_engine
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, node_ids = setup_services(
@@ -217,9 +199,7 @@ def test_postgres_new_review_reuses_receipt_after_cancelled_rank_before_releasin
     first_child = _child_operation_id(service.get(first.operation_id))
     assert first_child is not None
 
-    first_receipt = _record_successful_reconcile_member(
-        sessions, lifecycle, first_child, node_ids[0]
-    )
+    _record_successful_reconcile_member(sessions, lifecycle, first_child, node_ids[0])
     with sessions.begin() as session:
         child = session.scalar(
             select(AgentOperation).where(
@@ -231,7 +211,6 @@ def test_postgres_new_review_reuses_receipt_after_cancelled_rank_before_releasin
         assert child is not None and presence is not None
         child.state = "running"
         child.current_attempt = 1
-        child_operation_id = child.id
         fence = str(uuid.uuid4())
         deadline = NOW + timedelta(minutes=1)
         session.add(
@@ -252,13 +231,7 @@ def test_postgres_new_review_reuses_receipt_after_cancelled_rank_before_releasin
     )
     cancelled = AgentResult.model_validate(
         {
-            "schema_version": 1,
-            "job_id": first_child,
-            "operation_id": child_operation_id,
-            "attempt": 1,
             "fence": fence,
-            "node_id": node_ids[1],
-            "deadline": deadline,
             "state": "cancelled",
             "result": {
                 "error_code": "operation_cancelled",
@@ -315,16 +288,9 @@ def test_postgres_new_review_reuses_receipt_after_cancelled_rank_before_releasin
     ]
     assert retry_plan.reconciliation_authority is not None
     assert [
-        (target.node_id, target.state, target.cleanup_receipt_sha256)
+        (target.node_id, target.state)
         for target in retry_plan.reconciliation_authority.targets
-    ] == [
-        (
-            node_ids[0],
-            "reconciled",
-            first_receipt["cleanup_receipt_sha256"],
-        ),
-        (node_ids[1], "pending", None),
-    ]
+    ] == [(node_ids[0], "reconciled"), (node_ids[1], "pending")]
     retry = service.apply_cleanup(
         RunSwitchCleanupApplyRequest(
             installation_id=installation.owner_id,

@@ -18,12 +18,11 @@ use thiserror::Error;
 use vonk_agent_protocol::generated::{
     CompiledExecutionPlan, ConfirmPackageActivationOperation,
     ExecuteContainerRuntimeRequestOperation, HostHelperProcessLogs, InstallVonkDebOperation,
-    RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload, RestartVonkUnitOperation,
-    ScheduleRebootOperation,
+    RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload,
 };
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeReconciliationIdentity,
-    RecipeRunObservationOutcome, canonical_json,
+    canonical_json,
     compiled_oci::{
         CompiledOciError, CompiledOciPaths, ExecInvocationLimits, measure_exec_invocation,
         start_arguments_for_paths,
@@ -32,7 +31,7 @@ use vonk_agent_protocol::{
 };
 use wait_timeout::ChildExt;
 
-use crate::protocol::{ContainerRuntimeAction, HostOperation, RestartUnit, artifact_signing_bytes};
+use crate::protocol::{ContainerRuntimeAction, HostOperation, artifact_signing_bytes};
 
 const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
@@ -308,8 +307,6 @@ impl CommandRunner for ProcessCommandRunner {
             Some(
                 "/usr/bin/dpkg-deb"
                     | "/usr/bin/dpkg"
-                    | "/usr/bin/systemctl"
-                    | "/usr/bin/systemd-run"
                     | DOCKER_FIREWALL
                     | "/usr/bin/docker"
                     | "/usr/bin/setfacl"
@@ -451,16 +448,12 @@ mod process_command_runner_tests {
 pub struct OperationOutcome {
     pub schema_version: u8,
     pub status: String,
-    pub evidence_sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recipe_run_observation: Option<RecipeRunObservationOutcome>,
 }
 
 struct RuntimeRequestOutcome {
     exit_code: Option<i32>,
-    recipe_run_observation: Option<RecipeRunObservationOutcome>,
 }
 
 /// The helper's durable proof that one Controller-authorized archive delivery
@@ -509,9 +502,6 @@ struct DockerSaveManifestEntry {
 
 #[derive(Clone, Copy)]
 struct RuntimeRequestGrantBinding<'a> {
-    job_id: &'a uuid::Uuid,
-    operation_id: &'a uuid::Uuid,
-    attempt: u32,
     fence: &'a uuid::Uuid,
     installation_id: Option<&'a uuid::Uuid>,
     reconciliation_identity: Option<&'a RecipeReconciliationIdentity>,
@@ -553,7 +543,7 @@ struct InstallationReconciliationReceipt {
     installation_inode: u64,
 }
 
-const INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION: u8 = 2;
+const INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION: u8 = 3;
 const RUNTIME_GENERATION_FENCE_SCHEMA_VERSION: u8 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -838,7 +828,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .validate()
             .map_err(|_| OperationError::InvalidOperation)?;
         self.require_directory(&self.roots.data)?;
-        let (status, evidence, exit_code, recipe_run_observation) = match operation {
+        let (status, exit_code) = match operation {
             HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
                 package_sha256,
                 package_signature,
@@ -851,7 +841,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     rollback,
                     observation_node_id.ok_or(OperationError::InvalidOperation)?,
                 )?;
-                ("package-installed", package_sha256.clone(), None, None)
+                ("package-installed", None)
             }
             HostOperation::ConfirmPackageActivationOperation(
                 ConfirmPackageActivationOperation {
@@ -867,33 +857,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         attempt_nonce,
                     )
                     .map_err(|_| OperationError::PackagePreflightFailed)?;
-                (
-                    "package-activation-confirmed",
-                    package_sha256.clone(),
-                    None,
-                    None,
-                )
-            }
-            HostOperation::RestartVonkUnitOperation(RestartVonkUnitOperation { unit, .. }) => {
-                let unit_name = self.restart_unit(unit)?;
-                ("unit-restarted", unit_name.to_owned(), None, None)
-            }
-            HostOperation::ScheduleRebootOperation(ScheduleRebootOperation {
-                delay_seconds,
-                ..
-            }) => {
-                self.schedule_reboot(*delay_seconds)?;
-                ("reboot-scheduled", delay_seconds.to_string(), None, None)
+                ("package-activation-confirmed", None)
             }
             HostOperation::ExecuteContainerRuntimeRequestOperation(
                 ExecuteContainerRuntimeRequestOperation {
                     action,
-                    job_id,
-                    operation_id,
-                    attempt,
                     fence,
                     request_sha256,
-                    observation_identity_sha256,
                     installation_id,
                     reconciliation_identity,
                     start_plan_sha256,
@@ -908,9 +878,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 let outcome = self.execute_runtime_request(
                     action,
                     RuntimeRequestGrantBinding {
-                        job_id,
-                        operation_id,
-                        attempt: *attempt,
                         fence,
                         installation_id: installation_id.as_ref(),
                         reconciliation_identity: reconciliation_identity.as_ref(),
@@ -922,35 +889,36 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         runtime_installation_id: runtime_installation_id.as_ref(),
                     },
                     request_sha256,
-                    observation_identity_sha256.as_deref(),
-                    observation_node_id,
                 );
-                let (status, exit_code, recipe_run_observation) = match outcome {
-                    Ok(outcome) => (
-                        "container-runtime-request-executed",
-                        outcome.exit_code,
-                        outcome.recipe_run_observation,
-                    ),
+                let (status, exit_code) = match outcome {
+                    Ok(outcome) => ("container-runtime-request-executed", outcome.exit_code),
                     Err(OperationError::StopUncertain) => {
-                        ("container-runtime-stop-uncertain", Some(124), None)
+                        ("container-runtime-stop-uncertain", Some(124))
                     }
                     Err(error) => return Err(error),
                 };
-                (
-                    status,
-                    request_sha256.clone(),
-                    exit_code,
-                    recipe_run_observation,
-                )
+                (status, exit_code)
             }
         };
         Ok(OperationOutcome {
             schema_version: 1,
             status: status.to_owned(),
-            evidence_sha256: hex_sha256(evidence.as_bytes()),
             exit_code,
-            recipe_run_observation,
         })
+    }
+
+    /// Report whether the exact container of one agent-written `run-inspect`
+    /// request is running.  Read-only, so it needs no Controller grant.
+    pub fn inspect_recipe_run(&self, request_sha256: &str) -> Result<bool, OperationError> {
+        self.require_directory(&self.roots.data)?;
+        let request = self.read_runtime_request(request_sha256)?;
+        if request.action != HostRuntimeAction::RunInspect
+            || request.installation_id.is_some()
+            || request.reconciliation_identity.is_some()
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        self.runtime_run_inspect(&request.arguments, false)
     }
 
     fn install_package(
@@ -1118,76 +1086,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(())
     }
 
-    fn restart_unit(&self, unit: &RestartUnit) -> Result<&'static str, OperationError> {
-        let unit = match unit {
-            RestartUnit::Agent => "vonk-forge-agent.service",
-            RestartUnit::Helper => "vonk-forge-package-helper.service",
-        };
-        if matches!(unit, "vonk-forge-package-helper.service") {
-            let result = self
-                .runner
-                .run(
-                    Path::new("/usr/bin/systemd-run"),
-                    &[
-                        "--quiet".to_owned(),
-                        "--collect".to_owned(),
-                        "--unit=vonk-forge-helper-restart.service".to_owned(),
-                        "--on-active=1s".to_owned(),
-                        "/usr/bin/systemctl".to_owned(),
-                        "restart".to_owned(),
-                        unit.to_owned(),
-                    ],
-                )
-                .map_err(|_| OperationError::CommandFailed)?;
-            if !result.success {
-                return Err(OperationError::CommandFailed);
-            }
-            return Ok(unit);
-        }
-        let result = self
-            .runner
-            .run(
-                Path::new("/usr/bin/systemctl"),
-                &["restart".to_owned(), unit.to_owned()],
-            )
-            .map_err(|_| OperationError::CommandFailed)?;
-        if !result.success {
-            return Err(OperationError::CommandFailed);
-        }
-        Ok(unit)
-    }
-
-    fn schedule_reboot(&self, delay_seconds: u32) -> Result<(), OperationError> {
-        if !(60..=3600).contains(&delay_seconds) {
-            return Err(OperationError::InvalidOperation);
-        }
-        let result = self
-            .runner
-            .run(
-                Path::new("/usr/bin/systemd-run"),
-                &[
-                    "--quiet".to_owned(),
-                    "--collect".to_owned(),
-                    "--unit=vonk-forge-reboot.service".to_owned(),
-                    format!("--on-active={delay_seconds}s"),
-                    "/usr/bin/systemctl".to_owned(),
-                    "reboot".to_owned(),
-                ],
-            )
-            .map_err(|_| OperationError::CommandFailed)?;
-        if !result.success {
-            return Err(OperationError::CommandFailed);
-        }
-        Ok(())
-    }
-
     fn execute_runtime_request(
         &self,
         action: &ContainerRuntimeAction,
         binding: RuntimeRequestGrantBinding<'_>,
         request_sha256: &str,
-        observation_identity_sha256: Option<&str>,
-        observation_node_id: Option<&str>,
     ) -> Result<RuntimeRequestOutcome, OperationError> {
         let request = self.read_runtime_request(request_sha256)?;
         let expected_action = match action {
@@ -1200,40 +1103,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
             ContainerRuntimeAction::InstallationCleanup => HostRuntimeAction::InstallationCleanup,
         };
         if request.action != expected_action
-            || &request.job_id != binding.job_id
-            || &request.operation_id != binding.operation_id
-            || request.attempt != binding.attempt
             || &request.fence != binding.fence
             || request.installation_id.as_ref() != binding.installation_id
             || request.reconciliation_identity.as_ref() != binding.reconciliation_identity
         {
             return Err(OperationError::InvalidOperation);
         }
-        match (
-            request.observation.as_ref(),
-            observation_identity_sha256,
-            observation_node_id,
-        ) {
-            (None, None, _) => {}
-            (Some(binding), Some(expected), Some(node_id)) => {
-                let mut identity = serde_json::to_value(binding)
-                    .map_err(|_| OperationError::InvalidOperation)?
-                    .as_object()
-                    .cloned()
-                    .ok_or(OperationError::InvalidOperation)?;
-                identity.insert("schema_version".to_owned(), serde_json::json!(1));
-                identity.insert("node_id".to_owned(), serde_json::json!(node_id));
-                if hex_sha256(
-                    &canonical_json(&identity).map_err(|_| OperationError::InvalidOperation)?,
-                ) != expected
-                {
-                    return Err(OperationError::InvalidOperation);
-                }
-            }
-            _ => return Err(OperationError::InvalidOperation),
-        }
-        let authorized_effect =
-            self.authorize_runtime_effect(&request, binding, observation_node_id)?;
+        let authorized_effect = self.authorize_runtime_effect(&request, binding)?;
         match request.action {
             HostRuntimeAction::RuntimePreflight => {
                 let code = crate::runtime_preflight::run(
@@ -1248,39 +1124,19 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .map_err(|_| OperationError::CommandFailed)?;
                 Ok(RuntimeRequestOutcome {
                     exit_code: Some(code),
-                    recipe_run_observation: None,
                 })
             }
-            HostRuntimeAction::ImageImport => {
-                self.runtime_image_import(&request.arguments)
-                    .map(|()| RuntimeRequestOutcome {
-                        exit_code: None,
-                        recipe_run_observation: None,
-                    })
-            }
-            HostRuntimeAction::ImageInspect => {
-                self.runtime_image_inspect(&request.arguments)
-                    .map(|()| RuntimeRequestOutcome {
-                        exit_code: None,
-                        recipe_run_observation: None,
-                    })
-            }
+            HostRuntimeAction::ImageImport => self
+                .runtime_image_import(&request.arguments)
+                .map(|()| RuntimeRequestOutcome { exit_code: None }),
+            HostRuntimeAction::ImageInspect => self
+                .runtime_image_inspect(&request.arguments)
+                .map(|()| RuntimeRequestOutcome { exit_code: None }),
             HostRuntimeAction::RunInspect => {
-                let running =
-                    self.runtime_run_inspect(&request.arguments, request.observation.is_none())?;
-                if request.observation.is_none() && !running {
+                if !self.runtime_run_inspect(&request.arguments, true)? {
                     return Err(OperationError::InvalidArtifact);
                 }
-                Ok(RuntimeRequestOutcome {
-                    exit_code: None,
-                    recipe_run_observation: request.observation.as_ref().map(|_| {
-                        if running {
-                            RecipeRunObservationOutcome::Running
-                        } else {
-                            RecipeRunObservationOutcome::NotRunning
-                        }
-                    }),
-                })
+                Ok(RuntimeRequestOutcome { exit_code: None })
             }
             HostRuntimeAction::Start => {
                 let Some(AuthorizedRuntimeEffect::Start {
@@ -1297,10 +1153,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     logical_run_id,
                     &plan_digest,
                 )
-                .map(|exit_code| RuntimeRequestOutcome {
-                    exit_code,
-                    recipe_run_observation: None,
-                })
+                .map(|exit_code| RuntimeRequestOutcome { exit_code })
             }
             HostRuntimeAction::Stop => {
                 let Some(AuthorizedRuntimeEffect::Stop {
@@ -1320,10 +1173,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     stop_timeout_seconds,
                     cancel_pending_start,
                 )
-                .map(|()| RuntimeRequestOutcome {
-                    exit_code: None,
-                    recipe_run_observation: None,
-                })
+                .map(|()| RuntimeRequestOutcome { exit_code: None })
             }
             HostRuntimeAction::InstallationCleanup => {
                 let installation_id = request
@@ -1331,19 +1181,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .as_ref()
                     .ok_or(OperationError::InvalidOperation)?;
                 if let Some(identity) = request.reconciliation_identity.as_ref() {
-                    if identity.installation_id != *installation_id
-                        || Some(identity.node_id.as_str()) != observation_node_id
-                    {
+                    if identity.installation_id != *installation_id {
                         return Err(OperationError::InvalidOperation);
                     }
                     self.runtime_reconcile_installation(identity)?;
                 } else {
                     self.runtime_installation_cleanup(&installation_id.to_string())?;
                 }
-                Ok(RuntimeRequestOutcome {
-                    exit_code: None,
-                    recipe_run_observation: None,
-                })
+                Ok(RuntimeRequestOutcome { exit_code: None })
             }
         }
     }
@@ -1352,13 +1197,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         request: &HostRuntimeRequest,
         grant: RuntimeRequestGrantBinding<'_>,
-        node_id: Option<&str>,
     ) -> Result<Option<AuthorizedRuntimeEffect>, OperationError> {
         match request.action {
             HostRuntimeAction::Start => {
                 if request.installation_id.is_some()
                     || request.reconciliation_identity.is_some()
-                    || request.observation.is_some()
                     || request.stop_plan.is_some()
                     || request.run_generation.is_none()
                     || (request.start_plan.is_some() == request.job_plan.is_some())
@@ -1413,7 +1256,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         .start_plan_sha256
                         .is_some_and(|digest| lower_hex(digest, 64) && hex_sha256(&plan) == digest)
                     || !valid_oci_digest(&compiled.runtime_image.image_digest)
-                    || !compiled.lifecycle.pre_start.is_empty()
                 {
                     return Err(OperationError::InvalidOperation);
                 }
@@ -1452,7 +1294,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     || request.reconciliation_identity.is_some()
                     || request.start_plan.is_some()
                     || request.job_plan.is_some()
-                    || request.observation.is_some()
                     || request.run_generation != Some(plan.run_generation)
                     || grant.run_generation != Some(plan.run_generation)
                     || grant.runtime_run_id != Some(&plan.run_id)
@@ -1467,10 +1308,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
                                 .ok()
                                 .is_some_and(|encoded| hex_sha256(&encoded) == digest)
                     })
-                    || plan.node_id != node_id.ok_or(OperationError::InvalidOperation)?
                     || (plan.compiled_execution_plan.job.is_none()
                         && plan.target_runtime_id != plan.run_id)
-                    || !plan.compiled_execution_plan.lifecycle.post_stop.is_empty()
                 {
                     return Err(OperationError::InvalidOperation);
                 }
@@ -1749,34 +1588,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Err(OperationError::UnsafePath);
         }
 
-        let spec_path = installation.join("spec.json");
-        let spec_bytes = read_agent_installation_file(
-            &spec_path,
-            self.runtime_request_owner_uid,
-            vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES as u64,
-        )?;
-        let spec: serde_json::Value =
-            serde_json::from_slice(&spec_bytes).map_err(|_| OperationError::InvalidArtifact)?;
-        let canonical_spec = canonical_json(&spec).map_err(|_| OperationError::InvalidArtifact)?;
-        if hex_sha256(&canonical_spec) != identity.compiled_spec_canonical_sha256 {
-            return Err(OperationError::InvalidArtifact);
-        }
-        let embedded_digest = spec
-            .get("identity")
-            .and_then(|value| value.get("recipe_revision_sha256"))
-            .and_then(serde_json::Value::as_str);
-        let recipe_bytes = read_agent_installation_file(
-            &installation.join("recipe-content.sha256"),
-            self.runtime_request_owner_uid,
-            64,
-        )?;
-        let recipe_digest =
-            std::str::from_utf8(&recipe_bytes).map_err(|_| OperationError::InvalidArtifact)?;
-        if recipe_digest != identity.recipe_content_sha256
-            || embedded_digest != Some(identity.recipe_content_sha256.as_str())
-        {
-            return Err(OperationError::InvalidArtifact);
-        }
         Ok((installation_metadata.dev(), installation_metadata.ino()))
     }
 
@@ -4105,53 +3916,31 @@ fn validate_runtime_start_plan(plan: &RecipeStartPayload) -> Result<(), Operatio
         .validate()
         .map_err(|_| OperationError::InvalidOperation)?;
     let placement = &compiled.runtime.placement;
-    let expected_endpoint = placement.endpoint_address.or_else(|| {
-        (plan.world_size > 1)
-            .then_some(placement.local_address)
-            .flatten()
-    });
     let phase_binding_valid = match (plan.phase, plan.start_deadline.as_deref()) {
         (None, None) => true,
         (Some(_), Some(deadline)) => !deadline.is_empty() && deadline.len() <= 64,
         _ => false,
     };
-    if plan.schema_version != 2
-        || plan.run_generation == 0
+    if plan.run_generation == 0
         || plan.run_generation > i32::MAX as u32
-        || plan.mapping_generation == 0
-        || plan.rank >= plan.world_size
-        || plan.world_size == 0
-        || !valid_recipe_alias(&plan.alias)
-        || !lower_hex(&plan.recipe_content_sha256, 64)
+        || placement.rank >= placement.world_size
         || !lower_hex(&plan.plan_digest, 64)
-        || !valid_oci_digest(&plan.image_digest)
+        || !valid_oci_digest(plan.image_digest())
         || compiled.job.is_some()
         || compiled.endpoint.is_none()
-        || compiled.identity.recipe_revision_sha256 != plan.recipe_content_sha256
-        || compiled.runtime.image_digest != plan.image_digest
-        || compiled.runtime_image.image_digest != plan.image_digest
-        || plan.rank != placement.rank
-        || plan.role != placement.role
-        || plan.world_size != placement.world_size
-        || expected_endpoint != Some(plan.endpoint_address)
-        || plan.port != placement.port.unwrap_or_default()
-        || plan.local_address != placement.local_address
-        || plan.master_address != placement.master_address
-        || plan.master_port != placement.master_port
-        || plan.reserved_memory_bytes != placement.reserved_memory_bytes
-        || plan.memory_floor_bytes != placement.memory_floor_bytes
-        || plan.memory_kind.to_string() != placement.memory_kind.to_string()
-        || (plan.world_size == 1
-            && (plan.rank != 0
-                || plan.local_address.is_some()
-                || plan.master_address.is_some()
-                || plan.master_port.is_some()
+        || plan.endpoint_address().is_none()
+        || plan.port().is_none()
+        || (placement.world_size == 1
+            && (placement.rank != 0
+                || placement.local_address.is_some()
+                || placement.master_address.is_some()
+                || placement.master_port.is_some()
                 || plan.phase.is_some()
                 || plan.start_deadline.is_some()))
-        || (plan.world_size > 1
-            && (plan.local_address.is_none()
-                || plan.master_address.is_none()
-                || plan.master_port.is_none()))
+        || (placement.world_size > 1
+            && (placement.local_address.is_none()
+                || placement.master_address.is_none()
+                || placement.master_port.is_none()))
         || !phase_binding_valid
         || encoded_plan.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
         || encoded_claim.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
@@ -4174,27 +3963,13 @@ fn validate_runtime_job_plan(plan: &RecipeJobRunRequest) -> Result<(), Operation
         .job
         .as_ref()
         .ok_or(OperationError::InvalidOperation)?;
-    if plan.schema_version != 1
-        || plan.run_generation == 0
+    if plan.run_generation == 0
         || plan.run_generation > i32::MAX as u32
-        || plan.mapping_generation == 0
-        || !lower_hex(&plan.recipe_content_sha256, 64)
         || !lower_hex(&plan.plan_digest, 64)
-        || !lower_hex(&plan.contract_sha256, 64)
-        || !valid_oci_digest(&plan.image_digest)
-        || plan.recipe_content_sha256 != compiled.identity.recipe_revision_sha256
-        || plan.image_digest != compiled.runtime.image_digest
-        || plan.image_digest != compiled.runtime_image.image_digest
-        || job.interface.to_string() != plan.interface.to_string()
-        || job.timeout_seconds != plan.timeout_seconds
-        || !(1..=3600).contains(&plan.timeout_seconds)
-        || plan.rank != 0
-        || plan.role != "entrypoint"
-        || u64::from(plan.rank) != placement.rank
-        || plan.role != placement.role
-        || plan.reserved_memory_bytes != placement.reserved_memory_bytes
-        || plan.memory_floor_bytes != placement.memory_floor_bytes
-        || plan.memory_kind.to_string() != placement.memory_kind.to_string()
+        || !valid_oci_digest(&compiled.runtime_image.image_digest)
+        || !(1..=3600).contains(&job.timeout_seconds)
+        || placement.rank != 0
+        || placement.world_size != 1
         || plan.input_total_bytes > 1024 * 1024 * 1024
         || plan.inputs.iter().try_fold(0_u64, |total, file| {
             total.checked_add(u64::from(file.size_bytes))
@@ -4216,19 +3991,11 @@ fn validate_runtime_stop_plan(plan: &RecipeStopPayload) -> Result<(), OperationE
         .validate_storage()
         .map_err(|_| OperationError::InvalidOperation)?;
     let placement = &compiled.runtime.placement;
-    if plan.schema_version != 2
-        || plan.run_generation == 0
+    if plan.run_generation == 0
         || plan.run_generation > i32::MAX as u32
-        || plan.mapping_generation == 0
-        || plan.world_size == 0
-        || plan.rank >= plan.world_size
-        || !lower_hex(&plan.recipe_content_sha256, 64)
+        || placement.world_size == 0
+        || placement.rank >= placement.world_size
         || !lower_hex(&plan.plan_digest, 64)
-        || plan.recipe_content_sha256 != compiled.identity.recipe_revision_sha256
-        || plan.rank != placement.rank
-        || plan.role != placement.role
-        || plan.world_size != placement.world_size
-        || !valid_recipe_node_id(&plan.node_id)
         || (compiled.job.is_none() && plan.target_runtime_id != plan.run_id)
         || !(1..=600).contains(&compiled.lifecycle.stop_timeout_seconds)
         || encoded_plan.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
@@ -4239,37 +4006,15 @@ fn validate_runtime_stop_plan(plan: &RecipeStopPayload) -> Result<(), OperationE
     Ok(())
 }
 
-fn valid_recipe_node_id(value: &str) -> bool {
-    value
-        .strip_prefix("spk_")
-        .is_some_and(|suffix| lower_hex(suffix, 32))
-}
-
-fn valid_recipe_alias(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 63
-        && value
-            .as_bytes()
-            .first()
-            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-        && value.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte)
-        })
-        && value
-            .as_bytes()
-            .last()
-            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-}
-
 fn runtime_plan_prefix(plan: &CompiledExecutionPlan, command: Vec<String>) -> Vec<String> {
+    // The helper request names the archive, the image digest in both the
+    // registry and platform slots (Controller-built images have no separate
+    // registry index), and the local reference.
     let mut arguments = vec![
         plan.runtime_image.oci_layout_sha256.clone(),
-        plan.runtime_image
-            .registry_manifest_digest
-            .clone()
-            .unwrap_or_else(|| plan.runtime_image.platform_manifest_digest.clone()),
-        plan.runtime_image.platform_manifest_digest.clone(),
-        plan.runtime_image.local_image_reference.clone(),
+        plan.runtime_image.image_digest.clone(),
+        plan.runtime_image.image_digest.clone(),
+        plan.runtime_image.local_image_reference(),
     ];
     arguments.extend(command);
     arguments
@@ -4971,41 +4716,6 @@ fn sync_directory(path: &Path) -> Result<(), OperationError> {
     Ok(())
 }
 
-fn read_agent_installation_file(
-    path: &Path,
-    owner_uid: Option<u32>,
-    maximum_bytes: u64,
-) -> Result<Vec<u8>, OperationError> {
-    let path_metadata = fs::symlink_metadata(path).map_err(|_| OperationError::UnsafePath)?;
-    if path_metadata.file_type().is_symlink()
-        || !path_metadata.is_file()
-        || path_metadata.nlink() != 1
-        || path_metadata.mode() & 0o777 != 0o600
-        || owner_uid.is_some_and(|uid| path_metadata.uid() != uid)
-        || path_metadata.len() == 0
-        || path_metadata.len() > maximum_bytes
-    {
-        return Err(OperationError::InvalidArtifact);
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-        .open(path)
-        .map_err(|_| OperationError::UnsafePath)?;
-    let opened = file.metadata().map_err(|_| OperationError::UnsafePath)?;
-    if artifact_identity(&opened) != artifact_identity(&path_metadata) {
-        return Err(OperationError::InvalidArtifact);
-    }
-    let mut bytes = Vec::with_capacity(path_metadata.len() as usize);
-    Read::by_ref(&mut file)
-        .take(maximum_bytes.saturating_add(1))
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != path_metadata.len() {
-        return Err(OperationError::InvalidArtifact);
-    }
-    Ok(bytes)
-}
-
 fn read_helper_reconciliation_receipt(
     path: &Path,
     owner_uid: Option<u32>,
@@ -5097,7 +4807,7 @@ mod tests {
         hex_sha256, loaded_image_source, parse_publication, validate_docker_run,
     };
     use vonk_agent_protocol::generated::{
-        CompiledExecutionPlan, RecipeStartPayload, RecipeStartPayloadMemoryKind, RecipeStopPayload,
+        CompiledExecutionPlan, RecipeStartPayload, RecipeStopPayload,
     };
     use vonk_agent_protocol::{RecipeReconciliationIdentity, canonical_json};
 
@@ -5268,17 +4978,9 @@ mod tests {
             "identity": {"recipe_revision_sha256": recipe_digest},
             "invalid legacy-shaped plan": {"opaque": [false, null]},
         });
-        let spec_canonical = canonical_json(&spec).unwrap();
         let identity = RecipeReconciliationIdentity {
-            compiled_spec_canonical_sha256: hex_sha256(&spec_canonical),
-            install_operation_id: uuid::Uuid::new_v4(),
-            install_operation_payload_sha256: "a".repeat(64),
             installation_id,
-            node_id: format!("spk_{}", "b".repeat(32)),
             plan_digest: "c".repeat(64),
-            recipe_content_sha256: recipe_digest.clone(),
-            recipe_revision_id: uuid::Uuid::new_v4(),
-            schema_version: 1,
         };
         fs::write(
             installation.join("spec.json"),
@@ -5591,40 +5293,17 @@ mod tests {
 
     fn recipe_start_plan_for_authority(run_generation: u32) -> RecipeStartPayload {
         let compiled = compiled_plan_for_runtime_authority();
-        let placement = &compiled.runtime.placement;
-        let memory_kind = match placement.memory_kind.to_string().as_str() {
-            "unified" => RecipeStartPayloadMemoryKind::Unified,
-            "host" => RecipeStartPayloadMemoryKind::Host,
-            "accelerator" => RecipeStartPayloadMemoryKind::Accelerator,
-            other => panic!("unexpected compiled memory kind {other}"),
-        };
         RecipeStartPayload {
-            alias: "test-model".to_owned(),
             compiled_execution_plan: compiled.clone(),
-            endpoint_address: "100.100.20.30".parse().unwrap(),
-            image_digest: compiled.runtime.image_digest.clone(),
             installation_id: runtime_effect_identity(run_generation).installation_id,
-            local_address: placement.local_address,
-            mapping_generation: 1,
             mapping_id: uuid::Uuid::parse_str("70000000-0000-4000-8000-000000000007").unwrap(),
-            master_address: placement.master_address,
-            master_port: placement.master_port,
-            memory_floor_bytes: placement.memory_floor_bytes,
-            memory_kind,
             phase: None,
             plan_digest: "c".repeat(64),
-            port: placement.port.unwrap(),
-            rank: placement.rank,
-            recipe_content_sha256: compiled.identity.recipe_revision_sha256.clone(),
             recipe_revision_id: uuid::Uuid::parse_str("60000000-0000-4000-8000-000000000006")
                 .unwrap(),
-            reserved_memory_bytes: placement.reserved_memory_bytes,
-            role: placement.role.clone(),
             run_generation,
             run_id: uuid::Uuid::parse_str(RUN_ID).unwrap(),
-            schema_version: 2,
             start_deadline: None,
-            world_size: placement.world_size,
         }
     }
 
@@ -5633,25 +5312,17 @@ mod tests {
         cancel_pending_start: bool,
     ) -> RecipeStopPayload {
         let compiled = compiled_plan_for_runtime_authority();
-        let placement = &compiled.runtime.placement;
         RecipeStopPayload {
             cancel_pending_start,
             compiled_execution_plan: compiled.clone(),
             installation_id: runtime_effect_identity(run_generation).installation_id,
-            mapping_generation: 1,
             mapping_id: uuid::Uuid::parse_str("70000000-0000-4000-8000-000000000007").unwrap(),
-            node_id: "spk_11111111111111111111111111111111".to_owned(),
             plan_digest: "c".repeat(64),
-            rank: placement.rank,
-            recipe_content_sha256: compiled.identity.recipe_revision_sha256.clone(),
             recipe_revision_id: uuid::Uuid::parse_str("60000000-0000-4000-8000-000000000006")
                 .unwrap(),
-            role: placement.role.clone(),
             run_generation,
             run_id: uuid::Uuid::parse_str(RUN_ID).unwrap(),
-            schema_version: 2,
             target_runtime_id: uuid::Uuid::parse_str(RUN_ID).unwrap(),
-            world_size: placement.world_size,
         }
     }
 
@@ -5664,20 +5335,13 @@ mod tests {
     }
 
     fn runtime_request_identity(
-        job_id: &uuid::Uuid,
-        operation_id: &uuid::Uuid,
         fence: &uuid::Uuid,
         parts: RuntimeRequestTestParts,
     ) -> HostRuntimeRequest {
         HostRuntimeRequest {
-            schema_version: 1,
             action: parts.action,
-            job_id: *job_id,
-            operation_id: *operation_id,
-            attempt: 1,
             fence: *fence,
             arguments: parts.arguments,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             job_plan: None,
@@ -5705,12 +5369,8 @@ mod tests {
                 start_plan.run_id,
             )
             .unwrap();
-        let job_id = uuid::Uuid::new_v4();
-        let operation_id = uuid::Uuid::new_v4();
         let fence = uuid::Uuid::new_v4();
         let request = runtime_request_identity(
-            &job_id,
-            &operation_id,
             &fence,
             RuntimeRequestTestParts {
                 action: HostRuntimeAction::Start,
@@ -5722,9 +5382,6 @@ mod tests {
         );
         let plan_sha256 = hex_sha256(&canonical_json(&start_plan).unwrap());
         let grant = RuntimeRequestGrantBinding {
-            job_id: &job_id,
-            operation_id: &operation_id,
-            attempt: 1,
             fence: &fence,
             installation_id: None,
             reconciliation_identity: None,
@@ -5736,11 +5393,7 @@ mod tests {
             runtime_installation_id: Some(&start_plan.installation_id),
         };
         let authorized = executor
-            .authorize_runtime_effect(
-                &request,
-                grant,
-                Some("spk_11111111111111111111111111111111"),
-            )
+            .authorize_runtime_effect(&request, grant)
             .unwrap()
             .unwrap();
         assert!(matches!(
@@ -5762,56 +5415,21 @@ mod tests {
         let mut caller_argv = request.clone();
         caller_argv.arguments.push("--privileged".to_owned());
         assert!(matches!(
-            executor.authorize_runtime_effect(&caller_argv, grant, None),
+            executor.authorize_runtime_effect(&caller_argv, grant),
             Err(OperationError::InvalidOperation)
         ));
 
         let mut stale_grant = request.clone();
         stale_grant.run_generation = Some(2);
         assert!(matches!(
-            executor.authorize_runtime_effect(&stale_grant, grant, None),
+            executor.authorize_runtime_effect(&stale_grant, grant),
             Err(OperationError::InvalidOperation)
         ));
 
         let mut mutated_plan = request.clone();
         mutated_plan.start_plan.as_mut().unwrap().plan_digest = "d".repeat(64);
         assert!(matches!(
-            executor.authorize_runtime_effect(&mutated_plan, grant, None),
-            Err(OperationError::InvalidOperation)
-        ));
-
-        let mut hook_plan = start_plan.clone();
-        hook_plan
-            .compiled_execution_plan
-            .lifecycle
-            .pre_start
-            .push(vec!["/usr/bin/true".to_owned()]);
-        let hook_arguments = executor
-            .projected_runtime_arguments(
-                &hook_plan.compiled_execution_plan,
-                hook_plan.installation_id,
-                hook_plan.run_id,
-            )
-            .unwrap();
-        let hook_request = runtime_request_identity(
-            &job_id,
-            &operation_id,
-            &fence,
-            RuntimeRequestTestParts {
-                action: HostRuntimeAction::Start,
-                arguments: hook_arguments,
-                run_generation: hook_plan.run_generation,
-                start_plan: Some(hook_plan.clone()),
-                stop_plan: None,
-            },
-        );
-        let hook_sha256 = hex_sha256(&canonical_json(&hook_plan).unwrap());
-        let hook_grant = RuntimeRequestGrantBinding {
-            start_plan_sha256: Some(&hook_sha256),
-            ..grant
-        };
-        assert!(matches!(
-            executor.authorize_runtime_effect(&hook_request, hook_grant, None),
+            executor.authorize_runtime_effect(&mutated_plan, grant),
             Err(OperationError::InvalidOperation)
         ));
     }
@@ -5827,12 +5445,8 @@ mod tests {
         )
         .unwrap();
         let stop_plan = recipe_stop_plan_for_authority(1, true);
-        let job_id = uuid::Uuid::new_v4();
-        let operation_id = uuid::Uuid::new_v4();
         let fence = uuid::Uuid::new_v4();
         let request = runtime_request_identity(
-            &job_id,
-            &operation_id,
             &fence,
             RuntimeRequestTestParts {
                 action: HostRuntimeAction::Stop,
@@ -5844,9 +5458,6 @@ mod tests {
         );
         let plan_sha256 = hex_sha256(&canonical_json(&stop_plan).unwrap());
         let grant = RuntimeRequestGrantBinding {
-            job_id: &job_id,
-            operation_id: &operation_id,
-            attempt: 1,
             fence: &fence,
             installation_id: None,
             reconciliation_identity: None,
@@ -5858,7 +5469,7 @@ mod tests {
             runtime_installation_id: Some(&stop_plan.installation_id),
         };
         let authorized = executor
-            .authorize_runtime_effect(&request, grant, Some(&stop_plan.node_id))
+            .authorize_runtime_effect(&request, grant)
             .unwrap()
             .unwrap();
         assert!(matches!(
@@ -5876,30 +5487,18 @@ mod tests {
                 && installation_id == stop_plan.installation_id
                 && logical_run_id == stop_plan.run_id
         ));
-        assert!(matches!(
-            executor.authorize_runtime_effect(
-                &request,
-                grant,
-                Some("spk_22222222222222222222222222222222")
-            ),
-            Err(OperationError::InvalidOperation)
-        ));
 
         let mut empty_argv = request.clone();
         empty_argv.arguments.push("ignored-argv".to_owned());
         assert!(matches!(
-            executor.authorize_runtime_effect(&empty_argv, grant, Some(&stop_plan.node_id)),
+            executor.authorize_runtime_effect(&empty_argv, grant),
             Err(OperationError::InvalidOperation)
         ));
 
         let mut different_generation = request.clone();
         different_generation.run_generation = Some(2);
         assert!(matches!(
-            executor.authorize_runtime_effect(
-                &different_generation,
-                grant,
-                Some(&stop_plan.node_id)
-            ),
+            executor.authorize_runtime_effect(&different_generation, grant),
             Err(OperationError::InvalidOperation)
         ));
 
@@ -5910,35 +5509,7 @@ mod tests {
             .unwrap()
             .target_runtime_id = uuid::Uuid::new_v4();
         assert!(matches!(
-            executor.authorize_runtime_effect(&different_target, grant, Some(&stop_plan.node_id)),
-            Err(OperationError::InvalidOperation)
-        ));
-
-        let mut hook_plan = stop_plan.clone();
-        hook_plan
-            .compiled_execution_plan
-            .lifecycle
-            .post_stop
-            .push(vec!["/usr/bin/true".to_owned()]);
-        let hook_request = runtime_request_identity(
-            &job_id,
-            &operation_id,
-            &fence,
-            RuntimeRequestTestParts {
-                action: HostRuntimeAction::Stop,
-                arguments: Vec::new(),
-                run_generation: hook_plan.run_generation,
-                start_plan: None,
-                stop_plan: Some(hook_plan.clone()),
-            },
-        );
-        let hook_sha256 = hex_sha256(&canonical_json(&hook_plan).unwrap());
-        let hook_grant = RuntimeRequestGrantBinding {
-            stop_plan_sha256: Some(&hook_sha256),
-            ..grant
-        };
-        assert!(matches!(
-            executor.authorize_runtime_effect(&hook_request, hook_grant, Some(&hook_plan.node_id)),
+            executor.authorize_runtime_effect(&different_target, grant),
             Err(OperationError::InvalidOperation)
         ));
     }
@@ -6627,10 +6198,8 @@ mod tests {
             serde_json::from_str(include_str!("../tests/fixtures/compiled_workload_v2.json"))
                 .unwrap();
         plan.validate().unwrap();
-        assert_eq!(plan.schema_version, 2);
         assert_eq!(plan.runtime.executable, "/opt/vonk/bin/vllm");
-        assert_eq!(plan.runtime_image.distribution_object.kind, "oci-archive");
-        assert!(!plan.security.host_network);
+        assert!(!plan.security.host_network());
 
         let (_temp, roots) = runtime_fixture();
         let model_set = runtime_models(&roots).join(&plan.identity.model_artifact_set_sha256);
@@ -6661,7 +6230,7 @@ mod tests {
         assert_eq!(validated.models.len(), 2);
         assert_eq!(
             validated.platform_manifest_digest,
-            plan.runtime.image_digest
+            plan.runtime_image.image_digest
         );
         assert_eq!(validated.arguments.last().unwrap(), "/opt/vonk/bin/vllm");
     }
@@ -7834,16 +7403,11 @@ mod tests {
         let requests = temp.path().join("runtime-requests");
         fs::create_dir_all(&requests).unwrap();
         let request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::ImageImport,
-            job_id: uuid::Uuid::new_v4(),
-            operation_id: uuid::Uuid::new_v4(),
-            attempt: 1,
             fence: uuid::Uuid::new_v4(),
             arguments: (0..3000)
                 .map(|index| format!("--mount=type=bind,src=/run/vonk/models/{index:05}"))
                 .collect(),
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             job_plan: None,

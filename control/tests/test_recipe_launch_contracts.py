@@ -18,7 +18,13 @@ from vonk_control.compiled_execution_plan import compile_verified_execution_plan
 from vonk_control.execution_plan_service import _bind_runtime_artifacts, _placement
 from vonk_control.models import ClusterMappingNode
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    read_model,
+    read_recipe,
+)
 
 from .recipe_library_source import recipe_library_root
 
@@ -42,10 +48,9 @@ def _package(recipe: RecipeDefinition) -> dict[str, object]:
     }
 
 
-def _receipts(models: list[ModelDefinition]) -> list[dict[str, object]]:
+def _receipts(models: dict[str, ModelDefinition]) -> list[dict[str, object]]:
     result: dict[tuple[str, str], dict[str, object]] = {}
-    for model in models:
-        model_digest = content_sha256(model)
+    for model_digest, model in models.items():
         for file in model.files:
             result.setdefault(
                 (model_digest, file.id),
@@ -68,48 +73,38 @@ def _receipts(models: list[ModelDefinition]) -> list[dict[str, object]]:
 
 
 def _image() -> dict[str, object]:
-    digest = "sha256:" + "a" * 64
-    layout = "f" * 64
     return {
-        "image_digest": digest,
-        "oci_layout_sha256": layout,
+        "image_digest": "sha256:" + "a" * 64,
+        "oci_layout_sha256": "f" * 64,
         "image_bytes": 4096,
-        "architecture": "linux-arm64",
-        "runtime_interface": "vonk.runtime.v1",
-        "source": "controller-build",
         "build_id": "audit-build",
-        "registry_manifest_digest": None,
-        "platform_manifest_digest": digest,
         "local_image_config_id": "sha256:" + "b" * 64,
         "runtime_interface_label": "v1",
-        "distribution_object": {
-            "name": "image.oci.tar",
-            "sha256": layout,
-            "bytes": 4096,
-            "kind": "oci-archive",
-        },
     }
 
 
 def check_catalog(root: Path) -> dict[str, Any]:
     models_by_digest: dict[str, ModelDefinition] = {}
+    raw_models: dict[str, dict[str, Any]] = {}
     for path in (root / "models").glob("*.json"):
-        model = ModelDefinition.model_validate(json.loads(path.read_text()))
-        models_by_digest[content_sha256(model)] = model
+        raw = json.loads(path.read_text())
+        digest = document_sha256(raw)
+        raw_models[digest] = raw
+        models_by_digest[digest] = read_model(raw)
     rows = []
     errors = []
     for path in sorted((root / "recipes").glob("*.json")):
-        recipe = RecipeDefinition.model_validate(json.loads(path.read_text()))
-        models = [
-            models_by_digest[selection.model.content_sha256]
+        raw_recipe = json.loads(path.read_text())
+        recipe = read_recipe(raw_recipe)
+        models = {
+            selection.model.content_sha256: models_by_digest[
+                selection.model.content_sha256
+            ]
             for selection in recipe.models
-        ]
+        }
         model_revisions = [
-            SimpleNamespace(
-                document=model.model_dump(mode="json"),
-                content_digest=content_sha256(model),
-            )
-            for model in models
+            SimpleNamespace(document=raw_models[digest], content_digest=digest)
+            for digest in models
         ]
         receipts = _receipts(models)
         for role_index, role_entry in enumerate(recipe.topology.roles):
@@ -118,6 +113,7 @@ def check_catalog(root: Path) -> dict[str, Any]:
                 runtime = compile_runtime_spec(
                     recipe,
                     models=models,
+                    recipe_digest=document_sha256(raw_recipe),
                     package_handle=_package(recipe),
                     role=role_entry.name,
                     rank=rank,
@@ -146,8 +142,7 @@ def check_catalog(root: Path) -> dict[str, Any]:
                     )
                 except Exception as error:
                     raise RuntimeError(f"{path.stem}: {error}") from error
-                topology = runtime["topology"]
-                world_size = topology["world_size"]
+                world_size = recipe.topology.world_size
                 placement = _placement(
                     recipe,
                     runtime,

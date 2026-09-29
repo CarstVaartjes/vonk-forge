@@ -16,7 +16,7 @@ INPUTS = (
     "control/pyproject.toml",
     "control/src",
     "control/web",
-    "inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl",
+    "inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl",
     "deploy/compose/hermes-agent/Dockerfile",
     "deploy/compose/hermes-agent/entrypoint.sh",
     # Runtime configuration the Controller image ships and stages.

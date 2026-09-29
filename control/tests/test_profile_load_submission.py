@@ -37,7 +37,7 @@ from vonk_control.models import (
     ResourceReservation,
     User,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
@@ -253,7 +253,6 @@ def test_change_between_fresh_review_and_admission_refuses_load(
                         state="active",
                         protocol_version=2,
                         architecture="linux-arm64",
-                        capabilities=[],
                         last_seen_at=NOW,
                     )
                 )
@@ -357,7 +356,6 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
                     state="active",
                     protocol_version=2,
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=NOW,
                 )
             )
@@ -408,7 +406,7 @@ def test_recipe_head_changed_after_review_is_not_substituted_into_admitted_inten
             "expected_revision": 0,
             "assignments": [
                 {
-                    "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                    "recipe_selector": "vonk-forge/synthetic-tiny-build",
                     "spark_ids": ["spk_" + "1" * 32],
                     "desired_state": "running",
                 }
@@ -448,7 +446,7 @@ def test_recipe_head_changed_after_review_is_not_substituted_into_admitted_inten
                     schema_version=2,
                     state="active",
                     document=document.model_dump(mode="json"),
-                    content_digest=content_sha256(document),
+                    content_digest=document_sha256(document.model_dump(mode="json")),
                     execution_key="d" * 64,
                     created_by="test",
                     created_at=NOW,

@@ -30,7 +30,7 @@ from vonk_control.runtime_writable_paths import writable_paths
 
 def test_every_builtin_engine_resolves_its_own_adapter() -> None:
     adapters = {
-        engine: resolve_runtime_adapter(engine, {"mode": "single"})
+        engine: resolve_runtime_adapter(engine, {"node_count": 1})
         for engine in CANONICAL_HARNESS_BY_SLUG
     }
     # Flattening every engine onto one launcher collapses these identities.
@@ -51,13 +51,13 @@ def test_adapter_resolution_fails_closed() -> None:
     with pytest.raises(RuntimeAdapterError):
         resolve_runtime_adapter("not-an-engine")
     with pytest.raises(RuntimeAdapterError):
-        resolve_runtime_adapter("vllm", {"mode": ""})
+        resolve_runtime_adapter("vllm", {"node_count": 0})
     with pytest.raises(RuntimeAdapterError):
         render_adaptation_stage("not-an-engine", launcher=None)
 
 
 def test_adapter_digest_covers_the_adaptation_implementation() -> None:
-    adapter = resolve_runtime_adapter("vllm", {"mode": "single"})
+    adapter = resolve_runtime_adapter("vllm", {"node_count": 1})
     assert (
         adapter.digest
         == hashlib.sha256(canonical_message(adapter.definition)).hexdigest()
@@ -75,7 +75,7 @@ def test_adapter_digest_covers_the_adaptation_implementation() -> None:
 
 
 def test_adapter_labels_name_the_interface_and_the_adapter_identity() -> None:
-    adapter = resolve_runtime_adapter("sglang", {"mode": "distributed"})
+    adapter = resolve_runtime_adapter("sglang", {"node_count": 2})
     assert adapter.labels() == (
         (RUNTIME_INTERFACE_LABEL, RUNTIME_INTERFACE_LABEL_VALUE),
         (RUNTIME_ADAPTER_LABEL, adapter.adapter_id),
@@ -87,8 +87,8 @@ def test_adapter_labels_name_the_interface_and_the_adapter_identity() -> None:
 
 
 def test_adapter_derives_the_writable_paths_instead_of_hardcoding_them() -> None:
-    vllm = resolve_runtime_adapter("vllm", {"mode": "single"}).containerfile
-    llama_cpp = resolve_runtime_adapter("llama-cpp", {"mode": "single"}).containerfile
+    vllm = resolve_runtime_adapter("vllm", {"node_count": 1}).containerfile
+    llama_cpp = resolve_runtime_adapter("llama-cpp", {"node_count": 1}).containerfile
     for item in writable_paths("vllm"):
         assert item.path in vllm
     assert "/outputs/cache/vllm" in vllm

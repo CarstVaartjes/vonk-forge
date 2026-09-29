@@ -11,7 +11,7 @@ from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import document_sha256, read_model, read_recipe
 
 
 def _example(name: str) -> dict[str, object]:
@@ -43,33 +43,54 @@ def _json_text(value: object) -> str:
     return value
 
 
-def _model() -> ModelDefinition:
-    return ModelDefinition.model_validate(_example("model-definition.json"))
+def _model() -> dict[str, object]:
+    return _example("model-definition.json")
 
 
 def _recipe(
-    name: str = "recipe-image.json",
+    name: str = "recipe-source-build.json",
     *,
     engine: str = "vllm",
     entrypoint: list[str] | None = None,
-) -> RecipeDefinition:
+) -> dict[str, object]:
     raw = _example(name)
     runtime = _json_object(raw["runtime"])
     runtime["engine"] = engine
     runtime["entrypoint"] = entrypoint or ["/opt/vonk/bin/vllm", "serve", "/models"]
-    return RecipeDefinition.model_validate(raw)
+    return raw
 
 
 def _source_package(digest: str = "d" * 64) -> dict[str, object]:
     return {
         "image_reference": f"localhost/vonk/recipe-build@sha256:{digest}",
         "image_digest": digest,
-        "paths": ["context.tar", "Dockerfile"],
+        "paths": ["context.tar", "Dockerfile", "blank"],
     }
 
 
-def _distributed_sglang_recipe() -> RecipeDefinition:
-    raw = _example("recipe-image.json")
+def _compile(
+    recipe: dict[str, object],
+    *,
+    model: dict[str, object] | None = None,
+    package_handle: object = _source_package(),
+    role: str = "entrypoint",
+    rank: int = 0,
+) -> dict[str, object]:
+    """Compile published raw documents the way the Controller reads them."""
+
+    model_document = model if model is not None else _model()
+    return compile_runtime_spec(
+        read_recipe(recipe),
+        models={document_sha256(model_document): read_model(model_document)},
+        recipe_digest=document_sha256(recipe),
+        package_handle=package_handle,
+        role=role,
+        rank=rank,
+    )
+
+
+def _distributed_sglang_recipe() -> dict[str, object]:
+    raw = _example("recipe-source-build.json")
     runtime = _json_object(raw["runtime"])
     runtime["engine"] = "sglang"
     runtime["entrypoint"] = ["/opt/vonk/bin/sglang-serve"]
@@ -86,36 +107,28 @@ def _distributed_sglang_recipe() -> RecipeDefinition:
     topology.update(
         {
             "name": "dual-sglang",
-            "mode": "distributed",
             "node_count": 2,
             "roles": [endpoint_role, worker_role],
             "parallelism": {
-                "world_size": 2,
                 "tensor": 2,
                 "pipeline": 1,
                 "data": 1,
                 "backend": "native",
             },
-            "fabric": {
-                "connectivity": "connected",
-                "minimum_bandwidth_mbps": 200_000,
-            },
             "start_order": ["entrypoint", "worker"],
-            "stop_order": ["entrypoint", "worker"],
         }
     )
-    return RecipeDefinition.model_validate(raw)
+    return raw
 
 
-def _multi_artifact_inputs() -> tuple[RecipeDefinition, ModelDefinition]:
-    raw = _example("recipe-image.json")
+def _multi_artifact_inputs() -> tuple[dict[str, object], dict[str, object]]:
+    raw = _example("recipe-source-build.json")
     model_raw = _example("model-definition.json")
     draft = copy.deepcopy(_json_object(_json_array(model_raw["files"])[0]))
     draft.update({"id": "draft", "path": "draft.safetensors", "sha256": "b" * 64})
     _json_array(model_raw["files"]).append(draft)
-    model = ModelDefinition.model_validate(model_raw)
     model_entry = _json_object(_json_array(raw["models"])[0])
-    _json_object(model_entry["model"])["content_sha256"] = content_sha256(model)
+    _json_object(model_entry["model"])["content_sha256"] = document_sha256(model_raw)
     files = _json_array(model_entry["files"])
     _json_object(_json_object(files[0])["mount"])["target"] = "/models/target"
     files.append(
@@ -123,7 +136,7 @@ def _multi_artifact_inputs() -> tuple[RecipeDefinition, ModelDefinition]:
             "id": "draft",
             "file_id": "draft",
             "roles": ["entrypoint"],
-            "mount": {"target": "/models/draft", "read_only": True},
+            "mount": {"target": "/models/draft"},
         }
     )
     runtime = _json_object(raw["runtime"])
@@ -134,20 +147,14 @@ def _multi_artifact_inputs() -> tuple[RecipeDefinition, ModelDefinition]:
             "value": '{"method":"draft_model","model":"/models/draft"}',
         }
     )
-    return RecipeDefinition.model_validate(raw), model
+    return raw, model_raw
 
 
 def test_runtime_spec_preserves_digest_bound_snapshot_selection() -> None:
     recipe = _recipe("recipe-source-build.json")
     model = _model()
     digest = "d" * 64
-    spec = compile_runtime_spec(
-        recipe,
-        models=[model],
-        package_handle=_source_package(digest),
-        role="entrypoint",
-        rank=0,
-    )
+    spec = _compile(recipe, model=model, package_handle=_source_package(digest))
 
     artifact = _json_object(_json_array(spec["artifacts"])[0])
     assert (
@@ -155,19 +162,17 @@ def test_runtime_spec_preserves_digest_bound_snapshot_selection() -> None:
         == f"localhost/vonk/recipe-build@sha256:{digest}"
     )
     assert artifact["path"] == "model.safetensors"
-    assert _json_object(artifact["model"])["content_sha256"] == content_sha256(model)
+    assert _json_object(artifact["model"])["content_sha256"] == document_sha256(model)
     assert artifact["mount"] == {
         "source": "/run/vonk/models/primary/weights",
         "target": "/models",
-        "read_only": True,
     }
 
 
 def test_runtime_spec_writable_paths_ignore_recipe_metadata_identity() -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     raw["identity"] = {"publisher": "anemll", "slug": "anemll-vllm-mia"}
-    recipe = RecipeDefinition.model_validate(raw)
-    spec = compile_runtime_spec(recipe, models=[_model()], role="entrypoint", rank=0)
+    spec = _compile(raw)
     runtime = _json_object(spec["runtime"])
     values = {
         _json_object(item)["name"]: _json_object(item)["value"]
@@ -184,7 +189,7 @@ def test_runtime_spec_writable_paths_ignore_recipe_metadata_identity() -> None:
 
 
 def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
-    spec = compile_runtime_spec(_recipe(), models=[_model()], role="entrypoint", rank=0)
+    spec = _compile(_recipe())
     runtime = _json_object(spec["runtime"])
 
     assert set(spec) == {
@@ -205,30 +210,20 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
         "8000",
     ]
     assert _json_array(runtime["environment"])[1:4] == [
-        {"name": "XDG_CACHE_HOME", "value": "/outputs/cache", "secret": None},
-        {"name": "XDG_CONFIG_HOME", "value": "/outputs/cache/config", "secret": None},
-        {"name": "TMPDIR", "value": "/outputs/tmp", "secret": None},
+        {"name": "XDG_CACHE_HOME", "value": "/outputs/cache"},
+        {"name": "XDG_CONFIG_HOME", "value": "/outputs/cache/config"},
+        {"name": "TMPDIR", "value": "/outputs/tmp"},
     ]
     assert spec["security"] == {
-        "devices": ["nvidia.com/gpu=all"],
+        "gpu": True,
         "user": "10001:10001",
-        "capabilities": [],
-        "privileged": False,
-        "host_network": False,
         "network_mode": "none",
         "mounts": [
-            {
-                "source": "/run/vonk/models/primary",
-                "target": "/models",
-                "read_only": True,
-            },
-            {"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False},
+            {"source": "/run/vonk/models/primary", "target": "/models"},
+            {"source": "/run/vonk/outputs", "target": "/outputs"},
         ],
-        "read_only_root": True,
-        "no_new_privileges": True,
     }
     assert spec["endpoint"] == {
-        "protocol": "openai",
         "port": 8000,
         "model_aliases": ["synthetic-tiny"],
         "health_path": "/v1/models",
@@ -236,12 +231,11 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
 
 
 def test_runtime_spec_projects_deepseek_r1_parser_into_agent_argv() -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     _json_array(_json_object(raw["runtime"])["arguments"]).append(
         {"name": "reasoning-parser", "value": "deepseek_r1"}
     )
-    recipe = RecipeDefinition.model_validate(raw)
-    spec = compile_runtime_spec(recipe, models=[_model()], role="entrypoint", rank=0)
+    spec = _compile(raw)
     command = _json_array(_json_object(spec["runtime"])["entrypoint"])
 
     parser = command.index("--reasoning-parser")
@@ -250,10 +244,8 @@ def test_runtime_spec_projects_deepseek_r1_parser_into_agent_argv() -> None:
 
 def test_runtime_spec_projects_distributed_sglang_placement_authority() -> None:
     recipe = _distributed_sglang_recipe()
-    entrypoint = compile_runtime_spec(
-        recipe, models=[_model()], role="entrypoint", rank=0
-    )
-    worker = compile_runtime_spec(recipe, models=[_model()], role="worker", rank=1)
+    entrypoint = _compile(recipe)
+    worker = _compile(recipe, role="worker", rank=1)
     entry_runtime = _json_object(entrypoint["runtime"])
     worker_runtime = _json_object(worker["runtime"])
 
@@ -272,17 +264,13 @@ def test_runtime_spec_projects_distributed_sglang_placement_authority() -> None:
     )
     assert entrypoint["topology"] == {
         "name": "dual-sglang",
-        "mode": "distributed",
         "node_count": 2,
-        "world_size": 2,
         "rank": 0,
         "role": "entrypoint",
-        "backend": "native",
     }
     assert _json_array(_json_object(entrypoint["security"])["mounts"])[-1] == {
         "source": "/run/vonk/outputs",
         "target": "/outputs",
-        "read_only": False,
     }
 
 
@@ -292,7 +280,7 @@ def test_runtime_spec_compiles_one_shot_artifact_job_authority() -> None:
         engine="diffusers",
         entrypoint=["/opt/vonk/bin/diffusers-job"],
     )
-    spec = compile_runtime_spec(recipe, models=[_model()], role="entrypoint", rank=0)
+    spec = _compile(recipe)
     runtime = _json_object(spec["runtime"])
     security = _json_object(spec["security"])
 
@@ -300,32 +288,30 @@ def test_runtime_spec_compiles_one_shot_artifact_job_authority() -> None:
     assert spec["job"] == {
         "interface": "image-job",
         "input": None,
-        "output_path": "/outputs",
         "timeout_seconds": 3600,
     }
     assert _json_array(security["mounts"]) == [
-        {"source": "/run/vonk/models/primary", "target": "/models", "read_only": True},
-        {"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False},
-        {"source": "/run/vonk/inputs", "target": "/inputs", "read_only": True},
+        {"source": "/run/vonk/models/primary", "target": "/models"},
+        {"source": "/run/vonk/outputs", "target": "/outputs"},
+        {"source": "/run/vonk/inputs", "target": "/inputs"},
     ]
     assert _json_array(runtime["entrypoint"])[-2:] == ["--output-dir", "/outputs"]
 
 
 def test_runtime_spec_binds_exact_auxiliary_model_versions() -> None:
     package = {
-        "artifact_inputs": [{"selection_id": "primary", "artifact_key": "weights"}]
+        **_source_package(),
+        "artifact_inputs": [{"selection_id": "primary", "artifact_key": "weights"}],
     }
     model = _model()
-    spec = compile_runtime_spec(
-        _recipe(), models=[model], package_handle=package, role="entrypoint", rank=0
-    )
+    spec = _compile(_recipe(), model=model, package_handle=package)
 
     assert spec["model_dependencies"] == [
         {
             "selection_id": "primary",
             "publisher": "vonk-forge",
             "slug": "synthetic-tiny-fp16",
-            "content_sha256": content_sha256(model),
+            "content_sha256": document_sha256(model),
             "artifact_key": "weights",
         }
     ]
@@ -333,7 +319,7 @@ def test_runtime_spec_binds_exact_auxiliary_model_versions() -> None:
 
 def test_runtime_spec_preserves_exact_multi_artifact_targets_and_vllm_primary() -> None:
     recipe, model = _multi_artifact_inputs()
-    spec = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+    spec = _compile(recipe, model=model)
 
     command = _json_array(_json_object(spec["runtime"])["entrypoint"])
     assert command[2] == "/models/target"
@@ -351,19 +337,16 @@ def test_runtime_spec_preserves_exact_multi_artifact_targets_and_vllm_primary() 
     assert _json_array(_json_object(spec["security"])["mounts"])[0] == {
         "source": "/run/vonk/models/primary",
         "target": "/models/target",
-        "read_only": True,
     }
 
 
 def test_runtime_spec_rejects_recipe_authored_shell_authority() -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     _json_object(raw["runtime"])["entrypoint"] = ["/bin/sh", "-c", "touch /tmp/owned"]
-    recipe = RecipeDefinition.model_validate(raw)
-
     with pytest.raises(RecipeRuntimeSpecError, match="entrypoint"):
-        compile_runtime_spec(recipe, models=[_model()], role="entrypoint", rank=0)
+        _compile(raw)
 
 
 def test_runtime_spec_rejects_a_role_that_does_not_bind_the_exact_rank() -> None:
     with pytest.raises(RecipeRuntimeSpecError, match="role"):
-        compile_runtime_spec(_recipe(), models=[_model()], role="worker", rank=0)
+        _compile(_recipe(), role="worker", rank=0)

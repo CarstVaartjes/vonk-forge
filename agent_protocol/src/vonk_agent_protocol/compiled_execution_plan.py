@@ -1,4 +1,10 @@
-"""Typed schema-2 compiled launch plan shared by Controller and agents."""
+"""Typed compiled launch plan shared by Controller and agents.
+
+Platform constants are not carried: images are linux/arm64, containers run
+with a read-only root, no capabilities and no new privileges, model and input
+mounts are read-only, the output mount is writable, job inputs live under
+/inputs and outputs under /outputs.
+"""
 
 from __future__ import annotations
 
@@ -35,6 +41,8 @@ MAX_COMPILED_EXECUTION_PLAN_MOUNTS = MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS + 2
 # structural mirror of the schema, not the size authority. The size authority is
 # `MAX_ARGV_BYTES`, derived from the canonical host-runtime request ceiling.
 MAX_ARGV_ITEMS = 4096
+# Only the start/job payload memory fields still use this; they move to the
+# plan's placement (always unified memory on DGX Spark).
 MemoryKind = Literal["unified", "host", "accelerator"]
 # Only the Controller's uninstall reader supplies this process-local context.
 # It cannot be selected by fields in a persisted or incoming JSON document.
@@ -104,11 +112,7 @@ def _validate_ip(value: str | None) -> str | None:
 
 class CompiledIdentity(_Strict):
     recipe_revision_sha256: Digest
-    execution_sha256: Digest
-    harness_sha256: Digest
-    build_input_sha256: Digest | None
     model_artifact_set_sha256: Digest
-    model_artifact_bytes: int = Field(ge=0, le=16 * 1024**4)
 
 
 class CompiledEnvironmentEntry(_Strict):
@@ -141,41 +145,17 @@ class CompiledPlacement(_Strict):
     port: int | None = Field(default=..., ge=1, le=65535)
     reserved_memory_bytes: int = Field(gt=0, le=16 * 1024**4)
     memory_floor_bytes: int = Field(ge=0, le=16 * 1024**4)
-    memory_kind: MemoryKind
 
     _addresses_are_safe = field_validator(
         "endpoint_address", "local_address", "master_address"
     )(_validate_ip)
 
 
-class CompiledRuntimeTelemetry(_Strict):
-    engine: str = Field(min_length=1, max_length=64)
-    engine_version: str | None = Field(min_length=1, max_length=128)
-    metrics_format: Literal["prometheus", "comfyui-queue"] | None
-    metrics_path: str | None = Field(max_length=256)
-
-    @model_validator(mode="after")
-    def endpoint_is_canonical(self) -> CompiledRuntimeTelemetry:
-        if (self.metrics_format is None) != (self.metrics_path is None):
-            raise ValueError("metrics format and path must be declared together")
-        if self.metrics_path is not None:
-            _safe_path(self.metrics_path, absolute=True)
-            if any(char in self.metrics_path for char in "?#\r\n"):
-                raise ValueError("metrics path is invalid")
-        if "\x00" in self.engine or (
-            self.engine_version and "\x00" in self.engine_version
-        ):
-            raise ValueError("engine identity is invalid")
-        return self
-
-
 class CompiledRuntime(_Strict):
     executable: str = Field(min_length=1, max_length=65536)
     argv: list[str] = Field(max_length=MAX_ARGV_ITEMS)
     env: list[CompiledEnvironmentEntry] = Field(max_length=128)
-    image_digest: ImageDigest
     placement: CompiledPlacement
-    telemetry: CompiledRuntimeTelemetry
 
     @field_validator("executable")
     @classmethod
@@ -194,8 +174,9 @@ class CompiledRuntime(_Strict):
 
 
 class CompiledArtifactMount(_Strict):
+    """A read-only model mount."""
+
     target: str
-    read_only: StrictBool
 
     @field_validator("target")
     @classmethod
@@ -204,12 +185,6 @@ class CompiledArtifactMount(_Strict):
         if value != "/models" and not value.startswith("/models/"):
             raise ValueError("model mount target is unsafe")
         return value
-
-    @model_validator(mode="after")
-    def mount_is_read_only(self) -> CompiledArtifactMount:
-        if not self.read_only:
-            raise ValueError("model mount must be read-only")
-        return self
 
 
 class CompiledModelIdentity(_Strict):
@@ -235,12 +210,6 @@ class CompiledModelIdentity(_Strict):
         return value
 
 
-class CompiledDistributionObject(DistributionObject):
-    """Distribution objects usable as installed model or runtime inputs."""
-
-    kind: Literal["model", "oci-archive"]
-
-
 class CompiledArtifact(_Strict):
     selection_id: str = Field(min_length=1, max_length=64)
     file_id: str = Field(min_length=1, max_length=64)
@@ -250,7 +219,6 @@ class CompiledArtifact(_Strict):
     roles: list[str] = Field(min_length=1)
     mount: CompiledArtifactMount
     model: CompiledModelIdentity
-    distribution_object: CompiledDistributionObject
 
     @field_validator("path")
     @classmethod
@@ -280,14 +248,7 @@ class CompiledArtifact(_Strict):
         return value
 
     @model_validator(mode="after")
-    def receipt_matches(self) -> CompiledArtifact:
-        if (
-            self.distribution_object.kind != "model"
-            or self.distribution_object.name != self.path
-            or self.distribution_object.sha256 != self.sha256
-            or self.distribution_object.bytes != self.size_bytes
-        ):
-            raise ValueError("artifact distribution receipt is inconsistent")
+    def weights_are_not_empty(self) -> CompiledArtifact:
         if self.size_bytes == 0 and any(
             role in {"model", "weight", "weights"} for role in self.roles
         ):
@@ -296,98 +257,74 @@ class CompiledArtifact(_Strict):
 
 
 class CompiledRuntimeImage(_Strict):
+    """The Controller-built OCI archive; imported locally as
+    ``localhost/vonk/compiled-runtime-<oci_layout_sha256>@<image_digest>``."""
+
     image_digest: ImageDigest
     oci_layout_sha256: Digest
     image_bytes: int = Field(gt=0, le=16 * 1024**4)
-    architecture: Literal["linux-arm64"]
-    runtime_interface: Literal["vonk.runtime.v1"]
-    source: Literal["published", "controller-build"]
-    build_id: str | None
-    distribution_object: CompiledDistributionObject
-    registry_manifest_digest: ImageDigest | None
-    platform_manifest_digest: ImageDigest
+    build_id: str = Field(min_length=1, max_length=128)
     local_image_config_id: ImageDigest
-    local_image_reference: str
     runtime_interface_label: str = Field(min_length=1, max_length=128)
 
-    @model_validator(mode="after")
-    def receipt_matches(self) -> CompiledRuntimeImage:
-        if (
-            self.platform_manifest_digest != self.image_digest
-            or self.distribution_object.kind != "oci-archive"
-            or self.distribution_object.name != "image.oci.tar"
-            or self.distribution_object.sha256 != self.oci_layout_sha256
-            or self.distribution_object.bytes != self.image_bytes
-        ):
-            raise ValueError("runtime image receipt is inconsistent")
-        if self.source == "published" and (
-            self.build_id is not None or self.registry_manifest_digest is None
-        ):
-            raise ValueError("published image receipt is invalid")
-        if self.source == "controller-build" and (
-            not self.build_id or self.registry_manifest_digest is not None
-        ):
-            raise ValueError("Controller image receipt is invalid")
-        expected = f"localhost/vonk/compiled-runtime-{self.oci_layout_sha256}@{self.platform_manifest_digest}"
-        if self.local_image_reference != expected:
-            raise ValueError("runtime image reference is not bound")
-        return self
+    @property
+    def distribution_object(self) -> DistributionObject:
+        return DistributionObject(
+            name="image.oci.tar",
+            sha256=self.oci_layout_sha256,
+            bytes=self.image_bytes,
+            kind="oci-archive",
+        )
+
+    @property
+    def local_image_reference(self) -> str:
+        return (
+            f"localhost/vonk/compiled-runtime-{self.oci_layout_sha256}"
+            f"@{self.image_digest}"
+        )
 
 
 class CompiledSecurityMount(_Strict):
+    """Model and input mounts are read-only; the output mount is writable."""
+
     source: Literal["model", "inputs", "outputs"]
     target: str
-    read_only: StrictBool
 
     @field_validator("target")
     @classmethod
     def target_is_safe(cls, value: str) -> str:
         return _safe_path(value, absolute=True)
 
+    @property
+    def read_only(self) -> bool:
+        return self.source != "outputs"
+
     @model_validator(mode="after")
     def policy_matches_source(self) -> CompiledSecurityMount:
-        if self.source == "outputs" and (self.target != "/outputs" or self.read_only):
+        if self.source == "outputs" and self.target != "/outputs":
             raise ValueError("outputs mount policy is invalid")
-        if self.source == "inputs" and (self.target != "/inputs" or not self.read_only):
+        if self.source == "inputs" and self.target != "/inputs":
             raise ValueError("inputs mount policy is invalid")
         if self.source == "model" and (
             self.target != "/models" and not self.target.startswith("/models/")
         ):
             raise ValueError("model mount policy is invalid")
-        if self.source == "model" and not self.read_only:
-            raise ValueError("model mount must be read-only")
         return self
 
 
 class CompiledSecurity(_Strict):
-    devices: list[str]
-    capabilities: list[str]
+    """Per-workload security choices; everything else is a platform constant."""
+
+    gpu: StrictBool
     network_mode: Literal["none", "bridge", "host"]
-    host_network: StrictBool
-    privileged: StrictBool
     user: str
     mounts: list[CompiledSecurityMount]
-    read_only_root: StrictBool
-    no_new_privileges: StrictBool
 
     @model_validator(mode="after")
     def security_is_bounded(self) -> CompiledSecurity:
-        if (
-            self.host_network != (self.network_mode == "host")
-            or self.privileged
-            or not self.read_only_root
-            or not self.no_new_privileges
-            or (
-                self.devices
-                and (len(self.devices) > 1 or self.devices != ["nvidia.com/gpu=all"])
-            )
-        ):
-            raise ValueError("security policy is invalid")
         targets = [mount.target for mount in self.mounts]
-        if (
-            self.capabilities
-            or len(self.mounts) > MAX_COMPILED_EXECUTION_PLAN_MOUNTS
-            or len(targets) != len(set(targets))
+        if len(self.mounts) > MAX_COMPILED_EXECUTION_PLAN_MOUNTS or len(targets) != len(
+            set(targets)
         ):
             raise ValueError("security policy is invalid")
         parts = self.user.split(":")
@@ -400,22 +337,7 @@ class CompiledSecurity(_Strict):
 
 class CompiledTopology(_Strict):
     name: str
-    mode: Literal[
-        "single",
-        "distributed",
-        "tensor_parallel",
-        "pipeline_parallel",
-        "data_parallel",
-        "hybrid",
-        "ray",
-        "mpi",
-    ]
-    # Engine-owned backend labels follow RecipeParallelism's string contract.
-    backend: str = Field(min_length=1, max_length=64)
     node_count: int = Field(gt=0)
-    world_size: int = Field(gt=0)
-    rank: int = Field(ge=0)
-    role: str = Field(min_length=1, max_length=64)
 
     @field_validator("name")
     @classmethod
@@ -424,35 +346,14 @@ class CompiledTopology(_Strict):
             raise ValueError("topology name is invalid")
         return value
 
-    @field_validator("role")
-    @classmethod
-    def role_is_canonical(cls, value: str) -> str:
-        if not _valid_role(value):
-            raise ValueError("topology role is invalid")
-        return value
-
-    @model_validator(mode="after")
-    def topology_is_bounded(self) -> CompiledTopology:
-        if self.world_size < self.node_count or self.rank >= self.world_size:
-            raise ValueError("topology bounds are invalid")
-        return self
-
 
 class CompiledLifecycle(_Strict):
-    pre_start: list[list[str]] = Field(max_length=16)
-    post_stop: list[list[str]] = Field(max_length=16)
     stop_timeout_seconds: int = Field(ge=1, le=600)
-
-    @field_validator("pre_start", "post_stop")
-    @classmethod
-    def hooks_are_argv(cls, value: list[list[str]]) -> list[list[str]]:
-        for argv in value:
-            _validate_argv(argv, required=True)
-        return value
 
 
 class CompiledEndpoint(_Strict):
-    protocol: Literal["openai"]
+    """An OpenAI-compatible endpoint."""
+
     port: int = Field(ge=1024, le=65535)
     model_aliases: list[str] = Field(min_length=1)
     health_path: str = Field(max_length=256)
@@ -503,9 +404,9 @@ class CompiledJobInputSlot(_Strict):
 
 
 class CompiledJobInput(_Strict):
-    """Typed compiled form of the public ``RecipeJobInput`` declaration."""
+    """Typed compiled form of the public ``RecipeJobInput`` declaration;
+    inputs are staged read-only under /inputs."""
 
-    path: Literal["/inputs"]
     required: StrictBool
     media_types: list[StrictStr] = Field(min_length=1, max_length=16)
     max_bytes: StrictInt = Field(ge=1, le=1024**3)
@@ -547,12 +448,10 @@ class CompiledJob(_Strict):
         "image-job", "audio-job", "video-job", "mesh-job", "artifact-job"
     ]
     input: CompiledJobInput | None
-    output_path: Literal["/outputs"]
     timeout_seconds: int = Field(ge=1, le=3600)
 
 
 class CompiledExecutionPlan(_Strict):
-    schema_version: Literal[2]
     identity: CompiledIdentity
     runtime: CompiledRuntime
     artifacts: list[CompiledArtifact] = Field(
@@ -565,40 +464,27 @@ class CompiledExecutionPlan(_Strict):
     endpoint: CompiledEndpoint | None
     job: CompiledJob | None
 
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def schema_version_is_strict(cls, value: object) -> object:
-        if type(value) is not int or value != 2:
-            raise ValueError("schema version is invalid")
-        return value
-
     @model_validator(mode="after")
     def cross_fields_match(self, info: ValidationInfo) -> CompiledExecutionPlan:
         if (self.endpoint is None) == (self.job is None):
             raise ValueError("exactly one compiled interface is required")
         placement = self.runtime.placement
-        if (
-            self.runtime.image_digest != self.runtime_image.image_digest
-            or (placement.rank, placement.role, placement.world_size)
-            != (self.topology.rank, self.topology.role, self.topology.world_size)
-            or placement.rank >= placement.world_size
-        ):
+        if placement.rank >= placement.world_size:
             raise ValueError("compiled placement identity is inconsistent")
         if self.endpoint is not None:
             if placement.port is None:
                 raise ValueError("compiled serving placement port is unavailable")
         elif placement.port is not None:
             raise ValueError("compiled job placement must not have a port")
-        if self.topology.world_size < self.topology.node_count:
+        if placement.world_size < self.topology.node_count:
             raise ValueError("compiled topology bounds are invalid")
-        if self.topology.world_size == 1 and (
+        if placement.world_size == 1 and (
             placement.rank != 0
             or placement.local_address is not None
             or placement.master_address is not None
             or placement.master_port is not None
         ):
             raise ValueError("single-node rendezvous is invalid")
-        by_digest: dict[str, int] = {}
         physical_by_path: dict[tuple[str, str], tuple[object, ...]] = {}
         file_paths: dict[tuple[str, str], str] = {}
         paths: set[tuple[str, str]] = set()
@@ -610,10 +496,6 @@ class CompiledExecutionPlan(_Strict):
                 artifact.model.publisher,
                 artifact.model.slug,
                 artifact.model.content_sha256,
-                artifact.distribution_object.name,
-                artifact.distribution_object.sha256,
-                artifact.distribution_object.bytes,
-                artifact.distribution_object.kind,
             )
             physical_key = (artifact.selection_id, artifact.path)
             previous = physical_by_path.get(physical_key)
@@ -629,11 +511,6 @@ class CompiledExecutionPlan(_Strict):
             if mount_path in paths:
                 raise ValueError("compiled artifact mount target is duplicated")
             paths.add(mount_path)
-            previous = by_digest.setdefault(artifact.sha256, artifact.size_bytes)
-            if previous != artifact.size_bytes:
-                raise ValueError("compiled artifact digest sizes conflict")
-        if sum(by_digest.values()) != self.identity.model_artifact_bytes:
-            raise ValueError("compiled artifact bytes do not match identity")
         # Teardown needs the current typed storage identity, not permission to
         # launch it. Keep all structural, artifact and security checks above;
         # only launch-time fabric/network admission is irrelevant to removal.
@@ -645,7 +522,7 @@ class CompiledExecutionPlan(_Strict):
             or placement.local_address is None
             or placement.master_address is None
             or self.endpoint is None
-            or self.security.devices != ["nvidia.com/gpu=all"]
+            or not self.security.gpu
         ):
             raise ValueError("native fabric placement is incomplete")
         expected_network = (
@@ -677,7 +554,6 @@ def validate_compiled_execution_plan(value: object) -> dict[str, object]:
 __all__ = [
     "CompiledArtifact",
     "CompiledArtifactMount",
-    "CompiledDistributionObject",
     "CompiledEndpoint",
     "CompiledEnvironmentEntry",
     "CompiledExecutionPlan",

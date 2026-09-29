@@ -43,7 +43,6 @@ class RuntimeImageStorageImpact:
             oci_layout_sha256 (None | str | Unset):
             reclaimable_bytes (int | Unset):  Default: 0.
             reclaimable_digests (list[str] | Unset):
-            registry_manifest_digest (None | str | Unset):
             required_bytes (int | None | Unset):
             reused_bytes (int | Unset):  Default: 0.
             running_coverage (RuntimeImageStorageImpactRunningCoverage | Unset):  Default: 'unknown'.
@@ -62,7 +61,6 @@ class RuntimeImageStorageImpact:
     oci_layout_sha256: None | str | Unset = UNSET
     reclaimable_bytes: int | Unset = 0
     reclaimable_digests: list[str] | Unset = UNSET
-    registry_manifest_digest: None | str | Unset = UNSET
     required_bytes: int | None | Unset = UNSET
     reused_bytes: int | Unset = 0
     running_coverage: RuntimeImageStorageImpactRunningCoverage | Unset = 'unknown'
@@ -124,12 +122,6 @@ class RuntimeImageStorageImpact:
 
 
 
-        registry_manifest_digest: None | str | Unset
-        if isinstance(self.registry_manifest_digest, Unset):
-            registry_manifest_digest = UNSET
-        else:
-            registry_manifest_digest = self.registry_manifest_digest
-
         required_bytes: int | None | Unset
         if isinstance(self.required_bytes, Unset):
             required_bytes = UNSET
@@ -169,8 +161,6 @@ class RuntimeImageStorageImpact:
             field_dict["reclaimable_bytes"] = reclaimable_bytes
         if reclaimable_digests is not UNSET:
             field_dict["reclaimable_digests"] = reclaimable_digests
-        if registry_manifest_digest is not UNSET:
-            field_dict["registry_manifest_digest"] = registry_manifest_digest
         if required_bytes is not UNSET:
             field_dict["required_bytes"] = required_bytes
         if reused_bytes is not UNSET:
@@ -270,16 +260,6 @@ class RuntimeImageStorageImpact:
         reclaimable_digests = cast(list[str], d.pop("reclaimable_digests", UNSET))
 
 
-        def _parse_registry_manifest_digest(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        registry_manifest_digest = _parse_registry_manifest_digest(d.pop("registry_manifest_digest", UNSET))
-
-
         def _parse_required_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -316,7 +296,6 @@ class RuntimeImageStorageImpact:
             oci_layout_sha256=oci_layout_sha256,
             reclaimable_bytes=reclaimable_bytes,
             reclaimable_digests=reclaimable_digests,
-            registry_manifest_digest=registry_manifest_digest,
             required_bytes=required_bytes,
             reused_bytes=reused_bytes,
             running_coverage=running_coverage,

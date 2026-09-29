@@ -118,8 +118,6 @@ def test_completed_result_projection_is_strict_and_exposes_both_children() -> No
         result={
             "schema_version": 2,
             "recipe_content_sha256": "a" * 64,
-            "source": "registry",
-            "platform_manifest_digest": "sha256:platform",
             "image_digest": "sha256:image",
             "oci_archive_sha256": "b" * 64,
             "image_bytes": 20,

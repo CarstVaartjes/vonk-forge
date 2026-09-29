@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
 from .admission_locking import (
@@ -119,9 +119,6 @@ def derive_build_input_identity(
             "base_image",
             "context",
             "dockerfile",
-            "target",
-            "platform",
-            "arguments",
             "network",
             "options",
             "security",
@@ -189,12 +186,14 @@ def _build_effective_settings(value: object | None) -> dict[str, object] | None:
 
 def _canonical_recipe_document(value: object) -> dict[str, object]:
     try:
-        recipe = RecipeDefinition.model_validate_json(canonical_message(value))
+        if not isinstance(value, Mapping):
+            raise TypeError("stored recipe is not a JSON object")
+        read_recipe(value)
     except (TypeError, ValueError) as error:
         raise RecipeBuildError(
             "build.contract_invalid", "stored recipe does not satisfy RecipeDefinition"
         ) from error
-    return recipe.model_dump(mode="json")
+    return dict(value)
 
 
 def _canonical_model_build_inputs(
@@ -244,9 +243,7 @@ def _canonical_build(
     document: Mapping[str, object], projected: RecipeRevisionProjection | None = None
 ) -> Mapping[str, object]:
     execution = document.get("execution")
-    if not isinstance(execution, Mapping) or execution.get("mode") != "build":
-        raise RecipeBuildError("build.not_required", "recipe selects a prebuilt image")
-    build = execution.get("build")
+    build = execution.get("build") if isinstance(execution, Mapping) else None
     if not isinstance(build, Mapping):
         raise RecipeBuildError(
             "build.contract_invalid", "canonical execution.build is unavailable"
@@ -316,19 +313,6 @@ def _canonical_build_resources(
     return resources, security
 
 
-def _canonical_build_platform(build: Mapping[str, object]) -> str:
-    base_image = build.get("base_image")
-    if (
-        not isinstance(base_image, Mapping)
-        or base_image.get("platform") != "linux/arm64"
-    ):
-        raise RecipeBuildError(
-            "build.platform_invalid",
-            "canonical source builds require a linux/arm64 base image",
-        )
-    return "linux/arm64"
-
-
 def _source_policy_document(
     document: Mapping[str, object],
     build: Mapping[str, object],
@@ -344,7 +328,7 @@ def _source_policy_document(
     normalized_build = {
         "context": {"path": context_path, "sha256": source_sha256},
         "dockerfile": build.get("dockerfile"),
-        "network": copy.deepcopy(build.get("network", {"mode": "none", "hosts": []})),
+        "network": copy.deepcopy(build.get("network", {"hosts": []})),
     }
     return {**copy.deepcopy(dict(document)), "build": normalized_build}
 
@@ -493,7 +477,7 @@ class _BuildCandidate:
 class PreparedBuildReceipt(Protocol):
     """Verified filesystem identity of one prepared Controller build."""
 
-    build_id: str | None
+    build_id: str
     build_input_sha256: str | None
     image_digest: str
     oci_archive_sha256: str
@@ -624,7 +608,6 @@ class RecipeBuildService:
             )
         base_images = list(dockerfile_base_images(dockerfile_payload))
         _canonical_build_resources(projected)
-        _canonical_build_platform(build)
         _declared_image_bytes(document)
         model_inputs = projected.build_model_artifacts
         topology_inputs = projected.build_topology_inputs
@@ -929,14 +912,8 @@ class RecipeBuildService:
             "processes": processes,
             "timeout_seconds": resources.timeout_seconds,
             "output_bytes": output_bytes,
-            "gpu": 0,
-            "privileged": False,
-            "host_mounts": False,
-            "container_socket": False,
         }
         payload: dict[str, object] = {
-            "schema_version": 1,
-            "kind": "recipe.build.v1",
             "adapter": adapter.to_wire().model_dump(mode="json"),
             "build_id": proposed_build_id,
             "recipe_revision_id": revision.id,
@@ -948,8 +925,6 @@ class RecipeBuildService:
             "base_image_storage_bytes": base_image_storage_bytes,
             "capabilities": capabilities,
             "dockerfile": build["dockerfile"],
-            "platform": _canonical_build_platform(build),
-            "arguments": copy.deepcopy(build["arguments"]),
             "network": copy.deepcopy(build["network"]),
             "options": (
                 projected.build_options.model_dump(mode="json")
@@ -957,7 +932,6 @@ class RecipeBuildService:
                 else {}
             ),
             "limits": limits,
-            "target": build.get("target"),
         }
         policy_document = {
             "passed": policy.passed,
@@ -1014,9 +988,7 @@ class RecipeBuildService:
         called while the availability parent and builder rows are locked.
         """
         try:
-            acquire_admission_keys(
-                session, (node_admission_key(plan.builder_node_id),)
-            )
+            acquire_admission_keys(session, (node_admission_key(plan.builder_node_id),))
             locked = lock_admission_rows(
                 session,
                 (
@@ -1218,9 +1190,7 @@ class RecipeBuildService:
         request_id: str | None = None,
     ) -> None:
         try:
-            acquire_admission_keys(
-                session, (node_admission_key(plan.builder_node_id),)
-            )
+            acquire_admission_keys(session, (node_admission_key(plan.builder_node_id),))
             self._reserve_in_session(session, plan, now=now, request_id=request_id)
         except AdmissionLockBusy as error:
             raise RecipeBuildAdmissionBusy() from error
@@ -1252,9 +1222,7 @@ class RecipeBuildService:
                 AdmissionRowLock(
                     "build-builder-node",
                     AgentNode,
-                    select(AgentNode).where(
-                        AgentNode.node_id == plan.builder_node_id
-                    ),
+                    select(AgentNode).where(AgentNode.node_id == plan.builder_node_id),
                 ),
                 AdmissionRowLock(
                     "build-recipe-revision",
@@ -1477,11 +1445,7 @@ class RecipeBuildService:
                 # Docker cache state. Re-importing the immutable layout makes a
                 # new mapping self-healing after image pruning or runtime changes.
                 node = session.get(AgentNode, item.node_id)
-                if (
-                    node is None
-                    or node.state != "active"
-                    or "recipe.image.import.v1" not in node.capabilities
-                ):
+                if node is None or node.state != "active":
                     raise RecipeBuildError(
                         "build.import_capability_missing",
                         "a mapped GPU node cannot import the exact OCI result",
@@ -1490,8 +1454,6 @@ class RecipeBuildService:
                     (
                         item.node_id,
                         {
-                            "schema_version": 1,
-                            "kind": "recipe.image.import.v1",
                             "build_id": build.id,
                             "mapping_id": mapping.id,
                             "mapping_generation": mapping.generation,
@@ -1518,7 +1480,6 @@ def _validate_builder(node: AgentNode) -> None:
         or node.architecture != "linux-arm64"
         or not isinstance(node.binary_digest, str)
         or _SHA256.fullmatch(node.binary_digest) is None
-        or "recipe.build.v1" not in node.capabilities
     ):
         raise RecipeBuildError(
             "build.node_incompatible", "builder GPU node is inactive or incompatible"
@@ -1529,25 +1490,16 @@ def _public_build_network(build: object) -> bool:
     if not isinstance(build, dict):
         return False
     network = build.get("network")
-    return isinstance(network, dict) and network.get("mode") == "public"
+    return isinstance(network, dict) and bool(network.get("hosts"))
 
 
 def _declared_image_bytes(document: dict[str, object]) -> int:
-    values: list[int] = []
     try:
-        topology = recipe_topology(document)
+        values = [
+            role.resources.disk.image_bytes for role in recipe_topology(document).roles
+        ]
     except RecipeRuntimeSpecError:
-        topology = {}
-    roles = topology.get("roles")
-    if isinstance(roles, list):
-        for role in roles:
-            if not isinstance(role, dict):
-                continue
-            resources = role.get("resources")
-            disk = resources.get("disk") if isinstance(resources, dict) else None
-            image_bytes = disk.get("image_bytes") if isinstance(disk, dict) else None
-            if isinstance(image_bytes, int) and not isinstance(image_bytes, bool):
-                values.append(image_bytes)
+        values = []
     if not values or min(values) < 1 or max(values) > 16 * 1024**4:
         raise RecipeBuildError(
             "build.image_size_invalid",
@@ -1614,8 +1566,7 @@ def _available_build_memory(
             - capacity.occupied_bytes
             - capacity.unmaterialized_bytes
             - sum(
-                residual.maximum_bytes
-                for residual in capacity.unknown_run_residuals
+                residual.maximum_bytes for residual in capacity.unknown_run_residuals
             ),
         )
         - floor

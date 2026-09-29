@@ -4,27 +4,20 @@ import copy
 import hashlib
 import json
 import tarfile
-from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol import (
     canonical_message,
 )
-from vonk_control.agent_api import AgentApiServices
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.api import create_app
-from vonk_control.auth import AgentSource, TokenCodec
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -46,20 +39,10 @@ from vonk_control.execution_plan_service import (
 )
 from vonk_control.jobs import _canonical_payload
 from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    Base,
-    CatalogDocument,
     CatalogDocumentRevision,
-    ClusterMapping,
     ClusterMappingNode,
-    InstallationNode,
     RecipeBuild,
-    RecipeInstallation,
-    RuntimeImageAuthorization,
 )
-from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
-from vonk_control.recipe_execution_contract import installation_plan_document
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
@@ -69,8 +52,12 @@ from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptWire,
 )
-from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import (
+    RecipeDefinition,
+    document_sha256,
+    read_model,
+    read_recipe,
+)
 from vonk_forge_contracts.model import ModelFile, ModelReference
 
 from .canonical_recipe_fixtures import canonical_example
@@ -117,7 +104,7 @@ def _spec(
                 "metrics_format": "prometheus",
                 "metrics_path": "/metrics",
             },
-            "image": "registry.example/vonk/vllm@sha256:" + "0" * 64,
+            "image": "localhost/vonk/recipe-build@sha256:" + "1" * 64,
             "architecture": "linux/arm64",
             "entrypoint": ["/opt/vonk/bin/vllm", "serve"],
             "arguments": [],
@@ -125,38 +112,19 @@ def _spec(
             "writable_paths": [],
         },
         "security": {
-            "devices": [],
-            "capabilities": [],
+            "gpu": True,
             "network_mode": "none",
-            "host_network": False,
-            "privileged": False,
             "user": "10001:10001",
-            "mounts": [
-                {
-                    "source": "/run/vonk/models",
-                    "target": "/models",
-                    "read_only": True,
-                }
-            ],
-            "read_only_root": True,
-            "no_new_privileges": True,
+            "mounts": [{"source": "/run/vonk/models", "target": "/models"}],
         },
-        "lifecycle": {
-            "pre_start": [],
-            "post_stop": [],
-            "stop_timeout_seconds": 30,
-        },
+        "lifecycle": {"stop_timeout_seconds": 30},
         "topology": {
             "name": "solo",
-            "mode": "single",
             "node_count": 1,
-            "world_size": 1,
             "rank": 0,
             "role": "entrypoint",
-            "backend": "local",
         },
         "endpoint": {
-            "protocol": "openai",
             "port": 8000,
             "model_aliases": ["synthetic-tiny"],
             "health_path": "/v1/models",
@@ -182,7 +150,6 @@ def _spec(
                 "mount": {
                     "source": "/run/vonk/models/primary",
                     "target": mount_target,
-                    "read_only": True,
                 },
                 "model": {
                     "publisher": "vonk-forge",
@@ -202,14 +169,11 @@ def _job_spec() -> dict[str, object]:
     spec["job"] = {
         "interface": "image-job",
         "input": None,
-        "output_path": "/outputs",
         "timeout_seconds": 30,
     }
     security = spec["security"]
     assert isinstance(security, dict)
-    security["mounts"].append(
-        {"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False}
-    )
+    security["mounts"].append({"source": "/run/vonk/outputs", "target": "/outputs"})
     _mapping(spec["identity"])["execution_sha256"] = execution_identity_sha256(spec)
     return spec
 
@@ -234,30 +198,14 @@ def _model_objects() -> list[dict[str, object]]:
     ]
 
 
-def _image(
-    *, source: str = "published", build_id: str | None = None
-) -> dict[str, object]:
-    layout = "f" * 64
+def _image(*, build_id: str = "build-1") -> dict[str, object]:
     return {
         "image_digest": "sha256:" + "1" * 64,
-        "oci_layout_sha256": layout,
+        "oci_layout_sha256": "f" * 64,
         "image_bytes": 4096,
-        "architecture": "linux-arm64",
-        "runtime_interface": "vonk.runtime.v1",
-        "registry_manifest_digest": (
-            "sha256:" + "0" * 64 if source == "published" else None
-        ),
-        "platform_manifest_digest": "sha256:" + "1" * 64,
+        "build_id": build_id,
         "local_image_config_id": "sha256:" + "2" * 64,
         "runtime_interface_label": "v1",
-        "source": source,
-        "build_id": build_id,
-        "distribution_object": {
-            "name": "image.oci.tar",
-            "sha256": layout,
-            "bytes": 4096,
-            "kind": "oci-archive",
-        },
     }
 
 
@@ -268,20 +216,6 @@ def _compile(
 ) -> CompiledExecutionPlan:
     selected_image = _image() if image is None else image
     selected_spec = _spec() if spec is None else spec
-    runtime = selected_spec.get("runtime")
-    if selected_image.get("source") == "controller-build" and isinstance(runtime, dict):
-        selected_spec = dict(selected_spec)
-        selected_spec["runtime"] = {
-            **runtime,
-            "image": "localhost/vonk/recipe-build@"
-            + str(selected_image["image_digest"]),
-        }
-        identity = selected_spec.get("identity")
-        if isinstance(identity, dict):
-            selected_spec["identity"] = {
-                **identity,
-                "execution_sha256": execution_identity_sha256(selected_spec),
-            }
     return compile_verified_execution_plan(
         selected_spec,
         model_artifact_set_sha256="d" * 64,
@@ -335,22 +269,30 @@ def test_prebuilt_plan_binds_exact_file_and_controller_archive_receipts() -> Non
     artifact = plan.artifacts[0]
     assert artifact.sha256 == _model_objects()[0]["sha256"]
     assert artifact.bytes == len(b"verified model bytes")
-    assert artifact.distribution_object.name == "model.safetensors"
     assert artifact.mount.source == "/run/vonk/models/primary"
     assert artifact.materialized_path == "/run/vonk/models/primary/model.safetensors"
     assert artifact.roles == ["entrypoint", "weights"]
-    assert plan.runtime_image.source == "published"
-    assert plan.runtime_image.distribution_object.kind == "oci-archive"
+    assert plan.runtime_image.build_id == "build-1"
 
-    payload = plan.to_agent_payload()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+        },
+    )
     rendered = json.dumps(payload, sort_keys=True)
     assert "repository" not in rendered
-    assert "revision" not in rendered
+    assert '"revision"' not in rendered
     assert "token" not in rendered
-    assert "recipe_revision_sha256" not in payload
-    runtime_image = _mapping(payload["runtime_image"])
-    assert "source" not in runtime_image
-    assert "build_id" not in runtime_image
 
 
 def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> None:
@@ -368,12 +310,10 @@ def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> No
             "port": 8000,
             "reserved_memory_bytes": 1,
             "memory_floor_bytes": 0,
-            "memory_kind": "unified",
         },
     )
     validated = validate_compiled_launch_payload(payload)
     assert set(validated) == {
-        "schema_version",
         "identity",
         "runtime",
         "artifacts",
@@ -388,12 +328,8 @@ def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> No
     assert wire.runtime.executable == "/opt/vonk/bin/vllm"
     assert wire.runtime.argv == ["serve"]
     assert wire.artifacts[0].selection_id == "primary"
-    assert wire.artifacts[0].mount.model_dump() == {
-        "target": "/models",
-        "read_only": True,
-    }
+    assert wire.artifacts[0].mount.model_dump() == {"target": "/models"}
     assert wire.security.network_mode == "none"
-    assert wire.security.host_network is False
     assert wire.endpoint is not None
     assert wire.endpoint.port == 8000
     assert wire.job is None
@@ -414,7 +350,6 @@ def test_compiled_launch_payload_preserves_missing_endpoint_for_jobs() -> None:
             "port": None,
             "reserved_memory_bytes": 1,
             "memory_floor_bytes": 0,
-            "memory_kind": "unified",
         },
     )
 
@@ -441,7 +376,6 @@ def test_compiled_launch_payload_allows_distinct_serving_ports() -> None:
             "port": 9000,
             "reserved_memory_bytes": 1,
             "memory_floor_bytes": 0,
-            "memory_kind": "unified",
         },
     )
 
@@ -468,7 +402,6 @@ def test_compiled_launch_serving_port_is_required_and_in_range(port: object) -> 
                 "port": port,
                 "reserved_memory_bytes": 1,
                 "memory_floor_bytes": 0,
-                "memory_kind": "unified",
             },
         )
         validate_compiled_launch_payload(payload)
@@ -485,7 +418,6 @@ def test_compiled_launch_projection_requires_explicit_placement_fields() -> None
         "master_port": None,
         "reserved_memory_bytes": 1,
         "memory_floor_bytes": 0,
-        "memory_kind": "unified",
     }
     with pytest.raises(CompiledExecutionPlanError, match="runtime port is missing"):
         _compile().to_compiled_launch_payload(_spec(), placement=placement)
@@ -511,7 +443,6 @@ def test_compiled_launch_projection_validates_before_persisting() -> None:
                 "port": 8000,
                 "reserved_memory_bytes": 1,
                 "memory_floor_bytes": 0,
-                "memory_kind": "unified",
             },
         )
 
@@ -530,7 +461,6 @@ def test_compiled_launch_consumer_rejects_malformed_interface_document() -> None
             "port": 8000,
             "reserved_memory_bytes": 1,
             "memory_floor_bytes": 0,
-            "memory_kind": "unified",
         },
     )
     payload["endpoint"] = {"protocol": "openai", "port": 8000}
@@ -554,7 +484,6 @@ def test_compiled_launch_payload_rejects_document_over_dedicated_ceiling() -> No
             "port": 8000,
             "reserved_memory_bytes": 1,
             "memory_floor_bytes": 0,
-            "memory_kind": "unified",
         },
     )
     _mapping(payload["runtime"])["oversized_flat_field"] = (
@@ -572,13 +501,13 @@ def test_controller_produces_real_751_artifact_plan() -> None:
     )
     plan = validate_compiled_launch_payload(fixture)
     assert len(_sequence(plan["artifacts"])) == 751
-    assert len(canonical_message(plan)) > 500 * 1024
+    assert len(canonical_message(plan)) > 300 * 1024
     parent_payload, encoded = _canonical_payload(
         {"phases": [{"payload": {"compiled_execution_plan": plan}}]},
         kind="recipe.start",
     )
     assert parent_payload["phases"]
-    assert len(encoded) > 500 * 1024
+    assert len(encoded) > 300 * 1024
 
 
 def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() -> None:
@@ -596,7 +525,6 @@ def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() ->
             "port": 8000,
             "reserved_memory_bytes": 1,
             "memory_floor_bytes": 0,
-            "memory_kind": "unified",
         },
     )
     missing = copy.deepcopy(payload)
@@ -608,33 +536,6 @@ def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() ->
     both["job"] = {"id": "job-1"}
     with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(both)
-
-
-def test_compiled_launch_payload_rejects_mismatched_receipt() -> None:
-    plan = _compile()
-    payload = plan.to_compiled_launch_payload(
-        _spec(),
-        placement={
-            "endpoint_address": None,
-            "rank": 0,
-            "role": "entrypoint",
-            "world_size": 1,
-            "local_address": None,
-            "master_address": None,
-            "master_port": None,
-            "port": 8000,
-            "reserved_memory_bytes": 1,
-            "memory_floor_bytes": 0,
-            "memory_kind": "unified",
-        },
-    )
-    mismatched = copy.deepcopy(payload)
-    distribution = _mapping(
-        _first_mapping(mismatched["artifacts"])["distribution_object"]
-    )
-    distribution["bytes"] = _integer(distribution["bytes"]) + 1
-    with pytest.raises(CompiledExecutionPlanError):
-        validate_compiled_launch_payload(mismatched)
 
 
 def test_compiled_launch_payload_rejects_non_isolated_network_mode() -> None:
@@ -652,7 +553,6 @@ def test_compiled_launch_payload_rejects_non_isolated_network_mode() -> None:
             "port": 8000,
             "reserved_memory_bytes": 1,
             "memory_floor_bytes": 0,
-            "memory_kind": "unified",
         },
     )
     polluted = copy.deepcopy(payload)
@@ -683,7 +583,6 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
             "port": 8000,
             "reserved_memory_bytes": 1,
             "memory_floor_bytes": 0,
-            "memory_kind": "unified",
         },
     )
     started = _bind_compiled_execution_plan(
@@ -707,7 +606,7 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
     assert placement.endpoint_address == "192.0.2.10"
     assert placement.reserved_memory_bytes == 4096
     assert placement.memory_floor_bytes == 2048
-    assert validate_compiled_launch_payload(started)["schema_version"] == 2
+    validate_compiled_launch_payload(started)
 
 
 @pytest.mark.parametrize("rank", [0, 1])
@@ -725,13 +624,9 @@ def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) 
             "port": 8000,
             "reserved_memory_bytes": 1,
             "memory_floor_bytes": 0,
-            "memory_kind": "unified",
         },
     )
-    _mapping(payload["topology"]).update(
-        name="dual", mode="distributed", node_count=2, backend="mp"
-    )
-    _mapping(payload["security"])["devices"] = ["nvidia.com/gpu=all"]
+    _mapping(payload["topology"]).update(name="dual", node_count=2)
     started = _bind_compiled_execution_plan(
         payload,
         placement=RecipeStartPlacement(
@@ -751,319 +646,24 @@ def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) 
     )
     wire = WireCompiledExecutionPlan.parse(started)
     assert wire.security.network_mode == "host"
-    assert wire.security.host_network is True
     assert wire.runtime.placement.local_address == f"192.168.100.{10 + rank}"
 
 
-def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
-    tmp_path: Path,
-) -> None:
-    node_id = "spk_" + "a" * 32
-    serial = "serial-a"
-    fingerprint = "fingerprint-a"
-    now = datetime(2026, 9, 6, tzinfo=UTC)
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'agent-spec.sqlite'}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    presence = AgentPresenceService(
-        sessions,
-        ManagementAddressPolicy.parse("10.0.0.0/24"),
-        clock=lambda: now,
-    )
-    operations = AgentJobService(sessions, clock=lambda: now)
-
-    def observe_contact(session: Session, source: AgentSource) -> None:
-        presence.observe_in_session(session, source)
-
-    operations.set_contact_consumer(observe_contact)
-    services = AgentApiServices(
-        enrollment=None,
-        operations=operations,
-        sessions=sessions,
-        clock=lambda: now,
-        presence=presence,
-        artifact_root=tmp_path / "artifacts",
-        source_bundles=SourceBundleStore(tmp_path / "bundles"),
-    )
-    services.artifact_root.mkdir()
-    original_recipe = canonical_example("recipe-image.json")
-    from vonk_forge_contracts import RecipeDefinition, content_sha256
-
-    original = RecipeDefinition.model_validate(original_recipe)
-    revised_data = original.model_dump(mode="json")
-    revised_data["metadata"]["description"] = "Agent spec editorial revision"
-    revised = RecipeDefinition.model_validate(revised_data)
-    original_digest = content_sha256(original)
-    current_digest = content_sha256(revised)
-    spec = _spec(recipe_digest=current_digest)
-    payload = _compile(spec).to_compiled_launch_payload(
-        spec,
-        placement={
-            "endpoint_address": None,
-            "rank": 0,
-            "role": "entrypoint",
-            "world_size": 1,
-            "local_address": None,
-            "master_address": None,
-            "master_port": None,
-            "port": 8000,
-            "reserved_memory_bytes": 1,
-            "memory_floor_bytes": 0,
-            "memory_kind": "unified",
-        },
-    )
-    installation_id = str(uuid4())
-    revision_id = str(uuid4())
-    original_revision_id = str(uuid4())
-    document_id = str(uuid4())
-    mapping_id = str(uuid4())
-    payload_wire = WireCompiledExecutionPlan.parse(payload)
-    effective_execution_key = payload_wire.identity.execution_sha256
-    runtime_image = payload_wire.runtime_image
-    with sessions.begin() as session:
-        session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
-        session.add(
-            AgentCertificate(
-                serial=serial,
-                node_id=node_id,
-                fingerprint=fingerprint,
-                not_before=now - timedelta(days=1),
-                not_after=now + timedelta(days=1),
-                state="active",
-                generation=1,
-            )
-        )
-        session.add(
-            CatalogDocument(
-                id=document_id,
-                kind="recipe",
-                publisher=original.identity.publisher,
-                slug=original.identity.slug,
-                title=original.metadata.title,
-                created_by="test",
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        session.add_all(
-            [
-                CatalogDocumentRevision(
-                    id=original_revision_id,
-                    document_id=document_id,
-                    kind="recipe",
-                    publisher=original.identity.publisher,
-                    slug=original.identity.slug,
-                    revision_number=1,
-                    schema_version=2,
-                    state="active",
-                    document=original.model_dump(mode="json"),
-                    content_digest=original_digest,
-                    artifact_key="b" * 64,
-                    execution_key="c" * 64,
-                    projected={"source_bundle_sha256": "d" * 64},
-                    created_by="test",
-                    created_at=now,
-                ),
-                CatalogDocumentRevision(
-                    id=revision_id,
-                    document_id=document_id,
-                    kind="recipe",
-                    publisher=revised.identity.publisher,
-                    slug=revised.identity.slug,
-                    revision_number=2,
-                    schema_version=2,
-                    state="active",
-                    document=revised.model_dump(mode="json"),
-                    content_digest=current_digest,
-                    artifact_key="b" * 64,
-                    execution_key="c" * 64,
-                    projected={"source_bundle_sha256": "d" * 64},
-                    created_by="test",
-                    created_at=now,
-                ),
-            ]
-        )
-        session.add(
-            ClusterMapping(
-                id=mapping_id,
-                recipe_revision_id=revision_id,
-                topology_name="solo",
-                generation=1,
-                node_count=1,
-                state="ready",
-                parameters={},
-                placement_digest="e" * 64,
-                endpoint_owner_node_id=node_id,
-                created_by="test",
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        session.add(
-            ClusterMappingNode(
-                mapping_id=mapping_id,
-                node_id=node_id,
-                rank=0,
-                role="entrypoint",
-                endpoint_owner=True,
-                created_at=now,
-            )
-        )
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=revision_id,
-                source="published",
-                original_content_digest=original_digest,
-                effective_execution_key=effective_execution_key,
-                registry_manifest_digest=runtime_image.registry_manifest_digest,
-                platform_manifest_digest=runtime_image.platform_manifest_digest,
-                local_image_config_id=runtime_image.local_image_config_id,
-                oci_archive_sha256=runtime_image.oci_layout_sha256,
-                image_bytes=runtime_image.image_bytes,
-                build_id=None,
-                authorized_at=now,
-                state="authorized",
-            )
-        )
-        session.add(
-            RecipeInstallation(
-                id=installation_id,
-                recipe_revision_id=revision_id,
-                mapping_id=mapping_id,
-                mapping_generation=1,
-                recipe_build_id=None,
-                image_digest=runtime_image.image_digest,
-                plan_digest="a" * 64,
-                plan=installation_plan_document(
-                    {
-                        "schema_version": 1,
-                        "mapping_id": mapping_id,
-                        "mapping_generation": 1,
-                        "recipe_build_id": None,
-                        "image_digest": runtime_image.image_digest,
-                        "recipe_revision_id": revision_id,
-                        "recipe_content_sha256": current_digest,
-                        "allowed": True,
-                        "plan_digest": "a" * 64,
-                        "nodes": [
-                            {
-                                "node_id": node_id,
-                                "rank": 0,
-                                "role": "entrypoint",
-                                "allowed": True,
-                                "inventory_observed_at": None,
-                                "free_bytes": 1,
-                                "active_reserved_bytes": 0,
-                                "reused_bytes": 0,
-                                "required_download_bytes": 0,
-                                "required_bytes": 1,
-                                "required_payload_bytes": 1,
-                                "disk_floor_bytes": 0,
-                                "free_after_bytes": 0,
-                                "blockers": [],
-                                "warnings": [],
-                            }
-                        ],
-                        "compiled_execution_plans": {node_id: payload},
-                    }
-                ),
-                state="installed",
-                actor="test",
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        session.add(
-            InstallationNode(
-                installation_id=installation_id,
-                node_id=node_id,
-                rank=0,
-                role="entrypoint",
-                state="installed",
-                required_bytes=1,
-                installed_bytes=1,
-                updated_at=now,
-            )
-        )
-
-    class Jobs:
-        def list(self, *, limit: int = 100) -> list[object]:
-            return []
-
-        def list_page(
-            self,
-            *,
-            limit: int = 100,
-            cursor: str | None = None,
-            status: str | None = None,
-            target: str | None = None,
-        ) -> tuple[list[object], str | None, int]:
-            raise AssertionError("the spec route must not list jobs")
-
-        def get(self, job_id: str) -> object:
-            raise KeyError(job_id)
-
-        def enqueue(
-            self,
-            kind: str,
-            actor: str,
-            authority_revision: str,
-            targets: Sequence[str],
-            payload: Mapping[str, object],
-            *,
-            request_id: str,
-        ) -> object:
-            raise AssertionError("the spec route must not enqueue work")
-
-    app = create_app(
-        jobs=Jobs(),
-        tokens=TokenCodec(b"k" * 32),
-        now=lambda: 0,
-        agent=services,
-        trusted_agent_proxy_auth=b"p" * 32,
-    )
-    headers = {
-        "x-vonk-agent-node": node_id,
-        "x-vonk-agent-serial": serial,
-        "x-vonk-agent-fingerprint": fingerprint,
-        "x-vonk-agent-verified": "1",
-        "x-vonk-agent-proxy-auth": "p" * 32,
-        "x-vonk-agent-source": "10.0.0.42",
-    }
-    with TestClient(app) as client:
-        response = client.get(
-            f"/agent/recipe-installations/{installation_id}/spec",
-            headers=headers,
-        )
-    assert response.status_code == 200
-    assert response.json() == payload
-    assert response.json()["schema_version"] == 2
-
-
 def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
-    from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+    from vonk_forge_contracts import document_sha256, read_recipe
 
-    recipe = RecipeDefinition.model_validate(
-        canonical_example("recipe-source-build.json")
-    )
-    recipe_document = recipe.model_dump(mode="json")
+    recipe_document = canonical_example("recipe-source-build.json")
     topology = _mapping(recipe_document["topology"])
     roles = _sequence(topology["roles"])
     entrypoint = _mapping(roles[0])
     resources = _mapping(entrypoint["resources"])
     memory = _mapping(resources["memory"])
-    memory["system_reserve_bytes"] = 32_000_007
-    recipe = RecipeDefinition.model_validate(recipe_document)
-    model = ModelDefinition.model_validate(canonical_example("model-definition.json"))
-    recipe_document = recipe.model_dump(mode="json")
-    model_document = model.model_dump(mode="json")
-    model_digest = content_sha256(model)
+    memory["reserve_bytes"] = 32_000_007
+    model_document = canonical_example("model-definition.json")
+    model_digest = document_sha256(model_document)
     recipe_document["models"][0]["model"]["content_sha256"] = model_digest
-    recipe = RecipeDefinition.model_validate(recipe_document)
-    recipe_digest = content_sha256(recipe)
+    recipe = read_recipe(recipe_document)
+    recipe_digest = document_sha256(recipe_document)
     artifact_set_digest = "a" * 64
 
     class Manifest:
@@ -1141,17 +741,13 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         adapter = resolve_runtime_adapter(recipe.runtime.engine, recipe.topology)
         return RuntimeImageReceiptWire(
             schema_version=2,
-            source="controller-build",
             distribution_publisher=recipe.identity.publisher,
             distribution_slug=recipe.identity.slug,
             distribution_content_sha256=recipe_digest,
-            registry_manifest_digest=None,
-            platform_manifest_digest=image_digest,
             image_digest=image_digest,
             oci_archive_sha256="f" * 64,
             image_bytes=4096,
             local_image_config_id="sha256:" + "2" * 64,
-            local_image_reference=None,
             architecture="linux-arm64",
             runtime_interface="vonk.runtime.v1",
             archive_path="/run/vonk/image-cache/" + "f" * 64,
@@ -1182,39 +778,17 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
     validate_compiled_launch_payload(payload)
     payload_wire = WireCompiledExecutionPlan.parse(payload)
     assert payload_wire.identity.model_artifact_set_sha256 == artifact_set_digest
-    assert payload_wire.identity.model_artifact_bytes == 1024
-    assert payload_wire.identity.build_input_sha256 == "b" * 64
     assert payload_wire.runtime.placement.memory_floor_bytes == 32_000_007
     assert payload_wire.artifacts[0].path == "model.safetensors"
-    assert payload_wire.runtime_image.source == "controller-build"
+    assert payload_wire.runtime_image.build_id == "build-1"
     assert "repository" not in json.dumps(payload, sort_keys=True)
 
 
-def test_controller_built_receipt_and_pulled_receipt_share_reusable_identity() -> None:
-    prebuilt = _compile()
-    built = _compile(image=_image(source="controller-build", build_id="build-7"))
-    assert built.runtime_image.build_id == "build-7"
-    # The selected platform/archive/config facts are shared, while the
-    # published parent-manifest provenance remains distinct from a
-    # Controller-produced image receipt.
-    assert built.reusable_identity_sha256 != prebuilt.reusable_identity_sha256
-
-    editorial = _compile(_spec(recipe_digest="9" * 64))
-    assert editorial.recipe_revision_sha256 != prebuilt.recipe_revision_sha256
-    assert editorial.reusable_identity_sha256 == prebuilt.reusable_identity_sha256
-
-
-@pytest.mark.parametrize("mutation", ["missing", "malformed"])
-def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundary(
-    mutation: str,
-) -> None:
-    raw = canonical_example("recipe-source-build.json")
-    recipe = RecipeDefinition.model_validate(raw)
-    document = recipe.model_dump(mode="json")
-    if mutation == "missing":
-        document.pop("topology")
-    else:
-        document["topology"]["parallelism"]["world_size"] = 0
+def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundary() -> (
+    None
+):
+    document = canonical_example("recipe-source-build.json")
+    document.pop("topology")
 
     class Cache:
         def resolve_artifact_set(self, **_kwargs: object) -> object:
@@ -1239,46 +813,6 @@ def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundar
     with pytest.raises(
         ExecutionPlanCompilationError,
         match="recipe does not satisfy the canonical contract",
-    ):
-        service.compile_installation(
-            Session(),
-            revision=revision,
-            build=None,
-            mapping_nodes=(),
-            parameters={},
-        )
-
-
-def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resolution() -> (
-    None
-):
-    recipe = RecipeDefinition.model_validate(
-        canonical_example("recipe-source-build.json")
-    )
-
-    class Cache:
-        def resolve_artifact_set(self, **_kwargs: object) -> object:
-            raise AssertionError("digest mismatches must fail before cache resolution")
-
-    revision = CatalogDocumentRevision(
-        id="revision-1",
-        document_id="document-1",
-        kind="recipe",
-        publisher="publisher",
-        slug="recipe",
-        revision_number=1,
-        schema_version=2,
-        state="active",
-        document=recipe.model_dump(mode="json"),
-        content_digest="a" * 64,
-        projected={},
-        created_by="test",
-        created_at=datetime(2026, 1, 1, tzinfo=UTC),
-    )
-    service = ControllerExecutionPlanService(Cache())
-    with pytest.raises(
-        ExecutionPlanCompilationError,
-        match="recipe revision digest does not match the canonical document",
     ):
         service.compile_installation(
             Session(),
@@ -1339,18 +873,12 @@ def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and
     assert empty.roles == ["entrypoint"]
     assert empty.path == "__init__.py"
     assert wire.security.network_mode == "none"
-    assert wire.security.host_network is False
     runtime_image = wire.runtime_image
-    assert (
-        runtime_image.registry_manifest_digest != runtime_image.platform_manifest_digest
-    )
-    assert runtime_image.platform_manifest_digest == runtime_image.image_digest
     assert runtime_image.local_image_config_id != runtime_image.image_digest
     assert runtime_image.local_image_reference == (
         "localhost/vonk/compiled-runtime-"
-        f"{runtime_image.oci_layout_sha256}@{runtime_image.platform_manifest_digest}"
+        f"{runtime_image.oci_layout_sha256}@{runtime_image.image_digest}"
     )
-    assert runtime_image.runtime_interface == "vonk.runtime.v1"
     assert runtime_image.runtime_interface_label == "v1"
     argv = wire.runtime.argv
     assert "--served-model-name" in argv
@@ -1369,25 +897,6 @@ def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and
     }
 
 
-def test_mount_change_invalidates_reuse_identity_without_changing_bytes() -> None:
-    first = _compile()
-    changed = _compile(_spec(mount_target="/models/alternate"))
-
-    assert changed.artifacts[0].sha256 == first.artifacts[0].sha256
-    assert changed.artifacts[0].bytes == first.artifacts[0].bytes
-    assert changed.reusable_identity_sha256 != first.reusable_identity_sha256
-
-
-def test_selector_label_change_does_not_invalidate_reusable_bytes() -> None:
-    first = _compile()
-    changed_spec = _spec()
-    _first_mapping(changed_spec["artifacts"])["id"] = "release-label"
-
-    changed = _compile(changed_spec)
-    assert changed.artifacts[0].id == "release-label"
-    assert changed.reusable_identity_sha256 == first.reusable_identity_sha256
-
-
 def test_upstream_authority_cannot_enter_compiled_receipts() -> None:
     polluted = _spec()
     model = _first_mapping(polluted["artifacts"])["model"]
@@ -1396,25 +905,6 @@ def test_upstream_authority_cannot_enter_compiled_receipts() -> None:
 
     with pytest.raises(CompiledExecutionPlanError, match="upstream authority"):
         _compile(polluted)
-
-
-def test_mismatched_distribution_receipt_is_rejected() -> None:
-    plan = _compile()
-    artifact = plan.artifacts[0].model_dump(mode="json")
-    artifact["distribution_object"]["bytes"] += 1
-
-    with pytest.raises(ValidationError, match="bytes do not match"):
-        CompiledModelArtifact.model_validate(artifact)
-
-
-def test_controller_build_requires_build_id_and_exact_archive_identity() -> None:
-    with pytest.raises(CompiledExecutionPlanError, match="verified runtime image"):
-        _compile(image=_image(source="controller-build"))
-
-    image = _image()
-    _mapping(image["distribution_object"])["sha256"] = "2" * 64
-    with pytest.raises(CompiledExecutionPlanError, match="verified runtime image"):
-        _compile(image=image)
 
 
 def test_plan_rejects_incomplete_selected_cache_receipt() -> None:
@@ -1513,7 +1003,6 @@ def _collision_spec() -> dict[str, object]:
             "mount": {
                 "source": "/run/vonk/models/primary",
                 "target": "/models/target",
-                "read_only": True,
             },
             "model": {
                 "publisher": "radixark",
@@ -1532,7 +1021,6 @@ def _collision_spec() -> dict[str, object]:
             "mount": {
                 "source": "/run/vonk/models/draft",
                 "target": "/models/draft",
-                "read_only": True,
             },
             "model": {
                 "publisher": "radixark",
@@ -1624,13 +1112,12 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
     recipe_document = json.loads(
         (library_root / "recipes" / recipe_name).read_text(encoding="utf-8")
     )
-    recipe = RecipeDefinition.model_validate(recipe_document)
+    recipe = read_recipe(recipe_document)
     model_slug = recipe_document["models"][0]["model"]["slug"]
-    model = ModelDefinition.model_validate(
-        json.loads(
-            (library_root / "models" / f"{model_slug}.json").read_text(encoding="utf-8")
-        )
+    model_document = json.loads(
+        (library_root / "models" / f"{model_slug}.json").read_text(encoding="utf-8")
     )
+    model = read_model(model_document)
     model_selection = recipe.models[0]
     physical = next(file for file in model.files if file.id == "filtered-snapshot")
     model_content_sha256 = model_selection.model.content_sha256
@@ -1651,24 +1138,22 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
     package_path = library_root / "packages" / f"{recipe.identity.slug}.tar.gz"
     with tarfile.open(package_path, mode="r:*") as package_archive:
         package_paths = package_archive.getnames()
-    assert recipe.execution.mode == "build"
     package_paths.append(recipe.execution.build.context.path)
     image_digest = "1" * 64
     spec = compile_runtime_spec(
         recipe,
-        models=[model],
+        models={model_content_sha256: model},
+        recipe_digest=document_sha256(recipe_document),
         package_handle={
             "image_digest": image_digest,
             "image_reference": f"localhost/vonk/build@sha256:{image_digest}",
-            "platform": "linux/arm64",
             "paths": package_paths,
         },
         role="entrypoint",
         rank=0,
     )
     model_projection = SimpleNamespace(
-        document=model.model_dump(mode="json"),
-        content_digest=content_sha256(model),
+        document=model_document, content_digest=model_content_sha256
     )
     spec = _bind_runtime_artifacts(spec, [model_projection])
     artifacts = _sequence(spec["artifacts"])
@@ -1696,7 +1181,7 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
         spec,
         model_artifact_set_sha256="d" * 64,
         model_objects=[model_object],
-        runtime_image=_image(source="controller-build", build_id="1" * 64),
+        runtime_image=_image(build_id="1" * 64),
     )
     assert len(plan.artifacts) == 2
     assert [artifact.mount.target for artifact in plan.artifacts] == targets
@@ -1705,9 +1190,6 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
         for artifact in plan.artifacts
     ] == [("primary", "filtered-snapshot", "filtered-snapshot")] * 2
     assert plan.artifacts[0].model == plan.artifacts[1].model
-    assert (
-        plan.artifacts[0].distribution_object == plan.artifacts[1].distribution_object
-    )
     assert plan.artifacts[0].sha256 == plan.artifacts[1].sha256 == physical.sha256
 
 

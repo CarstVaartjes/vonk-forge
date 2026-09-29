@@ -58,6 +58,7 @@ from vonk_control.operation_api import (
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.strict_json import serialize_json_value
 
+from .agent_fences import fenced_attempt, fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
@@ -65,11 +66,6 @@ COMMIT = "a" * 64
 DIGEST = "d" * 64
 NODE_ID = "spk_" + "1" * 32
 PARKED_NODE_ID = "spk_" + "2" * 32
-PARKED_CAPABILITIES = (
-    "agent.runtime.rust.v1",
-    "recipe.stop",
-    "agent.lifecycle.resume.exact.v1",
-)
 PARKED_PAYLOAD = recipe_stop_payload(PARKED_NODE_ID, plan_digest=COMMIT)
 
 
@@ -840,15 +836,21 @@ def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
 
     resumed = _claim_parked(jobs)
     assert resumed is not None
-    assert resumed.operation_id == operation.id
-    assert resumed.attempt == first.attempt + 1
+    assert fenced_operation(sessions, resumed).id == operation.id
+    assert (
+        fenced_attempt(sessions, resumed).attempt
+        == fenced_attempt(sessions, first).attempt + 1
+    )
     with sessions() as session:
         stored_job = session.get(Job, job_id)
         stored_operation = session.get(AgentOperation, operation.id)
         assert stored_job is not None and stored_job.state == "queued"
         assert stored_operation is not None
         assert stored_operation.retry_disposition == "retry"
-        assert stored_operation.retry_disposition_attempt == first.attempt
+        assert (
+            stored_operation.retry_disposition_attempt
+            == fenced_attempt(sessions, first).attempt
+        )
 
 
 @pytest.mark.parametrize(
@@ -1096,7 +1098,7 @@ def test_durable_operation_keyset_pages_are_complete_and_aggregated(tmp_path) ->
         updated_at=now,
     )
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_ID, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_ID, state="active"))
         session.add(job)
         session.flush()
         for index in range(23):
@@ -1166,7 +1168,7 @@ def test_activity_sql_pages_equal_timestamps_and_binds_request_filter(tmp_path) 
         updated_at=now,
     )
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_ID, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_ID, state="active"))
         session.add(job)
         session.add(
             Job(
@@ -1334,7 +1336,6 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
             AgentNode(
                 node_id=NODE_ID,
                 state="active",
-                capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
                 semantic_version="0.1.0",
                 binary_digest=old_binary,
                 build_digest=old_build,
@@ -1531,7 +1532,7 @@ def test_durable_operation_cursor_rejects_cross_job_replay_and_tampering(
         for index in (1, 2)
     ]
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_ID, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_ID, state="active"))
         session.add_all(jobs)
         session.flush()
         for job in jobs:
@@ -1645,7 +1646,7 @@ def test_parallel_job_byte_aggregate_is_independent_of_operation_page(tmp_path) 
         session.add(job)
         session.flush()
         for index, target in enumerate(job.targets, 1):
-            session.add(AgentNode(node_id=target, state="active", capabilities=[]))
+            session.add(AgentNode(node_id=target, state="active"))
             operation = AgentOperation(
                 parent_job_id=job.id,
                 node_id=target,
@@ -1822,8 +1823,7 @@ def _parked_stop_services(tmp_path, *, clock: MutableClock):
 
     Production resumes and claims in separate transactions, so the test keeps
     the agent queue that parks and claims apart from the operator projection
-    that resumes.  The node advertises the exact-resume capability a lifecycle
-    operation must hold before a retry is offered to it.
+    that resumes.
     """
 
     engine = create_engine(
@@ -1840,12 +1840,10 @@ def _parked_stop_services(tmp_path, *, clock: MutableClock):
                 state="active",
                 protocol_version=3,
                 workload_intent_ordinal=1,
-                capabilities=list(PARKED_CAPABILITIES),
                 architecture="linux-arm64",
                 semantic_version="1.0.0",
                 build_digest="sha256:" + "f" * 64,
                 binary_digest="f" * 64,
-                self_test_passed=True,
             )
         )
         session.add(
@@ -1891,9 +1889,6 @@ def _claim_parked(jobs):
         jobs,
         PARKED_NODE_ID,
         "serial-parked",
-        30,
-        protocol_version=3,
-        capabilities=PARKED_CAPABILITIES,
     )
 
 
@@ -1902,7 +1897,10 @@ def _park_repeatedly(sessions, jobs, services, operation, times: int = 1):
 
     for expected_attempt in range(1, times + 1):
         claim = _claim_parked(jobs)
-        assert claim is not None and claim.attempt == expected_attempt
+        assert (
+            claim is not None
+            and fenced_attempt(sessions, claim).attempt == expected_attempt
+        )
         jobs.wait_for_operator(claim, "effect requires operator inspection")
         with sessions() as session:
             stored = session.get(AgentOperation, operation.id)
@@ -1912,7 +1910,7 @@ def _park_repeatedly(sessions, jobs, services, operation, times: int = 1):
                 and stored.retry_disposition_attempt == stored.current_attempt
             )
         if expected_attempt < times:
-            services.resume_job(claim.job_id)
+            services.resume_job(fenced_operation(sessions, claim).parent_job_id)
     return times
 
 
@@ -1938,8 +1936,11 @@ def test_durable_resume_authorises_the_parked_operation_for_the_next_claim(
 
     resumed = _claim_parked(jobs)
     assert resumed is not None
-    assert resumed.operation_id == operation.id
-    assert resumed.attempt == first.attempt + 1
+    assert fenced_operation(sessions, resumed).id == operation.id
+    assert (
+        fenced_attempt(sessions, resumed).attempt
+        == fenced_attempt(sessions, first).attempt + 1
+    )
     with sessions() as session:
         parent = session.get(Job, job_id)
         assert parent is not None and parent.state == "queued"
@@ -2000,7 +2001,10 @@ def test_durable_resume_is_never_refused_for_earlier_failed_attempts(
     services.resume_job(job_id)
 
     resumed = _claim_parked(jobs)
-    assert resumed is not None and resumed.attempt == attempts + 1
+    assert (
+        resumed is not None
+        and fenced_attempt(sessions, resumed).attempt == attempts + 1
+    )
     with sessions() as session:
         parent = session.get(Job, job_id)
         assert parent is not None and parent.state == "queued"

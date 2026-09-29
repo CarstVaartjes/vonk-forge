@@ -31,14 +31,11 @@ fn schema2_dual_plan() -> CompiledExecutionPlan {
         "endpoint_address": null, "rank": 1, "role": "worker", "world_size": 2,
         "local_address": "192.168.100.11", "master_address": "192.168.100.10",
         "master_port": 29500, "port": 8000, "reserved_memory_bytes": 68719476736_u64,
-        "memory_floor_bytes": 0, "memory_kind": "unified"
+        "memory_floor_bytes": 0
     });
     value["security"]["network_mode"] = json!("host");
-    value["security"]["host_network"] = json!(true);
-    value["topology"] = json!({
-        "name": "dual", "mode": "distributed", "backend": "nccl",
-        "node_count": 2, "world_size": 2, "rank": 1, "role": "worker"
-    });
+    value["security"]["gpu"] = json!(true);
+    value["topology"] = json!({"name": "dual", "node_count": 2});
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     plan.validate().unwrap();
     plan
@@ -63,14 +60,8 @@ fn placement(plan: &CompiledExecutionPlan) -> CompiledRuntimePlacement {
     plan.runtime.placement.clone()
 }
 
-fn identity(plan: &CompiledExecutionPlan) -> RecipeRunStartIdentity {
-    RecipeRunStartIdentity {
-        mapping_generation: 3,
-        mapping_id: "11111111-1111-4111-8111-111111111111".parse().unwrap(),
-        recipe_content_sha256: plan.identity.recipe_revision_sha256.clone(),
-        recipe_revision_id: "22222222-2222-4222-8222-222222222222".parse().unwrap(),
-        run_generation: 2,
-    }
+fn identity(_plan: &CompiledExecutionPlan) -> RecipeRunStartIdentity {
+    RecipeRunStartIdentity { run_generation: 2 }
 }
 
 #[test]
@@ -81,7 +72,7 @@ fn unbound_install_to_bound_start_retains_exact_inspection_arguments() {
 
 fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan) {
     let root = tempdir().unwrap();
-    if started.topology.world_size == 1 {
+    if started.runtime.placement.world_size == 1 {
         started.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
         started.security.network_mode = "bridge".parse().unwrap();
     }
@@ -91,7 +82,6 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
     installed.runtime.placement.master_address = None;
     installed.runtime.placement.master_port = None;
     installed.security.network_mode = "none".parse().unwrap();
-    installed.security.host_network = false;
     installed.validate().unwrap();
     persist_plan(root.path(), &installed);
 
@@ -120,7 +110,7 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
     fs::create_dir_all(root.path().join("runs").join("not-a-run-id")).unwrap();
     let inspections = runtime.recipe_run_inspection_plans().unwrap();
     assert_eq!(inspections.len(), 1);
-    assert_eq!(inspections[0].binding.run_id.to_string(), RUN);
+    assert_eq!(inspections[0].run_id.to_string(), RUN);
     assert_eq!(&inspections[0].arguments[4..], launched.main.as_slice());
     assert_eq!(runtime.load_spec(INSTALLATION).unwrap(), installed);
 
@@ -207,9 +197,9 @@ fn retained_inspection_and_agent_preparation_leave_private_tmp_cleanup_to_helper
         &inspections[0].arguments[..4],
         &[
             plan.runtime_image.oci_layout_sha256.clone(),
-            plan.runtime_image.registry_manifest_digest.clone().unwrap(),
-            plan.runtime_image.platform_manifest_digest.clone(),
-            plan.runtime_image.local_image_reference.clone(),
+            plan.runtime_image.image_digest.clone(),
+            plan.runtime_image.image_digest.clone(),
+            plan.runtime_image.local_image_reference(),
         ]
     );
     assert_eq!(fs::read(&marker).unwrap(), b"live kernel workspace");
@@ -234,7 +224,7 @@ fn real_751_artifact_spec_json_round_trips_through_persisted_loader() {
     let directory = root.path().join("installations").join(INSTALLATION);
     fs::create_dir_all(&directory).unwrap();
     let encoded = serde_json::to_vec(&plan).unwrap();
-    assert!(encoded.len() > 500 * 1024);
+    assert!(encoded.len() > 256 * 1024);
     fs::write(directory.join("spec.json"), &encoded).unwrap();
     let runtime = OciRuntime {
         runner: &NoProcess,
@@ -358,14 +348,13 @@ fn retained_job_stop_accepts_only_a_timeout_within_installed_limit() {
     installed.runtime.placement.port = None;
     installed.security.mounts.push(
         serde_json::from_value(json!({
-            "source": "inputs", "target": "/inputs", "read_only": true
+            "source": "inputs", "target": "/inputs"
         }))
         .unwrap(),
     );
     installed.job = Some(
         serde_json::from_value(json!({
-            "interface": "artifact-job", "input": null,
-            "output_path": "/outputs", "timeout_seconds": 90
+            "interface": "artifact-job", "input": null, "timeout_seconds": 90
         }))
         .unwrap(),
     );
@@ -455,7 +444,6 @@ fn unbound_compiled_placement_requires_addresses_only_at_execution() {
     plan.runtime.placement.master_address = None;
     plan.runtime.placement.master_port = None;
     plan.security.network_mode = "none".parse().unwrap();
-    plan.security.host_network = false;
     plan.validate().unwrap();
     assert!(plan.runtime.placement.validate_bound().is_err());
     let bound = schema2_dual_plan();

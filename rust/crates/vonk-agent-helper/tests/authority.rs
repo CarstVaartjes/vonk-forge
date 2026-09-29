@@ -12,13 +12,15 @@ use vonk_agent_helper::operations::{
 };
 use vonk_agent_helper::protocol::{
     ContainerRuntimeAction, GrantClaims, GrantSignature, GrantVerifier, HostOperation,
-    PeerIdentity, RestartUnit, SignedGrant, canonical_signing_bytes, parse_request,
+    PeerIdentity, SignedGrant, canonical_signing_bytes, parse_inspection_request, parse_request,
 };
 use vonk_agent_protocol::generated::{
-    ExecuteContainerRuntimeRequestOperation, InstallVonkDebOperation, RestartVonkUnitOperation,
-    ScheduleRebootOperation,
+    ConfirmPackageActivationOperation, ExecuteContainerRuntimeRequestOperation,
+    InstallVonkDebOperation,
 };
-use vonk_agent_protocol::{HostRuntimeAction, HostRuntimeRequest, canonical_json, hex_sha256};
+use vonk_agent_protocol::{
+    HostRuntimeAction, HostRuntimeRequest, RecipeRunInspectionRequest, canonical_json, hex_sha256,
+};
 
 const NOW: i64 = 2_100_000_000;
 const NODE_ID: &str = "spk_11111111111111111111111111111111";
@@ -66,27 +68,12 @@ fn python_issuer_fixture_is_verified_by_the_rust_helper() {
         .unwrap();
 }
 
-#[test]
-fn python_fixture_is_the_same_strict_canonical_grant() {
-    let raw = fs::read(fixtures().join("host-helper-grant.json")).unwrap();
-    let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);
-    let request = parse_request(raw).unwrap();
-    assert_eq!(request.claims.node_id, NODE_ID);
-    assert_eq!(vonk_agent_protocol::canonical_json(&request).unwrap(), raw);
-    let public_key =
-        hex::decode("8b237d788e8eaaef550c6d125823fa45f1fd5fc29b2c88bdf871119471fc1312").unwrap();
-    GrantVerifier::new(&public_key, 971)
-        .unwrap()
-        .authorize(
-            &request,
-            &PeerIdentity {
-                uid: 1001,
-                primary_gid: 971,
-                supplementary_gids: Vec::new(),
-            },
-            2_100_000_000,
-        )
-        .unwrap();
+fn confirm_activation() -> HostOperation {
+    HostOperation::ConfirmPackageActivationOperation(ConfirmPackageActivationOperation {
+        type_: "confirm-package-activation".into(),
+        package_sha256: "a".repeat(64),
+        attempt_nonce: "b".repeat(64),
+    })
 }
 
 fn signer(seed: u8) -> Ed25519KeyPair {
@@ -167,24 +154,13 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
             package_sha256: "c".repeat(64),
             package_signature: "d".repeat(128),
         }),
-        HostOperation::RestartVonkUnitOperation(RestartVonkUnitOperation {
-            type_: "restart-vonk-unit".into(),
-            unit: RestartUnit::Agent,
-        }),
-        HostOperation::ScheduleRebootOperation(ScheduleRebootOperation {
-            type_: "schedule-reboot".into(),
-            delay_seconds: 120,
-        }),
+        confirm_activation(),
         HostOperation::ExecuteContainerRuntimeRequestOperation(
             ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
                 action: ContainerRuntimeAction::Start,
-                job_id: Uuid::parse_str("20000000-0000-4000-8000-000000000002").unwrap(),
-                operation_id: Uuid::parse_str("30000000-0000-4000-8000-000000000003").unwrap(),
-                attempt: 2,
                 fence: Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap(),
                 request_sha256: "a".repeat(64),
-                observation_identity_sha256: None,
                 installation_id: None,
                 reconciliation_identity: None,
                 run_generation: Some(1),
@@ -213,13 +189,7 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
 #[test]
 fn rejects_unknown_fields_and_untyped_process_control() {
     let signer = signer(7);
-    let request = signed(
-        HostOperation::RestartVonkUnitOperation(RestartVonkUnitOperation {
-            type_: "restart-vonk-unit".into(),
-            unit: RestartUnit::Agent,
-        }),
-        &signer,
-    );
+    let request = signed(confirm_activation(), &signer);
     let raw = vonk_agent_protocol::canonical_json(&request).unwrap();
     let mut document: serde_json::Value = serde_json::from_slice(&raw).unwrap();
     for (field, value) in [
@@ -259,7 +229,7 @@ fn protocol_rejects_removed_host_operations() {
         }),
         serde_json::json!({
             "type": "restart-vonk-unit",
-            "unit": "supervisor",
+            "unit": "agent",
         }),
     ] {
         assert!(serde_json::from_value::<HostOperation>(operation).is_err());
@@ -270,13 +240,7 @@ fn protocol_rejects_removed_host_operations() {
 fn authority_rejects_expiry_bad_signature_and_users_outside_agent_group() {
     let signer = signer(7);
     let verifier = grant_verifier(&signer);
-    let request = signed(
-        HostOperation::RestartVonkUnitOperation(RestartVonkUnitOperation {
-            type_: "restart-vonk-unit".into(),
-            unit: RestartUnit::Agent,
-        }),
-        &signer,
-    );
+    let request = signed(confirm_activation(), &signer);
 
     assert!(
         verifier
@@ -342,7 +306,6 @@ struct RecordingRunner {
     calls: SharedCalls,
     runtime_container: Arc<Mutex<Option<(String, String)>>>,
     runtime_running: Arc<Mutex<bool>>,
-    fail_systemd_run: Arc<Mutex<bool>>,
     docker_load_stdout: Arc<Mutex<Option<Vec<u8>>>>,
 }
 
@@ -564,11 +527,6 @@ impl CommandRunner for RecordingRunner {
         } else {
             Vec::new()
         };
-        if executable == std::path::Path::new("/usr/bin/systemd-run")
-            && *self.fail_systemd_run.lock().unwrap()
-        {
-            success = false;
-        }
         Ok(CommandOutput {
             success,
             stdout,
@@ -681,12 +639,8 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
                     ContainerRuntimeAction::InstallationCleanup
                 }
             },
-            job_id: request.job_id,
-            operation_id: request.operation_id,
-            attempt: request.attempt,
             fence: request.fence,
             request_sha256: digest,
-            observation_identity_sha256: request.observation.as_ref().map(|_| "e".repeat(64)),
             installation_id: request.installation_id,
             reconciliation_identity: None,
             run_generation,
@@ -701,14 +655,9 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
 
 fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRuntimeRequest {
     HostRuntimeRequest {
-        schema_version: 1,
         action,
-        job_id: Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap(),
-        operation_id: Uuid::parse_str("20000000-0000-4000-8000-000000000002").unwrap(),
-        attempt: 1,
         fence: Uuid::parse_str("30000000-0000-4000-8000-000000000003").unwrap(),
         arguments,
-        observation: None,
         installation_id: None,
         reconciliation_identity: None,
         job_plan: None,
@@ -934,6 +883,49 @@ fn helper_rejects_argv_only_start_and_stop_before_container_mutation() {
 }
 
 #[test]
+fn ungranted_inspection_frame_can_only_inspect() {
+    let (_temp, roots, runner, release) = fixture();
+    let executor = OperationExecutor::new(
+        roots.clone(),
+        release.public_key().as_ref(),
+        runner.clone(),
+        None,
+    )
+    .unwrap();
+    let mut cleanup = runtime_request(HostRuntimeAction::InstallationCleanup, Vec::new());
+    cleanup.installation_id =
+        Some(Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap());
+    let mut granted_only = Vec::new();
+    for request in [
+        runtime_request(HostRuntimeAction::Start, vec!["run".to_owned()]),
+        runtime_request(HostRuntimeAction::Stop, Vec::new()),
+        runtime_request(HostRuntimeAction::ImageImport, vec!["archive".to_owned()]),
+        cleanup,
+    ] {
+        let digest = write_runtime_request(&roots, &request);
+        assert!(executor.inspect_recipe_run(&digest).is_err());
+        granted_only.push(runtime_operation(&request, digest));
+    }
+    assert!(
+        runner.calls.lock().unwrap().is_empty(),
+        "an ungranted frame must never reach the container runtime for another action"
+    );
+
+    let frame = canonical_json(&RecipeRunInspectionRequest {
+        request_id: Uuid::new_v4(),
+        request_sha256: "a".repeat(64),
+    })
+    .unwrap();
+    assert!(parse_inspection_request(&frame).is_ok());
+    assert!(parse_request(&frame).is_err());
+    let mut widened: serde_json::Value = serde_json::from_slice(&frame).unwrap();
+    widened["action"] = serde_json::json!("stop");
+    assert!(parse_inspection_request(&canonical_json(&widened).unwrap()).is_err());
+    let grant = signed(granted_only.remove(0), &signer(1));
+    assert!(parse_inspection_request(&canonical_json(&grant).unwrap()).is_err());
+}
+
+#[test]
 fn artifacts_are_verified_before_package_mutation() {
     let (_temp, roots, runner, release) = fixture();
     let executor = OperationExecutor::new(
@@ -1004,88 +996,11 @@ fn package_restart_and_reboot_commands_are_compiled_not_caller_supplied() {
             Some(NODE_ID),
         )
         .unwrap();
-    executor
-        .execute(&HostOperation::RestartVonkUnitOperation(
-            RestartVonkUnitOperation {
-                type_: "restart-vonk-unit".into(),
-                unit: RestartUnit::Agent,
-            },
-        ))
-        .unwrap();
-    executor
-        .execute(&HostOperation::ScheduleRebootOperation(
-            ScheduleRebootOperation {
-                type_: "schedule-reboot".into(),
-                delay_seconds: 300,
-            },
-        ))
-        .unwrap();
-    assert!(
-        executor
-            .execute(&HostOperation::ScheduleRebootOperation(
-                ScheduleRebootOperation {
-                    type_: "schedule-reboot".into(),
-                    delay_seconds: 5
-                }
-            ))
-            .is_err()
-    );
-
     let calls = runner.calls.lock().unwrap();
     assert_eq!(calls[0].0, PathBuf::from("/usr/bin/dpkg-deb"));
     assert_eq!(calls[0].1[0], "--field");
     assert_eq!(calls[1].1[2], "Architecture");
     assert_eq!(calls[2].0, PathBuf::from("/usr/bin/dpkg"));
-    assert_eq!(
-        calls[3],
-        (
-            PathBuf::from("/usr/bin/systemctl"),
-            vec!["restart".to_owned(), "vonk-forge-agent.service".to_owned()],
-        )
-    );
-    assert_eq!(calls[4].0, PathBuf::from("/usr/bin/systemd-run"));
-    assert!(calls[4].1.contains(&"--on-active=300s".to_owned()));
-}
-
-#[test]
-fn helper_restart_transient_unit_collision_fails_closed_without_fallback() {
-    let (_temp, roots, runner, release) = fixture();
-    *runner.fail_systemd_run.lock().unwrap() = true;
-    let package_owner = fs::metadata(&roots.incoming).unwrap().uid();
-    let executor = OperationExecutor::new(
-        roots,
-        release.public_key().as_ref(),
-        runner.clone(),
-        Some(package_owner),
-    )
-    .unwrap()
-    .with_package_owner(package_owner);
-
-    assert!(
-        executor
-            .execute(&HostOperation::RestartVonkUnitOperation(
-                RestartVonkUnitOperation {
-                    type_: "restart-vonk-unit".into(),
-                    unit: RestartUnit::Helper,
-                }
-            ))
-            .is_err()
-    );
-    assert_eq!(
-        *runner.calls.lock().unwrap(),
-        vec![(
-            PathBuf::from("/usr/bin/systemd-run"),
-            vec![
-                "--quiet".to_owned(),
-                "--collect".to_owned(),
-                "--unit=vonk-forge-helper-restart.service".to_owned(),
-                "--on-active=1s".to_owned(),
-                "/usr/bin/systemctl".to_owned(),
-                "restart".to_owned(),
-                "vonk-forge-package-helper.service".to_owned(),
-            ],
-        )]
-    );
 }
 
 fn signed_package(

@@ -42,13 +42,10 @@ from vonk_agent_protocol import (
     ContainerRuntimeAction,
     DistributionAssignment,
     InventoryRequest,
-    RecipeRunObservationGrantRequest,
-    RecipeRunObservationGrantWire,
     RecipeRunObservationsWire,
     SignedHostHelperGrant,
     canonical_message,
 )
-from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
 from vonk_agent_protocol.claims import ClaimRequest
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
@@ -62,19 +59,13 @@ from vonk_agent_protocol.host_helper import (
     RecipeReconciliationIdentity,
 )
 from vonk_agent_protocol.telemetry import TelemetryRequest
-from vonk_forge_contracts import RecipeDefinition, content_sha256
 
-from .agent_jobs import AgentJobService, StaleAgentAttempt
+from .agent_jobs import CLAIM_LEASE_SECONDS, AgentJobService, StaleAgentAttempt
 from .auth import (
     AgentIdentity,
     AgentSource,
     agent_identity_from_scope,
     agent_source_from_scope,
-)
-from .compiled_execution_plan import (
-    MAX_COMPILED_EXECUTION_PLAN_BYTES,
-    CompiledExecutionPlanError,
-    validate_compiled_launch_payload,
 )
 from .contract_graph import raw_json_body
 from .distribution import DistributionError, DistributionService
@@ -90,8 +81,6 @@ from .enrollment_contract import EnrollmentId
 from .host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
-    RecipeRunObservationPendingError,
-    RecipeRunObservationReplayError,
     recipe_run_known,
 )
 from .inventory_repository import (
@@ -103,42 +92,28 @@ from .models import (
     AgentCertificate,
     AgentNode,
     AgentOperation,
-    CatalogDocumentRevision,
     ClusterMapping,
-    ClusterMappingNode,
-    InstallationNode,
     RecipeBuild,
-    RecipeInstallation,
     RecipeRun,
     RecipeSourceBundle,
     RunNode,
-    RuntimeImageAuthorization,
 )
 from .operation_api import bounded_error_responses
 from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
-from .recipe_execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_installation_plan,
-)
 from .recipe_operations import (
     prepare_exact_recipe_run_observation_nodes,
 )
 from .runtime_image_preparation import (
     IMAGE_CACHE_DIRECTORY,
-    prefixed_image_digest,
 )
 from .source_bundles import SourceBundleError, SourceBundleStoreProtocol
 from .strict_json import ControllerAPIRoute, StrictJSONModel
-from .telemetry import (
-    TelemetryDetailsInput,
-    TelemetryRepository,
-    TelemetrySampleInput,
-)
+from .telemetry import TelemetryRepository, TelemetrySampleInput
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-#: Response header on an observation grant that names a run this Controller
-#: has no record of; the grant then authorizes only a read-only probe.
+#: Response header on a disposition lookup naming a run this Controller has
+#: no record of; the agent then retires that run's local lifecycle.
 RECIPE_RUN_DISPOSITION_HEADER = "x-vonk-recipe-run-disposition"
 RECIPE_RUN_UNOWNED = "unowned"
 _UUID4_TEXT = (
@@ -153,8 +128,6 @@ _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
 _MAX_ENROLLMENT_BODY_BYTES = 64 * 1024
 _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES = 2 * 1024
 _MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
-_MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
-_MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
 MAX_RECIPE_IMAGE_BYTES = 16 * 1024**4
 _MAX_RANGE_BYTES = 8 * 1024 * 1024
 # A distribution refusal is returned as the agent's ``x-vonk-error-code`` so the
@@ -186,74 +159,6 @@ def _strict_json_datetime(value: object) -> object:
     if "T" not in value and "t" not in value:
         raise ValueError("observed time must be an RFC 3339 string")
     return parsed
-
-
-def _prefixed_text(value: object) -> str | None:
-    """Normalize a digest-shaped value that arrived as untyped JSON."""
-
-    return prefixed_image_digest(value) if isinstance(value, str) else None
-
-
-def _runtime_image_authorization_matches(
-    runtime_image: Mapping[str, object],
-    identity: Mapping[str, object],
-    authorization: object,
-    *,
-    revision_id: str,
-    revision_digest: str,
-    installation_image_digest: str,
-    installation_recipe_build_id: str | None,
-) -> bool:
-    """Bind one persisted launch image to its authorized Controller archive.
-
-    SQL owns the authorization decision; managed storage owns the verified
-    archive and its receipt. The authorization carries the archive identity, so
-    comparing it to the compiled launch image is the whole check.
-    """
-
-    if (
-        getattr(authorization, "state", None) != "authorized"
-        or identity.get("recipe_revision_sha256") != revision_digest
-        or getattr(authorization, "recipe_revision_id", None) != revision_id
-        or getattr(authorization, "effective_execution_key", None)
-        != identity.get("execution_sha256")
-        or runtime_image.get("image_digest") != installation_image_digest
-        # The compiled plan and the durable authorization spell image digests
-        # differently; compare them in one spelling.
-        or _prefixed_text(runtime_image.get("image_digest"))
-        != _prefixed_text(getattr(authorization, "platform_manifest_digest", None))
-        or _prefixed_text(runtime_image.get("platform_manifest_digest"))
-        != _prefixed_text(getattr(authorization, "platform_manifest_digest", None))
-        or runtime_image.get("registry_manifest_digest")
-        != getattr(authorization, "registry_manifest_digest", None)
-        or runtime_image.get("local_image_config_id")
-        != getattr(authorization, "local_image_config_id", None)
-        or runtime_image.get("oci_layout_sha256")
-        != getattr(authorization, "oci_archive_sha256", None)
-        or runtime_image.get("image_bytes")
-        != getattr(authorization, "image_bytes", None)
-        # Architecture and runtime-interface labels are compiled launch facts,
-        # not authorization columns; the plan's own validation owns them.
-        or runtime_image.get("source") != getattr(authorization, "source", None)
-        or runtime_image.get("build_id") != getattr(authorization, "build_id", None)
-    ):
-        return False
-    source = runtime_image.get("source")
-    if source == "published":
-        return (
-            runtime_image.get("registry_manifest_digest") is not None
-            and getattr(authorization, "registry_manifest_digest", None) is not None
-            and runtime_image.get("build_id") is None
-            and getattr(authorization, "build_id", None) is None
-            and installation_recipe_build_id is None
-        )
-    if source == "controller-build":
-        return (
-            runtime_image.get("build_id") is not None
-            and getattr(authorization, "build_id", None) is not None
-            and getattr(authorization, "registry_manifest_digest", None) is None
-        )
-    return False
 
 
 @dataclass(frozen=True)
@@ -328,11 +233,9 @@ class EnrollmentGrantResponse(StrictJSONModel):
 
 
 class AgentGrantRequest(StrictJSONModel):
+    """A helper grant for the attempt the fence names; mTLS names the node."""
+
     model_config = ConfigDict(extra="forbid", strict=True)
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    job_id: str = Field(pattern=_UUID4_TEXT)
-    operation_id: str = Field(pattern=_UUID4_TEXT)
-    attempt: int = Field(ge=1, le=2**31 - 1)
     fence: str = Field(pattern=_UUID4_TEXT)
     expires_in_seconds: int = Field(ge=1, le=300)
 
@@ -391,7 +294,6 @@ class HostRuntimeGrantRequest(AgentGrantRequest):
         if self.reconciliation_identity is not None and (
             self.action != "installation-cleanup"
             or self.reconciliation_identity.installation_id != self.installation_id
-            or self.reconciliation_identity.node_id != self.node_id
         ):
             raise ValueError("host runtime reconciliation binding is invalid")
         return self
@@ -402,7 +304,6 @@ from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 
 
 class PackageActivationGrantRequest(StrictJSONModel):
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     receipt: PackageActivationReceipt
     runtime_identity: AgentRuntimeIdentity
 
@@ -1066,17 +967,14 @@ def install_agent_routes(
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        _body_node_matches(body.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
             result = required.operations.claim(
                 identity.node_id,
                 identity.certificate_serial,
-                body.lease_seconds,
                 body.wait_seconds,
-                body.protocol_version,
-                body.capabilities,
                 runtime_identity=body.runtime_identity.model_dump(),
+                preflight_fingerprint=body.preflight_fingerprint,
                 hostname=body.hostname,
                 source=source,
             )
@@ -1153,8 +1051,6 @@ def install_agent_routes(
                     TelemetrySampleInput(
                         boot_id=uuid.UUID(sample.boot_id),
                         observed_at=sample.observed_at,
-                        cpu_utilization_percent=sample.cpu_utilization_percent,
-                        load_average_1m=sample.load_average_1m,
                         memory_total_bytes=sample.memory_total_bytes,
                         memory_available_bytes=sample.memory_available_bytes,
                         disk_total_bytes=sample.disk_total_bytes,
@@ -1162,22 +1058,6 @@ def install_agent_routes(
                         gpu_utilization_percent=sample.gpu_utilization_percent,
                         gpu_memory_total_bytes=sample.gpu_memory_total_bytes,
                         gpu_memory_free_bytes=sample.gpu_memory_free_bytes,
-                        temperature_c=sample.temperature_c,
-                        power_watts=sample.power_watts,
-                        network_receive_bytes_per_second=(
-                            sample.network_receive_bytes_per_second
-                        ),
-                        network_transmit_bytes_per_second=(
-                            sample.network_transmit_bytes_per_second
-                        ),
-                        gap_samples=sample.gap_samples,
-                        details=TelemetryDetailsInput(
-                            accelerator_name=sample.details.accelerator_name,
-                            accelerator_performance_state=(
-                                sample.details.accelerator_performance_state
-                            ),
-                        ),
-                        metrics=sample.metrics,
                     )
                     for sample in body.samples
                 ),
@@ -1193,11 +1073,6 @@ def install_agent_routes(
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        if body.observed_at.tzinfo is None or body.observed_at.utcoffset() is None:
-            raise HTTPException(
-                status_code=422,
-                detail="recipe run observation time must be timezone-aware",
-            )
         observed_at = body.observed_at.astimezone(UTC)
         now = _now(required.clock()).astimezone(UTC)
         if observed_at > now + timedelta(seconds=30) or now - observed_at > timedelta(
@@ -1207,15 +1082,12 @@ def install_agent_routes(
                 status_code=422,
                 detail="recipe run observation time is outside the accepted window",
             )
-        # One stale, replayed, or no-longer-assigned run must not discard the
-        # evidence for every other run in the snapshot.  Each item is judged on
-        # its own; rejected items are skipped and the rest commit.  Helper
-        # signature, key, and nonce verification stays exact per item.
+        # One stale or no-longer-assigned run must not discard the evidence
+        # for every other run in the report: each run is judged on its own.
         rejected: list[str] = []
         accepted = 0
+        by_run = {run.run_id: run for run in body.runs}
         try:
-            authority = None
-            by_run = {run.run_id: run for run in body.runs}
             with required.sessions.begin() as session:
                 included = set(by_run)
                 if included:
@@ -1239,116 +1111,55 @@ def install_agent_routes(
                 assigned = prepare_exact_recipe_run_observation_nodes(
                     session, identity.node_id, observed_at, included
                 )
-                agent_node = session.get(AgentNode, identity.node_id)
-                if agent_node is None:
-                    raise ValueError("recipe run observation node is unavailable")
                 for node in assigned:
-                    run = session.get(RecipeRun, node.run_id)
-                    assert run is not None
                     evidence = by_run.get(node.run_id)
                     if evidence is None or node.run_id not in included:
                         continue
-                    evidence_observed_at = evidence.observed_at.astimezone(UTC)
-                    if (
-                        agent_node.observation_receipt_public_key
-                        != evidence.observation_receipt_public_key
-                    ):
-                        rejected.append("recipe run observation receipt key is stale")
-                        continue
+                    run = session.get(RecipeRun, node.run_id)
+                    assert run is not None
                     if evidence.run_generation != run.run_generation:
                         rejected.append("recipe run observation generation is stale")
                         continue
-                    if authority is None:
-                        authority = host_runtime_service()
-                    # Helper receipts sign whole Unix seconds. A fresh grant
-                    # may inspect a start completed within that same second;
-                    # nonce consumption below remains the replay authority.
-                    if int(_now(node.updated_at).timestamp()) > int(
-                        evidence_observed_at.timestamp()
+                    if node.state not in {"running", "failed"} or (
+                        node.state == "failed" and run.route_state != "withdrawn"
                     ):
-                        rejected.append("recipe run observation was replayed")
+                        # The start or recovery operation owns this rank now.
                         continue
-                    try:
-                        (
-                            observed_identity,
-                            process_running,
-                            receipt_sha256,
-                        ) = authority.consume_recipe_run_observation_grant(
-                            session,
-                            node_id=identity.node_id,
-                            certificate_serial=identity.certificate_serial,
-                            identity=evidence.observation_identity(),
-                            observed_at=evidence_observed_at,
-                            received_at=now,
-                            signed_grant=evidence.grant,
-                            helper_receipt=evidence.helper_receipt,
-                        )
-                    except RecipeRunObservationReplayError as error:
-                        rejected.append(str(error))
-                        continue
-                    except HostHelperAuthorityError:
-                        # An authenticated same-generation identity mismatch is
-                        # rank failure, not permission to keep serving.
-                        node.state = "failed"
-                        node.observed_run_generation = None
-                        node.observation_receipt_sha256 = None
-                        node.observation_process_running = None
-                        node.observation_observed_at = None
-                        node.observation_endpoint_ready = None
-                        node.updated_at = max(
-                            _now(node.updated_at).astimezone(UTC), evidence_observed_at
-                        )
-                        accepted += 1
+                    if _now(node.updated_at).astimezone(UTC) > observed_at:
+                        rejected.append("recipe run observation is stale")
                         continue
                     accepted += 1
-                    # The grace period bounds the first authenticated receipt,
-                    # not every later renewal's timestamp. Once this generation
-                    # has a receipt, freshness checks govern continuing service.
+                    # The grace period bounds the first observation of a
+                    # generation, not every later one.
                     initial_observation_late = (
                         node.observed_run_generation != run.run_generation
                         and run.observation_deadline_at is not None
-                        and evidence_observed_at > _now(run.observation_deadline_at)
+                        and observed_at > _now(run.observation_deadline_at)
                     )
                     mapping = session.get(ClusterMapping, run.mapping_id)
                     owner = (
                         mapping is not None
                         and mapping.endpoint_owner_node_id == identity.node_id
                     )
-                    observation_identity_mismatch = (
-                        observed_identity != evidence.observation_identity_sha256
-                        or (owner and type(evidence.endpoint_ready) is not bool)
-                        or (not owner and evidence.endpoint_ready is not None)
-                    )
-                    if observation_identity_mismatch:
-                        node.state = "failed"
-                        node.observed_run_generation = None
-                        node.observation_receipt_sha256 = None
-                        node.observation_process_running = None
-                        node.observation_observed_at = None
-                        node.observation_endpoint_ready = None
-                    elif initial_observation_late:
+                    if initial_observation_late:
                         # Late first evidence cannot make the run routable, but
-                        # its exact signed process result remains valid evidence
-                        # for Controller-owned recovery.
+                        # its process result remains valid evidence for
+                        # Controller-owned recovery.
                         node.state = "failed"
                     elif node.state != "failed":
                         node.state = (
                             "running"
-                            if process_running
+                            if evidence.process_running
                             and (not owner or evidence.endpoint_ready is True)
                             else "failed"
                         )
-                    if not observation_identity_mismatch:
-                        node.observed_run_generation = run.run_generation
-                        node.observation_receipt_sha256 = receipt_sha256
-                        node.observation_process_running = process_running
-                        node.observation_observed_at = evidence_observed_at
-                        node.observation_endpoint_ready = (
-                            evidence.endpoint_ready if owner else None
-                        )
-                    node.updated_at = max(
-                        _now(node.updated_at).astimezone(UTC), evidence_observed_at
+                    node.observed_run_generation = run.run_generation
+                    node.observation_process_running = evidence.process_running
+                    node.observation_observed_at = observed_at
+                    node.observation_endpoint_ready = (
+                        evidence.endpoint_ready if owner else None
                     )
+                    node.updated_at = observed_at
                     if (
                         run.route_state == "withdrawn"
                         and run.route_next_attempt_at is not None
@@ -1356,7 +1167,7 @@ def install_agent_routes(
                         run.route_next_attempt_at = None
                         run.updated_at = max(_now(run.updated_at).astimezone(UTC), now)
                 if rejected and not accepted:
-                    # Nothing in this snapshot was usable; report the cause so
+                    # Nothing in this report was usable; report the cause so
                     # the agent's log names it.  No state changed.
                     raise ValueError("; ".join(rejected[:4]))
         except ValueError as error:
@@ -1371,102 +1182,6 @@ def install_agent_routes(
                 rejected[0],
             )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-    @agent.post(
-        "/recipe-runs/observation-grants",
-        response_model=RecipeRunObservationGrantWire,
-    )
-    def recipe_run_observation_grant(
-        body: RecipeRunObservationGrantRequest, request: Request, response: Response
-    ) -> RecipeRunObservationGrantWire:
-        identity = helper_identity(request)
-        required = host_runtime_service()
-        if body.node_id != identity.node_id:
-            raise HTTPException(
-                status_code=409,
-                detail="recipe run observation authority rejected request",
-            )
-        try:
-            probe = required.issue_unowned_recipe_run_probe_grant(
-                node_id=identity.node_id,
-                certificate_serial=identity.certificate_serial,
-                identity=body.observation_identity(),
-                job_id=body.job_id,
-                operation_id=body.operation_id,
-                attempt=body.attempt,
-                fence=body.fence,
-                request_sha256=body.request_sha256,
-                expires_in_seconds=body.expires_in_seconds,
-            )
-        except (TypeError, ValueError, HostHelperAuthorityError):
-            raise HTTPException(
-                status_code=409,
-                detail="recipe run observation authority rejected request",
-            ) from None
-        if probe is not None:
-            # This Controller has no record of the run (for example after its
-            # database was rebuilt), so no observation of it can ever be
-            # accepted.  Authorize only the read-only probe and say so: the
-            # agent retires the local lifecycle once the helper proves the
-            # process is gone, instead of asking for this grant forever.
-            observation_identity, grant = probe
-            response.headers[RECIPE_RUN_DISPOSITION_HEADER] = RECIPE_RUN_UNOWNED
-            return RecipeRunObservationGrantWire(
-                schema_version=1,
-                observation_identity_sha256=observation_identity,
-                grant=SignedHostHelperGrant.parse(grant.to_mapping()),
-            )
-        with _require_services(services).sessions() as session:
-            run = session.get(RecipeRun, body.run_id)
-            run_node = session.scalar(
-                select(RunNode).where(
-                    RunNode.run_id == body.run_id,
-                    RunNode.node_id == identity.node_id,
-                )
-            )
-            if (
-                run is not None
-                and run_node is not None
-                and (run.state == "starting" or run_node.state == "starting")
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_425_TOO_EARLY,
-                    detail="recipe run observation is not ready",
-                )
-        try:
-            observation_identity, grant = required.issue_recipe_run_observation_grant(
-                node_id=identity.node_id,
-                certificate_serial=identity.certificate_serial,
-                identity=body.observation_identity(),
-                job_id=body.job_id,
-                operation_id=body.operation_id,
-                attempt=body.attempt,
-                fence=body.fence,
-                request_sha256=body.request_sha256,
-                expires_in_seconds=body.expires_in_seconds,
-            )
-        except RecipeRunObservationPendingError:
-            # An outstanding, unconsumed grant is the authoritative "not yet",
-            # exactly like the "starting" 425 above.  Name it with a stable
-            # code so the agent can retry the run instead of reading a lost
-            # authorization and abandoning its whole observation sweep.
-            raise HTTPException(
-                status_code=409,
-                detail="recipe run observation grant is already pending",
-                headers={
-                    "x-vonk-error-code": "controller.recipe_run.observation_pending"
-                },
-            ) from None
-        except (TypeError, ValueError, HostHelperAuthorityError):
-            raise HTTPException(
-                status_code=409,
-                detail="recipe run observation authority rejected request",
-            ) from None
-        return RecipeRunObservationGrantWire(
-            schema_version=1,
-            observation_identity_sha256=observation_identity,
-            grant=SignedHostHelperGrant.parse(grant.to_mapping()),
-        )
 
     @agent.get(
         "/recipe-runs/{run_id}/disposition",
@@ -1489,13 +1204,10 @@ def install_agent_routes(
     def recipe_run_disposition(run_id: str, request: Request) -> Response:
         """Say whether this Controller has any record of one local run.
 
-        A Spark can retain a run directory whose managed metadata this agent
-        can no longer parse (for example one written before an upgrade), so
-        it cannot build the exact binding an observation grant needs.  The
-        run id alone is enough to learn that no owner exists; the agent then
-        retires that unusable lifecycle instead of skipping it forever.  A
-        known run is never named unowned, so its integrity failure stays
-        visible.
+        A Spark can retain a run this Controller never owned (for example
+        after its database was rebuilt).  No observation of it is ever
+        accepted, so the agent asks once and retires the local lifecycle
+        instead of reporting it forever.
         """
 
         helper_identity(request)
@@ -1549,234 +1261,6 @@ def install_agent_routes(
             },
         )
 
-    @agent.get(
-        "/recipe-installations/{installation_id}/spec",
-        response_model=AgentCompiledExecutionPlan,
-    )
-    def recipe_spec(installation_id: str, request: Request) -> Response:
-        _scope_identity(request)
-        required = _require_services(services)
-        identity = _authenticated_identity(request, required)
-        if (
-            re.fullmatch(
-                r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
-                installation_id,
-            )
-            is None
-        ):
-            raise HTTPException(
-                status_code=404, detail="recipe specification does not exist"
-            )
-        with required.sessions() as session:
-            installation = session.get(RecipeInstallation, installation_id)
-            placement = session.scalar(
-                select(InstallationNode).where(
-                    InstallationNode.installation_id == installation_id,
-                    InstallationNode.node_id == identity.node_id,
-                )
-            )
-            if installation is None or placement is None:
-                raise HTTPException(
-                    status_code=404, detail="recipe specification does not exist"
-                )
-            revision = session.get(
-                CatalogDocumentRevision, installation.recipe_revision_id
-            )
-            mapping = session.get(ClusterMapping, installation.mapping_id)
-            mapping_node = session.scalar(
-                select(ClusterMappingNode).where(
-                    ClusterMappingNode.mapping_id == installation.mapping_id,
-                    ClusterMappingNode.node_id == identity.node_id,
-                )
-            )
-            if installation.state not in {"installing", "installed", "partial"}:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification installation is not ready",
-                )
-            if (
-                revision is None
-                or revision.kind != "recipe"
-                or revision.schema_version != 2
-                or revision.state != "active"
-                or mapping is None
-                or mapping_node is None
-                or mapping.state != "ready"
-                or mapping.generation != installation.mapping_generation
-                or placement.rank != mapping_node.rank
-                or placement.role != mapping_node.role
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification installation authority is stale",
-                )
-            try:
-                recipe = RecipeDefinition.model_validate(revision.document)
-            except (TypeError, ValueError):
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification installation authority is stale",
-                ) from None
-            if content_sha256(recipe) != revision.content_digest:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification installation authority is stale",
-                )
-            try:
-                stored_installation_plan = parse_stored_installation_plan(
-                    installation.plan
-                )
-            except RecipeExecutionContractError:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification compiled execution plan is invalid",
-                ) from None
-            candidate_model = stored_installation_plan.compiled_execution_plans.get(
-                identity.node_id
-            )
-            if candidate_model is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification compiled execution plan is unavailable",
-                )
-            candidate = candidate_model.model_dump(mode="json")
-            candidate_identity = candidate.get("identity")
-            candidate_runtime_image = candidate.get("runtime_image")
-            effective_execution_key = (
-                candidate_identity.get("execution_sha256")
-                if isinstance(candidate_identity, Mapping)
-                else None
-            )
-            authorizations = (
-                session.scalars(
-                    select(RuntimeImageAuthorization).where(
-                        RuntimeImageAuthorization.recipe_revision_id
-                        == installation.recipe_revision_id,
-                        RuntimeImageAuthorization.effective_execution_key
-                        == effective_execution_key,
-                        RuntimeImageAuthorization.state == "authorized",
-                    )
-                ).all()
-                if isinstance(effective_execution_key, str)
-                else []
-            )
-            candidate_authorizations = list(authorizations)
-            candidate_source = (
-                candidate_runtime_image.get("source")
-                if isinstance(candidate_runtime_image, Mapping)
-                else None
-            )
-            candidate_build_id = (
-                candidate_runtime_image.get("build_id")
-                if isinstance(candidate_runtime_image, Mapping)
-                else None
-            )
-            build = (
-                session.get(RecipeBuild, candidate_build_id)
-                if candidate_source == "controller-build"
-                and isinstance(candidate_build_id, str)
-                else None
-            )
-            build_id = build.id if build is not None else None
-            build_state = build.state if build is not None else None
-            build_recipe_revision_id = (
-                build.recipe_revision_id if build is not None else None
-            )
-            build_image_digest = build.image_digest if build is not None else None
-            build_oci_layout_sha256 = (
-                build.oci_layout_sha256 if build is not None else None
-            )
-            build_image_bytes = build.image_bytes if build is not None else None
-            build_input_sha256 = build.build_input_sha256 if build is not None else None
-            installation_recipe_build_id = installation.recipe_build_id
-            revision_id = revision.id
-            revision_content_digest = revision.content_digest
-            installation_image_digest = installation.image_digest
-        try:
-            spec = validate_compiled_launch_payload(candidate)
-            typed_spec = AgentCompiledExecutionPlan.model_validate(spec)
-        except (CompiledExecutionPlanError, TypeError, ValueError):
-            # The candidate plan is caller-supplied, and a pydantic error string
-            # embeds the offending input, so the response names the fault
-            # without echoing the document back.
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification compiled execution plan is invalid",
-            ) from None
-        topology = spec.get("topology")
-        if not isinstance(topology, Mapping) or (
-            topology.get("rank") != placement.rank
-            or topology.get("role") != placement.role
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification placement does not match the installation",
-            )
-        identity_document = spec.get("identity")
-        runtime_image = spec.get("runtime_image")
-        if not isinstance(identity_document, Mapping) or not isinstance(
-            runtime_image, Mapping
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification execution receipts are stale",
-            )
-        if identity_document.get("recipe_revision_sha256") != revision_content_digest:
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification execution receipts are stale",
-            )
-        matching_authorizations = [
-            authorization
-            for authorization in candidate_authorizations
-            if _runtime_image_authorization_matches(
-                runtime_image,
-                identity_document,
-                authorization,
-                revision_id=revision_id,
-                revision_digest=revision_content_digest,
-                installation_image_digest=installation_image_digest,
-                installation_recipe_build_id=installation_recipe_build_id,
-            )
-        ]
-        if len(matching_authorizations) != 1:
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification execution receipts are stale",
-            )
-        receipt = matching_authorizations[0]
-        if runtime_image.get("source") == "controller-build":
-            if (
-                build_id != getattr(receipt, "build_id", None)
-                or build_id != installation_recipe_build_id
-                or build_state != "succeeded"
-                or build_recipe_revision_id != revision_id
-                or build_image_digest != installation_image_digest
-                or build_oci_layout_sha256
-                != getattr(receipt, "oci_archive_sha256", None)
-                or build_image_bytes != getattr(receipt, "image_bytes", None)
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification execution receipts are stale",
-                )
-            build_input = identity_document.get("build_input_sha256")
-            if build_input is not None and build_input != build_input_sha256:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification execution receipts are stale",
-                )
-        encoded_spec = canonical_message(typed_spec)
-        if len(encoded_spec) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification compiled execution plan is too large",
-            )
-        return Response(
-            content=encoded_spec,
-            media_type="application/json",
-        )
-
     def helper_identity(request: Request) -> AgentIdentity:
         _scope_identity(request)
         required = _require_services(services)
@@ -1796,10 +1280,7 @@ def install_agent_routes(
         required = host_runtime_service()
         try:
             grant = required.issue_grant(
-                node_id=body.node_id,
-                job_id=body.job_id,
-                operation_id=body.operation_id,
-                attempt=body.attempt,
+                node_id=identity.node_id,
                 fence=body.fence,
                 action=ContainerRuntimeAction(body.action),
                 request_sha256=body.request_sha256,
@@ -1827,11 +1308,9 @@ def install_agent_routes(
         body: PackageActivationGrantRequest, request: Request
     ) -> Response:
         identity = helper_identity(request)
-        if identity.node_id != body.node_id:
-            raise HTTPException(status_code=403, detail="activation node mismatch")
         try:
             grant = host_runtime_service().issue_package_activation_grant(
-                node_id=body.node_id,
+                node_id=identity.node_id,
                 receipt=body.receipt,
                 runtime_identity=body.runtime_identity,
                 certificate_serial=identity.certificate_serial,
@@ -1850,10 +1329,7 @@ def install_agent_routes(
         required = host_runtime_service()
         try:
             grant = required.issue_agent_upgrade_grant(
-                node_id=body.node_id,
-                job_id=body.job_id,
-                operation_id=body.operation_id,
-                attempt=body.attempt,
+                node_id=identity.node_id,
                 fence=body.fence,
                 package_sha256=body.package_sha256,
                 package_signature=body.package_signature,
@@ -1872,13 +1348,12 @@ def install_agent_routes(
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
         message = body
-        _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
             response = required.operations.heartbeat(
                 message,
                 message.progress,
-                30,
+                CLAIM_LEASE_SECONDS,
                 source=source,
             )
         except StaleAgentAttempt as error:
@@ -1886,8 +1361,8 @@ def install_agent_routes(
                 message, source=source
             ):
                 logging.getLogger(__name__).info(
-                    "ignored heartbeat for superseded cancelled operation %s",
-                    message.operation_id,
+                    "ignored heartbeat for superseded cancelled fence %s",
+                    message.fence,
                 )
                 raise HTTPException(
                     status_code=409,
@@ -1895,8 +1370,6 @@ def install_agent_routes(
                     headers={"x-vonk-error-code": "superseded_operation_cancelled"},
                 ) from None
             required.operations.record_boundary_refusal(
-                str(message.operation_id),
-                message.attempt,
                 str(message.fence),
                 boundary="heartbeat",
                 check="stale-attempt",
@@ -1904,8 +1377,6 @@ def install_agent_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
         except ValueError as error:
             required.operations.record_boundary_refusal(
-                str(message.operation_id),
-                message.attempt,
                 str(message.fence),
                 boundary="heartbeat",
                 check="invalid-progress",
@@ -1919,7 +1390,6 @@ def install_agent_routes(
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
         message = body
-        _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
             # The failed-result identity rule (a failed status plus a stable
@@ -1933,8 +1403,6 @@ def install_agent_routes(
                 required.operations.record_late_result(message, source=source)
             except StaleAgentAttempt:
                 required.operations.record_boundary_refusal(
-                    str(message.operation_id),
-                    message.attempt,
                     str(message.fence),
                     boundary="result",
                     check="stale-attempt",
@@ -1942,8 +1410,6 @@ def install_agent_routes(
                 raise HTTPException(status_code=409, detail=str(error)) from None
             except ValueError as invalid:
                 required.operations.record_boundary_refusal(
-                    str(message.operation_id),
-                    message.attempt,
                     str(message.fence),
                     boundary="result",
                     check="late-result-invalid",
@@ -1952,8 +1418,6 @@ def install_agent_routes(
             return Response(status_code=status.HTTP_202_ACCEPTED)
         except ValueError as error:
             required.operations.record_boundary_refusal(
-                str(message.operation_id),
-                message.attempt,
                 str(message.fence),
                 boundary="result",
                 check="invalid-result",
@@ -2324,7 +1788,7 @@ def install_agent_routes(
             raise _distribution_error(error) from None
         response.headers["Cache-Control"] = "no-store"
         response.headers["ETag"] = f'"plan:{plan_digest}"'
-        return assignment
+        return assignment.wire()
 
     @agent.get(
         "/distribution/objects/{sha256}",

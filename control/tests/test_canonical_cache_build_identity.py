@@ -15,21 +15,19 @@ from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
 from vonk_control.recipe_builds import (
-    RecipeBuildError,
-    _canonical_build,
     derive_build_input_identity,
 )
 from vonk_control.runtime_adapters import resolve_runtime_adapter
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
 
 def _digest(value: object) -> str:
     if isinstance(value, dict) and value.get("kind") == "model":
-        return content_sha256(ModelDefinition.model_validate(value))
+        return document_sha256(value)
     if isinstance(value, dict) and value.get("kind") == "recipe":
-        return content_sha256(RecipeDefinition.model_validate(value))
+        return document_sha256(value)
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -149,7 +147,7 @@ def _add_active(
         schema_version=2,
         state="active",
         document=document,
-        content_digest=content_sha256(parsed),
+        content_digest=document_sha256(document),
         artifact_key=("a" * 64 if kind == "model" else None),
         projected=write_catalog_projection(projected, kind=kind),
         created_by="test",
@@ -346,7 +344,7 @@ def test_build_identity_binds_the_resolved_runtime_adapter() -> None:
         "arguments": [{"name": "flavor", "value": "release"}],
         "network": {"mode": "none", "hosts": []},
     }
-    adapter = resolve_runtime_adapter("vllm", {"mode": "single"})
+    adapter = resolve_runtime_adapter("vllm", {"node_count": 1})
     changed = replace(adapter, adapter_id=f"{adapter.adapter_id}-next")
 
     def identity(value) -> dict[str, object]:
@@ -361,22 +359,3 @@ def test_build_identity_binds_the_resolved_runtime_adapter() -> None:
     # the prepared-image cache key identical and reuses an unadapted image.
     assert identity(adapter) == identity(adapter)
     assert identity(adapter) != identity(changed)
-
-
-def test_prebuilt_recipe_does_not_enter_source_build_path() -> None:
-    image_recipe = {
-        "execution": {
-            "mode": "image",
-            "image": {
-                "repository": "runtime/image",
-                "digest": "a" * 64,
-                "platform": "linux/arm64",
-            },
-        }
-    }
-    try:
-        _canonical_build(image_recipe)
-    except RecipeBuildError as error:
-        assert error.code == "build.not_required"
-    else:
-        raise AssertionError("prebuilt recipe unexpectedly selected source build")

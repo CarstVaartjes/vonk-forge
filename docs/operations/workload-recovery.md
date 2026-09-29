@@ -3,7 +3,7 @@
 This runbook describes implemented workload recovery. The
 [coordination architecture](../architecture-overview.md#coordination-and-deadlock-prevention)
 sets the required lock and scheduling boundaries. Recovery does not make
-arbitrary jobs, hooks, or upgrades safe to replay.
+arbitrary jobs or upgrades safe to replay.
 
 An accepted workload request remains the owner of its preparation, installation,
 runtime and route work until it completes, is cancelled, or is superseded by a
@@ -45,15 +45,14 @@ window. Neither an expired lease nor an overdue observation proves that an
 effect stopped. Current authority, cancellation, and newer intent are checked
 before further work.
 
-Lifecycle recovery requires an agent advertising exact lifecycle resumption.
 Installation, Start, Stop and uninstall reconcile the exact stored receipt or
 runtime/filesystem effect before performing unfinished work. A running exact
 runtime is observed instead of started again. A completed installation is checked
 and reused instead of copied again. Completed removal is accepted only when the
 exact managed object is proved absent.
 
-For a persistent single-Spark run, a fresh schema-2 signed observation that
-reports `process_running=false` lets the Controller withdraw the route and
+For a persistent single-Spark run, a fresh agent observation of the current
+run generation that reports `process_running=false` lets the Controller withdraw the route and
 queue the canonical exact Stop, followed by a new generation of the same
 accepted Start. The model, image, installation, plan and workload-intent
 ordinal remain bound to the original accepted Start. Recovery can repeat after
@@ -70,19 +69,16 @@ retains the accepted topology and authorization and does not infer absence from
 a lost rank.
 
 The Controller does not infer process absence from an expired lease, stale
-observation, or offline Spark. If the signed absence becomes stale, it waits
-for a fresh read-only exact inspection grant for the still-current run
-generation. Missing or stale Controller-observed presence is also a bounded
-wait; refreshed signed absence and presence resume the same run. These waits
+observation, or offline Spark. If the observed absence becomes stale, it waits
+for a fresh observation of the still-current run generation. Missing or stale
+Controller-observed presence is also a bounded wait; a refreshed absence
+observation and presence resume the same run. These waits
 keep the route withdrawn and do not release claims. Singleton reboot recovery
 fails closed when the exact accepted compiled lifecycle plan differs from the
-installed plan or declares `pre_start` or `post_stop` hooks; this release does
-not replay hooks during recovery.
+installed plan.
 
-Hook-bearing plans remain fail-closed because their external effects cannot be
-replayed safely; the run reports which hook blocks recovery. One-shot jobs also
-remain fail-closed after a lost result because the job may already have produced
-external effects. Verify those effects before submitting a new authorized run.
+One-shot jobs remain fail-closed after a lost result because the job may already
+have produced external effects. Verify those effects before submitting a new authorized run.
 Builds and package upgrades do not inherit automatic workload replay. Invalid
 ownership, revoked authorization, malformed contracts, integrity failures and
 denied access remain explicit blockers.

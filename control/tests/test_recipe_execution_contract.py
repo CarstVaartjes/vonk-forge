@@ -11,7 +11,6 @@ from vonk_control.recipe_execution_contract import (
     RecipeExecutionContractError,
     StoredRunNodePlan,
     StoredRunPlan,
-    build_plan_document,
     installation_plan_document,
     parse_stored_build_policy,
     parse_stored_installation_plan,
@@ -21,7 +20,7 @@ from vonk_control.recipe_execution_contract import (
 )
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 
-_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
+_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 
 
 def _run_plan() -> dict[str, object]:
@@ -110,66 +109,6 @@ def test_persisted_contracts_fail_closed_on_malformed_db_shapes() -> None:
                 "unexpected": False,
             }
         )
-
-
-def test_build_plan_optional_target_is_omitted_in_canonical_document() -> None:
-    value = {
-        "schema_version": 1,
-        "kind": "recipe.build.v1",
-        "adapter": _ADAPTER.to_wire().model_dump(mode="json"),
-        "build_id": "00000000-0000-4000-8000-000000000001",
-        "recipe_revision_id": "00000000-0000-4000-8000-000000000002",
-        "recipe_content_sha256": "a" * 64,
-        "source_bundle_sha256": "b" * 64,
-        "source_bundle_bytes": 1,
-        "build_input_sha256": "c" * 64,
-        "base_images": [],
-        "base_image_storage_bytes": 0,
-        "capabilities": [],
-        "dockerfile": "Dockerfile",
-        "platform": "linux/arm64",
-        "arguments": [],
-        "network": {"mode": "none", "hosts": []},
-        "options": {
-            "additional_contexts": [],
-            "annotations": [],
-            "environment": [],
-            "format": "oci",
-            "identity_label": False,
-            "ignorefile": None,
-            "jobs": 1,
-            "labels": [],
-            "layer_compression": "disabled",
-            "layer_labels": [],
-            "layers": True,
-            "no_hostname": False,
-            "no_hosts": False,
-            "omit_history": False,
-            "os_features": [],
-            "os_version": None,
-            "shm_bytes": 65536,
-            "skip_unused_stages": False,
-            "squash": "none",
-            "timestamp": None,
-            "unset_environment": [],
-            "unset_labels": [],
-        },
-        "limits": {
-            "container_socket": False,
-            "cpu_cores": 1,
-            "gpu": 0,
-            "host_mounts": False,
-            "memory_bytes": 1,
-            "output_bytes": 1,
-            "privileged": False,
-            "processes": 1,
-            "temporary_bytes": 1,
-            "timeout_seconds": 1,
-        },
-        "target": None,
-    }
-    document = build_plan_document(value)
-    assert "target" not in document
 
 
 def test_inventory_timestamp_schema_remains_a_formatted_string() -> None:

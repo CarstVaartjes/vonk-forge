@@ -2,7 +2,7 @@ use std::io::{self, BufRead};
 
 use serde_json::{Value, json};
 use uuid::Uuid;
-use vonk_agent_protocol::{AgentClaim, RecipeOperationRequest, canonical_json, hex_sha256};
+use vonk_agent_protocol::{AgentClaim, RecipeOperationRequest};
 
 fn main() {
     for line in io::stdin().lock().lines() {
@@ -17,48 +17,24 @@ fn main() {
             let operation = input["operation"].as_str().expect("operation");
             let payload = input["payload"].clone();
             let payload = serde_json::from_value(payload).expect("typed payload");
-            let payload_bytes = canonical_json(&payload).expect("payload canonicalization");
             AgentClaim {
-                attempt: 1,
-                authority_revision: "a".repeat(64),
                 deadline: "2026-12-31T00:00:00Z".parse().expect("deadline"),
                 fence: Uuid::new_v4(),
-                job_id: Uuid::new_v4(),
-                node_id: "spk_11111111111111111111111111111111".to_owned(),
                 operation: operation.parse().expect("operation"),
-                operation_id: Uuid::new_v4(),
                 payload,
-                payload_digest: hex_sha256(&payload_bytes),
-                schema_version: 1,
             }
         };
         let operation = claim.operation;
         let payload = claim.payload.clone();
         let parsed = RecipeOperationRequest::parse(&claim).expect("valid operation");
         let evidence = match parsed {
-            RecipeOperationRequest::BuildCleanup(request) => json!({
-                "schema_version": 1,
-                "build_id": request.build_id,
-                "operation_id": request.operation_id,
-                "stopped": true,
-            }),
-            RecipeOperationRequest::Build(request) => json!({
-                "build_input_sha256": request.build_input_sha256,
+            RecipeOperationRequest::BuildCleanup(_) => json!({}),
+            RecipeOperationRequest::Build(_) => json!({
                 "image_bytes": 1,
                 "image_digest": format!("sha256:{}", "a".repeat(64)),
                 "oci_layout_sha256": "b".repeat(64),
-                "policy": {
-                    "passed": true,
-                    "dockerfile": request.dockerfile,
-                    "findings": [],
-                },
             }),
-            RecipeOperationRequest::ImageImport(request) => json!({
-                "build_id": request.build_id,
-                "image_bytes": request.image_bytes,
-                "image_digest": request.image_digest,
-                "oci_layout_sha256": request.oci_layout_sha256,
-            }),
+            RecipeOperationRequest::ImageImport(_) => json!({}),
             _ => panic!("unexpected operation"),
         };
         println!(

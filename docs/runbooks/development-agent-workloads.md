@@ -97,8 +97,7 @@ the operation receipt. Progress is durable per Spark and includes transfer
 phase, replacement state, and serving readiness; apply reports partial state
 truthfully and never treats enqueueing as success. Once the route is active,
 run the Recipe's declared HTTP serving checks with `scripts/qualify-recipe
---serving-url URL --evidence-ledger PATH` and retain the bounded serving result
-separately.
+--serving-url URL`; it prints the bounded serving result as JSON.
 
 ## Upgrade and recovery
 

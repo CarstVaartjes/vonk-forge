@@ -30,27 +30,23 @@ def _sessions(tmp_path):
                 AgentNode(
                     node_id=NODE,
                     state="active",
-                    protocol_version=3,
-                    capabilities=[],
+                    protocol_version=4,
                     last_seen_at=NOW - timedelta(seconds=90),
                 ),
                 AgentNode(
                     node_id=NEW_NODE,
                     state="retired",
-                    protocol_version=4,
-                    capabilities=[],
+                    protocol_version=5,
                 ),
                 AgentNode(
                     node_id=OLD_NODE,
                     state="active",
-                    protocol_version=2,
-                    capabilities=[],
+                    protocol_version=3,
                 ),
                 AgentNode(
                     node_id=UNKNOWN_NODE,
                     state="database-value-that-must-not-be-a-label",
                     protocol_version=None,
-                    capabilities=[],
                 ),
             ]
         )

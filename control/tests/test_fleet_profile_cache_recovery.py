@@ -158,7 +158,6 @@ def test_selected_profile_reconciles_a_newly_enrolled_spark(tmp_path: Path) -> N
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -226,7 +225,6 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
         builder = session.get(AgentNode, build.builder_node_id)
         assert builder is not None
         builder.binary_digest = "a" * 64
-        builder.capabilities = [*builder.capabilities, "recipe.build.v1"]
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == build.builder_node_id

@@ -35,7 +35,7 @@ from vonk_control.recipe_library_types import (
     RecipeLibrarySnapshot,
 )
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
@@ -91,14 +91,14 @@ def _item_with_document(
     item: RecipeLibraryItem, document: dict[str, object]
 ) -> RecipeLibraryItem:
     recipe = RecipeDefinition.model_validate(document)
-    digest = content_sha256(recipe)
+    digest = document_sha256(recipe.model_dump(mode="json"))
     return replace(
         item,
         content_sha256=digest,
         uri=f"vonk://catalog/{item.publisher}/{item.slug}@sha256:{digest}",
         document=recipe.model_dump(mode="json"),
         tags=tuple(recipe.metadata.tags),
-        release_history=(),
+        release=None,
         package_handle=None,
         package_sha256=None,
         source_bundle=None,
@@ -133,6 +133,8 @@ def _fixture(
             )
             in selected
         ),
+        version=snapshot.version,
+        updated_at=snapshot.updated_at,
     )
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
@@ -203,6 +205,11 @@ def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -
     )
     assert result.state == "current"
     assert result.imported_count == 1
+    assert (result.library_version, result.library_updated_at) == (
+        reader.snapshot.version,
+        reader.snapshot.updated_at,
+    )
+    assert result.library_version == "2.0.0"
     assert reader.fetches == [item.uri]
     with sessions() as session:
         revisions = session.scalars(select(CatalogDocumentRevision)).all()
@@ -755,9 +762,10 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     index["recipes"] = index["recipes"][:2]
     models, recipes = index["catalog_entities"], index["recipes"]
-    # A newer release may carry a field this Controller's contract does not
-    # know, or omit one it still requires: only those documents are skipped.
-    models[0]["document"]["future_field"] = "added by a newer contract"
+    # A field a newer minor contract added is ignored; a document that omits
+    # one this Controller still requires is skipped on its own.
+    models[1]["document"]["future_field"] = "added by a newer contract"
+    del models[0]["document"]["files"]
     del recipes[0]["document"]["metadata"]
     skipped_model = models[0]["document"]["identity"]
     skipped_recipe = recipes[0]["document"]["identity"]
@@ -780,7 +788,7 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
     details = [str(problem["detail"]) for problem in snapshot.problems]
     assert any(
         f"{skipped_model['publisher']}/{skipped_model['slug']}" in detail
-        and "future_field" in detail
+        and "files" in detail
         for detail in details
     )
     assert any(

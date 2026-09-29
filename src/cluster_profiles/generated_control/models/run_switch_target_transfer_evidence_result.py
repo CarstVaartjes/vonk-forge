@@ -25,26 +25,16 @@ T = TypeVar("T", bound="RunSwitchTargetTransferEvidenceResult")
 class RunSwitchTargetTransferEvidenceResult:
     """
         Attributes:
-            imported_image_digest (str):
             node_id (str):
             phase (Literal['transfer']):
             subphase (Literal['target-copy']):
-            verified (bool):
-            verified_digests (list[str]):
-            verified_image_digest (str):
-            verified_oci_layout_sha256 (str):
             copied_bytes (int | None | Unset):
             downloaded_bytes (int | None | Unset):
      """
 
-    imported_image_digest: str
     node_id: str
     phase: Literal['transfer']
     subphase: Literal['target-copy']
-    verified: bool
-    verified_digests: list[str]
-    verified_image_digest: str
-    verified_oci_layout_sha256: str
     copied_bytes: int | None | Unset = UNSET
     downloaded_bytes: int | None | Unset = UNSET
 
@@ -53,23 +43,11 @@ class RunSwitchTargetTransferEvidenceResult:
 
 
     def to_dict(self) -> dict[str, Any]:
-        imported_image_digest = self.imported_image_digest
-
         node_id = self.node_id
 
         phase = self.phase
 
         subphase = self.subphase
-
-        verified = self.verified
-
-        verified_digests = self.verified_digests
-
-
-
-        verified_image_digest = self.verified_image_digest
-
-        verified_oci_layout_sha256 = self.verified_oci_layout_sha256
 
         copied_bytes: int | None | Unset
         if isinstance(self.copied_bytes, Unset):
@@ -87,14 +65,9 @@ class RunSwitchTargetTransferEvidenceResult:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "imported_image_digest": imported_image_digest,
             "node_id": node_id,
             "phase": phase,
             "subphase": subphase,
-            "verified": verified,
-            "verified_digests": verified_digests,
-            "verified_image_digest": verified_image_digest,
-            "verified_oci_layout_sha256": verified_oci_layout_sha256,
         })
         if copied_bytes is not UNSET:
             field_dict["copied_bytes"] = copied_bytes
@@ -108,8 +81,6 @@ class RunSwitchTargetTransferEvidenceResult:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        imported_image_digest = d.pop("imported_image_digest")
-
         node_id = d.pop("node_id")
 
         phase = cast(Literal['transfer'] , d.pop("phase"))
@@ -119,15 +90,6 @@ class RunSwitchTargetTransferEvidenceResult:
         subphase = cast(Literal['target-copy'] , d.pop("subphase"))
         if subphase != 'target-copy':
             raise ValueError(f"subphase must match const 'target-copy', got '{subphase}'")
-
-        verified = d.pop("verified")
-
-        verified_digests = cast(list[str], d.pop("verified_digests"))
-
-
-        verified_image_digest = d.pop("verified_image_digest")
-
-        verified_oci_layout_sha256 = d.pop("verified_oci_layout_sha256")
 
         def _parse_copied_bytes(data: object) -> int | None | Unset:
             if data is None:
@@ -150,14 +112,9 @@ class RunSwitchTargetTransferEvidenceResult:
 
 
         run_switch_target_transfer_evidence_result = cls(
-            imported_image_digest=imported_image_digest,
             node_id=node_id,
             phase=phase,
             subphase=subphase,
-            verified=verified,
-            verified_digests=verified_digests,
-            verified_image_digest=verified_image_digest,
-            verified_oci_layout_sha256=verified_oci_layout_sha256,
             copied_bytes=copied_bytes,
             downloaded_bytes=downloaded_bytes,
         )

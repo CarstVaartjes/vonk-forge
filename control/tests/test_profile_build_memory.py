@@ -67,7 +67,6 @@ def _accepted_build_profile(
         build = session.scalar(select(RecipeBuild))
         assert snapshot is not None and node is not None and build is not None
         node.binary_digest = "1" * 64
-        node.capabilities = [*node.capabilities, "recipe.build.v1"]
         snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
         snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = 275
         snapshot.disk_total_bytes = 100_000
@@ -341,9 +340,12 @@ def test_active_run_peak_upper_bound_reduces_build_physical_free_capacity(
         # observed free path must reserve the full 225-byte residual upper
         # bound plus the 50-byte system floor. Ignoring that range would
         # incorrectly offer 225 bytes to an unrelated source build.
-        assert memory_reservations(
-            session, node_id, memory_pool="shared"
-        ).unknown_run_residuals_by_kind["unified-memory"][0].maximum_bytes == 225
+        assert (
+            memory_reservations(session, node_id, memory_pool="shared")
+            .unknown_run_residuals_by_kind["unified-memory"][0]
+            .maximum_bytes
+            == 225
+        )
         assert _available_build_memory(session, snapshot) == 0
 
 
@@ -552,11 +554,9 @@ def test_profile_build_borrows_promise_and_preserves_it_for_runtime(
         node,
         succeeded=True,
         evidence={
-            "build_input_sha256": selected.build_input_sha256,
             "image_digest": "sha256:" + "1" * 64,
             "oci_layout_sha256": "2" * 64,
             "image_bytes": 30,
-            "policy": {"passed": True, "findings": [], "dockerfile": "Dockerfile"},
         },
     )
     with sessions() as session:

@@ -41,6 +41,7 @@ from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem
 from vonk_control.source_bundles import SourceBundleStore
+from vonk_forge_contracts import read_model, read_recipe
 
 from .recipe_library_source import recipe_library_root
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
@@ -388,9 +389,11 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
             item.identity.publisher,
             item.identity.slug,
             item.identity.content_sha256,
-        ): item.document.model_dump(mode="json")
+        ): item.document
         for item in library_models
-    } == expected_model_documents
+    } == {
+        key: read_model(document) for key, document in expected_model_documents.items()
+    }
 
     library_recipes = _library_recipes(api)
     by_digest = {item.identity.content_sha256: item for item in library_recipes}
@@ -400,9 +403,11 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         _recipe_key(row)[2]: row["document"] for row in corpus.index["recipes"]
     }
     assert {
-        item.identity.content_sha256: item.document.model_dump(mode="json")
-        for item in library_recipes
-    } == expected_recipe_documents
+        item.identity.content_sha256: item.document for item in library_recipes
+    } == {
+        digest: read_recipe(document)
+        for digest, document in expected_recipe_documents.items()
+    }
     multi_model_detail_seen = False
     # The listing above already compares every recipe document. Detail adds
     # per-selection Model resolution, whose paths are single- and multi-Model
@@ -422,14 +427,13 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         assert [
             entry.selection.model_dump() for entry in detail.model_documents
         ] == row["document"]["models"]
-        assert [
-            entry.model_document.model_dump(mode="json")
-            for entry in detail.model_documents
-        ] == [
-            next(
-                model["document"]
-                for model in corpus.index["catalog_entities"]
-                if model["content_sha256"] == selection["model"]["content_sha256"]
+        assert [entry.model_document for entry in detail.model_documents] == [
+            read_model(
+                next(
+                    model["document"]
+                    for model in corpus.index["catalog_entities"]
+                    if model["content_sha256"] == selection["model"]["content_sha256"]
+                )
             )
             for selection in row["document"]["models"]
         ]
@@ -497,6 +501,6 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     restarted.prepare(offline_snapshot)
     assert offline_snapshot.commit == snapshot.commit
     assert len(offline_snapshot.items) == len(corpus.index["recipes"])
-    assert release.requests == [f"/repos/{REPOSITORY}/releases/latest"]
+    assert release.requests == [f"/repos/{REPOSITORY}/releases"]
     assert not (tmp_path / "packages" / "snapshot.candidate.json").exists()
     restarted.close()

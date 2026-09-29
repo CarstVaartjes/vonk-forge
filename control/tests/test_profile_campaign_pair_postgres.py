@@ -31,7 +31,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchMemberReceipt,
     RunSwitchOperationResult,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profiles import (
@@ -49,7 +49,7 @@ from .test_fleet_profiles_canonical import (
     _seed,
 )
 
-_FIRST_RECIPE = "vonk-forge/synthetic-tiny-image"
+_FIRST_RECIPE = "vonk-forge/synthetic-tiny-build"
 _SECOND_RECIPE = "vonk-forge/synthetic-tiny-solo"
 
 
@@ -154,7 +154,7 @@ def _add_second_recipe_revision(sessions: sessionmaker) -> str:
                 schema_version=2,
                 state="active",
                 document=recipe.model_dump(mode="json"),
-                content_digest=content_sha256(recipe),
+                content_digest=document_sha256(recipe.model_dump(mode="json")),
                 execution_key="c" * 64,
                 created_by="test",
                 created_at=NOW,

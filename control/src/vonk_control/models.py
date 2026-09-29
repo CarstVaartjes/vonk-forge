@@ -290,8 +290,8 @@ class AgentNode(Base):
             name="ck_agent_nodes_architecture",
         ),
         CheckConstraint(
-            _nullable_lower_hex("observation_receipt_public_key", 64),
-            name="ck_agent_nodes_observation_receipt_public_key",
+            _nullable_lower_hex("preflight_fingerprint", 64),
+            name="ck_agent_nodes_preflight_fingerprint",
         ),
     )
     node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -304,13 +304,11 @@ class AgentNode(Base):
     semantic_version: Mapped[str | None] = mapped_column(String(32))
     build_digest: Mapped[str | None] = mapped_column(String(71))
     binary_digest: Mapped[str | None] = mapped_column(String(64))
-    self_test_passed: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
-    observation_receipt_public_key: Mapped[str | None] = mapped_column(String(64))
     contact_certificate_serial: Mapped[str | None] = mapped_column(String(128))
     contact_observation_digest: Mapped[str | None] = mapped_column(String(64))
-    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # The host-runtime fingerprint the agent's last claim reported; a runtime
+    # preflight proof is current only while it matches.
+    preflight_fingerprint: Mapped[str | None] = mapped_column(String(64))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -633,10 +631,6 @@ class AgentEnrollment(Base):
             "state IN ('issuing', 'certificate_issued')",
             name="ck_agent_enrollments_state",
         ),
-        CheckConstraint(
-            _nullable_lower_hex("observation_receipt_public_key", 64),
-            name="ck_agent_enrollments_observation_receipt_public_key",
-        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -655,7 +649,6 @@ class AgentEnrollment(Base):
     hardware_fingerprint: Mapped[str] = mapped_column(String(512), nullable=False)
     agent_digest: Mapped[str] = mapped_column(String(128), nullable=False)
     boot_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    observation_receipt_public_key: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
@@ -1324,6 +1317,10 @@ class RecipeLibrarySyncRun(Base):
     repository: Mapped[str] = mapped_column(String(200), nullable=False)
     expected_commit: Mapped[str | None] = mapped_column(String(40))
     observed_commit: Mapped[str | None] = mapped_column(String(40), index=True)
+    # The recipe library release (its contract version) and when its recipes
+    # last changed, read from the signed catalog index.
+    library_version: Mapped[str | None] = mapped_column(String(32))
+    library_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     imported_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -1439,8 +1436,8 @@ class RuntimeImageAuthorization(Base):
             name="ck_runtime_image_authorizations_execution_key",
         ),
         CheckConstraint(
-            _prefixed_digest("platform_manifest_digest"),
-            name="ck_runtime_image_authorizations_platform_digest",
+            _prefixed_digest("image_digest"),
+            name="ck_runtime_image_authorizations_image_digest",
         ),
         CheckConstraint(
             _prefixed_digest("local_image_config_id"),
@@ -1453,10 +1450,6 @@ class RuntimeImageAuthorization(Base):
         CheckConstraint(
             "image_bytes > 0",
             name="ck_runtime_image_authorizations_image_bytes",
-        ),
-        CheckConstraint(
-            "source IN ('published','controller-build')",
-            name="ck_runtime_image_authorizations_source",
         ),
         CheckConstraint(
             "state IN ('authorized','revoked')",
@@ -1477,7 +1470,7 @@ class RuntimeImageAuthorization(Base):
         Index(
             "ix_runtime_image_authorizations_effective_identity",
             "effective_execution_key",
-            "platform_manifest_digest",
+            "image_digest",
             "local_image_config_id",
             "oci_archive_sha256",
         ),
@@ -1488,17 +1481,13 @@ class RuntimeImageAuthorization(Base):
     recipe_revision_id: Mapped[str] = mapped_column(
         String(36), nullable=False, index=True
     )
-    source: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     original_content_digest: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True
     )
     effective_execution_key: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True
     )
-    registry_manifest_digest: Mapped[str | None] = mapped_column(String(71), index=True)
-    platform_manifest_digest: Mapped[str] = mapped_column(
-        String(71), nullable=False, index=True
-    )
+    image_digest: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
     local_image_config_id: Mapped[str] = mapped_column(
         String(71), nullable=False, index=True
     )
@@ -1506,7 +1495,7 @@ class RuntimeImageAuthorization(Base):
         String(64), nullable=False, index=True
     )
     image_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    build_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    build_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     authorized_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -1675,19 +1664,9 @@ class NodeTelemetrySample(Base):
         ),
         CheckConstraint(_uuid_shape("boot_id"), name="ck_telemetry_boot_id_shape"),
         CheckConstraint(
-            "gap_samples BETWEEN 0 AND 9223372036854775807",
-            name="ck_telemetry_gap_samples",
-        ),
-        CheckConstraint(
-            "(cpu_utilization_percent IS NULL OR "
-            "cpu_utilization_percent BETWEEN 0 AND 100) AND "
-            "(gpu_utilization_percent IS NULL OR "
-            "gpu_utilization_percent BETWEEN 0 AND 100)",
+            "gpu_utilization_percent IS NULL OR "
+            "gpu_utilization_percent BETWEEN 0 AND 100",
             name="ck_telemetry_utilization",
-        ),
-        CheckConstraint(
-            "load_average_1m IS NULL OR load_average_1m BETWEEN 0 AND 1000000",
-            name="ck_telemetry_load",
         ),
         CheckConstraint(
             "(memory_total_bytes IS NULL AND memory_available_bytes IS NULL) OR "
@@ -1716,19 +1695,6 @@ class NodeTelemetrySample(Base):
             "gpu_memory_free_bytes <= gpu_memory_total_bytes)",
             name="ck_telemetry_gpu_memory",
         ),
-        CheckConstraint(
-            "(temperature_c IS NULL OR temperature_c BETWEEN -100 AND 300) "
-            "AND (power_watts IS NULL OR power_watts BETWEEN 0 AND 100000) AND "
-            "(network_receive_bytes_per_second IS NULL OR "
-            "network_receive_bytes_per_second BETWEEN 0 AND 1000000000000000) AND "
-            "(network_transmit_bytes_per_second IS NULL OR "
-            "network_transmit_bytes_per_second BETWEEN 0 AND 1000000000000000)",
-            name="ck_telemetry_physical_metrics",
-        ),
-        CheckConstraint(
-            "length(CAST(details AS TEXT)) BETWEEN 2 AND 4096",
-            name="ck_telemetry_details",
-        ),
         Index("ix_telemetry_node_observed", "node_id", "observed_at"),
     )
     id: Mapped[str] = mapped_column(
@@ -1744,8 +1710,6 @@ class NodeTelemetrySample(Base):
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    cpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
-    load_average_1m: Mapped[float | None] = mapped_column(Float)
     memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     memory_available_bytes: Mapped[int | None] = mapped_column(BigInteger)
     disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
@@ -1753,16 +1717,6 @@ class NodeTelemetrySample(Base):
     gpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
     gpu_memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     gpu_memory_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    temperature_c: Mapped[float | None] = mapped_column(Float)
-    power_watts: Mapped[float | None] = mapped_column(Float)
-    network_receive_bytes_per_second: Mapped[float | None] = mapped_column(Float)
-    network_transmit_bytes_per_second: Mapped[float | None] = mapped_column(Float)
-    gap_samples: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
-    details: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    # Rich schema-2 observations live separately from the scalar columns; this
-    # bounded JSON document carries per-device, per-interface and per-run
-    # series plus capability/provenance metadata.
-    metrics: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
 
 
 class NodeTelemetryLatest(Base):
@@ -2059,10 +2013,6 @@ class RunNode(Base):
             "observed_run_generation IS NULL OR observed_run_generation>=1",
             name="ck_run_nodes_observed_run_generation",
         ),
-        CheckConstraint(
-            _nullable_lower_hex("observation_receipt_sha256", 64),
-            name="ck_run_nodes_observation_receipt",
-        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -2083,44 +2033,17 @@ class RunNode(Base):
     observed_memory_bytes: Mapped[int | None] = mapped_column(BigInteger)
     endpoint: Mapped[dict[str, object] | None] = mapped_column(JSON)
     observed_run_generation: Mapped[int | None] = mapped_column(BigInteger)
-    observation_receipt_sha256: Mapped[str | None] = mapped_column(String(64))
-    #: Process presence comes only from the consumed signed helper receipt.
-    #: ``None`` means the current exact observation did not prove either state.
+    #: Process presence from the agent's current-generation observation.
+    #: ``None`` means no current observation has been applied.
     observation_process_running: Mapped[bool | None] = mapped_column(Boolean)
-    #: Signed observation time is separate from row updates so unrelated
-    #: lifecycle writes cannot make an old absence receipt look fresh.
+    #: Observation time is separate from row updates so unrelated lifecycle
+    #: writes cannot make an old absence observation look fresh.
     observation_observed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
     observation_endpoint_ready: Mapped[bool | None] = mapped_column(Boolean)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
-    )
-
-
-class RecipeRunObservationGrant(Base):
-    """Current exact-inspection grant nonce for one retained local rank."""
-
-    __tablename__ = "recipe_run_observation_grants"
-    __table_args__ = (
-        CheckConstraint(
-            _lower_hex("identity_sha256", 64),
-            name="ck_recipe_run_observation_grants_identity",
-        ),
-        CheckConstraint(
-            "expires_at >= issued_at",
-            name="ck_recipe_run_observation_grants_expiry",
-        ),
-    )
-    run_node_id: Mapped[str] = mapped_column(
-        ForeignKey("run_nodes.id", ondelete="CASCADE"), primary_key=True
-    )
-    request_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
-    identity_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    issued_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    expires_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    consumed: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
     )
 
 

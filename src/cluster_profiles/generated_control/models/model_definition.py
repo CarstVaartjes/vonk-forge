@@ -16,17 +16,11 @@ from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.git_hub_release_source import GitHubReleaseSource
-  from ..models.model_access import ModelAccess
-  from ..models.model_capabilities import ModelCapabilities
   from ..models.model_file import ModelFile
   from ..models.model_format import ModelFormat
   from ..models.model_identity import ModelIdentity
   from ..models.model_license import ModelLicense
-  from ..models.model_limits import ModelLimits
-  from ..models.model_lineage import ModelLineage
   from ..models.model_metadata import ModelMetadata
-  from ..models.model_parameters import ModelParameters
-  from ..models.model_provenance import ModelProvenance
   from ..models.model_reference import ModelReference
   from ..models.model_source import ModelSource
 
@@ -43,42 +37,30 @@ class ModelDefinition:
     """ One exact model version and variant, including its complete manifest.
 
         Attributes:
-            access (ModelAccess):
-            capabilities (ModelCapabilities):
+            capabilities (list[str]):
             dependencies (list[ModelReference]):
             files (list[ModelFile]):
             format_ (ModelFormat):
             identity (ModelIdentity): The family, logical model, exact version, and selected variant.
             license_ (ModelLicense):
-            limits (ModelLimits):
-            lineage (ModelLineage):
             metadata (ModelMetadata):
             modalities (list[ModelDefinitionModalitiesItem]):
-            parameters (ModelParameters):
-            provenance (ModelProvenance):
+            requires_token (bool):
             source (GitHubReleaseSource | ModelSource):
             kind (Literal['model'] | Unset):  Default: 'model'.
-            schema_version (Literal[2] | Unset):  Default: 2.
-            supersedes (ModelReference | None | Unset):
      """
 
-    access: ModelAccess
-    capabilities: ModelCapabilities
+    capabilities: list[str]
     dependencies: list[ModelReference]
     files: list[ModelFile]
     format_: ModelFormat
     identity: ModelIdentity
     license_: ModelLicense
-    limits: ModelLimits
-    lineage: ModelLineage
     metadata: ModelMetadata
     modalities: list[ModelDefinitionModalitiesItem]
-    parameters: ModelParameters
-    provenance: ModelProvenance
+    requires_token: bool
     source: GitHubReleaseSource | ModelSource
     kind: Literal['model'] | Unset = 'model'
-    schema_version: Literal[2] | Unset = 2
-    supersedes: ModelReference | None | Unset = UNSET
 
 
 
@@ -86,22 +68,16 @@ class ModelDefinition:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.git_hub_release_source import GitHubReleaseSource # noqa: PLC0415
-        from ..models.model_access import ModelAccess # noqa: PLC0415
-        from ..models.model_capabilities import ModelCapabilities # noqa: PLC0415
         from ..models.model_file import ModelFile # noqa: PLC0415
         from ..models.model_format import ModelFormat # noqa: PLC0415
         from ..models.model_identity import ModelIdentity # noqa: PLC0415
         from ..models.model_license import ModelLicense # noqa: PLC0415
-        from ..models.model_limits import ModelLimits # noqa: PLC0415
-        from ..models.model_lineage import ModelLineage # noqa: PLC0415
         from ..models.model_metadata import ModelMetadata # noqa: PLC0415
-        from ..models.model_parameters import ModelParameters # noqa: PLC0415
-        from ..models.model_provenance import ModelProvenance # noqa: PLC0415
         from ..models.model_reference import ModelReference # noqa: PLC0415
         from ..models.model_source import ModelSource # noqa: PLC0415
-        access = self.access.to_dict()
+        capabilities = self.capabilities
 
-        capabilities = self.capabilities.to_dict()
+
 
         dependencies = []
         for dependencies_item_data in self.dependencies:
@@ -123,10 +99,6 @@ class ModelDefinition:
 
         license_ = self.license_.to_dict()
 
-        limits = self.limits.to_dict()
-
-        lineage = self.lineage.to_dict()
-
         metadata = self.metadata.to_dict()
 
         modalities = []
@@ -136,9 +108,7 @@ class ModelDefinition:
 
 
 
-        parameters = self.parameters.to_dict()
-
-        provenance = self.provenance.to_dict()
+        requires_token = self.requires_token
 
         source: dict[str, Any]
         if isinstance(self.source, ModelSource):
@@ -149,41 +119,23 @@ class ModelDefinition:
 
         kind = self.kind
 
-        schema_version = self.schema_version
-
-        supersedes: dict[str, Any] | None | Unset
-        if isinstance(self.supersedes, Unset):
-            supersedes = UNSET
-        elif isinstance(self.supersedes, ModelReference):
-            supersedes = self.supersedes.to_dict()
-        else:
-            supersedes = self.supersedes
-
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "access": access,
             "capabilities": capabilities,
             "dependencies": dependencies,
             "files": files,
             "format": format_,
             "identity": identity,
             "license": license_,
-            "limits": limits,
-            "lineage": lineage,
             "metadata": metadata,
             "modalities": modalities,
-            "parameters": parameters,
-            "provenance": provenance,
+            "requires_token": requires_token,
             "source": source,
         })
         if kind is not UNSET:
             field_dict["kind"] = kind
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
-        if supersedes is not UNSET:
-            field_dict["supersedes"] = supersedes
 
         return field_dict
 
@@ -192,28 +144,15 @@ class ModelDefinition:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.git_hub_release_source import GitHubReleaseSource # noqa: PLC0415
-        from ..models.model_access import ModelAccess # noqa: PLC0415
-        from ..models.model_capabilities import ModelCapabilities # noqa: PLC0415
         from ..models.model_file import ModelFile # noqa: PLC0415
         from ..models.model_format import ModelFormat # noqa: PLC0415
         from ..models.model_identity import ModelIdentity # noqa: PLC0415
         from ..models.model_license import ModelLicense # noqa: PLC0415
-        from ..models.model_limits import ModelLimits # noqa: PLC0415
-        from ..models.model_lineage import ModelLineage # noqa: PLC0415
         from ..models.model_metadata import ModelMetadata # noqa: PLC0415
-        from ..models.model_parameters import ModelParameters # noqa: PLC0415
-        from ..models.model_provenance import ModelProvenance # noqa: PLC0415
         from ..models.model_reference import ModelReference # noqa: PLC0415
         from ..models.model_source import ModelSource # noqa: PLC0415
         d = dict(src_dict)
-        access = ModelAccess.from_dict(d.pop("access"))
-
-
-
-
-        capabilities = ModelCapabilities.from_dict(d.pop("capabilities"))
-
-
+        capabilities = cast(list[str], d.pop("capabilities"))
 
 
         dependencies = []
@@ -251,16 +190,6 @@ class ModelDefinition:
 
 
 
-        limits = ModelLimits.from_dict(d.pop("limits"))
-
-
-
-
-        lineage = ModelLineage.from_dict(d.pop("lineage"))
-
-
-
-
         metadata = ModelMetadata.from_dict(d.pop("metadata"))
 
 
@@ -276,15 +205,7 @@ class ModelDefinition:
             modalities.append(modalities_item)
 
 
-        parameters = ModelParameters.from_dict(d.pop("parameters"))
-
-
-
-
-        provenance = ModelProvenance.from_dict(d.pop("provenance"))
-
-
-
+        requires_token = d.pop("requires_token")
 
         def _parse_source(data: object) -> GitHubReleaseSource | ModelSource:
             try:
@@ -312,48 +233,18 @@ class ModelDefinition:
         if kind != 'model' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'model', got '{kind}'")
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
-        def _parse_supersedes(data: object) -> ModelReference | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                supersedes_type_0 = ModelReference.from_dict(data)
-
-
-
-                return supersedes_type_0
-            except (TypeError, ValueError, AttributeError, KeyError):
-                pass
-            return cast(ModelReference | None | Unset, data)
-
-        supersedes = _parse_supersedes(d.pop("supersedes", UNSET))
-
-
         model_definition = cls(
-            access=access,
             capabilities=capabilities,
             dependencies=dependencies,
             files=files,
             format_=format_,
             identity=identity,
             license_=license_,
-            limits=limits,
-            lineage=lineage,
             metadata=metadata,
             modalities=modalities,
-            parameters=parameters,
-            provenance=provenance,
+            requires_token=requires_token,
             source=source,
             kind=kind,
-            schema_version=schema_version,
-            supersedes=supersedes,
         )
 
         return model_definition

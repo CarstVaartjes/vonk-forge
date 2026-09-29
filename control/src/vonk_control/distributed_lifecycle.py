@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from vonk_forge_contracts.recipe import RecipeTopology
+
 
 class DistributedLifecycleError(RuntimeError):
     pass
@@ -16,9 +18,8 @@ DEFAULT_DISTRIBUTED_READINESS_TIMEOUT_SECONDS = 60
 
 def canonical_distributed_readiness(
     *,
-    topology: Mapping[str, object],
+    topology: RecipeTopology,
     interfaces: Sequence[object],
-    lifecycle: Mapping[str, object],
 ) -> dict[str, object] | None:
     """Derive collective readiness from the canonical Recipe document.
 
@@ -27,17 +28,10 @@ def canonical_distributed_readiness(
     it is not an authoring field under ``runtime.lifecycle``.
     """
 
-    if topology.get("mode") != "distributed":
+    if not topology.distributed:
         return None
-    roles = topology.get("roles")
-    if not isinstance(roles, Sequence) or isinstance(roles, (str, bytes)):
-        raise DistributedLifecycleError("distributed endpoint topology is invalid")
-    owners = tuple(
-        role
-        for role in roles
-        if isinstance(role, Mapping) and role.get("endpoint_owner") is True
-    )
-    if len(owners) != 1 or owners[0].get("count") != 1:
+    owners = tuple(role for role in topology.roles if role.endpoint_owner)
+    if len(owners) != 1 or owners[0].count != 1:
         raise DistributedLifecycleError("distributed endpoint topology is invalid")
     openai_interfaces = tuple(
         interface
@@ -50,13 +44,9 @@ def canonical_distributed_readiness(
         # Job interfaces have filesystem completion semantics and do not
         # expose an HTTP endpoint for collective readiness.
         return None
-    interface = openai_interfaces[0]
-    path = interface.get("health_path")
+    path = openai_interfaces[0].get("health_path")
     if not isinstance(path, str) or not path.startswith("/"):
         raise DistributedLifecycleError("distributed readiness path is invalid")
-    stop_timeout = lifecycle.get("stop_timeout_seconds")
-    if type(stop_timeout) is not int or not 1 <= stop_timeout <= 600:
-        raise DistributedLifecycleError("distributed readiness timeout is invalid")
     return {
         "strategy": "endpoint-owner-after-all-ranks",
         "path": path,

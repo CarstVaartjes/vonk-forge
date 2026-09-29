@@ -17,16 +17,13 @@ use url::Url;
 use vonk_agent_protocol::generated::{
     ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, HostHelperGrantResponse,
     HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, IssuedCertificateResponse,
-    PackageActivationGrantRequest, RecipeRunObservationGrantRequest, RecipeRunObservationGrantWire,
-    RenewRequest, TelemetryRequest,
+    PackageActivationGrantRequest, RenewRequest, TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
-    HostHelperContainerRuntimeAction, HostHelperOperation, HostRuntimeAction, HostRuntimeRequest,
-    InventoryRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
-    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeRunInspectionBinding, RecipeRunObservationWire,
-    RecipeRunObservationsWire, SignedHostHelperGrant, canonical_generated_json, canonical_json,
-    hex_sha256, parse_strict,
+    HostRuntimeAction, HostRuntimeRequest, InventoryRequest,
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES, RecipeRunObservationWire, RecipeRunObservationsWire,
+    SignedHostHelperGrant, canonical_generated_json, canonical_json, hex_sha256, parse_strict,
 };
 
 use crate::{
@@ -38,7 +35,6 @@ use crate::{
     pair::verify_ca_pin,
     runtime_identity::AgentRuntimeIdentity,
     telemetry::{TelemetrySample, valid_report_batch},
-    workloads::CompiledExecutionPlan,
 };
 
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -120,8 +116,6 @@ pub enum ClientError {
     // and keeps the rest of the loop alive instead of exiting.
     #[error("controller refused the result as invalid")]
     ResultRejected(Box<ControllerError>),
-    #[error("exact recipe run observation is not ready for authorization")]
-    ObservationNotReady,
     #[error("controller CA pin is invalid")]
     Pin,
 }
@@ -268,29 +262,20 @@ impl ClientError {
     }
 }
 
+/// The one Controller<->agent protocol version this agent speaks.
+pub const AGENT_PROTOCOL_VERSION: u32 = 4;
+
 /// Serialize the current claim contract used by the HTTP transport.
 pub fn claim_request_document(
-    node_id: &str,
-    capabilities: &[&str],
+    preflight_fingerprint: Option<&str>,
     hostname: Option<&str>,
     wait_seconds: u64,
     runtime_identity: &AgentRuntimeIdentity,
 ) -> Result<Vec<u8>, ClientError> {
-    if !runtime_identity.self_test_passed {
-        return Err(ClientError::Protocol);
-    }
-    runtime_identity
-        .observation_receipt_public_key()
-        .map_err(|_| ClientError::Protocol)?;
     canonical_generated_json(&ClaimRequest {
-        capabilities: capabilities
-            .iter()
-            .map(|value| (*value).to_owned())
-            .collect(),
         hostname: hostname.map(str::to_owned),
-        lease_seconds: 60,
-        node_id: node_id.to_owned(),
-        protocol_version: 3,
+        preflight_fingerprint: preflight_fingerprint.map(str::to_owned),
+        protocol_version: AGENT_PROTOCOL_VERSION,
         runtime_identity: runtime_identity.clone(),
         wait_seconds: u32::try_from(wait_seconds.min(60)).expect("bounded claim wait"),
     })
@@ -299,70 +284,28 @@ pub fn claim_request_document(
 
 pub type ExactRecipeRunObservation = RecipeRunObservationWire;
 
-/// Validate and construct the one current snapshot envelope used by both the
-/// production executor and the Linux wire probe.
+/// Validate and construct the one current observation report used by both
+/// the production executor and the Linux wire probe.
 pub fn build_exact_recipe_run_observations(
-    node_id: &str,
     observed_at: chrono::DateTime<chrono::Utc>,
     observations: &[ExactRecipeRunObservation],
 ) -> Result<RecipeRunObservationsWire, ClientError> {
     if observations.len() > MAX_MANAGED_RECIPE_RUNS {
         return Err(ClientError::Protocol);
     }
-    if !valid_node_id(node_id) {
-        return Err(ClientError::Protocol);
-    }
     let mut run_ids = std::collections::BTreeSet::new();
     for observation in observations {
-        observation.validate().map_err(|_| ClientError::Protocol)?;
-        if observation.node_id != node_id || !run_ids.insert(observation.run_id) {
-            return Err(ClientError::Protocol);
-        }
-        let receipt_request_id = observation.helper_receipt.claims.request_id.to_string();
-        let (grant_job_id, grant_request_sha256) = match &observation.grant.claims.operation {
-            HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => {
-                (&operation.job_id, &operation.request_sha256)
-            }
-            _ => return Err(ClientError::Protocol),
-        };
-        if observation.schema_version != 1
-            || !valid_sha256(&observation.observation_identity_sha256)
-            || observation.helper_receipt.validate().is_err()
-            || observation.helper_receipt.claims.node_id != node_id
-            || observation
-                .helper_receipt
-                .claims
-                .observation_identity_sha256
-                != observation.observation_identity_sha256
-            || hex::decode(&observation.observation_receipt_public_key)
-                .ok()
-                .filter(|key| key.len() == 32)
-                .map(|key| hex_sha256(&key))
-                != Some(observation.helper_receipt.signature.key_id.clone())
-            || *grant_job_id != observation.run_id
-            || grant_request_sha256 != &observation.helper_receipt.claims.request_sha256
-            || observation.grant.claims.request_id.to_string() != receipt_request_id
-            || observation.observed_at.timestamp() != observation.helper_receipt.claims.observed_at
-            || (observation.local_address == observation.master_address)
-                != observation.endpoint_ready.is_some()
+        if observation.run_generation == 0
+            || observation.run_generation > i32::MAX as u32
+            || !run_ids.insert(observation.run_id)
         {
             return Err(ClientError::Protocol);
         }
     }
     Ok(RecipeRunObservationsWire {
-        schema_version: RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
         observed_at: observed_at.into(),
         runs: observations.to_vec(),
     })
-}
-
-#[derive(Debug)]
-pub struct RecipeRunInspectionGrant {
-    pub grant: SignedHostHelperGrant,
-    pub observation_identity_sha256: String,
-    /// The Controller has no record of this run: the grant authorizes only a
-    /// read-only probe, and no observation of the run can ever be accepted.
-    pub unowned: bool,
 }
 
 /// The Controller's answer for one locally retained run, by id alone.
@@ -381,8 +324,6 @@ pub const RECIPE_RUN_UNOWNED: &str = "unowned";
 
 #[derive(Debug, Clone)]
 pub struct DistributionDownloadEvidence {
-    pub assignment_id: uuid::Uuid,
-    pub model_artifact_set_sha256: String,
     pub model_digests: Vec<String>,
     pub model_paths: Vec<std::path::PathBuf>,
     pub oci_archive_path: std::path::PathBuf,
@@ -438,7 +379,7 @@ impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
 }
 
 struct ProgressSnapshot {
-    operation_id: uuid::Uuid,
+    fence: uuid::Uuid,
     phase: String,
     counters: Option<(u64, u64)>,
 }
@@ -498,6 +439,7 @@ impl AgentHttpClient {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn node_id(&self) -> &str {
         &self.node_id
     }
@@ -577,14 +519,13 @@ impl AgentHttpClient {
 
     pub async fn claim(
         &self,
-        capabilities: &[&str],
+        preflight_fingerprint: Option<&str>,
         wait_seconds: u64,
         runtime_identity: Option<&AgentRuntimeIdentity>,
     ) -> Result<Option<AgentClaim>, ClientError> {
         let hostname = local_hostname();
         let body = claim_request_document(
-            &self.node_id,
-            capabilities,
+            preflight_fingerprint,
             hostname.as_deref(),
             wait_seconds,
             runtime_identity.ok_or(ClientError::Protocol)?,
@@ -648,24 +589,24 @@ impl AgentHttpClient {
         }
     }
 
-    pub(crate) fn set_progress_phase(&self, operation_id: uuid::Uuid, phase: &str) {
+    pub(crate) fn set_progress_phase(&self, fence: uuid::Uuid, phase: &str) {
         *self
             .progress_phase
             .lock()
             .expect("progress phase lock poisoned") = Some(ProgressSnapshot {
-            operation_id,
+            fence,
             phase: phase.to_owned(),
             counters: None,
         });
     }
 
-    pub(crate) fn set_progress_bytes(&self, operation_id: uuid::Uuid, bytes: u64, total: u64) {
+    pub(crate) fn set_progress_bytes(&self, fence: uuid::Uuid, bytes: u64, total: u64) {
         if let Some(snapshot) = self
             .progress_phase
             .lock()
             .expect("progress phase lock poisoned")
             .as_mut()
-            && snapshot.operation_id == operation_id
+            && snapshot.fence == fence
         {
             let high_water = snapshot
                 .counters
@@ -685,7 +626,7 @@ impl AgentHttpClient {
                 .lock()
                 .expect("progress phase lock poisoned")
                 .as_ref()
-            && snapshot.operation_id == progress.operation_id
+            && snapshot.fence == progress.fence
         {
             measured.phase.clone_from(&snapshot.phase);
             if let Some((bytes, total)) = snapshot.counters {
@@ -695,9 +636,6 @@ impl AgentHttpClient {
             }
         }
         progress.validate().map_err(|_| ClientError::Protocol)?;
-        if progress.node_id != self.node_id {
-            return Err(ClientError::Protocol);
-        }
         let body = canonical_json(&progress).map_err(|_| ClientError::Protocol)?;
         // A renewal that arrives after the accepted lease deadline is still
         // accepted inside the Controller's renewal allowance, so the attempt
@@ -716,15 +654,7 @@ impl AgentHttpClient {
         classify_response(&response)?;
         let body = bounded_body(response).await?;
         let directive = parse_strict::<AgentDirective>(&body).map_err(|_| ClientError::Protocol)?;
-        directive.validate().map_err(|_| ClientError::Protocol)?;
-        if directive.schema_version != progress.schema_version
-            || directive.job_id != progress.job_id
-            || directive.operation_id != progress.operation_id
-            || directive.attempt != progress.attempt
-            || directive.fence != progress.fence
-            || directive.node_id != progress.node_id
-            || directive.deadline < progress.deadline
-        {
+        if directive.fence != progress.fence {
             return Err(ClientError::Protocol);
         }
         Ok(directive)
@@ -736,8 +666,7 @@ impl AgentHttpClient {
         request: &HostRuntimeRequest,
         request_sha256: &str,
     ) -> Result<SignedHostHelperGrant, ClientError> {
-        let grant_request =
-            build_host_runtime_grant_request(claim, &self.node_id, request, request_sha256)?;
+        let grant_request = build_host_runtime_grant_request(claim, request, request_sha256)?;
         let body = canonical_generated_json(&grant_request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
@@ -780,133 +709,12 @@ impl AgentHttpClient {
         }
     }
 
-    pub async fn recipe_run_inspection_grant(
-        &self,
-        binding: &RecipeRunInspectionBinding,
-        request: &HostRuntimeRequest,
-        request_sha256: &str,
-    ) -> Result<RecipeRunInspectionGrant, ClientError> {
-        binding.validate().map_err(|_| ClientError::Protocol)?;
-        request.validate().map_err(|_| ClientError::Protocol)?;
-        let expected_attempt = binding.run_generation;
-        if request.action != HostRuntimeAction::RunInspect
-            || request.job_id != binding.run_id
-            || request.attempt != expected_attempt
-            || request.observation.as_ref() != Some(binding)
-            || !valid_sha256(request_sha256)
-            || hex_sha256(&canonical_json(request).map_err(|_| ClientError::Protocol)?)
-                != request_sha256
-        {
-            return Err(ClientError::Protocol);
-        }
-        let body = canonical_generated_json(&RecipeRunObservationGrantRequest {
-            schema_version: 1,
-            node_id: self.node_id.clone(),
-            run_id: binding.run_id,
-            installation_id: binding.installation_id,
-            recipe_revision_id: binding.recipe_revision_id,
-            recipe_content_sha256: binding.recipe_content_sha256.clone(),
-            mapping_id: binding.mapping_id,
-            mapping_generation: binding.mapping_generation,
-            run_generation: binding.run_generation,
-            image_digest: binding.image_digest.clone(),
-            artifact_set_digest: binding.artifact_set_digest.clone(),
-            model_identity: binding.model_identity.clone(),
-            rank: binding.rank,
-            role: binding.role.clone(),
-            world_size: binding.world_size,
-            local_address: binding.local_address,
-            master_address: binding.master_address,
-            master_port: binding.master_port,
-            port: binding.port,
-            runtime_arguments_sha256: binding.runtime_arguments_sha256.clone(),
-            job_id: request.job_id,
-            operation_id: request.operation_id,
-            attempt: request.attempt,
-            fence: request.fence,
-            request_sha256: request_sha256.to_owned(),
-            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS as u8,
-        })
-        .map_err(|_| ClientError::Protocol)?;
-        let response = self
-            .current_client()
-            .await
-            .post(self.endpoint("/agent/recipe-runs/observation-grants")?)
-            .header("content-type", "application/json")
-            .body(body)
-            .send()
-            .await?;
-        if response.status() == StatusCode::TOO_EARLY {
-            return Err(ClientError::ObservationNotReady);
-        }
-        // An unconsumed grant from the previous sweep is the controller's
-        // bounded "not yet", not a lost authorization.  Reading it as a hard
-        // failure abandoned every other run's observation for that tick and
-        // slowed the claim cadence to the idle one.
-        if response.status() == StatusCode::CONFLICT
-            && response
-                .headers()
-                .get("x-vonk-error-code")
-                .and_then(|value| value.to_str().ok())
-                == Some("controller.recipe_run.observation_pending")
-        {
-            return Err(ClientError::ObservationNotReady);
-        }
-        classify_response(&response)?;
-        let unowned = match response.headers().get(RECIPE_RUN_DISPOSITION_HEADER) {
-            None => false,
-            Some(value) if value.as_bytes() == RECIPE_RUN_UNOWNED.as_bytes() => true,
-            Some(_) => return Err(ClientError::Protocol),
-        };
-        let body = bounded_body(response).await?;
-        let response: RecipeRunObservationGrantWire =
-            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
-        if response.schema_version != 1
-            || !valid_sha256(&response.observation_identity_sha256)
-            || response.grant.validate().is_err()
-            || response.grant.claims.node_id != self.node_id
-        {
-            return Err(ClientError::Protocol);
-        }
-        let operation = match &response.grant.claims.operation {
-            HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => (
-                &operation.action,
-                &operation.job_id,
-                &operation.operation_id,
-                &operation.attempt,
-                &operation.fence,
-                &operation.request_sha256,
-                operation
-                    .observation_identity_sha256
-                    .as_ref()
-                    .ok_or(ClientError::Protocol)?,
-            ),
-            _ => return Err(ClientError::Protocol),
-        };
-        if *operation.0 != HostHelperContainerRuntimeAction::RunInspect
-            || operation.1 != &request.job_id
-            || operation.2 != &request.operation_id
-            || *operation.3 != request.attempt
-            || operation.4 != &request.fence
-            || operation.5 != request_sha256
-            || operation.6 != &response.observation_identity_sha256
-        {
-            return Err(ClientError::Protocol);
-        }
-        Ok(RecipeRunInspectionGrant {
-            grant: response.grant,
-            observation_identity_sha256: response.observation_identity_sha256,
-            unowned,
-        })
-    }
-
     pub async fn package_activation_grant(
         &self,
         receipt: &vonk_agent_protocol::PackageActivationReceipt,
         runtime_identity: &AgentRuntimeIdentity,
     ) -> Result<SignedHostHelperGrant, ClientError> {
         let body = canonical_generated_json(&PackageActivationGrantRequest {
-            node_id: self.node_id.clone(),
             receipt: receipt.clone(),
             runtime_identity: runtime_identity.clone(),
         })
@@ -932,21 +740,15 @@ impl AgentHttpClient {
         package_sha256: &str,
         package_signature: &str,
     ) -> Result<SignedHostHelperGrant, ClientError> {
-        if claim.node_id != self.node_id
-            || !valid_sha256(package_sha256)
+        if !valid_sha256(package_sha256)
             || package_signature.len() != 128
             || !package_signature
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-            || claim.attempt == 0
         {
             return Err(ClientError::Protocol);
         }
         let body = canonical_generated_json(&AgentUpgradeGrantRequest {
-            node_id: self.node_id.clone(),
-            job_id: claim.job_id,
-            operation_id: claim.operation_id,
-            attempt: claim.attempt,
             fence: claim.fence,
             package_sha256: package_sha256.to_owned(),
             package_signature: package_signature.to_owned(),
@@ -966,29 +768,6 @@ impl AgentHttpClient {
         let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         Ok(response.grant)
-    }
-
-    pub async fn recipe_spec(
-        &self,
-        installation_id: &str,
-    ) -> Result<CompiledExecutionPlan, ClientError> {
-        if uuid::Uuid::parse_str(installation_id).is_err() {
-            return Err(ClientError::Protocol);
-        }
-        let response = self
-            .current_client()
-            .await
-            .get(self.endpoint(&format!(
-                "/agent/recipe-installations/{installation_id}/spec"
-            ))?)
-            .send()
-            .await?;
-        classify_response(&response)?;
-        let body = bounded_claim_body(response).await?;
-        let spec: CompiledExecutionPlan =
-            serde_json::from_slice(&body).map_err(|_| ClientError::Protocol)?;
-        spec.validate().map_err(|_| ClientError::Protocol)?;
-        Ok(spec)
     }
 
     pub async fn source_bundle(
@@ -1282,9 +1061,6 @@ impl AgentHttpClient {
         let assignment: DistributionAssignment =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         assignment.validate().map_err(|_| ClientError::Protocol)?;
-        if assignment.plan_digest != plan_digest || assignment.node_id != self.node_id {
-            return Err(ClientError::Protocol);
-        }
         Ok(assignment)
     }
 
@@ -1429,8 +1205,6 @@ impl AgentHttpClient {
             .map(|object| object.bytes)
             .ok_or(ClientError::Protocol)?;
         Ok(DistributionDownloadEvidence {
-            assignment_id: assignment.assignment_id,
-            model_artifact_set_sha256: assignment.model_artifact_set_sha256,
             model_digests,
             model_paths,
             oci_archive_path: archive_path,
@@ -1837,10 +1611,10 @@ impl AgentHttpClient {
 
     pub async fn report_exact_recipe_run_observations(
         &self,
+        observed_at: chrono::DateTime<chrono::Utc>,
         observations: &[ExactRecipeRunObservation],
     ) -> Result<(), ClientError> {
-        let envelope =
-            build_exact_recipe_run_observations(&self.node_id, chrono::Utc::now(), observations)?;
+        let envelope = build_exact_recipe_run_observations(observed_at, observations)?;
         let body = canonical_generated_json(&envelope).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
@@ -1863,8 +1637,7 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let request = TelemetryRequest {
-            schema_version: 1,
-            samples: samples.iter().map(|sample| sample.wire().clone()).collect(),
+            samples: samples.to_vec(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -2023,29 +1796,19 @@ struct HostRuntimePlanBinding {
 
 fn build_host_runtime_grant_request(
     claim: &AgentClaim,
-    node_id: &str,
     request: &HostRuntimeRequest,
     request_sha256: &str,
 ) -> Result<HostRuntimeGrantRequest, ClientError> {
     request.validate().map_err(|_| ClientError::Protocol)?;
     let request_body = canonical_json(request).map_err(|_| ClientError::Protocol)?;
-    if claim.node_id != node_id
-        || !valid_sha256(request_sha256)
+    if !valid_sha256(request_sha256)
         || hex_sha256(&request_body) != request_sha256
-        || claim.attempt == 0
-        || request.job_id != claim.job_id
-        || request.operation_id != claim.operation_id
-        || request.attempt != claim.attempt
         || request.fence != claim.fence
     {
         return Err(ClientError::Protocol);
     }
     let plan_binding = host_runtime_plan_binding(request)?;
     Ok(HostRuntimeGrantRequest {
-        node_id: node_id.to_owned(),
-        job_id: claim.job_id,
-        operation_id: claim.operation_id,
-        attempt: claim.attempt,
         fence: claim.fence,
         action: host_runtime_grant_action(request.action),
         request_sha256: request_sha256.to_owned(),
@@ -2655,14 +2418,6 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
-fn valid_node_id(value: &str) -> bool {
-    value.len() == 36
-        && value.starts_with("spk_")
-        && value[4..]
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-}
-
 fn local_hostname() -> Option<String> {
     let raw = fs::read_to_string("/proc/sys/kernel/hostname").ok()?;
     let hostname = raw.trim();
@@ -2695,6 +2450,10 @@ fn valid_oci_digest(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    const TEST_PLAN_DIGEST: &str =
+        "abababababababababababababababababababababababababababababababab";
+    const TEST_NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
+
     use super::{
         AgentHttpClient, AgentResult, ClientError, ControllerError, ExactRecipeRunObservation,
         MAX_REJECTION_CONTEXT_CHARS, clamp_inventory_request, controller_rejection_digest,
@@ -2722,16 +2481,12 @@ mod tests {
     use url::Url;
     use uuid::Uuid;
     use vonk_agent_protocol::generated::{
-        AgentClaimPayload, AgentOperation, DistributionObjectKind,
-        ExecuteContainerRuntimeRequestOperation, OperationProgress, RecipeImageImportRequest,
+        AgentClaimPayload, AgentOperation, DistributionObjectKind, OperationProgress,
+        RecipeImageImportRequest,
     };
     use vonk_agent_protocol::{
-        AgentClaim, AgentDirective, AgentProgress, HostHelperContainerRuntimeAction,
-        HostHelperGrantClaims, HostHelperGrantSignature, HostHelperOperation, HostRuntimeAction,
-        HostRuntimeRequest, RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunInspectionBinding,
-        RecipeRunObservationOutcome, RecipeRunObservationReceipt,
-        RecipeRunObservationReceiptClaims, RecipeRunObservationReceiptSignature,
-        SignedHostHelperGrant, canonical_json, hex_sha256,
+        AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, HostRuntimeRequest,
+        canonical_json, hex_sha256,
     };
 
     struct NoProcess;
@@ -2815,59 +2570,6 @@ mod tests {
             _: Duration,
         ) -> Result<ProcessOutput, ProcessError> {
             panic!("distribution/install handoff test must not launch a process");
-        }
-    }
-
-    fn inspection_binding() -> RecipeRunInspectionBinding {
-        RecipeRunInspectionBinding {
-            artifact_set_digest: "a".repeat(64),
-            image_digest: "b".repeat(64),
-            installation_id: Uuid::new_v4(),
-            local_address: Some("192.168.100.11".parse().unwrap()),
-            master_address: Some("192.168.100.10".parse().unwrap()),
-            master_port: Some(29500),
-            mapping_generation: 4,
-            mapping_id: Uuid::new_v4(),
-            model_identity: "example/model@immutable".to_owned(),
-            port: 8000,
-            rank: 1,
-            recipe_content_sha256: "c".repeat(64),
-            recipe_revision_id: Uuid::new_v4(),
-            role: "worker".to_owned(),
-            run_id: Uuid::new_v4(),
-            run_generation: 3,
-            runtime_arguments_sha256: hex_sha256(
-                &canonical_json(&vec![
-                    format!("sha256:{}", "b".repeat(64)),
-                    "run".to_owned(),
-                ])
-                .unwrap(),
-            ),
-            world_size: 2,
-        }
-    }
-
-    fn observation_receipt(
-        node_id: &str,
-        observation_identity_sha256: &str,
-    ) -> RecipeRunObservationReceipt {
-        RecipeRunObservationReceipt {
-            schema_version: 1,
-            claims: RecipeRunObservationReceiptClaims {
-                schema_version: 1,
-                authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
-                node_id: node_id.to_owned(),
-                request_id: Uuid::new_v4(),
-                request_sha256: "f".repeat(64),
-                observation_identity_sha256: observation_identity_sha256.to_owned(),
-                outcome: RecipeRunObservationOutcome::NotRunning,
-                observed_at: Utc::now().timestamp(),
-            },
-            signature: RecipeRunObservationReceiptSignature {
-                algorithm: "ed25519".to_owned(),
-                key_id: hex_sha256(&[0; 32]),
-                value: "b".repeat(128),
-            },
         }
     }
 
@@ -3126,13 +2828,6 @@ mod tests {
         let config_digest = digest(&config);
         let archive_digest = digest(&archive);
         let assignment = vonk_agent_protocol::DistributionAssignment {
-            schema_version: 2,
-            assignment_id: Uuid::new_v4(),
-            plan_digest: "a".repeat(64),
-            generation: 1,
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            expires_at: DateTime::parse_from_rfc3339("2030-01-01T00:00:00Z").unwrap(),
-            model_artifact_set_sha256: "b".repeat(64),
             objects: vec![
                 vonk_agent_protocol::DistributionObject {
                     name: "weights/model.bin".to_owned(),
@@ -3224,11 +2919,10 @@ mod tests {
                 stream.write_all(chunk).unwrap();
             }
         });
-        let client =
-            AgentHttpClient::for_http_test(&format!("http://{address}/"), &assignment.node_id);
+        let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), TEST_NODE_ID);
         let root = tempfile::tempdir().unwrap();
         let evidence = client
-            .download_distribution(&assignment.plan_digest, root.path(), root.path())
+            .download_distribution(TEST_PLAN_DIGEST, root.path(), root.path())
             .await
             .unwrap();
         assert_eq!(
@@ -3339,15 +3033,14 @@ mod tests {
                 observed.acquire().await.unwrap().forget();
             }
         });
-        let client =
-            AgentHttpClient::for_http_test(&format!("http://{address}/"), &assignment.node_id);
+        let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), TEST_NODE_ID);
         let root = tempfile::tempdir().unwrap();
         let mut snapshots = Vec::new();
         let mut completed_items = 0;
         let result = tokio::time::timeout(
             Duration::from_secs(10),
             client.download_distribution_with_progress(
-                &assignment.plan_digest,
+                TEST_PLAN_DIGEST,
                 root.path(),
                 root.path(),
                 |item| {
@@ -3464,13 +3157,6 @@ mod tests {
             kind: DistributionObjectKind::OciArchive,
         };
         vonk_agent_protocol::DistributionAssignment {
-            schema_version: 2,
-            assignment_id: Uuid::new_v4(),
-            plan_digest: "a".repeat(64),
-            generation: 1,
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            expires_at: DateTime::parse_from_rfc3339("2030-01-01T00:00:00Z").unwrap(),
-            model_artifact_set_sha256: "b".repeat(64),
             objects: vec![model_object, archive_object],
             oci_image_digest: format!("sha256:{image_digest}"),
             oci_archive_sha256: hex_sha256(archive),
@@ -3517,9 +3203,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let manifest = canonical_json(&assignment).unwrap();
-        let node_id = assignment.node_id.clone();
+        let node_id = TEST_NODE_ID.to_owned();
         let server = thread::spawn(move || {
             let mut requests = Vec::new();
+            let mut served_plan: Option<String> = None;
             for _ in 0..expected_requests {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut request = Vec::new();
@@ -3555,7 +3242,7 @@ mod tests {
                     continue;
                 }
                 if target.starts_with("/agent/distribution/manifests/") {
-                    assert!(target.ends_with(&assignment.plan_digest));
+                    served_plan = target.rsplit('/').next().map(str::to_owned);
                     write!(
                         stream,
                         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -3573,7 +3260,11 @@ mod tests {
                 }
                 let (path, query) = target.split_once('?').unwrap();
                 assert!(path.starts_with("/agent/distribution/objects/"));
-                assert!(query == format!("plan_digest={}", assignment.plan_digest));
+                assert!(
+                    served_plan
+                        .as_deref()
+                        .is_none_or(|plan| query == format!("plan_digest={plan}"))
+                );
                 let digest = path.rsplit('/').next().unwrap();
                 let source = objects.get(digest).unwrap();
                 let range = headers
@@ -3661,7 +3352,7 @@ mod tests {
         let mut snapshots = Vec::new();
         let evidence = client
             .download_distribution_with_progress(
-                &assignment.plan_digest,
+                TEST_PLAN_DIGEST,
                 &assignment_root,
                 &archive_root,
                 |item| snapshots.push(item),
@@ -3710,7 +3401,7 @@ mod tests {
         assert_eq!(cached, evidence.oci_archive_path);
         let before_retry_hash_reads = distribution_hash_read_bytes();
         let reused_evidence = client
-            .download_distribution(&assignment.plan_digest, &assignment_root, &archive_root)
+            .download_distribution(TEST_PLAN_DIGEST, &assignment_root, &archive_root)
             .await
             .unwrap();
         assert_eq!(
@@ -3772,9 +3463,9 @@ mod tests {
         let model = b"model payload".to_vec();
         let (archive, _) = oci_archive_fixture();
         let image_digest = "1".repeat(64);
-        let mut assignment = distribution_assignment_fixture(&model, &archive, &image_digest);
-        assignment.plan_digest = "a".repeat(64);
-        assignment.model_artifact_set_sha256 = "d".repeat(64);
+        let assignment = distribution_assignment_fixture(&model, &archive, &image_digest);
+        let plan_digest = "a".repeat(64);
+        let model_artifact_set_sha256 = "d".repeat(64);
         assignment.validate().unwrap();
         let mut objects = HashMap::new();
         objects.insert(hex_sha256(&model), model.clone());
@@ -3791,7 +3482,7 @@ mod tests {
         std::fs::create_dir_all(&distribution_root).unwrap();
         std::fs::create_dir_all(&archive_root).unwrap();
         let evidence = client
-            .download_distribution(&assignment.plan_digest, &distribution_root, &archive_root)
+            .download_distribution(&plan_digest, &distribution_root, &archive_root)
             .await
             .unwrap();
         assert_eq!(server.join().unwrap().len(), 3);
@@ -3810,25 +3501,13 @@ mod tests {
         .unwrap();
         let model_sha256 = hex_sha256(&model);
         let archive_sha256 = hex_sha256(&archive);
-        plan_value["identity"]["execution_sha256"] = json!("e".repeat(64));
         plan_value["identity"]["model_artifact_set_sha256"] =
-            json!(assignment.model_artifact_set_sha256.clone());
-        plan_value["identity"]["model_artifact_bytes"] = json!(model.len());
+            json!(model_artifact_set_sha256.clone());
         plan_value["artifacts"][0]["sha256"] = json!(model_sha256.clone());
         plan_value["artifacts"][0]["size_bytes"] = json!(model.len());
-        plan_value["artifacts"][0]["distribution_object"]["sha256"] = json!(model_sha256);
-        plan_value["artifacts"][0]["distribution_object"]["bytes"] = json!(model.len());
-        plan_value["runtime"]["image_digest"] = json!(format!("sha256:{image_digest}"));
         plan_value["runtime_image"]["image_digest"] = json!(format!("sha256:{image_digest}"));
-        plan_value["runtime_image"]["platform_manifest_digest"] =
-            json!(format!("sha256:{image_digest}"));
         plan_value["runtime_image"]["oci_layout_sha256"] = json!(archive_sha256.clone());
         plan_value["runtime_image"]["image_bytes"] = json!(archive.len());
-        plan_value["runtime_image"]["local_image_reference"] = json!(format!(
-            "localhost/vonk/compiled-runtime-{archive_sha256}@sha256:{image_digest}"
-        ));
-        plan_value["runtime_image"]["distribution_object"]["sha256"] = json!(archive_sha256);
-        plan_value["runtime_image"]["distribution_object"]["bytes"] = json!(archive.len());
         let plan: CompiledExecutionPlan = serde_json::from_value(plan_value).unwrap();
         plan.validate().unwrap();
 
@@ -3874,9 +3553,9 @@ mod tests {
             "reinstall reuses the receipt-bound destination without rereading the source"
         );
 
-        let mut second_assignment = assignment.clone();
-        second_assignment.plan_digest = "f".repeat(64);
-        second_assignment.model_artifact_set_sha256 = "c".repeat(64);
+        let second_assignment = assignment.clone();
+        let second_plan_digest = "f".repeat(64);
+        let second_model_artifact_set_sha256 = "c".repeat(64);
         let (second_client, second_server) = distribution_fixture_server(
             second_assignment.clone(),
             objects,
@@ -3884,11 +3563,7 @@ mod tests {
             DistributionFixtureMode::Good,
         );
         let reused = second_client
-            .download_distribution(
-                &second_assignment.plan_digest,
-                &distribution_root,
-                &archive_root,
-            )
+            .download_distribution(&second_plan_digest, &distribution_root, &archive_root)
             .await
             .unwrap();
         assert_eq!(reused.downloaded_bytes, evidence.downloaded_bytes);
@@ -3906,9 +3581,7 @@ mod tests {
         assert_eq!(second_server.join().unwrap().len(), 1);
 
         let mut second_plan = plan.clone();
-        second_plan.identity.execution_sha256 = "f".repeat(64);
-        second_plan.identity.model_artifact_set_sha256 =
-            second_assignment.model_artifact_set_sha256.clone();
+        second_plan.identity.model_artifact_set_sha256 = second_model_artifact_set_sha256.clone();
         let second_installation = "cb555393-764b-4eb6-8f15-b416d2894290";
         runtime
             .install(
@@ -3950,7 +3623,7 @@ mod tests {
             DistributionFixtureMode::Good,
         );
         client
-            .download_distribution(&assignment.plan_digest, root.path(), root.path())
+            .download_distribution(TEST_PLAN_DIGEST, root.path(), root.path())
             .await
             .unwrap();
         assert_eq!(std::fs::read(&model_path).unwrap(), model);
@@ -3986,11 +3659,7 @@ mod tests {
         );
         assert!(matches!(
             corrupt_client
-                .download_distribution(
-                    &assignment.plan_digest,
-                    corrupt_root.path(),
-                    corrupt_root.path(),
-                )
+                .download_distribution(TEST_PLAN_DIGEST, corrupt_root.path(), corrupt_root.path(),)
                 .await,
             Err(ClientError::Protocol)
         ));
@@ -4018,7 +3687,7 @@ mod tests {
         std::fs::set_permissions(&partial, std::fs::Permissions::from_mode(0o600)).unwrap();
         client
             .download_distribution_object(
-                &assignment.plan_digest,
+                TEST_PLAN_DIGEST,
                 &assignment.objects[0].sha256,
                 model.len() as u64,
                 &destination,
@@ -4057,7 +3726,7 @@ mod tests {
 
         client
             .download_distribution_object(
-                &assignment.plan_digest,
+                TEST_PLAN_DIGEST,
                 &assignment.objects[0].sha256,
                 model.len() as u64,
                 &destination,
@@ -4089,7 +3758,7 @@ mod tests {
         let digest = &assignment.objects[0].sha256;
         client
             .download_distribution_object(
-                &assignment.plan_digest,
+                TEST_PLAN_DIGEST,
                 digest,
                 model.len() as u64,
                 &destination,
@@ -4101,7 +3770,7 @@ mod tests {
         std::fs::write(&destination, &corrupt).unwrap();
         client
             .download_distribution_object(
-                &assignment.plan_digest,
+                TEST_PLAN_DIGEST,
                 digest,
                 model.len() as u64,
                 &destination,
@@ -4135,7 +3804,7 @@ mod tests {
         let mut swapped = false;
         let result = client
             .download_trusted_distribution_object_with_progress(
-                &assignment.plan_digest,
+                TEST_PLAN_DIGEST,
                 &assignment.objects[0].sha256,
                 model.len() as u64,
                 &destination,
@@ -4182,7 +3851,7 @@ mod tests {
         assert!(matches!(
             client
                 .download_distribution_object(
-                    &assignment.plan_digest,
+                    TEST_PLAN_DIGEST,
                     &assignment.objects[0].sha256,
                     model.len() as u64,
                     &destination,
@@ -4224,7 +3893,7 @@ mod tests {
         assert!(matches!(
             client
                 .download_distribution_object(
-                    &assignment.plan_digest,
+                    TEST_PLAN_DIGEST,
                     &assignment.objects[0].sha256,
                     model.len() as u64,
                     &destination,
@@ -4261,7 +3930,7 @@ mod tests {
         let mut updates = Vec::new();
         client
             .download_trusted_distribution_object_with_progress(
-                &assignment.plan_digest,
+                TEST_PLAN_DIGEST,
                 &hex_sha256(model),
                 model.len() as u64,
                 &destination,
@@ -4298,7 +3967,7 @@ mod tests {
             let root = tempfile::tempdir().unwrap();
             let result = client
                 .download_distribution_object(
-                    &assignment.plan_digest,
+                    TEST_PLAN_DIGEST,
                     &hex_sha256(model),
                     model.len() as u64,
                     &root.path().join("image.tar"),
@@ -4338,13 +4007,11 @@ mod tests {
             1,
             DistributionFixtureMode::Good,
         );
-        let unauthorized_client = AgentHttpClient::for_http_test(
-            authorized_client.controller.as_str(),
-            &assignment.node_id,
-        );
+        let unauthorized_client =
+            AgentHttpClient::for_http_test(authorized_client.controller.as_str(), TEST_NODE_ID);
         assert!(matches!(
             unauthorized_client
-                .distribution_manifest(&assignment.plan_digest)
+                .distribution_manifest(TEST_PLAN_DIGEST)
                 .await,
             Err(ClientError::Controller(error)) if error.status == 401
         ));
@@ -4384,7 +4051,7 @@ mod tests {
         );
 
         client
-            .download_distribution(&assignment.plan_digest, root.path(), &archive_root)
+            .download_distribution(TEST_PLAN_DIGEST, root.path(), &archive_root)
             .await
             .unwrap();
 
@@ -4432,35 +4099,13 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "boot_id": "00000000-0000-4000-8000-000000000001",
             "observed_at": "2026-08-15T12:00:01Z",
-            "cpu_utilization_percent": 12.5,
-            "load_average_1m": 1.25,
             "memory_total_bytes": 128000000000_u64,
             "memory_available_bytes": 64000000000_u64,
             "disk_total_bytes": 1000000000000_u64,
             "disk_free_bytes": 750000000000_u64,
             "gpu_utilization_percent": null,
             "gpu_memory_total_bytes": 128000000000_u64,
-            "gpu_memory_free_bytes": 63000000000_u64,
-            "temperature_c": 41.5,
-            "power_watts": 17.25,
-            "network_receive_bytes_per_second": 1024.5,
-            "network_transmit_bytes_per_second": 512.25,
-            "gap_samples": 0,
-            "details": {
-                "accelerator_name": "NVIDIA GB10",
-                "accelerator_performance_state": null
-            },
-            "metrics": {
-                "schema_version": 2,
-                "series": [],
-                "capabilities": [],
-                "runtimes": [],
-                "workloads": [],
-                "provenance": {
-                    "collector": "test",
-                    "collector_version": "1"
-                }
-            }
+            "gpu_memory_free_bytes": 63000000000_u64
         }))
         .unwrap()
     }
@@ -4481,7 +4126,7 @@ mod tests {
         request_capture_client(
             200,
             vec!["Content-Type: application/json".to_owned()],
-            br#"{"grant":{"claims":{"authority":"vonk.host-maintenance-helper","expires_at":2100000010,"issued_at":2100000000,"node_id":"spk_0123456789abcdef0123456789abcdef","operation":{"action":"image-import","attempt":1,"fence":"44d4e914-34df-4962-a802-d1f7dcd928aa","job_id":"84ddf214-f067-4bbf-917e-95df32a07fd8","operation_id":"f450b5ac-5a78-4af5-9670-e874f735e3ee","request_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","type":"execute-container-runtime-request"},"request_id":"84ddf214-f067-4bbf-917e-95df32a07fd8","schema_version":1},"schema_version":1,"signature":{"algorithm":"ed25519","key_id":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","value":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}}"#.to_vec(),
+            br#"{"grant":{"claims":{"authority":"vonk.host-maintenance-helper","expires_at":2100000010,"issued_at":2100000000,"node_id":"spk_0123456789abcdef0123456789abcdef","operation":{"action":"image-import","fence":"44d4e914-34df-4962-a802-d1f7dcd928aa","request_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","type":"execute-container-runtime-request"},"request_id":"84ddf214-f067-4bbf-917e-95df32a07fd8","schema_version":1},"schema_version":1,"signature":{"algorithm":"ed25519","key_id":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","value":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}}"#.to_vec(),
             None,
         )
     }
@@ -4548,12 +4193,7 @@ mod tests {
 
     fn progress() -> AgentProgress {
         AgentProgress {
-            attempt: 2,
-            deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
-            job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
             progress: Some(OperationProgress {
                 phase: "executing".to_owned(),
                 completed_bytes: 21,
@@ -4573,7 +4213,6 @@ mod tests {
                 checkpoint: None,
                 members: Vec::new(),
             }),
-            schema_version: 1,
         }
     }
 
@@ -4581,14 +4220,9 @@ mod tests {
     async fn heartbeat_posts_exact_progress_and_accepts_matching_renewal() {
         let progress = progress();
         let directive = AgentDirective {
-            attempt: progress.attempt,
             cancel_requested: false,
-            deadline: progress.deadline + chrono::Duration::seconds(30),
+            deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
             fence: progress.fence,
-            job_id: progress.job_id,
-            node_id: progress.node_id.clone(),
-            operation_id: progress.operation_id,
-            schema_version: progress.schema_version,
         };
         let (client, server) = heartbeat_client(directive.clone());
 
@@ -4623,18 +4257,13 @@ mod tests {
         let mut progress = progress();
         progress.progress.as_mut().unwrap().phase = "executing".to_owned();
         let directive = AgentDirective {
-            attempt: progress.attempt,
             cancel_requested: false,
-            deadline: progress.deadline + chrono::Duration::seconds(30),
+            deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
             fence: progress.fence,
-            job_id: progress.job_id,
-            node_id: progress.node_id.clone(),
-            operation_id: progress.operation_id,
-            schema_version: progress.schema_version,
         };
         let (client, server) = heartbeat_client(directive);
-        client.set_progress_phase(progress.operation_id, "uploading");
-        client.set_progress_bytes(progress.operation_id, 512, 1024);
+        client.set_progress_phase(progress.fence, "uploading");
+        client.set_progress_bytes(progress.fence, 512, 1024);
         client.heartbeat(&progress).await.unwrap();
         let request = server.join().unwrap();
         let start = request
@@ -4656,14 +4285,9 @@ mod tests {
         let mut progress = progress();
         progress.progress = None;
         let directive = AgentDirective {
-            attempt: progress.attempt,
             cancel_requested: false,
-            deadline: progress.deadline + chrono::Duration::seconds(30),
+            deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
             fence: progress.fence,
-            job_id: progress.job_id,
-            node_id: progress.node_id.clone(),
-            operation_id: progress.operation_id,
-            schema_version: progress.schema_version,
         };
         let (client, server) = heartbeat_client(directive.clone());
 
@@ -4703,14 +4327,9 @@ mod tests {
     async fn heartbeat_rejects_mismatched_or_regressing_renewal() {
         let progress = progress();
         let directive = AgentDirective {
-            attempt: progress.attempt,
             cancel_requested: false,
-            deadline: progress.deadline - chrono::Duration::seconds(1),
-            fence: progress.fence,
-            job_id: progress.job_id,
-            node_id: progress.node_id.clone(),
-            operation_id: progress.operation_id,
-            schema_version: progress.schema_version,
+            deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
+            fence: Uuid::new_v4(),
         };
         let (client, server) = heartbeat_client(directive);
 
@@ -4727,37 +4346,22 @@ mod tests {
             build_id: Uuid::new_v4(),
             image_bytes: 1,
             image_digest: format!("sha256:{}", "b".repeat(64)),
-            kind: "image.import".to_owned(),
             mapping_generation: 1,
             mapping_id: Uuid::new_v4(),
             oci_layout_sha256: "c".repeat(64),
-            schema_version: 1,
             source_node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
         };
-        let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
         let claim = AgentClaim {
-            schema_version: 1,
-            job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
-            operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
-            attempt: 1,
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             operation: AgentOperation::RecipeImageImportV1,
-            authority_revision: "a".repeat(64),
-            payload_digest,
             payload: AgentClaimPayload::RecipeImageImportRequest(payload),
             deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
         };
         let runtime_request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::ImageImport,
-            job_id: claim.job_id,
-            operation_id: claim.operation_id,
-            attempt: claim.attempt,
             fence: claim.fence,
             arguments: vec!["image-import".to_owned()],
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: None,
@@ -4808,15 +4412,10 @@ mod tests {
     fn job_run_grant_binding_hashes_the_typed_plan_and_keeps_target_distinct() {
         let (claim, plan) = job_run_plan_fixture();
         let request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::Start,
-            job_id: Uuid::parse_str(claim["job_id"].as_str().unwrap()).unwrap(),
-            operation_id: Uuid::parse_str(claim["operation_id"].as_str().unwrap()).unwrap(),
-            attempt: 1,
             fence: Uuid::parse_str(claim["fence"].as_str().unwrap()).unwrap(),
             arguments: vec!["job-run".to_owned()],
             job_plan: Some(plan.clone()),
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: Some(plan.run_generation),
@@ -4828,11 +4427,6 @@ mod tests {
         let binding = super::host_runtime_plan_binding(&request).unwrap();
         let plan_sha256 =
             hex_sha256(&vonk_agent_protocol::canonical_generated_json(&plan).unwrap());
-        assert_eq!(
-            Some(plan_sha256.as_str()),
-            claim["payload_digest"].as_str(),
-            "Rust plan hashing must match the canonical Python claim digest"
-        );
         assert_eq!(
             binding.start_plan_sha256.as_deref(),
             Some(plan_sha256.as_str())
@@ -4847,7 +4441,6 @@ mod tests {
         let agent_claim: AgentClaim = serde_json::from_value(claim.clone()).unwrap();
         let grant_request = super::build_host_runtime_grant_request(
             &agent_claim,
-            &agent_claim.node_id,
             &request,
             &hex_sha256(&canonical_json(&request).unwrap()),
         )
@@ -4871,34 +4464,22 @@ mod tests {
         let (claim, plan) = job_run_plan_fixture();
         let stop_plan: vonk_agent_protocol::generated::RecipeStopPayload =
             serde_json::from_value(json!({
-                "schema_version": 2,
                 "run_id": plan.run_id,
                 "target_runtime_id": plan.job_id,
                 "run_generation": plan.run_generation,
-                "node_id": claim["node_id"],
                 "installation_id": plan.installation_id,
                 "recipe_revision_id": plan.recipe_revision_id,
-                "recipe_content_sha256": plan.recipe_content_sha256,
                 "mapping_id": plan.mapping_id,
-                "mapping_generation": plan.mapping_generation,
                 "plan_digest": plan.plan_digest,
-                "rank": plan.rank,
-                "role": plan.role,
-                "world_size": plan.compiled_execution_plan.runtime.placement.world_size,
                 "compiled_execution_plan": plan.compiled_execution_plan,
                 "cancel_pending_start": false
             }))
             .unwrap();
         let request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::Stop,
-            job_id: Uuid::parse_str(claim["job_id"].as_str().unwrap()).unwrap(),
-            operation_id: Uuid::parse_str(claim["operation_id"].as_str().unwrap()).unwrap(),
-            attempt: 1,
             fence: Uuid::parse_str(claim["fence"].as_str().unwrap()).unwrap(),
             arguments: Vec::new(),
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: Some(stop_plan.run_generation),
@@ -4923,7 +4504,6 @@ mod tests {
         let agent_claim: AgentClaim = serde_json::from_value(claim.clone()).unwrap();
         let grant_request = super::build_host_runtime_grant_request(
             &agent_claim,
-            &agent_claim.node_id,
             &request,
             &hex_sha256(&canonical_json(&request).unwrap()),
         )
@@ -4943,229 +4523,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exact_inspection_grant_binds_fresh_envelope_and_full_identity() {
-        let binding = inspection_binding();
-        let request = HostRuntimeRequest {
-            schema_version: 1,
-            action: HostRuntimeAction::RunInspect,
-            job_id: binding.run_id,
-            operation_id: Uuid::new_v4(),
-            attempt: binding.run_generation,
-            fence: Uuid::new_v4(),
-            arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
-            job_plan: None,
-            observation: Some(binding.clone()),
-            installation_id: None,
-            reconciliation_identity: None,
-            run_generation: None,
-            start_plan: None,
-            stop_plan: None,
-        };
-        let digest = hex_sha256(&canonical_json(&request).unwrap());
-        let request_id = Uuid::new_v4();
-        let response = serde_json::to_vec(&serde_json::json!({
-            "schema_version": 1,
-            "observation_identity_sha256": "e".repeat(64),
-            "grant": {
-                "schema_version": 1,
-                "claims": {
-                    "schema_version": 1,
-                    "authority": "vonk.host-maintenance-helper",
-                    "request_id": request_id,
-                    "node_id": "spk_0123456789abcdef0123456789abcdef",
-                    "issued_at": 1_788_000_000,
-                    "expires_at": 1_788_000_010,
-                    "operation": {
-                        "type": "execute-container-runtime-request",
-                        "action": "run-inspect",
-                        "job_id": binding.run_id,
-                        "operation_id": request.operation_id,
-                        "attempt": request.attempt,
-                        "fence": request.fence,
-                        "request_sha256": digest,
-                        "observation_identity_sha256": "e".repeat(64)
-                    }
-                },
-                "signature": {
-                    "algorithm": "ed25519",
-                    "key_id": "f".repeat(64),
-                    "value": "e".repeat(128)
-                }
-            }
-        }))
-        .unwrap();
-        let (client, server) = request_capture_client(200, vec![], response.clone(), None);
-
-        let owned = client
-            .recipe_run_inspection_grant(&binding, &request, &digest)
-            .await
-            .unwrap();
-        assert!(!owned.unowned);
-        let raw = server.join().unwrap();
-        let (headers, body) = raw
-            .windows(4)
-            .position(|value| value == b"\r\n\r\n")
-            .map(|index| (&raw[..index], &raw[index + 4..]))
-            .unwrap();
-        assert!(
-            std::str::from_utf8(headers)
-                .unwrap()
-                .starts_with("POST /agent/recipe-runs/observation-grants HTTP/1.1\r\n")
-        );
-        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
-        assert_eq!(body["node_id"], client.node_id);
-        assert_eq!(body["job_id"], binding.run_id.to_string());
-        assert_eq!(body["attempt"], binding.run_generation);
-        assert_eq!(body["run_generation"], binding.run_generation);
-        assert_eq!(body["request_sha256"], digest);
-        assert_eq!(body["expires_in_seconds"], 10);
-
-        // A run the Controller has no record of gets a read-only probe grant
-        // that names itself, so the agent can retire the stopped run.
-        let (client, server) = request_capture_client(
-            200,
-            vec!["x-vonk-recipe-run-disposition: unowned".to_owned()],
-            response.clone(),
-            None,
-        );
-        assert!(
-            client
-                .recipe_run_inspection_grant(&binding, &request, &digest)
-                .await
-                .unwrap()
-                .unowned
-        );
-        server.join().unwrap();
-        // Any other disposition is outside the contract and never guessed at.
-        let (client, server) = request_capture_client(
-            200,
-            vec!["x-vonk-recipe-run-disposition: retired".to_owned()],
-            response,
-            None,
-        );
-        assert!(matches!(
-            client
-                .recipe_run_inspection_grant(&binding, &request, &digest)
-                .await,
-            Err(ClientError::Protocol)
-        ));
-        server.join().unwrap();
-
-        let (client, server) = request_capture_client(425, vec![], vec![], None);
-        assert!(matches!(
-            client
-                .recipe_run_inspection_grant(&binding, &request, &digest)
-                .await,
-            Err(ClientError::ObservationNotReady)
-        ));
-        server.join().unwrap();
-
-        // An outstanding unconsumed grant is the same bounded "not yet" as the
-        // 425 above: the run is authorized, its inspection is just in flight.
-        let (client, server) = request_capture_client(
-            409,
-            vec!["x-vonk-error-code: controller.recipe_run.observation_pending".to_owned()],
-            vec![],
-            None,
-        );
-        assert!(matches!(
-            client
-                .recipe_run_inspection_grant(&binding, &request, &digest)
-                .await,
-            Err(ClientError::ObservationNotReady)
-        ));
-        server.join().unwrap();
-
-        // A conflict the controller did not classify as pending stays a hard
-        // failure: an authority rejection must never read as a retry.
-        let (client, server) = request_capture_client(
-            409,
-            vec!["x-vonk-error-code: controller.conflict".to_owned()],
-            vec![],
-            None,
-        );
-        assert!(matches!(
-            client
-                .recipe_run_inspection_grant(&binding, &request, &digest)
-                .await,
-            Err(ClientError::Controller(_))
-        ));
-        server.join().unwrap();
-    }
-
-    #[tokio::test]
     async fn exact_worker_observation_reports_process_without_endpoint_result() {
-        let binding = inspection_binding();
-        let helper_receipt =
-            observation_receipt("spk_0123456789abcdef0123456789abcdef", &"e".repeat(64));
+        let run_id = Uuid::new_v4();
         let observations = vec![ExactRecipeRunObservation {
-            schema_version: 1,
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            observed_at: chrono::DateTime::from_timestamp(helper_receipt.claims.observed_at, 0)
-                .unwrap()
-                .into(),
-            artifact_set_digest: binding.artifact_set_digest.clone(),
-            image_digest: binding.image_digest.clone(),
-            installation_id: binding.installation_id,
-            local_address: binding.local_address,
-            mapping_generation: binding.mapping_generation,
-            mapping_id: binding.mapping_id,
-            master_address: binding.master_address,
-            master_port: binding.master_port,
-            model_identity: binding.model_identity.clone(),
-            port: binding.port,
-            rank: binding.rank,
-            recipe_content_sha256: binding.recipe_content_sha256.clone(),
-            recipe_revision_id: binding.recipe_revision_id,
-            role: binding.role.clone(),
-            run_generation: binding.run_generation,
-            run_id: binding.run_id,
-            runtime_arguments_sha256: binding.runtime_arguments_sha256.clone(),
-            world_size: binding.world_size,
+            run_id,
+            run_generation: 3,
+            process_running: false,
             endpoint_ready: None,
-            grant: SignedHostHelperGrant {
-                schema_version: 1,
-                claims: HostHelperGrantClaims {
-                    schema_version: 1,
-                    authority: "vonk.host-maintenance-helper".to_owned(),
-                    request_id: helper_receipt.claims.request_id,
-                    node_id: helper_receipt.claims.node_id.clone(),
-                    issued_at: helper_receipt.claims.observed_at - 1,
-                    expires_at: helper_receipt.claims.observed_at + 60,
-                    operation: HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
-                        ExecuteContainerRuntimeRequestOperation {
-                            action: HostHelperContainerRuntimeAction::RunInspect,
-                            type_: "execute-container-runtime-request".to_owned(),
-                            job_id: binding.run_id,
-                            operation_id: Uuid::new_v4(),
-                            attempt: binding.run_generation,
-                            fence: Uuid::new_v4(),
-                            request_sha256: helper_receipt.claims.request_sha256.clone(),
-                            observation_identity_sha256: Some("e".repeat(64)),
-                            installation_id: None,
-                            reconciliation_identity: None,
-                            start_plan_sha256: None,
-                            stop_plan_sha256: None,
-                            run_generation: None,
-                            runtime_run_id: None,
-                            runtime_target_id: None,
-                            runtime_installation_id: None,
-                        },
-                    ),
-                },
-                signature: HostHelperGrantSignature {
-                    algorithm: "ed25519".to_owned(),
-                    key_id: "f".repeat(64),
-                    value: "e".repeat(128),
-                },
-            },
-            observation_identity_sha256: "e".repeat(64),
-            helper_receipt,
-            observation_receipt_public_key: "00".repeat(32),
         }];
         let (client, server) = observation_client(204);
         client
-            .report_exact_recipe_run_observations(&observations)
+            .report_exact_recipe_run_observations(Utc::now(), &observations)
             .await
             .unwrap();
         let raw = server.join().unwrap();
@@ -5175,50 +4543,11 @@ mod tests {
             .map(|index| &raw[index + 4..])
             .unwrap();
         let body: serde_json::Value = serde_json::from_slice(body).unwrap();
-        assert_eq!(body["schema_version"], 2);
-        assert!(body["runs"][0].get("process_running").is_none());
-        assert_eq!(
-            body["runs"][0]["helper_receipt"]["claims"]["outcome"],
-            "not-running"
-        );
+        assert!(body["observed_at"].is_string());
+        assert_eq!(body["runs"][0]["run_id"], run_id.to_string());
+        assert_eq!(body["runs"][0]["process_running"], false);
         assert_eq!(body["runs"][0]["endpoint_ready"], serde_json::Value::Null);
         assert_eq!(body["runs"][0]["run_generation"], 3);
-        assert!(body["runs"][0]["observed_at"].is_string());
-    }
-
-    #[tokio::test]
-    async fn telemetry_posts_large_valid_metrics_without_content_loss() {
-        let mut sample = telemetry_sample();
-        sample.metrics.series = (0..143)
-            .map(|index| {
-                serde_json::from_value(json!({
-                    "key": format!("device.metric_{index}"), "scope": "node",
-                    "process_name": "測".repeat(128), "value": "測".repeat(256),
-                    "unit": "state", "source": "native-collector",
-                    "measurement_kind": "measured", "observed_at": sample.observed_at,
-                    "freshness": "fresh", "freshness_threshold_seconds": 6.0,
-                    "support_status": "available", "aggregation": "last"
-                }))
-                .unwrap()
-            })
-            .collect();
-        let (client, server) = observation_client(204);
-        client
-            .report_telemetry(std::slice::from_ref(&sample))
-            .await
-            .unwrap();
-        let request = server.join().unwrap();
-        let index = request
-            .windows(4)
-            .position(|value| value == b"\r\n\r\n")
-            .unwrap()
-            + 4;
-        let body: Value = serde_json::from_slice(&request[index..]).unwrap();
-        assert!(request.len() - index > 64 * 1024);
-        assert_eq!(
-            body["samples"][0]["metrics"]["series"],
-            json!(sample.metrics.series)
-        );
     }
 
     #[tokio::test]
@@ -5248,9 +4577,8 @@ mod tests {
                 .keys()
                 .cloned()
                 .collect::<Vec<_>>(),
-            ["samples", "schema_version"]
+            ["samples"]
         );
-        assert_eq!(body["schema_version"], 1);
         assert_eq!(body["samples"].as_array().unwrap().len(), 1);
         let sample = body["samples"][0].as_object().unwrap();
         let mut keys = sample.keys().cloned().collect::<Vec<_>>();
@@ -5259,34 +4587,18 @@ mod tests {
             keys,
             [
                 "boot_id",
-                "cpu_utilization_percent",
-                "details",
                 "disk_free_bytes",
                 "disk_total_bytes",
-                "gap_samples",
                 "gpu_memory_free_bytes",
                 "gpu_memory_total_bytes",
                 "gpu_utilization_percent",
-                "load_average_1m",
                 "memory_available_bytes",
                 "memory_total_bytes",
-                "metrics",
-                "network_receive_bytes_per_second",
-                "network_transmit_bytes_per_second",
                 "observed_at",
-                "power_watts",
-                "temperature_c",
             ]
         );
         assert!(!body.to_string().contains("node_id"));
         assert_eq!(sample["gpu_utilization_percent"], serde_json::Value::Null);
-        assert_eq!(
-            sample["details"],
-            serde_json::json!({
-                "accelerator_name": "NVIDIA GB10",
-                "accelerator_performance_state": null
-            })
-        );
     }
 
     #[tokio::test]
@@ -5392,13 +4704,7 @@ mod tests {
     /// The failed distribution envelope spark-3542's agent retained.
     fn retained_result() -> AgentResult {
         let document = json!({
-            "schema_version": 1,
-            "job_id": "f4156489-a522-454b-bc6e-d2f871fa3db3",
-            "operation_id": "7c2ae819-58c1-4414-90b6-93dc19a33f48",
-            "attempt": 2,
             "fence": "35a57c2a-0b03-4101-8f89-6b3806570c50",
-            "node_id": "spk_0123456789abcdef0123456789abcdef",
-            "deadline": "2026-09-16T23:30:02.001555Z",
             "state": "failed",
             "result": {
                 "status": "failed",

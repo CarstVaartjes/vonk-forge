@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import ValidationError
-from sqlalchemy import Boolean, and_, case, or_, select, update
+from sqlalchemy import Boolean, and_, or_, select, update
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
@@ -29,7 +29,7 @@ from vonk_agent_protocol import (
     canonical_message,
     validate_result_for_operation,
 )
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_payload
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
@@ -197,25 +197,9 @@ def superseded_cancellation_deadline(result: object) -> datetime | None:
     return requested_at + timedelta(seconds=_SUPERSEDED_CANCELLATION_SECONDS)
 
 
-_RUNTIME_CAPABILITIES = frozenset({"agent.runtime.rust.v1", "runtime.vonk.v1"})
-EXACT_LIFECYCLE_RESUME_CAPABILITY = "agent.lifecycle.resume.exact.v1"
-RECIPE_RECONCILE_FEATURE_CAPABILITY = "recipe.reconcile.v1"
-_NEXT_CAPABILITIES = _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
-_OPTIONAL_CAPABILITIES = frozenset(
-    {
-        AgentOperation.AGENT_UPGRADE.value,
-        AgentOperation.RUNTIME_PREFLIGHT.value,
-        "recipe.start.two-phase.v1",
-        "recipe.run.inspect.exact.v1",
-        "recipe.run.inspect.receipt.v1",
-        EXACT_LIFECYCLE_RESUME_CAPABILITY,
-        RECIPE_RECONCILE_FEATURE_CAPABILITY,
-    }
-)
-_KNOWN_CAPABILITIES = _NEXT_CAPABILITIES | _OPTIONAL_CAPABILITIES
-_CONTROL_OPERATIONS = (
-    _NEXT_CAPABILITIES - _RUNTIME_CAPABILITIES
-) | _OPTIONAL_CAPABILITIES
+_CONTROL_OPERATIONS = frozenset(operation.value for operation in AgentOperation)
+#: The lease a claim grants and every heartbeat renews.
+CLAIM_LEASE_SECONDS = 30
 
 
 def _safe_retry_failure(kind: str, state: str, result: Mapping[str, object]) -> bool:
@@ -1027,7 +1011,7 @@ def _profile_stop_covers_jobrun_mutations(
                 canonical_message(old.payload)
             )
             expected_stop = stop_payload_from_job_run(
-                request, old.node_id, cancel_pending_start=True
+                request, cancel_pending_start=True
             )
             validate_profile_jobrun_stop_target(
                 session,
@@ -1534,10 +1518,6 @@ class AgentJobService:
             raise KeyError(node_id)
         if node.state != "active" or node.revoked_at is not None:
             raise ValueError("agent operation node must be active")
-        if node.capabilities and operation not in set(node.capabilities):
-            raise ValueError(
-                f"agent does not advertise operation capability {operation}"
-            )
         parent = session.scalar(select(Job).where(Job.id == parent_job_id))
         if parent is None:
             raise KeyError(parent_job_id)
@@ -1562,24 +1542,17 @@ class AgentJobService:
         payload_bytes = canonical_payload(protocol_operation, payload)
         final_payload = json.loads(payload_bytes)
         validated = AgentClaim(
-            schema_version=1,
-            job_id=parent_job_id,
-            operation_id=operation_id,
-            attempt=1,
             fence=reserved_fence,
-            node_id=node_id,
             operation=protocol_operation,
-            authority_revision=authority_revision,
-            payload_digest=hashlib.sha256(payload_bytes).hexdigest(),
             payload=final_payload,
             deadline=now,
         )
         stored = StoredOperation(
-            id=validated.operation_id,
+            id=operation_id,
             parent_job_id=parent_job_id,
             node_id=node_id,
             kind=protocol_operation.value,
-            payload_digest=validated.payload_digest,
+            payload_digest=hashlib.sha256(payload_bytes).hexdigest(),
             payload=_document(validated.payload),
             authority_revision=authority_revision,
             workload_intent_ordinal=workload_intent_ordinal,
@@ -1899,12 +1872,10 @@ class AgentJobService:
         self,
         node_id: str,
         certificate_serial: str,
-        lease_seconds: int,
         wait_seconds: float = 0,
-        protocol_version: int | None = 3,
-        capabilities: Sequence[str] | None = tuple(_NEXT_CAPABILITIES),
         *,
         runtime_identity: Mapping[str, object] | None,
+        preflight_fingerprint: str | None = None,
         hostname: str | None = None,
         source: AgentSource | None = None,
     ) -> AgentClaim | None:
@@ -1912,7 +1883,6 @@ class AgentJobService:
         if (
             not node_id.strip()
             or not certificate_serial.strip()
-            or lease_seconds <= 0
             or isinstance(wait_seconds, bool)
             or not 0 <= wait_seconds <= 60
             or (
@@ -1930,16 +1900,11 @@ class AgentJobService:
                 )
             )
             or (
-                protocol_version is not None
-                and (
-                    isinstance(protocol_version, bool)
-                    or not isinstance(protocol_version, int)
-                    or not 1 <= protocol_version <= 2_147_483_647
-                )
+                preflight_fingerprint is not None
+                and re.fullmatch(r"[0-9a-f]{64}", preflight_fingerprint) is None
             )
         ):
-            raise ValueError("node, certificate, and positive lease are required")
-        advertised = self._capabilities(capabilities)
+            raise ValueError("node and certificate are required")
         running = self._runtime_identity(runtime_identity)
         if self._advance_node is not None:
             try:
@@ -1958,10 +1923,8 @@ class AgentJobService:
                 claim = self._claim_once(
                     node_id,
                     certificate_serial,
-                    lease_seconds,
-                    protocol_version,
-                    advertised,
                     running,
+                    preflight_fingerprint,
                     hostname,
                     source,
                 )
@@ -2090,8 +2053,6 @@ class AgentJobService:
 
     def record_boundary_refusal(
         self,
-        operation_id: str,
-        attempt: int,
         fence: str,
         *,
         boundary: str,
@@ -2103,8 +2064,8 @@ class AgentJobService:
         The claim path already explains its refusals, but a refused heartbeat or
         result persisted nothing, so an operator could see an operation that
         stopped progressing with no reason at all.  The note is written only
-        when the submission names the operation's current attempt and fence, so
-        a replayed old boundary cannot annotate newer work.  The parent job
+        when the fence names the operation's current attempt, so a replayed old
+        boundary cannot annotate newer work.  The parent job
         receives the same note on the same surface the jobs API returns.
         """
 
@@ -2115,23 +2076,22 @@ class AgentJobService:
         prefix = prefixes.get(boundary)
         if prefix is None:
             raise ValueError("agent boundary is invalid")
-        reason = _refusal_reason(prefix, check, attempt=attempt, **facts)
         with self._sessions.begin() as session:
-            operation = session.scalar(
-                select(StoredOperation)
-                .where(StoredOperation.id == operation_id)
-                .with_for_update(of=StoredOperation)
-            )
-            if operation is None or operation.current_attempt != attempt:
-                return False
             current = session.scalar(
                 select(AgentOperationAttempt).where(
-                    AgentOperationAttempt.operation_id == operation_id,
-                    AgentOperationAttempt.attempt == attempt,
+                    AgentOperationAttempt.fence == fence
                 )
             )
-            if current is None or current.fence != fence:
+            if current is None:
                 return False
+            operation = session.scalar(
+                select(StoredOperation)
+                .where(StoredOperation.id == current.operation_id)
+                .with_for_update(of=StoredOperation)
+            )
+            if operation is None or operation.current_attempt != current.attempt:
+                return False
+            reason = _refusal_reason(prefix, check, attempt=current.attempt, **facts)
             self._write_refusal_note(
                 session,
                 operation=operation,
@@ -2350,21 +2310,7 @@ class AgentJobService:
         self._aggregate_parent(session, operation.parent_job_id)
 
     @staticmethod
-    def _claimable_operations(
-        node_id: str, now: datetime, capabilities: tuple[str, ...] | None
-    ):
-        supported = StoredOperation.kind.in_(capabilities or ())
-        if "agent.lifecycle.resume.exact.v1" not in (capabilities or ()):
-            supported = and_(
-                supported,
-                and_(
-                    StoredOperation.kind.in_(_LIFECYCLE_RESTART_OPERATIONS),
-                    StoredOperation.current_attempt > 0,
-                    StoredOperation.retry_disposition == _RETRY_DISPOSITION,
-                    StoredOperation.retry_disposition_attempt
-                    == StoredOperation.current_attempt,
-                ).is_not(True),
-            )
+    def _claimable_operations(node_id: str, now: datetime):
         return (
             select(StoredOperation)
             .join(Job, Job.id == StoredOperation.parent_job_id)
@@ -2376,15 +2322,7 @@ class AgentJobService:
                 # drift from) the decision it explains.
                 _claim_predicate(now).expression,
             )
-            # Choose work this agent can perform before limiting the queue.
-            # Otherwise a retry requiring a newer agent starves its own upgrade.
-            # Keep unsupported work as a fallback so the authority check can
-            # still record its actionable reason when no supported work is due.
-            .order_by(
-                case((supported, 0), else_=1),
-                StoredOperation.created_at,
-                StoredOperation.id,
-            )
+            .order_by(StoredOperation.created_at, StoredOperation.id)
             .execution_options(populate_existing=True)
             .limit(1)
         )
@@ -2393,19 +2331,17 @@ class AgentJobService:
         self,
         node_id: str,
         certificate_serial: str,
-        lease_seconds: int,
-        protocol_version: int | None,
-        capabilities: tuple[str, ...] | None,
         runtime_identity: AgentRuntimeIdentity,
+        preflight_fingerprint: str | None,
         hostname: str | None,
         source: AgentSource | None,
     ) -> AgentClaim | None:
         with self._claim_lock, self._sessions.begin() as session:
             now = self._clock()
             candidate_id = session.scalar(
-                self._claimable_operations(
-                    node_id, now, capabilities
-                ).with_only_columns(StoredOperation.id)
+                self._claimable_operations(node_id, now).with_only_columns(
+                    StoredOperation.id
+                )
             )
             recovery_id = None
             if candidate_id is None:
@@ -2438,11 +2374,7 @@ class AgentJobService:
                         recovery_id = parked.id
                         break
             upgrade_id = None
-            if (
-                capabilities is not None
-                and AgentOperation.AGENT_UPGRADE.value in capabilities
-                and runtime_identity.package_activation is not None
-            ):
+            if runtime_identity.package_activation is not None:
                 receipt = runtime_identity.package_activation
                 upgrade_id = session.scalar(
                     select(StoredOperation.id)
@@ -2491,18 +2423,14 @@ class AgentJobService:
                     )
                 return None
             node, certificate = identity
-            self._validate_agent_contract(
-                protocol_version, capabilities, runtime_identity
-            )
             self._consume_contact(session, source, node, certificate)
             self._record_contact(
                 session,
                 node,
                 certificate,
                 now,
-                protocol_version,
-                capabilities,
                 runtime_identity,
+                preflight_fingerprint,
                 hostname,
             )
             self._reconcile_agent_upgrade(
@@ -2510,7 +2438,6 @@ class AgentJobService:
                 node_id,
                 certificate.serial,
                 now,
-                capabilities,
                 runtime_identity,
                 operation_id=upgrade_id,
                 parent_job_id=None if upgrade_id is None else scopes[upgrade_id][0],
@@ -2553,8 +2480,6 @@ class AgentJobService:
                         parked,
                         now,
                         node=node,
-                        protocol_version=protocol_version,
-                        capabilities=capabilities,
                         locked_targets=scopes[recovery_id][1],
                     ):
                         parked.updated_at = now
@@ -2580,7 +2505,7 @@ class AgentJobService:
                     )
                 return None
             statement = (
-                self._claimable_operations(node_id, now, capabilities)
+                self._claimable_operations(node_id, now)
                 .where(StoredOperation.id == candidate_id)
                 .with_for_update(of=StoredOperation, skip_locked=True)
                 .execution_options(populate_existing=True)
@@ -2601,31 +2526,8 @@ class AgentJobService:
                 operation,
                 now,
                 node=node,
-                protocol_version=protocol_version,
-                capabilities=capabilities,
                 locked_targets=scopes[candidate_id][1],
             ):
-                return None
-            if capabilities is not None and operation.kind not in capabilities:
-                self._record_claim_refusal(
-                    session,
-                    operation=operation,
-                    job_id=operation.parent_job_id,
-                    check="capability-unadvertised",
-                    kind=operation.kind,
-                )
-                return None
-            if operation.kind in _RECIPE_CAPABILITIES and (
-                protocol_version != 3 or capabilities is None
-            ):
-                self._record_claim_refusal(
-                    session,
-                    operation=operation,
-                    job_id=operation.parent_job_id,
-                    check="recipe-protocol-unsupported",
-                    kind=operation.kind,
-                    protocol_version=protocol_version,
-                )
                 return None
             if (
                 operation.kind == AgentOperation.RECIPE_BUILD.value
@@ -2887,7 +2789,6 @@ class AgentJobService:
                     at_target = bool(
                         runtime_identity.binary_digest == payload.target_binary_digest
                         and runtime_identity.build_digest == payload.target_build_digest
-                        and runtime_identity.self_test_passed is True
                     )
                     # ``cancelled``, not ``succeeded``: no install happened, so
                     # no package receipt may be derived from this order.
@@ -2924,7 +2825,7 @@ class AgentJobService:
             operation.status_reason = None
             operation.updated_at = now
             fence = str(uuid.uuid4())
-            deadline = now + timedelta(seconds=lease_seconds)
+            deadline = now + timedelta(seconds=CLAIM_LEASE_SECONDS)
             attempt = AgentOperationAttempt(
                 operation_id=operation.id,
                 attempt=operation.current_attempt,
@@ -2938,15 +2839,8 @@ class AgentJobService:
             self._note_malformed_cancel_flag(session, operation)
             return AgentClaim.model_validate(
                 {
-                    "schema_version": 1,
-                    "job_id": operation.parent_job_id,
-                    "operation_id": operation.id,
-                    "attempt": attempt.attempt,
                     "fence": attempt.fence,
-                    "node_id": operation.node_id,
                     "operation": AgentOperation(operation.kind),
-                    "authority_revision": operation.authority_revision,
-                    "payload_digest": operation.payload_digest,
                     "payload": operation.payload,
                     "deadline": deadline,
                 }
@@ -2958,17 +2852,12 @@ class AgentJobService:
         node_id: str,
         certificate_serial: str,
         now: datetime,
-        capabilities: tuple[str, ...] | None,
         runtime_identity: AgentRuntimeIdentity,
         *,
         operation_id: str | None,
         parent_job_id: str | None,
     ) -> None:
-        if (
-            operation_id is None
-            or capabilities is None
-            or AgentOperation.AGENT_UPGRADE.value not in capabilities
-        ):
+        if operation_id is None:
             return
         operation = session.scalar(
             select(StoredOperation)
@@ -3041,7 +2930,6 @@ class AgentJobService:
             or runtime_identity.binary_digest
             != operation.payload.get("target_binary_digest")
             or runtime_identity.architecture != operation.payload.get("architecture")
-            or runtime_identity.self_test_passed is not True
         ):
             return
         evidence = {
@@ -3050,7 +2938,6 @@ class AgentJobService:
             "build_digest": runtime_identity.build_digest,
             "package_sha256": operation.payload["package_sha256"],
             "package_version": operation.payload["package_version"],
-            "self_test_passed": True,
             "status": "upgraded",
             "activation_receipt": receipt.model_dump(mode="json"),
         }
@@ -3070,17 +2957,7 @@ class AgentJobService:
         }:
             return
         message = AgentResult.model_validate(
-            {
-                "schema_version": 1,
-                "job_id": operation.parent_job_id,
-                "operation_id": operation.id,
-                "attempt": attempt.attempt,
-                "fence": attempt.fence,
-                "node_id": operation.node_id,
-                "deadline": max(_aware(attempt.lease_deadline), _aware(now)),
-                "state": "succeeded",
-                "result": evidence,
-            }
+            {"fence": attempt.fence, "state": "succeeded", "result": evidence}
         )
         # Preserve explicit helper failures as truthful attempt audit. Exact
         # contact reconciles the operation projection, not the historical fact
@@ -3154,17 +3031,7 @@ class AgentJobService:
                 attempt,
                 AgentResult.model_validate_json(
                     canonical_message(
-                        {
-                            "schema_version": 1,
-                            "job_id": operation.parent_job_id,
-                            "operation_id": operation.id,
-                            "attempt": attempt.attempt,
-                            "fence": fence,
-                            "node_id": operation.node_id,
-                            "deadline": _aware(now),
-                            "state": "failed",
-                            "result": reason,
-                        }
+                        {"fence": fence, "state": "failed", "result": reason}
                     )
                 ),
             )
@@ -3177,8 +3044,6 @@ class AgentJobService:
         now: datetime,
         *,
         node: AgentNode,
-        protocol_version: int | None,
-        capabilities: tuple[str, ...] | None,
         locked_targets: tuple[str, ...],
     ) -> bool:
         job = session.scalar(
@@ -3194,21 +3059,6 @@ class AgentJobService:
             .with_for_update(of=StoredOperation)
         )
         if current_operation is None:
-            return False
-        if (
-            current_operation.kind in _LIFECYCLE_RESTART_OPERATIONS
-            and current_operation.current_attempt > 0
-            and current_operation.retry_disposition == _RETRY_DISPOSITION
-            and current_operation.retry_disposition_attempt
-            == current_operation.current_attempt
-            and "agent.lifecycle.resume.exact.v1" not in (capabilities or ())
-        ):
-            current_operation.status_reason = (
-                "Spark agent update required before exact recovery; "
-                f"retry scheduled at {current_operation.retry_due_at.isoformat()}"
-                if current_operation.retry_due_at is not None
-                else "Spark agent update required before exact recovery"
-            )
             return False
         if (
             current_operation.node_id != node.node_id
@@ -3259,12 +3109,7 @@ class AgentJobService:
                 kind=current_operation.kind,
             )
             return False
-        if (
-            node.state != "active"
-            or node.revoked_at is not None
-            or protocol_version is None
-            or node.protocol_version != protocol_version
-        ):
+        if node.state != "active" or node.revoked_at is not None:
             self._record_claim_refusal(
                 session,
                 operation=current_operation,
@@ -3272,22 +3117,6 @@ class AgentJobService:
                 check="node-not-eligible",
                 kind=current_operation.kind,
                 node_state=node.state,
-                protocol_version=protocol_version,
-                node_protocol_version=node.protocol_version,
-            )
-            return False
-        if (
-            capabilities is None
-            or current_operation.kind not in capabilities
-            or not isinstance(node.capabilities, list)
-            or current_operation.kind not in node.capabilities
-        ):
-            self._record_claim_refusal(
-                session,
-                operation=current_operation,
-                job_id=job.id,
-                check="capability-unadvertised",
-                kind=current_operation.kind,
             )
             return False
         if (
@@ -3478,30 +3307,14 @@ class AgentJobService:
                 )
                 attempt.lease_deadline = deadline
                 return AgentDirective(
-                    schema_version=1,
-                    job_id=operation.parent_job_id,
-                    operation_id=operation.id,
-                    attempt=attempt.attempt,
-                    fence=attempt.fence,
-                    node_id=operation.node_id,
-                    deadline=deadline,
-                    cancel_requested=True,
+                    fence=attempt.fence, deadline=deadline, cancel_requested=True
                 )
             deadline = max(
                 _aware(attempt.lease_deadline),
                 _aware(now) + timedelta(seconds=lease_seconds),
             )
             message = AgentProgress.model_validate(
-                {
-                    "schema_version": 1,
-                    "job_id": operation.parent_job_id,
-                    "operation_id": operation.id,
-                    "attempt": attempt.attempt,
-                    "fence": attempt.fence,
-                    "node_id": operation.node_id,
-                    "deadline": deadline,
-                    "progress": progress,
-                }
+                {"fence": attempt.fence, "progress": progress}
             )
             write_progress = message.progress is None
             if message.progress is not None:
@@ -3565,12 +3378,7 @@ class AgentJobService:
                     .values(expires_at=now + timedelta(hours=1), updated_at=now)
                 )
             return AgentDirective(
-                schema_version=message.schema_version,
-                job_id=message.job_id,
-                operation_id=message.operation_id,
-                attempt=message.attempt,
                 fence=message.fence,
-                node_id=message.node_id,
                 deadline=deadline,
                 cancel_requested=cancel_requested,
             )
@@ -3600,12 +3408,7 @@ class AgentJobService:
                 or operation is None
                 or parent is None
                 or operation.kind not in _WORKLOAD_INTENT_OPERATIONS
-                or operation.id != fence.operation_id
-                or operation.parent_job_id != fence.job_id
-                or operation.node_id != fence.node_id
-                or attempt.attempt != fence.attempt
                 or operation.current_attempt != attempt.attempt
-                or _aware(fence.deadline) > _aware(attempt.lease_deadline)
                 or operation.workload_intent_ordinal
                 != parent.payload.get("workload_intent_ordinal")
                 or not isinstance(parent.result, Mapping)
@@ -3789,13 +3592,8 @@ class AgentJobService:
                 or node.revoked_at is not None
                 or self._target_scope(parent.targets) != scopes[operation_id][1]
                 or operation.authority_revision != parent.authority_revision
-                or operation.parent_job_id != message.job_id
-                or operation.id != message.operation_id
-                or operation.node_id != message.node_id
                 or attempt.operation_id != operation.id
-                or attempt.attempt != message.attempt
                 or attempt.agent_certificate_serial != serial
-                or _aware(message.deadline) > _aware(attempt.lease_deadline)
             ):
                 raise StaleAgentAttempt(
                     "agent operation authority or expired attempt is stale"
@@ -3806,30 +3604,6 @@ class AgentJobService:
             evidence = _document(message.result)
             if message.state in {"failed", "waiting-for-operator"}:
                 evidence = sanitize_failure_evidence(evidence)
-            if _aware(message.deadline) < _aware(attempt.lease_deadline):
-                # The agent may have lost a heartbeat renewal response before
-                # learning that this order was cancelled. Its original fence
-                # identifies the old order, but the old deadline cannot prove
-                # quiescence or replace a result under the renewed authority.
-                if (
-                    message.state == "cancelled"
-                    and operation.kind in _WORKLOAD_INTENT_OPERATIONS
-                    and operation.current_attempt == attempt.attempt
-                    and operation.workload_intent_ordinal
-                    == parent.payload.get("workload_intent_ordinal")
-                    and isinstance(parent.result, Mapping)
-                    and superseded_cancellation_deadline(parent.result) is not None
-                    and (
-                        operation.state == "cancelled"
-                        or (
-                            operation.workload_intent_ordinal is not None
-                            and operation.workload_intent_ordinal
-                            < node.workload_intent_ordinal
-                        )
-                    )
-                ):
-                    return False
-                raise StaleAgentAttempt("agent operation renewal deadline is stale")
             if attempt.state == message.state and attempt.result == evidence:
                 return False
             superseded_intent = (
@@ -3921,10 +3695,6 @@ class AgentJobService:
                 # abandoned effect.
                 allow_lapsed_renewal=True,
             )
-            if isinstance(fence, AgentResult) and _aware(fence.deadline) != _aware(
-                attempt.lease_deadline
-            ):
-                raise StaleAgentAttempt("agent operation renewal deadline is stale")
             now = self._clock()
             node = session.get(AgentNode, operation.node_id)
             parent = session.get(Job, operation.parent_job_id)
@@ -3960,13 +3730,7 @@ class AgentJobService:
                 message = AgentResult.model_validate_json(
                     canonical_message(
                         {
-                            "schema_version": 1,
-                            "job_id": operation.parent_job_id,
-                            "operation_id": operation.id,
-                            "attempt": attempt.attempt,
                             "fence": attempt.fence,
-                            "node_id": operation.node_id,
-                            "deadline": _aware(attempt.lease_deadline),
                             "state": state,
                             "result": canonical_result,
                         }
@@ -4139,8 +3903,6 @@ class AgentJobService:
             )
             or node.state != "active"
             or node.revoked_at is not None
-            or not isinstance(node.capabilities, list)
-            or operation.kind not in node.capabilities
         ):
             raise StaleAgentAttempt(
                 "agent operation lease, certificate, or fence is stale"
@@ -4157,13 +3919,6 @@ class AgentJobService:
         if (
             attempt is None
             or operation.state != "running"
-            or (not isinstance(fence, str) and operation.parent_job_id != fence.job_id)
-            or (not isinstance(fence, str) and operation.id != fence.operation_id)
-            or (not isinstance(fence, str) and operation.node_id != fence.node_id)
-            or (
-                not isinstance(fence, str)
-                and operation.current_attempt != fence.attempt
-            )
             or attempt.operation_id != operation.id
             or operation.current_attempt != attempt.attempt
             or attempt.state != "running"
@@ -4183,72 +3938,8 @@ class AgentJobService:
             raise StaleAgentAttempt(
                 "agent operation lease, certificate, or fence is stale"
             )
-        self._record_contact(
-            session,
-            node,
-            certificate,
-            now,
-            None,
-            None,
-            None,
-            None,
-        )
+        self._record_contact(session, node, certificate, now, None, None, None)
         return operation, attempt
-
-    @staticmethod
-    def _capabilities(
-        capabilities: Sequence[str] | None,
-    ) -> tuple[str, ...] | None:
-        """Normalize the negotiated capability intersection.
-
-        Agents may be newer than the Controller and advertise capabilities this
-        Controller does not know yet.  Those capabilities are intentionally
-        ignored for this session; operation dispatch already checks the
-        normalized set, so the effective contract is the intersection of both
-        sides.  Required capabilities are still enforced by
-        ``_validate_agent_contract`` below.
-        """
-        if capabilities is None:
-            return None
-        if isinstance(capabilities, (str, bytes)):
-            raise TypeError("agent capabilities are invalid")
-        values = tuple(capabilities)
-        if not values or any(
-            not isinstance(value, str) or not value for value in values
-        ):
-            raise ValueError("agent capabilities are invalid")
-        return tuple(
-            sorted(
-                {
-                    value
-                    for value in values
-                    if value in _KNOWN_CAPABILITIES
-                    or re.fullmatch(
-                        r"runtime\.preflight\.fingerprint\.[0-9a-f]{64}", value
-                    )
-                }
-            )
-        )
-
-    @staticmethod
-    def _validate_agent_contract(
-        protocol_version: int | None,
-        capabilities: tuple[str, ...] | None,
-        runtime_identity: AgentRuntimeIdentity,
-    ) -> None:
-        if (
-            protocol_version is None
-            or protocol_version != 3
-            or capabilities is None
-            or "agent.runtime.rust.v1" not in capabilities
-        ):
-            raise ValueError("Rust agent capability negotiation is incomplete")
-        receipt_key = runtime_identity.observation_receipt_public_key
-        receipt_capable = "recipe.run.inspect.receipt.v1" in capabilities
-        if receipt_capable and not (
-            isinstance(receipt_key, str) and len(receipt_key) == 64
-        ):
-            raise ValueError("agent observation receipt identity is incomplete")
 
     @staticmethod
     def _record_contact(
@@ -4256,9 +3947,8 @@ class AgentJobService:
         node: AgentNode,
         certificate: AgentCertificate,
         now: datetime,
-        protocol_version: int | None,
-        capabilities: tuple[str, ...] | None,
         runtime_identity: AgentRuntimeIdentity | None,
+        preflight_fingerprint: str | None,
         hostname: str | None,
     ) -> None:
         current = None if node.last_seen_at is None else _aware(node.last_seen_at)
@@ -4268,10 +3958,6 @@ class AgentJobService:
         contact_time = node.last_seen_at
         if contact_time is None:
             raise ValueError("agent contact timestamp is unavailable")
-        if protocol_version is not None:
-            node.protocol_version = protocol_version
-        if capabilities is not None:
-            node.capabilities = list(capabilities)
         if hostname is not None:
             profile = session.scalar(
                 select(AgentNodeProfile)
@@ -4281,25 +3967,14 @@ class AgentJobService:
             if profile is not None and profile.hostname != hostname:
                 profile.hostname = hostname
         if runtime_identity is not None:
-            receipt_key = runtime_identity.observation_receipt_public_key
-            if (
-                receipt_key is not None
-                and node.observation_receipt_public_key is not None
-                and node.observation_receipt_public_key != receipt_key
-            ):
-                raise ValueError("agent observation receipt key changed")
-            if (
-                isinstance(receipt_key, str)
-                and node.observation_receipt_public_key is None
-            ):
-                # The first authenticated contact binds the immutable receipt
-                # identity; subsequent contacts remain change-protected above.
-                node.observation_receipt_public_key = receipt_key
+            # A claim is the only caller with a runtime identity; it passed the
+            # single protocol gate, so the node now speaks this version.
+            node.protocol_version = AGENT_PROTOCOL_VERSION
+            node.preflight_fingerprint = preflight_fingerprint
             node.architecture = runtime_identity.architecture
             node.semantic_version = runtime_identity.semantic_version
             node.build_digest = runtime_identity.build_digest
             node.binary_digest = runtime_identity.binary_digest
-            node.self_test_passed = runtime_identity.self_test_passed
             node.contact_certificate_serial = certificate.serial
             node.contact_observation_digest = hashlib.sha256(
                 canonical_message(

@@ -9,16 +9,15 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import IO
 
-from pydantic import ValidationError
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts import (
-    ModelDefinition,
     RecipeDefinition,
-    TestReport,
-    content_sha256,
+    document_sha256,
+    read_model,
+    read_recipe,
 )
 
 from .auth import CursorCodec
@@ -49,13 +48,7 @@ from .source_bundles import (
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_RELEASE_VERSION = re.compile(
-    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
-)
-_REQUIRED_TEST_CHECKS = frozenset(
-    {"container.started", "endpoint.healthy", "inference.completed"}
-)
+_RELEASE_VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,18 +223,17 @@ class CatalogService:
     ) -> int:
         actor = _actor(actor)
         try:
-            models = [ModelDefinition.model_validate(value) for value in documents]
+            for value in documents:
+                read_model(value)
         except (TypeError, ValueError) as error:
             raise CatalogValidationError(
                 "recipe_library.model_document_invalid",
                 "catalog index model documents are invalid",
             ) from error
         with self._sessions.begin() as session:
-            for model in models:
-                self._upsert_canonical_document(
-                    session, model.model_dump(mode="json"), actor=actor
-                )
-        return len(models)
+            for value in documents:
+                self._upsert_canonical_document(session, value, actor=actor)
+        return len(documents)
 
     def refresh_build_policy(self) -> None:
         CatalogEntityService(self._sessions, clock=self._clock).refresh_build_policy()
@@ -263,17 +255,15 @@ class CatalogService:
     ) -> RecipeRevisionView:
         actor = _actor(actor)
         try:
-            recipe = RecipeDefinition.model_validate(document)
-            models = [
-                ModelDefinition.model_validate(value) for value in dependency_documents
-            ]
+            read_recipe(document)
+            for value in dependency_documents:
+                read_model(value)
         except (TypeError, ValueError) as error:
             raise CatalogValidationError(
                 "recipe_library.document_invalid",
                 "recipe library package must contain a canonical recipe and model snapshots",
             ) from error
-        actual = content_sha256(recipe)
-        if actual != expected_content_sha256:
+        if document_sha256(document) != expected_content_sha256:
             raise CatalogValidationError(
                 "recipe_library.hash_mismatch",
                 "recipe content does not match the supplied digest",
@@ -303,17 +293,15 @@ class CatalogService:
             )
         if package_handle is not None:
             _package_handle_metadata(
-                package_handle, recipe=recipe, package_sha256=package_sha256
+                package_handle,
+                recipe_digest=expected_content_sha256,
+                package_sha256=package_sha256,
             )
         actor = _actor(actor)
         with self._sessions.begin() as session:
-            for model in models:
-                self._upsert_canonical_document(
-                    session, model.model_dump(mode="json"), actor=actor
-                )
-            revision = self._upsert_canonical_document(
-                session, recipe.model_dump(mode="json"), actor=actor
-            )
+            for value in dependency_documents:
+                self._upsert_canonical_document(session, value, actor=actor)
+            revision = self._upsert_canonical_document(session, document, actor=actor)
             self._select_imported_recipe_head(session, revision)
             projected = read_catalog_projection(revision).model_dump(
                 mode="json", exclude_none=False
@@ -325,7 +313,9 @@ class CatalogService:
                     "package_sha256": package_sha256,
                     "source_bundle_sha256": source_bundle_sha256,
                     "package_handle": _package_handle_metadata(
-                        package_handle, recipe=recipe, package_sha256=package_sha256
+                        package_handle,
+                        recipe_digest=expected_content_sha256,
+                        package_sha256=package_sha256,
                     )
                     if package_handle is not None
                     else None,
@@ -391,12 +381,12 @@ class CatalogService:
         self, session: Session, document: Mapping[str, object], *, actor: str
     ) -> CatalogDocumentRevision:
         parsed = (
-            ModelDefinition.model_validate(document)
+            read_model(document)
             if document.get("kind") == "model"
-            else RecipeDefinition.model_validate(document)
+            else read_recipe(document)
         )
         kind = str(parsed.kind)
-        digest = content_sha256(parsed)
+        digest = document_sha256(document)
         identity = parsed.identity
         existing = session.scalar(
             select(CatalogDocumentRevision).where(
@@ -422,9 +412,7 @@ class CatalogService:
             .with_for_update()
         )
         if root is None:
-            candidate = service.create_draft(
-                parsed.model_dump(mode="json"), actor=actor
-            )
+            candidate = service.create_draft(document, actor=actor)
         else:
             head = session.scalar(
                 select(CatalogDocumentHead)
@@ -447,7 +435,7 @@ class CatalogService:
             )
             candidate = service.revise(
                 root.id,
-                parsed.model_dump(mode="json"),
+                document,
                 actor=actor,
                 expected_revision=latest.revision_number if latest else None,
             )
@@ -457,81 +445,14 @@ class CatalogService:
         self, document: Mapping[str, object], *, actor: str
     ) -> str:
         try:
-            recipe = RecipeDefinition.model_validate(document)
+            recipe = read_recipe(document)
         except (TypeError, ValueError) as error:
             raise CatalogValidationError(
                 "catalog.document_invalid", "recipe document is invalid"
             ) from error
         with self._sessions() as session:
-            return _resolve_recipe(session, recipe, actor=actor)
-
-    def attach_test_report(
-        self, recipe_id: str, report: Mapping[str, object], actor: str
-    ) -> dict[str, object]:
-        del actor
-        try:
-            validated = TestReport.model_validate(report)
-        except ValidationError as error:
-            raise CatalogValidationError(
-                "catalog.test_report_invalid", "test report is invalid"
-            ) from error
-        clean = validated.model_dump(mode="json", exclude_none=False)
-        with self._sessions.begin() as session:
-            revision = _get_active_recipe(session, recipe_id)
-            if revision is None:
-                raise KeyError(recipe_id)
-            if clean["recipe_sha256"] != revision.content_digest:
-                raise CatalogValidationError(
-                    "catalog.test_report_recipe_mismatch",
-                    "test report does not match this recipe revision",
-                )
-            projected = read_catalog_projection(revision).model_dump(
-                mode="json", exclude_none=False
-            )
-            projected["test_report"] = clean
-            # An active revision is immutable through the ORM; only the derived
-            # ``projected`` column may move, and it moves through the same
-            # Core UPDATE the import path uses.
-            session.execute(
-                update(CatalogDocumentRevision)
-                .where(CatalogDocumentRevision.id == revision.id)
-                .values(
-                    projected=write_catalog_projection(projected, kind=revision.kind)
-                )
-            )
-            session.expire(revision, ["projected"])
-        return clean
-
-    def publication_export(
-        self, recipe_id: str, target_publisher: str
-    ) -> dict[str, object]:
-        if not _SLUG.fullmatch(target_publisher):
-            raise CatalogValidationError(
-                "catalog.publisher", "target publisher namespace is invalid"
-            )
-        with self._sessions() as session:
-            revision = _get_active_recipe(session, recipe_id)
-            if revision is None:
-                raise KeyError(recipe_id)
-            report = read_catalog_projection(revision).test_report
-            if report is None:
-                raise CatalogConflict(
-                    "catalog.test_report_required",
-                    "attach a passing local test report before publication export",
-                )
-            test_report = report.model_dump(mode="json", exclude_none=False)
-            recipe_document = read_catalog_document(revision)
-            if not isinstance(recipe_document, RecipeDefinition):
-                raise CatalogValidationError(
-                    "catalog.recipe_invalid", "catalog revision is not a recipe"
-                )
-            recipe = recipe_document.model_dump(
-                mode="json", exclude_none=False, exclude_unset=False
-            )
-        identity = recipe["identity"]
-        if isinstance(identity, dict):
-            identity["publisher"] = target_publisher
-        return {"recipe": recipe, "test_report": test_report}
+            _resolve_recipe(session, recipe)
+        return document_sha256(document)
 
 
 def _get_active_recipe(
@@ -552,13 +473,12 @@ def _get_active_recipe(
     )
 
 
-def _resolve_recipe(session: Session, recipe: RecipeDefinition, *, actor: str) -> str:
+def _resolve_recipe(session: Session, recipe: RecipeDefinition) -> None:
     service = CatalogEntityService(
         session, clock=lambda: datetime.now(UTC), cursors=None
     )
     for selection in recipe.models:
         service.resolve_reference(selection.model)
-    return content_sha256(recipe)
 
 
 def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
@@ -577,9 +497,7 @@ def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
         revision_number=revision.revision_number,
         lifecycle="resolved" if revision.state == "active" else revision.state,
         schema_version=revision.schema_version,
-        document=recipe.model_dump(
-            mode="json", exclude_none=False, exclude_unset=False
-        ),
+        document=dict(revision.document),
         content_sha256=revision.content_digest,
         created_by=revision.created_by,
         created_at=revision.created_at,
@@ -588,9 +506,7 @@ def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
 
 def _release_version(document: Mapping[str, object]) -> str | None:
     release = document.get("release")
-    history = release.get("history") if isinstance(release, Mapping) else None
-    current = history[0] if isinstance(history, list) and history else None
-    version = current.get("version") if isinstance(current, Mapping) else None
+    version = release.get("version") if isinstance(release, Mapping) else None
     return (
         version
         if isinstance(version, str) and _RELEASE_VERSION.fullmatch(version)
@@ -599,7 +515,7 @@ def _release_version(document: Mapping[str, object]) -> str | None:
 
 
 def _package_handle_metadata(
-    handle: object, *, recipe: RecipeDefinition, package_sha256: str | None
+    handle: object, *, recipe_digest: str, package_sha256: str | None
 ) -> dict[str, object]:
     fields = (
         "publication_commit",
@@ -632,7 +548,7 @@ def _package_handle_metadata(
         )
     package_size = values["package_size"]
     if (
-        values["recipe_content_sha256"] != content_sha256(recipe)
+        values["recipe_content_sha256"] != recipe_digest
         or not isinstance(package_size, int)
         or package_size <= 0
     ):

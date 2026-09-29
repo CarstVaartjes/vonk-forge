@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import os
 import subprocess
@@ -15,13 +14,11 @@ from vonk_agent_protocol import (
     CompiledExecutionPlan,
     RecipeOperationRequest,
     RecipeStartResult,
-    canonical_message,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_MOUNTS,
     CompiledJobInput,
 )
-from vonk_agent_protocol.contracts import TensorParallelStartEvidence
 
 PLAN = json.loads(
     (Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json").read_text()
@@ -34,11 +31,8 @@ MAPPING_ID = "00000000-0000-4000-8000-000000000007"
 
 def _install() -> dict[str, object]:
     return {
-        "schema_version": 2,
         "installation_id": INSTALLATION_ID,
         "plan_digest": "b" * 64,
-        "rank": 0,
-        "role": "entrypoint",
         "expected_bytes": 1,
         "compiled_execution_plan": copy.deepcopy(PLAN),
     }
@@ -49,37 +43,19 @@ def _start() -> dict[str, object]:
     plan["runtime"]["placement"]["endpoint_address"] = "100.100.20.30"
     plan["security"]["network_mode"] = "bridge"
     return {
-        "schema_version": 2,
         "run_id": RUN_ID,
         "installation_id": INSTALLATION_ID,
         "recipe_revision_id": REVISION_ID,
-        "recipe_content_sha256": PLAN["identity"]["recipe_revision_sha256"],
         "mapping_id": MAPPING_ID,
-        "mapping_generation": 1,
-        "image_digest": PLAN["runtime"]["image_digest"],
         "plan_digest": "c" * 64,
-        "alias": "test-model",
-        "rank": 0,
-        "role": "entrypoint",
-        "port": 8000,
-        "reserved_memory_bytes": 67108864,
-        "memory_floor_bytes": plan["runtime"]["placement"]["memory_floor_bytes"],
-        "memory_kind": plan["runtime"]["placement"]["memory_kind"],
-        "endpoint_address": "100.100.20.30",
-        "world_size": 1,
         "compiled_execution_plan": plan,
-        "local_address": None,
-        "master_address": None,
-        "master_port": None,
         "run_generation": 1,
     }
 
 
 def _distributed_start() -> dict[str, object]:
     plan = copy.deepcopy(PLAN)
-    plan["topology"].update(
-        world_size=2, node_count=2, rank=1, role="worker", mode="distributed"
-    )
+    plan["topology"].update(node_count=2)
     plan["runtime"]["placement"].update(
         world_size=2,
         rank=1,
@@ -89,19 +65,12 @@ def _distributed_start() -> dict[str, object]:
         master_address="100.100.20.30",
         master_port=29500,
     )
-    plan["security"].update(network_mode="host", host_network=True)
+    plan["security"].update(network_mode="host", gpu=True)
     return {
         **_start(),
         "phase": "rank-launch",
         "start_deadline": "2026-09-07T12:05:00+00:00",
         "run_generation": 1,
-        "rank": 1,
-        "role": "worker",
-        "world_size": 2,
-        "endpoint_address": "100.100.20.31",
-        "local_address": "100.100.20.31",
-        "master_address": "100.100.20.30",
-        "master_port": 29500,
         "compiled_execution_plan": plan,
     }
 
@@ -110,74 +79,21 @@ def test_sanitized_compiled_plan_and_current_outer_payloads_round_trip() -> None
     assert CompiledExecutionPlan.parse(PLAN).endpoint is not None
     install = RecipeOperationRequest.parse(AgentOperation.RECIPE_INSTALL, _install())
     start = RecipeOperationRequest.parse(AgentOperation.RECIPE_START, _start())
-    assert install.schema_version == start.schema_version == 2
+    assert install.installation_id == start.installation_id == INSTALLATION_ID
     assert start.mapping_id == MAPPING_ID
 
 
-def test_tensor_parallel_start_result_requires_exact_run_identity_fields() -> None:
-    evidence = {
-        "recipe_revision_id": REVISION_ID,
-        "recipe_content_sha256": PLAN["identity"]["recipe_revision_sha256"],
-        "image_digest": PLAN["runtime"]["image_digest"],
-        "artifact_set_digest": "d" * 64,
-        "model_identity": "vonk-forge/synthetic-tiny-fp16@" + "e" * 64,
-        "rank": 1,
-        "world_size": 2,
-        "memory_reservation_bytes": 67108864,
-        "endpoint": "http://100.100.20.31:8000",
-        "ready": True,
-        "run_generation": 1,
-        "runtime_arguments_sha256": "a" * 64,
-        "local_address": "100.100.20.31",
-        "master_address": "100.100.20.30",
-        "master_port": 29500,
-    }
-    result = RecipeStartResult.model_validate(
-        {
-            "endpoint": evidence["endpoint"],
-            "evidence": evidence,
-        }
-    )
-    assert isinstance(result.evidence, TensorParallelStartEvidence)
-    for field in ("run_generation", "runtime_arguments_sha256"):
-        missing = dict(evidence)
-        missing.pop(field)
-        with pytest.raises(ValueError):
-            RecipeStartResult.model_validate(
-                {
-                    "endpoint": evidence["endpoint"],
-                    "evidence": missing,
-                }
-            )
-
-
-@pytest.mark.parametrize(
-    "mode",
-    [
-        "single",
-        "distributed",
-        "tensor_parallel",
-        "pipeline_parallel",
-        "data_parallel",
-        "hybrid",
-        "ray",
-        "mpi",
-    ],
-)
-@pytest.mark.parametrize("backend", ["tcp", "ucx", "future-engine-Δ"])
-def test_recipe_topology_vocabulary_survives_the_wire(mode, backend) -> None:
-    plan = copy.deepcopy(PLAN)
-    plan["topology"].update(mode=mode, backend=backend)
-    result = CompiledExecutionPlan.parse(plan)
-    assert result.topology.mode == mode
-    assert result.topology.backend == backend
+def test_start_result_carries_only_the_serving_endpoint() -> None:
+    assert RecipeStartResult.model_validate({}).endpoint is None
+    served = RecipeStartResult.model_validate({"endpoint": "http://100.100.20.31:8000"})
+    assert served.endpoint == "http://100.100.20.31:8000"
+    with pytest.raises(ValueError):
+        RecipeStartResult.model_validate({"endpoint": None, "ready": True})
 
 
 def test_install_accepts_deferred_distributed_rendezvous() -> None:
     plan = copy.deepcopy(PLAN)
-    plan["topology"].update(
-        world_size=2, node_count=2, mode="distributed", backend="nccl"
-    )
+    plan["topology"].update(node_count=2)
     plan["runtime"]["placement"].update(
         world_size=2,
         local_address=None,
@@ -197,33 +113,20 @@ def test_compiled_single_node_plan_rejects_rendezvous_addresses() -> None:
         CompiledExecutionPlan.parse(plan)
 
 
-def test_start_allows_controller_route_alias_distinct_from_engine_alias() -> None:
-    payload = _start()
-    payload["alias"] = "controller-route"
-    request = RecipeOperationRequest.parse(AgentOperation.RECIPE_START, payload)
-    assert request.alias == "controller-route"
-
-
 def test_agent_claim_dispatches_the_same_typed_install_and_start_models() -> None:
     for operation, payload in (
         (AgentOperation.RECIPE_INSTALL, _install()),
         (AgentOperation.RECIPE_START, _start()),
     ):
-        claim = {
-            "schema_version": 1,
-            "attempt": 1,
-            "deadline": "2026-09-07T12:05:00+00:00",
-            "fence": "00000000-0000-4000-8000-000000000011",
-            "job_id": "00000000-0000-4000-8000-000000000012",
-            "operation": operation.value,
-            "operation_id": "00000000-0000-4000-8000-000000000013",
-            "node_id": "spk_11111111111111111111111111111111",
-            "authority_revision": "a" * 64,
-            "payload": payload,
-        }
-        claim["payload_digest"] = hashlib.sha256(canonical_message(payload)).hexdigest()
-        claim = AgentClaim.parse(claim)
-        assert claim.payload["schema_version"] == 2
+        claim = AgentClaim.parse(
+            {
+                "deadline": "2026-09-07T12:05:00+00:00",
+                "fence": "00000000-0000-4000-8000-000000000011",
+                "operation": operation.value,
+                "payload": payload,
+            }
+        )
+        assert claim.payload.installation_id == INSTALLATION_ID
 
 
 def test_plan_rejects_unsafe_paths() -> None:
@@ -243,7 +146,6 @@ def test_plan_rejects_unsafe_paths() -> None:
 def test_plan_accepts_canonical_unicode_space_and_max_length_paths(path: str) -> None:
     value = copy.deepcopy(PLAN)
     value["artifacts"][0]["path"] = path
-    value["artifacts"][0]["distribution_object"]["name"] = path
     publisher = "发布者 " + "_" * 124
     value["artifacts"][0]["model"]["publisher"] = publisher
 
@@ -269,7 +171,6 @@ def test_plan_accepts_canonical_unicode_space_and_max_length_paths(path: str) ->
 def test_plan_rejects_unsafe_or_oversized_model_paths(path: str) -> None:
     value = copy.deepcopy(PLAN)
     value["artifacts"][0]["path"] = path
-    value["artifacts"][0]["distribution_object"]["name"] = path
     with pytest.raises(AgentProtocolError):
         CompiledExecutionPlan.parse(value)
 
@@ -345,7 +246,6 @@ def test_python_compiled_plan_producer_crosses_rust_parser(
     for path in ("模型 weights_file.safetensors", "模型 file_" * 64):
         value = copy.deepcopy(PLAN)
         value["artifacts"][0]["path"] = path
-        value["artifacts"][0]["distribution_object"]["name"] = path
         value["artifacts"][0]["model"]["publisher"] = "发布者 " + "_" * 124
         authored = CompiledExecutionPlan.parse(value).model_dump(mode="json")
         assert _rust_compiled_plan_accepts(compiled_plan_wire_probe, authored)
@@ -353,7 +253,6 @@ def test_python_compiled_plan_producer_crosses_rust_parser(
     for path in ("../escape", "nested//file", "bad\\name", "bad\x00name", "x" * 513):
         value = copy.deepcopy(PLAN)
         value["artifacts"][0]["path"] = path
-        value["artifacts"][0]["distribution_object"]["name"] = path
         assert not _rust_compiled_plan_accepts(compiled_plan_wire_probe, value)
 
     value = copy.deepcopy(PLAN)
@@ -365,7 +264,6 @@ def test_compiled_job_input_is_typed_and_round_trips_both_wire_directions(
     compiled_plan_wire_probe: Path,
 ) -> None:
     input_value = {
-        "path": "/inputs",
         "required": True,
         "media_types": ["application/json"],
         "max_bytes": 1024,
@@ -390,7 +288,6 @@ def test_compiled_job_input_is_typed_and_round_trips_both_wire_directions(
     value["job"] = {
         "interface": "artifact-job",
         "input": input_value,
-        "output_path": "/outputs",
         "timeout_seconds": 60,
     }
     authored = CompiledExecutionPlan.parse(value).to_mapping()
@@ -414,7 +311,7 @@ def test_compiled_job_input_is_typed_and_round_trips_both_wire_directions(
 
 def test_plan_rejects_non_boolean_security_values() -> None:
     value = copy.deepcopy(PLAN)
-    value["security"]["privileged"] = 1
+    value["security"]["gpu"] = 1
     with pytest.raises(AgentProtocolError):
         CompiledExecutionPlan.parse(value)
 
@@ -422,11 +319,11 @@ def test_plan_rejects_non_boolean_security_values() -> None:
 def test_plan_accepts_canonical_multi_model_mount_projection() -> None:
     value = copy.deepcopy(PLAN)
     value["security"]["mounts"] = [
-        {"source": "model", "target": "/models/target", "read_only": True},
-        {"source": "model", "target": "/models/text-encoder", "read_only": True},
-        {"source": "model", "target": "/models/vae", "read_only": True},
-        {"source": "inputs", "target": "/inputs", "read_only": True},
-        {"source": "outputs", "target": "/outputs", "read_only": False},
+        {"source": "model", "target": "/models/target"},
+        {"source": "model", "target": "/models/text-encoder"},
+        {"source": "model", "target": "/models/vae"},
+        {"source": "inputs", "target": "/inputs"},
+        {"source": "outputs", "target": "/outputs"},
     ]
 
     plan = CompiledExecutionPlan.parse(value)
@@ -446,27 +343,20 @@ def test_mount_source_and_target_policy_accepts_canonical_matrix(
     source: str, target: str, read_only: bool
 ) -> None:
     value = copy.deepcopy(PLAN)
-    value["security"]["mounts"] = [
-        {"source": source, "target": target, "read_only": read_only}
-    ]
-    CompiledExecutionPlan.parse(value)
+    value["security"]["mounts"] = [{"source": source, "target": target}]
+    plan = CompiledExecutionPlan.parse(value)
+    assert plan.security.mounts[0].read_only is read_only
 
 
 @pytest.mark.parametrize(
-    ("source", "target", "read_only"),
-    [
-        ("model", "/inputs", True),
-        ("inputs", "/models", True),
-        ("outputs", "/models", False),
-    ],
+    ("source", "target"),
+    [("model", "/inputs"), ("inputs", "/models"), ("outputs", "/models")],
 )
 def test_mount_source_and_target_policy_rejects_swapped_matrix(
-    source: str, target: str, read_only: bool
+    source: str, target: str
 ) -> None:
     value = copy.deepcopy(PLAN)
-    value["security"]["mounts"] = [
-        {"source": source, "target": target, "read_only": read_only}
-    ]
+    value["security"]["mounts"] = [{"source": source, "target": target}]
     with pytest.raises(AgentProtocolError):
         CompiledExecutionPlan.parse(value)
 
@@ -477,11 +367,7 @@ def test_plan_rejects_over_duplicate_or_unsafe_mounts(kind: str) -> None:
     mounts = value["security"]["mounts"]
     if kind == "over":
         mounts.extend(
-            {
-                "source": "model",
-                "target": f"/models/extra-{index}",
-                "read_only": True,
-            }
+            {"source": "model", "target": f"/models/extra-{index}"}
             for index in range(MAX_COMPILED_EXECUTION_PLAN_MOUNTS - len(mounts) + 1)
         )
     elif kind == "duplicate":
@@ -518,13 +404,6 @@ def test_plan_rejects_duplicate_final_projection_target() -> None:
     value = copy.deepcopy(PLAN)
     projection = copy.deepcopy(value["artifacts"][0])
     value["artifacts"].append(projection)
-    with pytest.raises(AgentProtocolError):
-        CompiledExecutionPlan.parse(value)
-
-
-def test_schema_version_is_an_integer_discriminator() -> None:
-    value = copy.deepcopy(PLAN)
-    value["schema_version"] = 2.0
     with pytest.raises(AgentProtocolError):
         CompiledExecutionPlan.parse(value)
 
@@ -573,7 +452,7 @@ def test_schema2_rejects_legacy_flat_install_and_missing_required_options() -> N
     with pytest.raises(AgentProtocolError):
         RecipeOperationRequest.parse(
             AgentOperation.RECIPE_INSTALL,
-            {"schema_version": 1, "installation_id": INSTALLATION_ID},
+            {"installation_id": INSTALLATION_ID},
         )
     value = _install()
     del value["compiled_execution_plan"]["job"]

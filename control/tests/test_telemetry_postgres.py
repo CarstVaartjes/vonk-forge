@@ -15,12 +15,9 @@ from vonk_control.models import (
     NodeTelemetrySample,
 )
 from vonk_control.telemetry import (
-    TelemetryDetailsInput,
     TelemetryRepository,
     TelemetrySampleInput,
 )
-
-from .telemetry_fixtures import telemetry_metrics
 
 NODE_A = "spk_" + "a" * 32
 BOOT_A = uuid.UUID("00000000-0000-4000-8000-000000000001")
@@ -33,7 +30,7 @@ def _repository(engine: Engine) -> tuple[TelemetryRepository, sessionmaker]:
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_A, state="active"))
     return TelemetryRepository(sessions, clock=lambda: NOW), sessions
 
 
@@ -43,8 +40,6 @@ def _sample(
     return TelemetrySampleInput(
         boot_id=boot_id,
         observed_at=observed_at,
-        cpu_utilization_percent=None,
-        load_average_1m=None,
         memory_total_bytes=None,
         memory_available_bytes=None,
         disk_total_bytes=None,
@@ -52,13 +47,6 @@ def _sample(
         gpu_utilization_percent=None,
         gpu_memory_total_bytes=None,
         gpu_memory_free_bytes=None,
-        temperature_c=None,
-        power_watts=None,
-        network_receive_bytes_per_second=None,
-        network_transmit_bytes_per_second=None,
-        gap_samples=0,
-        details=TelemetryDetailsInput(),
-        metrics=telemetry_metrics(),
     )
 
 

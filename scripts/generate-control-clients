@@ -26,7 +26,6 @@ OPENAPI = ROOT / "control/openapi.json"
 PYTHON_OUTPUT = ROOT / "src/cluster_profiles/generated_control"
 TYPESCRIPT_OUTPUT = ROOT / "control/web/src/api/generated.d.ts"
 CLI_OPENAPI_OUTPUT = ROOT / "src/cluster_profiles/schemas/control-openapi.json"
-CLI_OPENAPI_MIRROR = ROOT / "schemas/control-openapi.json"
 
 
 class _SchemaJobs:
@@ -174,9 +173,6 @@ def main() -> None:
         _write_openapi(
             _schema(include_browser_auth=False), path=CLI_OPENAPI_OUTPUT
         )
-        _write_openapi(
-            _schema(include_browser_auth=False), path=CLI_OPENAPI_MIRROR
-        )
         return
 
     # Keep the tracked document complete. Generated clients receive a filtered
@@ -188,7 +184,6 @@ def main() -> None:
         admin_schema = _schema(include_browser_auth=False)
         _write_openapi(admin_schema)
         _write_openapi(admin_schema, path=CLI_OPENAPI_OUTPUT)
-        _write_openapi(admin_schema, path=CLI_OPENAPI_MIRROR)
         _write_openapi(
             _generated_client_schema(admin_schema, python_compatibility=True),
             path=client_openapi,

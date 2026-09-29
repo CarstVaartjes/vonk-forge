@@ -17,9 +17,7 @@ from vonk_control.fleet_projection import (
     FleetSnapshot,
     NodeConnection,
     RecipePresence,
-    TelemetryDetails,
     TelemetryPoint,
-    telemetry_point,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.models import (
@@ -45,10 +43,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.recipe_execution_contract import installation_plan_document
-from vonk_control.telemetry import TelemetryRepository
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
-
-from .telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -79,12 +74,14 @@ def _canonical_catalog_documents(
     )
     recipe_document = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     recipe_document["identity"]["slug"] = slug
     recipe_document["metadata"]["title"] = title
-    recipe_document["models"][0]["model"]["content_sha256"] = content_sha256(model)
+    recipe_document["models"][0]["model"]["content_sha256"] = document_sha256(
+        model.model_dump(mode="json")
+    )
     if interfaces is not None:
         recipe_document["interfaces"] = interfaces
     recipe = RecipeDefinition.model_validate(recipe_document)
@@ -124,7 +121,7 @@ def _canonical_catalog_documents(
                 schema_version=2,
                 state="active",
                 document=canonical_recipe,
-                content_digest=content_sha256(recipe),
+                content_digest=document_sha256(recipe.model_dump(mode="json")),
                 projected={},
                 created_by="admin",
                 created_at=NOW,
@@ -139,7 +136,7 @@ def _canonical_catalog_documents(
                 schema_version=2,
                 state="active",
                 document=model_document,
-                content_digest=content_sha256(model),
+                content_digest=document_sha256(model.model_dump(mode="json")),
                 projected={},
                 created_by="admin",
                 created_at=NOW,
@@ -190,25 +187,13 @@ def _telemetry(
         boot_id=boot_id,
         observed_at=observed_at,
         received_at=observed_at + timedelta(milliseconds=250),
-        cpu_utilization_percent=cpu,
-        load_average_1m=1.5,
+        gpu_utilization_percent=cpu,
         memory_total_bytes=2_000,
         memory_available_bytes=1_400,
         disk_total_bytes=1_000,
         disk_free_bytes=700,
-        gpu_utilization_percent=25.0,
         gpu_memory_total_bytes=2_000,
         gpu_memory_free_bytes=1_300,
-        temperature_c=42.5,
-        power_watts=18.25,
-        network_receive_bytes_per_second=1_024.5,
-        network_transmit_bytes_per_second=512.25,
-        gap_samples=2,
-        details={
-            "accelerator_name": "NVIDIA GB10",
-            "accelerator_performance_state": "P0",
-        },
-        metrics=telemetry_metrics_document(),
     )
 
 
@@ -274,7 +259,6 @@ def test_fleet_contains_registered_node_absent_from_repository() -> None:
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -295,7 +279,6 @@ def test_fleet_excludes_revoked_agent_nodes() -> None:
             AgentNode(
                 node_id=NODE_A,
                 state="revoked",
-                capabilities=[],
                 last_seen_at=NOW,
                 revoked_at=NOW,
             )
@@ -327,21 +310,18 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                     node_id=NODE_A,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=["runtime.vonk.v1"],
                     last_seen_at=NOW - timedelta(seconds=5),
                 ),
                 AgentNode(
                     node_id=NODE_B,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=["runtime.vonk.v1"],
                     last_seen_at=NOW - timedelta(seconds=7),
                 ),
                 AgentNode(
                     node_id=EXTRA_NODE,
                     state="revoked",
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=NOW,
                     revoked_at=NOW,
                 ),
@@ -475,25 +455,13 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                         "boot_id": "00000000-0000-4000-8000-000000000001",
                         "observed_at": "2026-08-15T11:59:58Z",
                         "received_at": "2026-08-15T11:59:58.250000Z",
-                        "cpu_utilization_percent": 12.5,
-                        "load_average_1m": 1.5,
                         "memory_total_bytes": 2000,
                         "memory_available_bytes": 1400,
                         "disk_total_bytes": 1000,
                         "disk_free_bytes": 700,
-                        "gpu_utilization_percent": 25.0,
+                        "gpu_utilization_percent": 12.5,
                         "gpu_memory_total_bytes": 2000,
                         "gpu_memory_free_bytes": 1300,
-                        "temperature_c": 42.5,
-                        "power_watts": 18.25,
-                        "network_receive_bytes_per_second": 1024.5,
-                        "network_transmit_bytes_per_second": 512.25,
-                        "gap_samples": 2,
-                        "details": {
-                            "accelerator_name": "NVIDIA GB10",
-                            "accelerator_performance_state": "P0",
-                        },
-                        "metrics": telemetry_metrics_document(),
                     },
                 },
                 "installed": [],
@@ -562,22 +530,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
         ],
     }
     selects = [statement for statement in statements if statement.startswith("select")]
-    # Rich telemetry performs one bounded Controller join for the latest
-    # sample. Keep the query budget tied to that query identity so a future
-    # read cannot silently add unbounded per-node work.
-    controller_telemetry_reads = [
-        statement
-        for statement in selects
-        if (
-            "from run_nodes" in statement
-            and "join recipe_runs" in statement
-            and "run_nodes.node_id = ?" in statement
-        )
-    ]
-    assert len(controller_telemetry_reads) == 1
-    assert "run_nodes.node_id" in controller_telemetry_reads[0]
-    assert "recipe_runs.updated_at" in controller_telemetry_reads[0]
-    assert len(selects) == 11 + len(controller_telemetry_reads)
+    assert len(selects) == 11
     certificate_reads = [
         statement for statement in selects if "agent_certificates" in statement
     ]
@@ -607,7 +560,7 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
-        node = AgentNode(node_id=NODE_A, state="active", capabilities=[])
+        node = AgentNode(node_id=NODE_A, state="active")
         session.add(node)
         session.flush()
         session.add(
@@ -739,16 +692,11 @@ def test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies(
         "boot_id": "00000000-0000-4000-8000-000000000005",
         "observed_at": NOW,
         "received_at": NOW,
-        "gap_samples": 0,
-        "details": TelemetryDetails(),
-        "metrics": telemetry_metrics_document(),
     }
     with pytest.raises(ValidationError, match="memory_total_bytes"):
         TelemetryPoint(**{**point, "memory_total_bytes": 16 * 1024**4 + 1})
-    with pytest.raises(ValidationError, match="load_average_1m"):
-        TelemetryPoint(**{**point, "load_average_1m": 1_000_000.01})
-    with pytest.raises(ValidationError, match="temperature_c"):
-        TelemetryPoint(**{**point, "temperature_c": float("nan")})
+    with pytest.raises(ValidationError, match="gpu_utilization_percent"):
+        TelemetryPoint(**{**point, "gpu_utilization_percent": 100.01})
 
 
 @pytest.mark.parametrize(
@@ -770,9 +718,6 @@ def test_fleet_telemetry_dto_rejects_nil_and_noncanonical_boot_ids(
             boot_id=boot_id,
             observed_at=NOW,
             received_at=NOW,
-            gap_samples=0,
-            details=TelemetryDetails(),
-            metrics=telemetry_metrics(),
         )
 
 
@@ -812,17 +757,7 @@ def test_projection_schema_is_finite_for_states_items_and_task3_numbers() -> Non
         "^(?!00000000-0000-0000-0000-000000000000$)"
         "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     )
-    assert telemetry["load_average_1m"]["anyOf"][0]["maximum"] == 1_000_000
     assert telemetry["memory_total_bytes"]["anyOf"][0]["maximum"] == (16 * 1024**4)
-    assert telemetry["temperature_c"]["anyOf"][0] == {
-        "maximum": 300.0,
-        "minimum": -100.0,
-        "type": "number",
-    }
-    assert (
-        telemetry["network_receive_bytes_per_second"]["anyOf"][0]["maximum"]
-        == 1_000_000_000_000_000
-    )
 
 
 def test_connection_uses_certificate_authority_and_finite_offline_precedence() -> None:
@@ -845,63 +780,53 @@ def test_connection_uses_certificate_authority_and_finite_offline_precedence() -
                 AgentNode(
                     node_id=node_ids[1],
                     state="revoked",
-                    capabilities=[],
                     last_seen_at=NOW,
                     revoked_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[2],
                     state="pending",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[3],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[4],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[5],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[6],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[7],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
-                AgentNode(node_id=node_ids[8], state="active", capabilities=[]),
+                AgentNode(node_id=node_ids[8], state="active"),
                 AgentNode(
                     node_id=node_ids[9],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW + timedelta(microseconds=1),
                 ),
                 AgentNode(
                     node_id=node_ids[10],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW - timedelta(seconds=151),
                 ),
                 AgentNode(
                     node_id=node_ids[11],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
             ]
@@ -995,7 +920,6 @@ def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -
                     node_id=node_id,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=NOW
                     - timedelta(seconds=150 if node_id != NODE_D else 151),
                 )
@@ -1074,14 +998,12 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
                     node_id=NODE_A,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=NODE_B,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
             ]
@@ -1531,7 +1453,6 @@ def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
                 node_id=NODE_A,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -1683,74 +1604,12 @@ def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
         projection.read()
 
 
-@pytest.mark.parametrize("producer_node_id", [None, NODE_B])
-def test_frozen_metrics_project_authoritative_identity_without_mutating_source(
-    producer_node_id: str | None,
-) -> None:
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    sample = _telemetry(
-        NODE_A,
-        "00000000-0000-4000-8000-000000000299",
-        NOW - timedelta(seconds=1),
-        sequence=1,
-        cpu=1.0,
-    )
-    metric = {
-        "node_id": producer_node_id,
-        "key": "cpu.utilization_percent",
-        "scope": "node",
-        "unit": "%",
-        "source": "procfs",
-        "measurement_kind": "measured",
-        "freshness_threshold_seconds": 30.0,
-    }
-    sample.metrics["series"] = [
-        {
-            **metric,
-            "value": 12.5,
-            "observed_at": sample.observed_at.isoformat(),
-            "received_at": NOW.isoformat(),
-            "support_status": "available",
-            "aggregation": "mean",
-        }
-    ]
-    sample.metrics["capabilities"] = [{**metric, "supported": True}]
-    source_document = json.loads(json.dumps(sample.metrics))
-    with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
-        session.add(sample)
-        session.flush()
-        session.add(NodeTelemetryLatest(node_id=NODE_A, sample_id=sample.id))
-
-    projection = FleetProjection(sessions, clock=lambda: NOW)
-    source = TelemetryRepository(sessions).latest([NODE_A])[NODE_A]
-    source_metrics = source.metrics.model_dump()
-    direct_point = telemetry_point(source)
-    assert source.metrics.model_dump() == source_metrics
-    node_telemetry = projection.read().nodes[0].telemetry
-    assert node_telemetry is not None
-    point = node_telemetry.sample
-    for projected in (direct_point, point):
-        series = projected.metrics.series[0]
-        assert series.node_id == NODE_A
-        assert series.received_at == sample.received_at
-        assert series.observed_at == sample.observed_at
-        assert series.value == 12.5
-        assert projected.metrics.capabilities[0].node_id == NODE_A
-    with sessions() as session:
-        stored = session.get(NodeTelemetrySample, sample.id)
-        assert stored is not None
-        assert stored.metrics == source_document
-
-
 def test_non_rfc_non_nil_boot_id_flows_through_snapshot() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_A, state="active"))
         sample = _telemetry(
             NODE_A,
             "00000000-0000-4000-8000-000000000299",
@@ -1785,7 +1644,6 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
                 node_id=NODE_A,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -1899,7 +1757,6 @@ def test_projection_rejects_more_than_500_registered_nodes_before_state_queries(
                 AgentNode(
                     node_id=f"spk_{index:032x}",
                     state="active",
-                    capabilities=[],
                 )
                 for index in range(1, 502)
             ]
@@ -2009,7 +1866,6 @@ def _installed_byte_group(
                 node_id=NODE_A,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )

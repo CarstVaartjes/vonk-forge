@@ -17,7 +17,6 @@ def test_preflight_query_projects_only_comparison_fields(
     node_id = "spk_" + "a" * 32
     receipt = {
         "fingerprint": "b" * 64,
-        "request_sha256": "c" * 64,
         "observed_at": 100,
         "findings": [],
         "private": "must-not-appear",
@@ -25,7 +24,7 @@ def test_preflight_query_projects_only_comparison_fields(
     with postgres_engine.begin() as connection:
         for statement in (
             "CREATE TEMP TABLE jobs (id text, result jsonb, state text)",
-            "CREATE TEMP TABLE agent_nodes (node_id text, capabilities jsonb)",
+            "CREATE TEMP TABLE agent_nodes (node_id text, preflight_fingerprint text)",
             "CREATE TEMP TABLE agent_operations (id text, node_id text, kind text, payload_digest text, current_attempt int, updated_at int, parent_job_id text)",
             "CREATE TEMP TABLE agent_operation_attempts (operation_id text, attempt int, result jsonb, state text, lease_deadline timestamptz, progress jsonb)",
         ):
@@ -38,11 +37,8 @@ def test_preflight_query_projects_only_comparison_fields(
             },
         )
         connection.execute(
-            text("INSERT INTO agent_nodes VALUES (:node, CAST(:caps AS jsonb))"),
-            {
-                "node": node_id,
-                "caps": json.dumps(["runtime.preflight.fingerprint." + "d" * 64]),
-            },
+            text("INSERT INTO agent_nodes VALUES (:node, :fingerprint)"),
+            {"node": node_id, "fingerprint": "d" * 64},
         )
         connection.execute(
             text(
@@ -101,7 +97,7 @@ def test_preflight_query_projects_only_comparison_fields(
         assert evidence[1]["lease_deadline"] == "2026-09-08T12:00:00+00:00"
     assert evidence[0]["current_fingerprint"] == "d" * 64
     assert evidence[0]["receipt_fingerprint"] == "b" * 64
-    assert evidence[0]["payload_sha256"] == evidence[0]["request_sha256"] == "c" * 64
+    assert evidence[0]["payload_sha256"] == "c" * 64
     assert evidence[0]["observed_at"] == 100
     assert evidence[0]["controller_now"] > 100
     assert "must-not-appear" not in json.dumps(evidence)

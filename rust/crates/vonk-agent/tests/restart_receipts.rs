@@ -10,7 +10,7 @@ use vonk_agent::workloads::CompiledExecutionPlan;
 use vonk_agent_protocol::generated::{
     AgentClaimPayload, AgentFailureKind, AgentOperation, AgentResultResult, RecipeStopPayload,
 };
-use vonk_agent_protocol::{AgentClaim, canonical_json, hex_sha256};
+use vonk_agent_protocol::{AgentClaim, canonical_json};
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
@@ -24,33 +24,18 @@ fn claim() -> AgentClaim {
         cancel_pending_start: false,
         compiled_execution_plan: compiled_execution_plan.clone(),
         installation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000004").unwrap(),
-        mapping_generation: 1,
         mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
-        node_id: NODE_ID.to_owned(),
-        plan_digest: compiled_execution_plan.identity.execution_sha256,
-        rank: compiled_execution_plan.runtime.placement.rank,
-        recipe_content_sha256: compiled_execution_plan.identity.recipe_revision_sha256,
+        plan_digest: "e".repeat(64),
         recipe_revision_id: Uuid::parse_str("00000000-0000-4000-8000-000000000006").unwrap(),
-        role: compiled_execution_plan.runtime.placement.role,
         run_generation: 1,
         run_id,
-        schema_version: 2,
         target_runtime_id: run_id,
-        world_size: compiled_execution_plan.runtime.placement.world_size,
     };
-    let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
     AgentClaim {
-        attempt: 1,
-        authority_revision: "b".repeat(64),
         deadline: DateTime::<FixedOffset>::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
         fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
-        job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
-        node_id: NODE_ID.to_owned(),
         operation: AgentOperation::RecipeStop,
-        operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
-        payload_digest,
         payload: AgentClaimPayload::RecipeStopPayload(payload),
-        schema_version: 1,
     }
 }
 
@@ -65,9 +50,7 @@ fn completed_result_is_redelivered_until_acknowledged() {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         );
-        state
-            .finish(&claim, "succeeded", json!({"stopped": true}))
-            .unwrap()
+        state.finish(&claim, "succeeded", json!({})).unwrap()
     };
 
     let mut restarted = StateStore::open(&path, NODE_ID).unwrap();
@@ -94,9 +77,7 @@ fn acknowledged_result_is_not_replayed_after_restart() {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         );
-        let result = state
-            .finish(&claim, "succeeded", json!({"stopped": true}))
-            .unwrap();
+        let result = state.finish(&claim, "succeeded", json!({})).unwrap();
         state.acknowledge(&result).unwrap();
         result
     };
@@ -130,9 +111,7 @@ fn rejected_result_and_its_refusal_survive_restart() {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         );
-        let result = state
-            .finish(&claim, "succeeded", json!({"stopped": true}))
-            .unwrap();
+        let result = state.finish(&claim, "succeeded", json!({})).unwrap();
         state
             .reject_result(&result, &ingress_refusal(), Utc::now())
             .unwrap();
@@ -229,9 +208,7 @@ fn mismatched_result_is_rejected_before_persistence() {
     ));
     assert!(state.pending_results().unwrap().is_empty());
 
-    let result = state
-        .finish(&claim, "succeeded", json!({"stopped": true}))
-        .unwrap();
+    let result = state.finish(&claim, "succeeded", json!({})).unwrap();
     assert_eq!(
         state.pending_results().unwrap(),
         vec![(AgentOperation::RecipeStop, result)]
@@ -249,15 +226,13 @@ fn mismatched_durable_result_is_rejected_before_submission_and_replay() {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         );
-        state
-            .finish(&claim, "succeeded", json!({"stopped": true}))
-            .unwrap();
+        state.finish(&claim, "succeeded", json!({})).unwrap();
     }
     let connection = rusqlite::Connection::open(&path).unwrap();
     let raw: Vec<u8> = connection
         .query_row(
-            "SELECT result_json FROM operations WHERE operation_id=?1",
-            [claim.operation_id.to_string()],
+            "SELECT result_json FROM operations WHERE fence=?1",
+            [claim.fence.to_string()],
             |row| row.get(0),
         )
         .unwrap();
@@ -265,11 +240,8 @@ fn mismatched_durable_result_is_rejected_before_submission_and_replay() {
     document["result"] = json!({"installed_bytes": 0});
     connection
         .execute(
-            "UPDATE operations SET result_json=?2 WHERE operation_id=?1",
-            rusqlite::params![
-                claim.operation_id.to_string(),
-                canonical_json(&document).unwrap()
-            ],
+            "UPDATE operations SET result_json=?2 WHERE fence=?1",
+            rusqlite::params![claim.fence.to_string(), canonical_json(&document).unwrap()],
         )
         .unwrap();
     drop(connection);
@@ -287,7 +259,7 @@ fn mismatched_durable_result_is_rejected_before_submission_and_replay() {
 }
 
 #[test]
-fn incompatible_operation_journal_fails_closed_without_touching_credentials() {
+fn older_operation_journal_is_replaced_without_touching_credentials() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("state.sqlite");
     let credentials = directory.path().join("credentials");
@@ -316,11 +288,9 @@ fn incompatible_operation_journal_fails_closed_without_touching_credentials() {
         .unwrap();
     drop(connection);
 
-    let error = match StateStore::open(&path, NODE_ID) {
-        Ok(_) => panic!("old operation journal was accepted"),
-        Err(error) => error,
-    };
-    assert!(matches!(error, StateError::IncompatibleSchema));
-    assert!(error.to_string().contains("remove only state.sqlite"));
+    // The Controller re-issues unfinished work, so another protocol's
+    // receipts are dropped rather than blocking the agent from starting.
+    let state = StateStore::open(&path, NODE_ID).unwrap();
+    assert!(state.pending_results().unwrap().is_empty());
     assert_eq!(std::fs::read(sentinel).unwrap(), b"credential sentinel");
 }

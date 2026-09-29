@@ -61,10 +61,6 @@ from .resource_planning import (
 )
 from .topology import Placement, TopologyError, validate_topology
 
-_DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
-_EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
-_SIGNED_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.receipt.v1"
-
 _PORT_CONFLICTS = {
     "service": (
         "run.port_occupied",
@@ -357,15 +353,6 @@ class RunAdmissionService:
                     .order_by(ClusterMappingNode.rank)
                 )
             )
-            agent_nodes = tuple(
-                session.scalars(
-                    select(AgentNode).where(
-                        AgentNode.node_id.in_(
-                            [mapping_node.node_id for mapping_node in mapping_nodes]
-                        )
-                    )
-                )
-            )
             unreconciled_lost_ranks: dict[str, list[tuple[str, str]]] = {}
             for node_id, run_id, run_alias in session.execute(
                 select(RunNode.node_id, RecipeRun.id, RecipeRun.alias)
@@ -382,13 +369,6 @@ class RunAdmissionService:
                 unreconciled_lost_ranks.setdefault(node_id, []).append(
                     (run_id, run_alias)
                 )
-            agent_capabilities = {
-                node.node_id: tuple(node.capabilities or ()) for node in agent_nodes
-            }
-            receipt_keys = {
-                node.node_id: node.observation_receipt_public_key
-                for node in agent_nodes
-            }
             installed_nodes = {
                 (row.node_id, row.rank, row.role)
                 for row in session.scalars(
@@ -423,14 +403,8 @@ class RunAdmissionService:
             ordered = tuple(sorted(placements, key=lambda item: item.rank))
             topology_reason = AdmissionReason(error.code, str(error))
         topology = recipe_topology(revision.document)
-        topology_roles = topology.get("roles")
-        if not isinstance(topology_roles, list):
-            raise TypeError("recipe runtime topology is invalid")
-        role_by_name = {
-            str(role["name"]): role for role in topology_roles if isinstance(role, dict)
-        }
+        role_by_name = {role.name: role for role in topology.roles}
         multi_node = len(ordered) > 1
-        two_phase_start = multi_node and topology.get("mode") == "distributed"
         endpoint_owner = next(
             (item for item in mapping_nodes if item.endpoint_owner), None
         )
@@ -452,8 +426,6 @@ class RunAdmissionService:
                         f"model {run_alias} ({run_id}); reconcile it before placing work.",
                     )
                 )
-            if legal_admission.blocker is not None:
-                blockers.append(AdmissionReason(*legal_admission.blocker))
             if legal_admission.warning is not None:
                 warnings.append(AdmissionReason(*legal_admission.warning))
             snapshot = snapshots.get(placement.node_id)
@@ -481,47 +453,12 @@ class RunAdmissionService:
                         "run.stale_inventory", "GPU node memory inventory is stale."
                     )
                 )
-            if (
-                two_phase_start
-                and _DISTRIBUTED_START_CAPABILITY
-                not in agent_capabilities.get(placement.node_id, ())
-            ):
-                blockers.append(
-                    AdmissionReason(
-                        "run.distributed_start_capability_missing",
-                        "Spark agent does not support two-phase distributed start.",
-                    )
-                )
-            if (
-                two_phase_start
-                and _EXACT_RUN_INSPECTION_CAPABILITY
-                not in agent_capabilities.get(placement.node_id, ())
-            ):
-                blockers.append(
-                    AdmissionReason(
-                        "run.distributed_observation_capability_missing",
-                        "Spark agent does not support exact distributed rank inspection.",
-                    )
-                )
-            if two_phase_start and (
-                _SIGNED_RUN_INSPECTION_CAPABILITY
-                not in agent_capabilities.get(placement.node_id, ())
-                or not isinstance(receipt_keys.get(placement.node_id), str)
-            ):
-                blockers.append(
-                    AdmissionReason(
-                        "run.distributed_observation_receipt_capability_missing",
-                        "Spark agent does not support signed distributed rank observations.",
-                    )
-                )
             role = role_by_name.get(placement.role)
-            resources = role.get("resources") if isinstance(role, dict) else None
-            memory = resources.get("memory") if isinstance(resources, dict) else None
-            if not isinstance(memory, dict):
+            if role is None:
                 raise TypeError("topology role memory is invalid")
             memory_need = memory_requirement(
                 revision.document,
-                memory,
+                role.resources.memory,
                 placement.role,
                 model_documents,
                 platform_floor_bytes=self._floor,
@@ -877,7 +814,7 @@ class RunAdmissionService:
             else {}
         )
         logical_job = next(iter(port_demands.values())).logical_job
-        # Exact signed observation is the sole current run contract for every
+        # Exact observation is the sole current run contract for every
         # topology.  Singleton runs retain a durable generation while their
         # rendezvous fields remain explicitly nullable.
         observation_schema_version = 2

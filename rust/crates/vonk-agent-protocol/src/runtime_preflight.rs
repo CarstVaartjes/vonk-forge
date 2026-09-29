@@ -1,9 +1,9 @@
 //! Typed, bounded runtime preflight evidence. The request contains no commands.
+use crate::ProtocolError;
 pub use crate::generated::{
     RuntimePreflightFinding, RuntimePreflightFindingStatus as RuntimePreflightStatus,
     RuntimePreflightRequest, RuntimePreflightResult,
 };
-use crate::{ProtocolError, canonical_json, hex_sha256};
 
 fn capability_name(value: &str) -> bool {
     !value.is_empty()
@@ -14,32 +14,6 @@ fn capability_name(value: &str) -> bool {
         })
 }
 
-impl RuntimePreflightRequest {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.schema_version != 1
-            || !matches!(self.architecture.as_str(), "linux-arm64" | "linux-amd64")
-            || !matches!(
-                self.fabric_connectivity.as_str(),
-                "none" | "connected" | "full_mesh" | "switch"
-            )
-            || self.mandatory_capabilities.len() > 64
-            || self
-                .mandatory_capabilities
-                .iter()
-                .enumerate()
-                .any(|(index, value)| {
-                    !capability_name(value) || self.mandatory_capabilities[..index].contains(value)
-                })
-        {
-            return Err(ProtocolError::Identity("runtime preflight request"));
-        }
-        Ok(())
-    }
-    pub fn digest(&self) -> Result<String, ProtocolError> {
-        Ok(hex_sha256(&canonical_json(self)?))
-    }
-}
-
 impl RuntimePreflightResult {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         let digest = |value: &str| {
@@ -48,10 +22,7 @@ impl RuntimePreflightResult {
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         };
-        if self.schema_version != 1
-            || !digest(&self.fingerprint)
-            || !digest(&self.request_sha256)
-            || self.duration_ms >= 60000
+        if !digest(&self.fingerprint)
             || self.findings.len() > 96
             || self.findings.iter().enumerate().any(|(index, value)| {
                 !capability_name(&value.capability)
@@ -78,15 +49,10 @@ mod tests {
     #[test]
     fn fixed_helper_preflight_cannot_carry_a_command_or_mount_argument() {
         let mut request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::RuntimePreflight,
-            job_id: uuid::Uuid::new_v4(),
-            operation_id: uuid::Uuid::new_v4(),
-            attempt: 1,
             fence: uuid::Uuid::new_v4(),
             arguments: vec![],
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: None,

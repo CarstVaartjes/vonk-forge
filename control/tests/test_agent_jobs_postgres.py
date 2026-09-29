@@ -27,6 +27,7 @@ from vonk_control.operation_api import durable_operation_services
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.run_admission import RunAdmissionBusy
 
+from .agent_fences import fenced_attempt, fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import exercise_upgrade_reconnect
@@ -35,7 +36,7 @@ NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
 STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
-STOP_RESULT = {"stopped": True}
+STOP_RESULT = {}
 
 
 class Clock:
@@ -84,7 +85,6 @@ def service(postgres_engine):
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    capabilities=[],
                     workload_intent_ordinal=1,
                 )
             )
@@ -136,7 +136,7 @@ def test_postgres_resume_transition_has_one_concurrent_winner(
     job = parent(sessions, clock)
     jobs = AgentJobService(sessions, clock=clock)
     operation = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    original = claim_agent(jobs, NODE_A, "serial-a", 30)
+    original = claim_agent(jobs, NODE_A, "serial-a")
     assert original is not None
     jobs.wait_for_operator(original.fence, "operator must inspect the stopped effect")
     first = durable_operation_services(
@@ -171,17 +171,13 @@ def test_postgres_resume_transition_has_one_concurrent_winner(
         jobs,
         NODE_A,
         "serial-a",
-        30,
-        protocol_version=3,
-        capabilities=(
-            "agent.runtime.rust.v1",
-            "recipe.stop",
-            "agent.lifecycle.resume.exact.v1",
-        ),
     )
     assert resumed is not None
-    assert resumed.operation_id == operation.id
-    assert resumed.attempt == original.attempt + 1
+    assert fenced_operation(sessions, resumed).id == operation.id
+    assert (
+        fenced_attempt(sessions, resumed).attempt
+        == fenced_attempt(sessions, original).attempt + 1
+    )
 
 
 def test_postgres_claim_locks_only_operations_without_nullable_join(
@@ -200,7 +196,7 @@ def test_postgres_claim_locks_only_operations_without_nullable_join(
 
     event.listen(postgres_engine, "before_cursor_execute", record)
     try:
-        assert claim_agent(jobs, NODE_A, "serial-a", 30) is not None
+        assert claim_agent(jobs, NODE_A, "serial-a") is not None
     finally:
         event.remove(postgres_engine, "before_cursor_execute", record)
 
@@ -227,20 +223,17 @@ def test_postgres_upgrade_bypasses_unsupported_work_then_resumes_it(
     (
         (
             "artifact.distribution.v1",
-            {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+            {"plan_digest": COMMIT},
             "agent_restart_interrupted",
             True,
         ),
         (
             "runtime.preflight.v1",
             {
-                "schema_version": 1,
-                "architecture": "linux-arm64",
                 "source_build": False,
                 "minimum_free_bytes": 0,
                 "fabric_connectivity": "none",
                 "fabric_minimum_mbps": 0,
-                "mandatory_capabilities": [],
             },
             "agent_restart_interrupted",
             True,
@@ -248,7 +241,7 @@ def test_postgres_upgrade_bypasses_unsupported_work_then_resumes_it(
         ("recipe.stop", STOP_PAYLOAD, "agent_restart_interrupted", True),
         (
             "artifact.distribution.v1",
-            {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+            {"plan_digest": COMMIT},
             # Any uncertain effect of a restart-safe order is reconciled by
             # re-issue, exactly like an expired lease; it is not parked.
             "operation_outcome_uncertain",
@@ -263,19 +256,10 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
     jobs = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
     operation = jobs.enqueue(parent_job.id, NODE_A, kind, COMMIT, payload)
-    capabilities = ["agent.runtime.rust.v1", kind]
-    resume_capabilities = (
-        [*capabilities, "agent.lifecycle.resume.exact.v1"]
-        if kind == "recipe.stop"
-        else capabilities
-    )
     first = claim_agent(
         jobs,
         NODE_A,
         "serial-a",
-        30,
-        protocol_version=3,
-        capabilities=capabilities,
     )
     assert first is not None
 
@@ -283,18 +267,7 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
         return AgentResult.model_validate_json(
             canonical_message(
                 {
-                    **{
-                        key: getattr(claim, key)
-                        for key in (
-                            "schema_version",
-                            "job_id",
-                            "operation_id",
-                            "attempt",
-                            "fence",
-                            "node_id",
-                            "deadline",
-                        )
-                    },
+                    **{key: getattr(claim, key) for key in ("fence",)},
                     "state": "waiting-for-operator",
                     "result": {
                         "error_code": error_code,
@@ -327,46 +300,22 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
             jobs,
             NODE_A,
             "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=resume_capabilities,
         )
         is None
     )
     if due is not None:
         clock.now = due.replace(tzinfo=UTC)
-        if kind == "recipe.stop":
-            assert (
-                claim_agent(
-                    jobs,
-                    NODE_A,
-                    "serial-a",
-                    30,
-                    protocol_version=3,
-                    capabilities=capabilities,
-                )
-                is None
-            )
-            with sessions() as session:
-                stored = session.get(AgentOperation, operation.id)
-                assert stored is not None
-                assert stored.status_reason is not None
-                assert (
-                    "Spark agent update required before exact recovery"
-                    in stored.status_reason
-                )
-                assert stored.retry_due_at == due
         second = claim_agent(
             jobs,
             NODE_A,
             "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=resume_capabilities,
         )
         assert second is not None
-        assert second.operation_id == operation.id
-        assert second.attempt == first.attempt + 1
+        assert fenced_operation(sessions, second).id == operation.id
+        assert (
+            fenced_attempt(sessions, second).attempt
+            == fenced_attempt(sessions, first).attempt + 1
+        )
         assert second.payload == first.payload
         for attempt_number in range(2, 7):
             jobs.record_result(restart_receipt(second))
@@ -386,13 +335,14 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
                 jobs,
                 NODE_A,
                 "serial-a",
-                30,
-                protocol_version=3,
-                capabilities=resume_capabilities,
             )
-            assert second is not None and second.attempt == attempt_number + 1
             assert (
-                second.operation_id == operation.id and second.payload == first.payload
+                second is not None
+                and fenced_attempt(sessions, second).attempt == attempt_number + 1
+            )
+            assert (
+                fenced_operation(sessions, second).id == operation.id
+                and second.payload == first.payload
             )
 
 
@@ -407,14 +357,14 @@ def test_postgres_separate_services_cannot_claim_the_same_operation(service) -> 
 
     def claim(service):
         barrier.wait()
-        return claim_agent(service, NODE_A, "serial-a", 30)
+        return claim_agent(service, NODE_A, "serial-a")
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         claims = list(pool.map(claim, (first_service, second_service)))
 
     claimed = [claim for claim in claims if claim is not None]
     assert len(claimed) == 1
-    assert claimed[0].operation_id == operation.id
+    assert fenced_operation(sessions, claimed[0]).id == operation.id
 
 
 @pytest.mark.parametrize("agent_action", ("claim", "heartbeat", "result"))
@@ -430,7 +380,7 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
     claim = None
     original_deadline = None
     if agent_action != "claim":
-        claim = claim_agent(jobs, NODE_A, "serial-a", 30, protocol_version=3)
+        claim = claim_agent(jobs, NODE_A, "serial-a")
         assert claim is not None
         original_deadline = claim.deadline
     with sessions.begin() as session:
@@ -469,7 +419,7 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
     def act() -> None:
         try:
             if agent_action == "claim":
-                action_results.append(claim_agent(jobs, NODE_A, "serial-a", 30))
+                action_results.append(claim_agent(jobs, NODE_A, "serial-a"))
             elif agent_action == "heartbeat":
                 assert claim is not None
                 action_results.append(jobs.heartbeat(claim, {"phase": "checking"}, 60))
@@ -528,7 +478,8 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(
                     AgentOperationAttempt.operation_id == operation.id,
-                    AgentOperationAttempt.attempt == claim.attempt,
+                    AgentOperationAttempt.attempt
+                    == fenced_attempt(sessions, claim).attempt,
                 )
             )
             assert attempt is not None and attempt.state == "running"
@@ -543,11 +494,11 @@ def test_postgres_expired_mutating_operation_schedules_bounded_exact_retry(
     jobs = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
     operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
 
     clock.advance(seconds=30)
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with sessions() as session:
         gated = session.get(AgentOperation, operation.id)
@@ -567,25 +518,17 @@ def test_postgres_expired_mutating_operation_schedules_bounded_exact_retry(
         assert session.get(Job, parent_job.id).state == "queued"  # type: ignore[union-attr]
 
     clock.now = due.replace(tzinfo=UTC)
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
     second = claim_agent(
         jobs,
         NODE_A,
         "serial-a",
-        30,
-        protocol_version=3,
-        capabilities=[
-            "agent.runtime.rust.v1",
-            "recipe.stop",
-            "agent.lifecycle.resume.exact.v1",
-        ],
     )
     assert second is not None
-    assert second.operation_id == first.operation_id
-    assert second.attempt == 2
+    assert fenced_operation(sessions, second).id == fenced_operation(sessions, first).id
+    assert fenced_attempt(sessions, second).attempt == 2
 
     clock.advance(seconds=30)
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
 
 @pytest.mark.parametrize("exhausted", (False, True))
@@ -596,24 +539,13 @@ def test_postgres_new_stop_supersedes_parked_old_retry_without_starvation(
     jobs = AgentJobService(sessions, clock=clock)
     old_parent = parent(sessions, clock)
     old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
     jobs.record_result(
         AgentResult.model_validate_json(
             canonical_message(
                 {
-                    **{
-                        key: getattr(first, key)
-                        for key in (
-                            "schema_version",
-                            "job_id",
-                            "operation_id",
-                            "attempt",
-                            "fence",
-                            "node_id",
-                            "deadline",
-                        )
-                    },
+                    **{key: getattr(first, key) for key in ("fence",)},
                     "state": "waiting-for-operator",
                     "result": {
                         "error_code": "agent_restart_interrupted",
@@ -657,8 +589,8 @@ def test_postgres_new_stop_supersedes_parked_old_retry_without_starvation(
             isinstance(old_job.result, dict)
             and old_job.result.get("cancel_requested") is True
         )
-    claimed = claim_agent(jobs, NODE_A, "serial-a", 30)
-    assert claimed is not None and claimed.operation_id == current.id
+    claimed = claim_agent(jobs, NODE_A, "serial-a")
+    assert claimed is not None and fenced_operation(sessions, claimed).id == current.id
 
 
 @pytest.mark.parametrize(
@@ -709,7 +641,7 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
     enqueueing = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
     finishing.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    claim = claim_agent(finishing, NODE_A, "serial-a", 30)
+    claim = claim_agent(finishing, NODE_A, "serial-a")
     assert claim is not None
     aggregation_read = threading.Event()
     release = threading.Event()
@@ -815,7 +747,7 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
     first_operation = finishing.enqueue(
         parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    claim = claim_agent(finishing, NODE_A, "serial-a", 30)
+    claim = claim_agent(finishing, NODE_A, "serial-a")
     assert claim is not None
     node_locked = threading.Event()
     release_enqueue = threading.Event()
@@ -907,7 +839,7 @@ def test_postgres_complete_serializes_expiry_gate_with_identity_lock(
     completing.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    first = claim_agent(completing, NODE_A, "serial-a", 30)
+    first = claim_agent(completing, NODE_A, "serial-a")
     assert first is not None
     clock.advance(seconds=30)
     locked = threading.Event()
@@ -943,7 +875,7 @@ def test_postgres_complete_serializes_expiry_gate_with_identity_lock(
 
         def reclaim() -> None:
             try:
-                reclaimed.append(claim_agent(reclaiming, NODE_A, "serial-a", 30))
+                reclaimed.append(claim_agent(reclaiming, NODE_A, "serial-a"))
             except (
                 AssertionError,
                 OSError,
@@ -979,7 +911,7 @@ def test_postgres_complete_serializes_expiry_gate_with_identity_lock(
     assert reclaimed[0] is None
     with sessions() as session:
         assert (
-            session.get(AgentOperation, first.operation_id).state
+            session.get(AgentOperation, fenced_operation(sessions, first).id).state
             == "waiting-for-operator"
         )
 
@@ -999,8 +931,8 @@ def test_postgres_concurrent_final_completions_aggregate_parent_once(
         COMMIT,
         recipe_stop_payload(NODE_B, plan_digest=COMMIT),
     )
-    first = claim_agent(first_service, NODE_A, "serial-a", 30)
-    second = claim_agent(second_service, NODE_B, "serial-b", 30)
+    first = claim_agent(first_service, NODE_A, "serial-a")
+    second = claim_agent(second_service, NODE_B, "serial-b")
     assert first is not None and second is not None
     aggregation_started = threading.Event()
     release = threading.Event()
@@ -1080,8 +1012,8 @@ def test_postgres_non_boolean_cancel_flag_does_not_cancel(service, malformed) ->
         assert job is not None
         job.result = {"cancel_requested": malformed}
 
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
-    assert claim is not None and claim.operation_id == operation.id
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None and fenced_operation(sessions, claim).id == operation.id
 
     with sessions() as session:
         job = session.get(Job, parent_job.id)
@@ -1101,7 +1033,7 @@ def test_postgres_boolean_cancel_request_is_named(service) -> None:
         assert job is not None
         job.result = {"cancel_requested": True}
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
@@ -1115,10 +1047,10 @@ def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(ser
     operation = first.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    original = claim_agent(first, NODE_A, "serial-a", 30)
+    original = claim_agent(first, NODE_A, "serial-a")
     assert original is not None
     clock.advance(seconds=31)
-    assert claim_agent(first, NODE_A, "serial-a", 30) is None
+    assert claim_agent(first, NODE_A, "serial-a") is None
     with sessions.begin() as session:
         parked = session.get(AgentOperation, operation.id)
         assert parked is not None
@@ -1136,11 +1068,6 @@ def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(ser
         job = session.get(Job, parked.parent_job_id)
         assert job is not None
         job.state = "waiting-for-operator"
-    capabilities = [
-        "agent.runtime.rust.v1",
-        "recipe.stop",
-        "agent.lifecycle.resume.exact.v1",
-    ]
     services = (
         AgentJobService(sessions, clock=clock),
         AgentJobService(sessions, clock=clock),
@@ -1153,9 +1080,6 @@ def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(ser
             service,
             NODE_A,
             "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=capabilities,
         )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -1169,9 +1093,12 @@ def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(ser
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(claim_from, services))
     resumed = [claim for claim in outcomes if claim is not None]
-    assert len(resumed) == 1 and resumed[0].attempt == 6
-    assert resumed[0].operation_id == operation.id
+    assert len(resumed) == 1 and fenced_attempt(sessions, resumed[0]).attempt == 6
+    assert fenced_operation(sessions, resumed[0]).id == operation.id
     with pytest.raises(StaleAgentAttempt):
         first.succeed(original, STOP_RESULT)
     services[0].succeed(resumed[0], STOP_RESULT)
-    assert state(sessions, original.job_id) == "succeeded"
+    assert (
+        state(sessions, fenced_operation(sessions, original).parent_job_id)
+        == "succeeded"
+    )

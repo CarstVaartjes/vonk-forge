@@ -25,7 +25,6 @@ from vonk_control.failure_classification import (
         "helper_grant_invalid",
         "helper_request_replayed",
         "request_replayed",
-        "runtime_helper_observation_receipt_invalid",
         "controller.request_rejected",
         "agent.certificate.rotation.conflict",
     ],

@@ -20,8 +20,8 @@ use vonk_agent::{
 };
 use vonk_agent_protocol::{
     RecipeBuildAdapter, RecipeBuildAdapterDefinition, RecipeBuildAdditionalContext,
-    RecipeBuildArgument, RecipeBuildBaseImage, RecipeBuildLimits, RecipeBuildMetadata,
-    RecipeBuildNetwork, RecipeBuildOptions, RecipeBuildRequest, canonical_json, hex_sha256,
+    RecipeBuildBaseImage, RecipeBuildLimits, RecipeBuildMetadata, RecipeBuildNetwork,
+    RecipeBuildOptions, RecipeBuildRequest, canonical_json, hex_sha256,
 };
 
 struct Runner {
@@ -487,10 +487,6 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
     let base = registry_fixture();
     RecipeBuildRequest {
         adapter: adapter_fixture(),
-        arguments: vec![RecipeBuildArgument {
-            name: "runtime-version".to_owned(),
-            value: serde_json::json!("1"),
-        }],
         base_image_storage_bytes: 64 * 1024 * 1024,
         base_images: vec![RecipeBuildBaseImage {
             manifest_digest: base.manifest_digest,
@@ -500,23 +496,15 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
         build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000009").unwrap(),
         build_input_sha256: "c".repeat(64),
         dockerfile: "Dockerfile".to_owned(),
-        kind: "recipe.build.v1".to_owned(),
         limits: RecipeBuildLimits {
-            container_socket: false,
             cpu_cores: 8,
-            gpu: 0,
-            host_mounts: false,
             memory_bytes: 8 * 1024 * 1024 * 1024,
             output_bytes: 64 * 1024 * 1024,
-            privileged: false,
             processes: 4096,
             temporary_bytes: 64 * 1024 * 1024,
             timeout_seconds: 3600,
         },
-        network: RecipeBuildNetwork {
-            hosts: Vec::new(),
-            mode: "none".parse().unwrap(),
-        },
+        network: RecipeBuildNetwork { hosts: Vec::new() },
         options: RecipeBuildOptions {
             additional_contexts: vec![RecipeBuildAdditionalContext {
                 name: "assets".to_owned(),
@@ -558,13 +546,10 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
             unset_environment: vec!["OLD_ENV".to_owned()],
             unset_labels: vec!["org.example.old".to_owned()],
         },
-        platform: "linux/arm64".to_owned(),
         recipe_content_sha256: "a".repeat(64),
         recipe_revision_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
-        schema_version: 1,
         source_bundle_bytes: u32::try_from(bundle_bytes).unwrap(),
         source_bundle_sha256: digest,
-        target: None,
     }
 }
 
@@ -1090,8 +1075,7 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     let runtime = tempdir().unwrap();
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
 
-    let mut build_request = request(archive.len(), digest);
-    build_request.target = Some("runtime".to_owned());
+    let build_request = request(archive.len(), digest);
     let evidence = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
@@ -1190,8 +1174,6 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
         "org.example.old",
         "--platform",
         "linux/arm64",
-        "--target",
-        "runtime",
         "--root",
         "--runroot",
     ] {
@@ -2212,7 +2194,6 @@ fn build_routes_declared_public_hosts_through_an_ephemeral_internal_proxy() {
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
     let mut build_request = request(archive.len(), digest);
     build_request.network = RecipeBuildNetwork {
-        mode: "public".parse().unwrap(),
         hosts: vec!["pypi.org".to_owned()],
     };
 
@@ -2311,42 +2292,6 @@ fn build_routes_declared_public_hosts_through_an_ephemeral_internal_proxy() {
 }
 
 #[test]
-fn build_rejects_recipe_proxy_argument_override_before_starting_the_boundary() {
-    let (archive, digest) = bundle();
-    let runner = Runner {
-        calls: RefCell::new(Vec::new()),
-        fail_build: false,
-        oversize_base: false,
-        registry: None,
-        substitute_base: false,
-    };
-    let root = tempdir().unwrap();
-    stage_base_archive(root.path());
-    let runtime = tempdir().unwrap();
-    let mut build_request = request(archive.len(), digest);
-    build_request.network = RecipeBuildNetwork {
-        mode: "public".parse().unwrap(),
-        hosts: vec!["pypi.org".to_owned()],
-    };
-    build_request.arguments[0].name = "HTTPS_PROXY".to_owned();
-
-    let error = RecipeBuilder {
-        runner: &runner,
-        data_root: root.path(),
-        runtime_root: runtime.path(),
-        egress_binary: Path::new("/bin/true"),
-    }
-    .build(
-        &build_request,
-        Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
-        &archive,
-    )
-    .unwrap_err();
-
-    assert!(matches!(error, RecipeBuildError::NetworkPolicy));
-}
-
-#[test]
 fn public_build_cancellation_stops_work_and_removes_the_egress_boundary() {
     let (archive, digest) = bundle();
     let runner = CancellingRunner {
@@ -2365,7 +2310,6 @@ fn public_build_cancellation_stops_work_and_removes_the_egress_boundary() {
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
     let mut build_request = request(archive.len(), digest);
     build_request.network = RecipeBuildNetwork {
-        mode: "public".parse().unwrap(),
         hosts: vec!["pypi.org".to_owned()],
     };
 

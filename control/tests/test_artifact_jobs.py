@@ -36,6 +36,7 @@ from vonk_control.artifact_jobs import (
     _effective_parameters,
     _validate_parameter_definition,
 )
+from vonk_control.bounded_json import require_mapping
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -51,7 +52,7 @@ from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
     RecipeOperationConflict,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
@@ -194,7 +195,6 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
         "knobs": {},
     }
     document["validation"] = {
-        "benchmarks": [],
         "serving": {
             "interface": "image-job",
             "checks": [
@@ -205,9 +205,7 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
                     "request": {
                         "transport": "job",
                         "fixture": "fixtures/input.png",
-                        "input_path": "/inputs",
                         "input_slots": {},
-                        "output_path": "/outputs",
                         "output_slot": "image",
                     },
                 }
@@ -217,15 +215,12 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
     document["interfaces"] = [
         {
             "adapter": "image-job",
-            "path": "/outputs",
             "input": {
-                "path": "/inputs",
                 "required": True,
                 "media_types": ["image/png"],
                 "max_bytes": 32 * 1024**2,
             },
             "output": {
-                "path": "/outputs",
                 "max_total_bytes": 4096,
                 "slots": [
                     {
@@ -416,17 +411,10 @@ def cancellation_result(
 ) -> AgentResult:
     empty: tuple[RecipeJobFile, ...] = ()
     return AgentResult(
-        schema_version=1,
-        job_id=claim.job_id,
-        operation_id=claim.operation_id,
-        attempt=claim.attempt,
         fence=claim.fence,
-        node_id=claim.node_id,
-        deadline=claim.deadline,
         state=state,
         result=RecipeJobRunResult.model_validate(
             {
-                "schema_version": 1,
                 "job_id": artifact_job.id,
                 "run_id": artifact_job.run_id,
                 "exit_code": 130,
@@ -541,7 +529,7 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
             schema_version=2,
             state="active",
             document=parsed.model_dump(mode="json"),
-            content_digest=content_sha256(parsed),
+            content_digest=document_sha256(parsed.model_dump(mode="json")),
             projected={},
             created_by="admin",
             created_at=revision.created_at,
@@ -632,7 +620,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         entrypoint = _mapping(roles[0])
         resources = _mapping(entrypoint["resources"])
         memory = _mapping(resources["memory"])
-        memory["system_reserve_bytes"] = 107
+        memory["reserve_bytes"] = 107
         interfaces = _sequence(document["interfaces"])
         image_interface = _mapping(interfaces[0])
         output = _mapping(image_interface["output"])
@@ -726,7 +714,16 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         )
         assert operation is not None
         assert operation.kind == "recipe.job.run.v1"
-        assert operation.payload["reserved_memory_bytes"] == 225
+        placement = require_mapping(
+            require_mapping(
+                require_mapping(
+                    operation.payload["compiled_execution_plan"], "compiled plan"
+                )["runtime"],
+                "compiled runtime",
+            )["placement"],
+            "compiled placement",
+        )
+        assert placement["reserved_memory_bytes"] == 225
         run = session.get(RecipeRun, run_id)
         assert run is not None
         planned_floor = next(
@@ -735,20 +732,12 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
             if item.node_id == node_id
         )
         assert planned_floor == 107
-        assert operation.payload["memory_floor_bytes"] == planned_floor
-        planned_kind = next(
-            item.memory_kind
-            for item in parse_stored_run_plan(run.plan).nodes
-            if item.node_id == node_id
-        )
-        assert operation.payload["memory_kind"] == planned_kind
+        assert placement["memory_floor_bytes"] == planned_floor
         assert operation.payload["input_manifest_sha256"] == job.input_manifest_sha256
-        assert operation.payload["contract_sha256"] == job.contract_sha256
         compiled_plan = _mapping(operation.payload["compiled_execution_plan"])
         plan_runtime = _mapping(compiled_plan["runtime"])
         plan_placement = _mapping(plan_runtime["placement"])
         assert plan_placement["memory_floor_bytes"] == planned_floor
-        assert plan_placement["memory_kind"] == planned_kind
         assert "fox / meadow" in _sequence(plan_runtime["argv"])
         assert operation.payload["output_mappings"] == [
             {
@@ -805,7 +794,6 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
     )
     outputs = (metadata_output, image_output)
     result = {
-        "schema_version": 1,
         "job_id": job.id,
         "run_id": run_id,
         "exit_code": 0,
@@ -1197,7 +1185,6 @@ def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
         sha256=output_digest,
     )
     result = {
-        "schema_version": 1,
         "job_id": job.id,
         "run_id": run_id,
         "exit_code": 0,
@@ -1318,9 +1305,9 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
 
     agent_jobs.set_result_consumer(consume)
     recipe_operations._agent_jobs = agent_jobs
-    assert claim_agent(agent_jobs, node_id, "serial-0", 30) is None
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
     submitted = submitted_artifact_job(service, run_id, request_suffix=118)
-    claim = claim_agent(agent_jobs, node_id, "serial-0", 30)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
 
     cancelling = service.cancel(
@@ -1389,9 +1376,9 @@ def test_artifact_cancel_stop_failure_remains_recoverable_and_blocks_release(
 
     agent_jobs.set_result_consumer(consume)
     recipe_operations._agent_jobs = agent_jobs
-    assert claim_agent(agent_jobs, node_id, "serial-0", 30) is None
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
     submitted = submitted_artifact_job(service, run_id, request_suffix=121)
-    claim = claim_agent(agent_jobs, node_id, "serial-0", 30)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
     service.cancel(
         submitted.id,
@@ -1431,13 +1418,13 @@ def test_unsafe_artifact_lease_expiry_is_terminal_recoverable_and_fences_result(
     clock = MutableClock(NOW)
     agent_jobs = AgentJobService(sessions, clock=clock)
     recipe_operations._agent_jobs = agent_jobs
-    assert claim_agent(agent_jobs, node_id, "serial-0", 30) is None
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
     submitted = submitted_artifact_job(service, run_id, request_suffix=124)
-    claim = claim_agent(agent_jobs, node_id, "serial-0", 30)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
 
     clock.advance(seconds=31)
-    assert claim_agent(agent_jobs, node_id, "serial-0", 30) is None
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
     expired = service.get(submitted.id)
     assert expired.state == "failed"
     assert expired.result_evidence == {

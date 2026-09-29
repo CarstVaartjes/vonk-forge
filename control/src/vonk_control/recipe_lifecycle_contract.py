@@ -21,14 +21,11 @@ from vonk_agent_protocol import (
     RecipeImageImportEvidence,
     RecipeJobRunResult,
     RecipeReconcileResult,
-    RecipeStartCollectiveReadinessEvidence,
-    RecipeStartRankLaunchEvidence,
-    RecipeStartSingleEvidence,
+    RecipeStartResult,
     RecipeStopResult,
     RecipeUninstallResult,
     canonical_message,
 )
-from vonk_agent_protocol.contracts import TensorParallelStartEvidence
 
 from .library_contract import NodeId, UuidId
 from .strict_json import StrictJSONModel
@@ -58,10 +55,7 @@ LifecycleNodeResult = Annotated[
     | RecipeBuildEvidence
     | RecipeBuildCleanupEvidence
     | RecipeImageImportEvidence
-    | RecipeStartSingleEvidence
-    | RecipeStartRankLaunchEvidence
-    | RecipeStartCollectiveReadinessEvidence
-    | TensorParallelStartEvidence
+    | RecipeStartResult
     | RecipeStopResult
     | RecipeUninstallResult
     | RecipeReconcileResult
@@ -216,12 +210,7 @@ def _validate_evidence_for_kind(kind: str, value: object) -> None:
     elif kind == "recipe.install":
         evidence_models = (AgentInstallResult,)
     elif kind == "recipe.start":
-        evidence_models = (
-            RecipeStartSingleEvidence,
-            RecipeStartCollectiveReadinessEvidence,
-            RecipeStartRankLaunchEvidence,
-            TensorParallelStartEvidence,
-        )
+        evidence_models = (RecipeStartResult,)
     elif kind == "recipe.stop":
         evidence_models = (RecipeStopResult,)
     elif kind == "recipe.uninstall":
@@ -269,6 +258,5 @@ __all__ = [
     "RecipeOperationResult",
     "RecipeOperationStoppedResult",
     "RemovedRecipeNodeResult",
-    "TensorParallelStartEvidence",
     "parse_recipe_lifecycle_result",
 ]

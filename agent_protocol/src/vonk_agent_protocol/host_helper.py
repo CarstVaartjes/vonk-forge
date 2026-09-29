@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import ipaddress
-import re
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
@@ -12,7 +9,6 @@ from pydantic import (
     Field,
     TypeAdapter,
     ValidationError,
-    field_validator,
     model_validator,
 )
 
@@ -27,9 +23,6 @@ from .wire_model import WireModel
 
 HOST_HELPER_AUTHORITY = "vonk.host-maintenance-helper"
 HOST_HELPER_GRANT_DOMAIN = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\x00"
-HOST_ARTIFACT_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00"
-RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY = "vonk.recipe-run-observation-helper"
-RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\x00"
 MAX_HOST_HELPER_GRANT_SECONDS = 300
 # A complete runtime request carries its typed plan plus one frame's worth of
 # projected argv and envelope. The signed helper frame itself carries only the
@@ -64,81 +57,17 @@ ContainerRuntimeActionName = Literal[
 ]
 
 
-class RecipeRunInspectionBinding(WireModel):
-    """Exact run identity bound into a signed helper inspection request."""
-
-    run_id: Uuid4Text
-    installation_id: Uuid4Text
-    recipe_revision_id: Uuid4Text
-    recipe_content_sha256: Digest
-    mapping_id: Uuid4Text
-    mapping_generation: int = Field(ge=1, le=2**63 - 1, strict=True)
-    run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
-    image_digest: Digest
-    artifact_set_digest: Digest
-    model_identity: str = Field(min_length=3, max_length=1024)
-    rank: int = Field(ge=0, le=1023, strict=True)
-    role: str = Field(min_length=1, max_length=64)
-    world_size: int = Field(ge=1, le=1024, strict=True)
-    local_address: str | None = Field(
-        min_length=2, max_length=45, json_schema_extra={"format": "ip"}
-    )
-    master_address: str | None = Field(
-        min_length=2, max_length=45, json_schema_extra={"format": "ip"}
-    )
-    master_port: int | None = Field(ge=1024, le=65535, strict=True)
-    port: int = Field(ge=1024, le=65535, strict=True)
-    runtime_arguments_sha256: Digest
-
-    @field_validator("local_address", "master_address")
-    @classmethod
-    def canonical_fabric_address(cls, value: str | None) -> str | None:
-        if value is not None:
-            address = ipaddress.ip_address(value)
-            if (
-                str(address) != value
-                or address.is_loopback
-                or address.is_unspecified
-                or address.is_multicast
-                or address.is_link_local
-            ):
-                raise ValueError("inspection address must be canonical and routable")
-        return value
-
-    @model_validator(mode="after")
-    def exact_rendezvous(self) -> RecipeRunInspectionBinding:
-        if self.rank >= self.world_size:
-            raise ValueError("inspection rank is outside its world")
-        rendezvous = (self.local_address, self.master_address, self.master_port)
-        if (
-            self.world_size == 1 and any(value is not None for value in rendezvous)
-        ) or (self.world_size > 1 and any(value is None for value in rendezvous)):
-            raise ValueError("inspection rendezvous is invalid")
-        return self
-
-
 class RecipeReconciliationIdentity(WireModel):
-    """Exact old install authority carried through the signed cleanup grant."""
+    """The install a reconciliation removes, carried through the cleanup grant."""
 
-    schema_version: Literal[1]
-    node_id: NodeId
     installation_id: Uuid4Text
-    install_operation_id: Uuid4Text
-    install_operation_payload_sha256: Digest
     plan_digest: Digest
-    recipe_revision_id: Uuid4Text
-    recipe_content_sha256: Digest
-    compiled_spec_canonical_sha256: Digest
 
 
 class HostRuntimeRequest(WireModel):
     """The complete bytes hashed by the agent and admitted by the root helper."""
 
-    schema_version: Literal[1]
     action: ContainerRuntimeActionName
-    job_id: Uuid4Text
-    operation_id: Uuid4Text
-    attempt: int = Field(ge=1, le=2**31 - 1)
     fence: Uuid4Text
     # One request carries the whole container command line. The authoritative
     # size limit is the canonical request byte ceiling
@@ -166,7 +95,6 @@ class HostRuntimeRequest(WireModel):
         strict=True,
         exclude_if=lambda value: value is None,
     )
-    observation: RecipeRunInspectionBinding | None = None
     installation_id: Uuid4Text | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -240,14 +168,6 @@ class HostRuntimeRequest(WireModel):
             raise ValueError("runtime plan binding does not match the action")
         if len(canonical_message(self)) > MAX_HOST_RUNTIME_REQUEST_BYTES:
             raise ValueError("runtime request exceeds its canonical byte ceiling")
-        if self.observation is not None and (
-            self.action != "run-inspect"
-            or self.job_id != self.observation.run_id
-            or self.attempt != self.observation.run_generation
-            or hashlib.sha256(canonical_message(self.arguments)).hexdigest()
-            != self.observation.runtime_arguments_sha256
-        ):
-            raise ValueError("runtime observation binding does not match the request")
         return self
 
 
@@ -269,8 +189,6 @@ class ContainerRuntimeAction(StrEnum):
 class HostOperationKind(StrEnum):
     INSTALL_VONK_DEB = "install-vonk-deb"
     CONFIRM_PACKAGE_ACTIVATION = "confirm-package-activation"
-    RESTART_VONK_UNIT = "restart-vonk-unit"
-    SCHEDULE_REBOOT = "schedule-reboot"
     EXECUTE_CONTAINER_RUNTIME_REQUEST = "execute-container-runtime-request"
 
 
@@ -292,22 +210,9 @@ class ConfirmPackageActivationOperation(_HostOperation):
     attempt_nonce: Digest
 
 
-class RestartVonkUnitOperation(_HostOperation):
-    type: Literal["restart-vonk-unit"]
-    unit: Literal["agent", "helper"]
-
-
-class ScheduleRebootOperation(_HostOperation):
-    type: Literal["schedule-reboot"]
-    delay_seconds: int = Field(ge=60, le=3600, strict=True)
-
-
 class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     type: Literal["execute-container-runtime-request"]
     action: ContainerRuntimeActionName
-    job_id: Uuid4Text
-    operation_id: Uuid4Text
-    attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
     fence: Uuid4Text
     request_sha256: Digest
     start_plan_sha256: Digest | None = Field(
@@ -332,9 +237,6 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     runtime_installation_id: Uuid4Text | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    observation_identity_sha256: Digest | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
     installation_id: Uuid4Text | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -343,14 +245,9 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     )
 
     @model_validator(mode="after")
-    def observation_only_for_inspection(
+    def bind_action_authority(
         self,
     ) -> ExecuteContainerRuntimeRequestOperation:
-        if (
-            self.observation_identity_sha256 is not None
-            and self.action != "run-inspect"
-        ):
-            raise ValueError("container runtime observation identity is invalid")
         if (self.installation_id is not None) != (
             self.action == "installation-cleanup"
         ):
@@ -398,8 +295,6 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
 type HostOperation = Annotated[
     InstallVonkDebOperation
     | ConfirmPackageActivationOperation
-    | RestartVonkUnitOperation
-    | ScheduleRebootOperation
     | ExecuteContainerRuntimeRequestOperation,
     Field(discriminator="type"),
 ]
@@ -467,66 +362,22 @@ class SignedHostHelperGrant(WireModel):
         return self.model_dump(mode="json")
 
 
-class RecipeRunObservationReceiptClaims(WireModel):
-    schema_version: Literal[1]
-    authority: Literal["vonk.recipe-run-observation-helper"]
-    node_id: NodeId
+class RecipeRunInspectionRequest(WireModel):
+    """Helper frame for one read-only inspection of a managed run.
+
+    Unlike every other helper operation it needs no Controller grant: it only
+    reports whether the exact container of an agent-written ``run-inspect``
+    runtime request is running.
+    """
+
     request_id: Uuid4Text
     request_sha256: Digest
-    observation_identity_sha256: Digest
-    outcome: Literal["running", "not-running"]
-    observed_at: int = Field(
-        gt=0, strict=True, le=2**63 - 1, json_schema_extra={"format": "int64"}
-    )
-
-    @classmethod
-    def parse(cls, value: Any) -> RecipeRunObservationReceiptClaims:
-        return _parse_model(cls, value, "recipe run observation receipt claims")
-
-    def to_mapping(self) -> dict[str, object]:
-        return self.model_dump(mode="json")
-
-
-class SignedRecipeRunObservationReceipt(WireModel):
-    schema_version: Literal[1]
-    claims: RecipeRunObservationReceiptClaims
-    signature: HostHelperSignature
-
-    @classmethod
-    def parse(cls, value: Any) -> SignedRecipeRunObservationReceipt:
-        return _parse_model(cls, value, "signed recipe run observation receipt")
-
-    def to_mapping(self) -> dict[str, object]:
-        return self.model_dump(mode="json")
 
 
 def host_helper_grant_signing_bytes(claims: HostHelperGrantClaims) -> bytes:
     if type(claims) is not HostHelperGrantClaims:
         raise AgentProtocolError("host helper grant claims are invalid")
     return HOST_HELPER_GRANT_DOMAIN + canonical_message(claims.to_mapping())
-
-
-def recipe_run_observation_receipt_signing_bytes(
-    claims: RecipeRunObservationReceiptClaims,
-) -> bytes:
-    if type(claims) is not RecipeRunObservationReceiptClaims:
-        raise AgentProtocolError("recipe run observation receipt claims are invalid")
-    return RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN + canonical_message(
-        claims.to_mapping()
-    )
-
-
-def host_artifact_signing_bytes(kind: str, digest: str) -> bytes:
-    if (
-        kind not in {"agent", "deb"}
-        or not isinstance(digest, str)
-        or _DIGEST.fullmatch(digest) is None
-    ):
-        raise AgentProtocolError("host artifact is invalid")
-    return HOST_ARTIFACT_DOMAIN + kind.encode("ascii") + b"\x00" + bytes.fromhex(digest)
-
-
-_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def _parse_model(cls: type[WireModel], value: Any, name: str) -> Any:

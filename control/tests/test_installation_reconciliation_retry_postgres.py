@@ -11,12 +11,12 @@ from vonk_agent_protocol import (
     AgentClaim,
     AgentResult,
     RecipeReconcilePayload,
-    RecipeReconcileResult,
     canonical_message,
 )
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import AgentOperation, AgentOperationAttempt, Job
 
+from .agent_fences import fenced_attempt, fenced_operation
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs_postgres import (
     COMMIT,
@@ -29,26 +29,9 @@ from .test_agent_jobs_postgres import (
 
 pytestmark = pytest.mark.lane
 
-RECONCILE_CAPABILITIES = (
-    "agent.runtime.rust.v1",
-    "agent.lifecycle.resume.exact.v1",
-    "recipe.reconcile",
-    "recipe.reconcile.v1",
-)
-
 
 def _payload() -> RecipeReconcilePayload:
-    return RecipeReconcilePayload(
-        schema_version=1,
-        node_id=NODE_A,
-        installation_id=str(uuid.uuid4()),
-        install_operation_id=str(uuid.uuid4()),
-        install_operation_payload_sha256=COMMIT,
-        plan_digest=COMMIT,
-        recipe_revision_id=str(uuid.uuid4()),
-        recipe_content_sha256=COMMIT,
-        compiled_spec_canonical_sha256=COMMIT,
-    )
+    return RecipeReconcilePayload(installation_id=str(uuid.uuid4()), plan_digest=COMMIT)
 
 
 def _result_envelope(
@@ -60,39 +43,12 @@ def _result_envelope(
     return AgentResult.model_validate_json(
         canonical_message(
             {
-                **{
-                    key: claim_document[key]
-                    for key in (
-                        "schema_version",
-                        "job_id",
-                        "operation_id",
-                        "attempt",
-                        "fence",
-                        "node_id",
-                        "deadline",
-                    )
-                },
+                **{key: claim_document[key] for key in ("fence",)},
                 "state": state,
                 "result": result,
             }
         )
     )
-
-
-def _reconciliation_receipt(payload: RecipeReconcilePayload) -> dict[str, object]:
-    return RecipeReconcileResult(
-        reconciled=True,
-        node_id=payload.node_id,
-        installation_id=payload.installation_id,
-        install_operation_id=payload.install_operation_id,
-        install_operation_payload_sha256=payload.install_operation_payload_sha256,
-        plan_digest=payload.plan_digest,
-        recipe_revision_id=payload.recipe_revision_id,
-        recipe_content_sha256=payload.recipe_content_sha256,
-        compiled_spec_canonical_sha256=payload.compiled_spec_canonical_sha256,
-        removed_bytes=8192,
-        cleanup_receipt_sha256="f" * 64,
-    ).model_dump(mode="json")
 
 
 @pytest.fixture
@@ -131,12 +87,9 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
         jobs,
         NODE_A,
         "serial-a",
-        30,
-        protocol_version=3,
-        capabilities=RECONCILE_CAPABILITIES,
     )
     assert first is not None
-    assert first.operation_id == operation.id
+    assert fenced_operation(sessions, first).id == operation.id
     assert first.payload == payload
 
     if interruption == "temporary-failure":
@@ -167,9 +120,6 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
                 jobs,
                 NODE_A,
                 "serial-a",
-                30,
-                protocol_version=3,
-                capabilities=RECONCILE_CAPABILITIES,
             )
             is None
         )
@@ -182,17 +132,20 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
         parent_row = session.get(Job, parent_job.id)
         assert stored is not None and parent_row is not None
         assert stored.state == "waiting-for-operator"
-        assert stored.current_attempt == first.attempt
+        assert stored.current_attempt == fenced_attempt(sessions, first).attempt
         assert stored.workload_intent_ordinal == 1
         assert stored.retry_disposition == "retry"
-        assert stored.retry_disposition_attempt == first.attempt
+        assert (
+            stored.retry_disposition_attempt == fenced_attempt(sessions, first).attempt
+        )
         due = stored.retry_due_at
         assert due is not None
         assert parent_row.payload["workload_intent_ordinal"] == 1
         first_attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == first.attempt,
+                AgentOperationAttempt.attempt
+                == fenced_attempt(sessions, first).attempt,
             )
         )
         assert first_attempt is not None
@@ -213,9 +166,6 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
             jobs,
             NODE_A,
             "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=RECONCILE_CAPABILITIES,
         )
         is None
     )
@@ -224,24 +174,22 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
         jobs,
         NODE_A,
         "serial-a",
-        30,
-        protocol_version=3,
-        capabilities=RECONCILE_CAPABILITIES,
     )
     assert second is not None
-    assert second.operation_id == first.operation_id == operation.id
-    assert second.attempt == first.attempt + 1
+    assert fenced_operation(sessions, second).id == operation.id
+    assert (
+        fenced_attempt(sessions, second).attempt
+        == fenced_attempt(sessions, first).attempt + 1
+    )
     assert second.fence != first.fence
     assert second.payload == first.payload == payload
 
     # A delayed exact success from the old fence cannot overwrite the new owner.
-    old_success = _result_envelope(first, "succeeded", _reconciliation_receipt(payload))
+    old_success = _result_envelope(first, "succeeded", {})
     with pytest.raises(StaleAgentAttempt):
         jobs.record_result(old_success)
 
-    exact_success = _result_envelope(
-        second, "succeeded", _reconciliation_receipt(payload)
-    )
+    exact_success = _result_envelope(second, "succeeded", {})
     jobs.record_result(exact_success)
 
     with sessions() as session:
@@ -250,18 +198,20 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
         first_attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == first.attempt,
+                AgentOperationAttempt.attempt
+                == fenced_attempt(sessions, first).attempt,
             )
         )
         second_attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == second.attempt,
+                AgentOperationAttempt.attempt
+                == fenced_attempt(sessions, second).attempt,
             )
         )
         assert stored is not None and parent_row is not None
         assert stored.state == "succeeded"
-        assert stored.current_attempt == second.attempt
+        assert stored.current_attempt == fenced_attempt(sessions, second).attempt
         assert stored.workload_intent_ordinal == 1
         assert stored.payload == payload.model_dump(mode="json")
         assert parent_row.state == "succeeded"
@@ -275,4 +225,4 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
         else:
             assert first_attempt.result is not None
         assert second_attempt is not None and second_attempt.state == "succeeded"
-        assert second_attempt.result == _reconciliation_receipt(payload)
+        assert second_attempt.result == {}

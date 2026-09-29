@@ -15,7 +15,7 @@ from pydantic import (
     model_validator,
 )
 
-from .compiled_execution_plan import CompiledExecutionPlan, MemoryKind
+from .compiled_execution_plan import CompiledExecutionPlan
 from .contracts import AgentProtocolError, canonical_message
 from .failure_evidence import FailureDiagnostics
 from .wire_model import WireModel
@@ -29,7 +29,6 @@ MAX_OUTPUT_TOTAL_BYTES = 2 * 1024**3
 MAX_TIMEOUT_SECONDS = 60 * 60
 
 _DIGEST = r"^[0-9a-f]{64}$"
-_OCI_DIGEST = r"^sha256:[0-9a-f]{64}$"
 _NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _SLOT = r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"
 _EXTENSION = r"^\.[a-z0-9][a-z0-9._-]{0,15}$"
@@ -40,7 +39,6 @@ _UUID = (
 )
 
 Digest = Annotated[str, StringConstraints(pattern=_DIGEST)]
-ImageDigest = Annotated[str, StringConstraints(pattern=_OCI_DIGEST)]
 CanonicalUUID = Annotated[str, StringConstraints(pattern=_UUID)]
 ArtifactName = Annotated[str, StringConstraints(pattern=_NAME)]
 ArtifactSlot = Annotated[str, StringConstraints(pattern=_SLOT)]
@@ -245,26 +243,15 @@ class RecipeJobEvidence(_RecipeJobModel):
 
 
 class RecipeJobRunRequest(_RecipeJobModel):
-    schema_version: Literal[1]
+    """One job run; interface, image, placement and timeout come from the plan."""
+
     job_id: CanonicalUUID
     run_id: CanonicalUUID
     installation_id: CanonicalUUID
     mapping_id: CanonicalUUID
-    mapping_generation: int = Field(ge=1, le=2**63 - 1, strict=True)
     run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
     recipe_revision_id: CanonicalUUID
-    recipe_content_sha256: Digest
-    image_digest: ImageDigest
     plan_digest: Digest
-    interface: Literal[
-        "audio-job", "video-job", "image-job", "mesh-job", "artifact-job"
-    ]
-    rank: Literal[0]
-    role: Literal["entrypoint"]
-    reserved_memory_bytes: int = Field(ge=1, le=16 * 1024**4)
-    memory_floor_bytes: int = Field(ge=0, le=16 * 1024**4)
-    memory_kind: MemoryKind
-    contract_sha256: Digest
     input_manifest_sha256: Digest
     input_total_bytes: int = Field(ge=0, le=MAX_INPUT_TOTAL_BYTES)
     inputs: tuple[RecipeJobInputFile, ...] = Field(max_length=MAX_INPUT_FILES)
@@ -273,7 +260,6 @@ class RecipeJobRunRequest(_RecipeJobModel):
         min_length=1, max_length=MAX_OUTPUT_FILES
     )
     output_limits: RecipeJobOutputLimits
-    timeout_seconds: int = Field(ge=1, le=MAX_TIMEOUT_SECONDS)
 
     @field_validator("inputs", "output_mappings", mode="before")
     @classmethod
@@ -283,29 +269,8 @@ class RecipeJobRunRequest(_RecipeJobModel):
     @model_validator(mode="after")
     def request_is_canonical(self) -> RecipeJobRunRequest:
         plan = self.compiled_execution_plan
-        placement = plan.runtime.placement
-        if (
-            plan.job is None
-            or plan.job.interface != self.interface
-            or plan.job.timeout_seconds != self.timeout_seconds
-            or plan.identity.recipe_revision_sha256 != self.recipe_content_sha256
-            or plan.runtime.image_digest != self.image_digest
-            or (
-                placement.rank,
-                placement.role,
-                placement.reserved_memory_bytes,
-                placement.memory_floor_bytes,
-                placement.memory_kind,
-            )
-            != (
-                self.rank,
-                self.role,
-                self.reserved_memory_bytes,
-                self.memory_floor_bytes,
-                self.memory_kind,
-            )
-        ):
-            raise ValueError("job invocation does not match request authority")
+        if plan.job is None or plan.runtime.placement.world_size != 1:
+            raise ValueError("job invocation requires a single-rank job plan")
         names = [item.name for item in self.inputs]
         if names != sorted(names, key=lambda value: value.encode("utf-8")):
             raise ValueError("artifact manifest is not canonically sorted")
@@ -333,7 +298,6 @@ class RecipeJobRunRequest(_RecipeJobModel):
 
 
 class RecipeJobRunResult(_RecipeJobModel):
-    schema_version: Literal[1]
     job_id: CanonicalUUID
     run_id: CanonicalUUID
     exit_code: int = Field(ge=0, le=255)

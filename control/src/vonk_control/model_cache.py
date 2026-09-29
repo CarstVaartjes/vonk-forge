@@ -37,7 +37,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import OperationMemberProgress, canonical_message
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    read_model,
+    read_recipe,
+)
 from vonk_forge_contracts.model import GitHubReleaseSource, ModelReference
 
 from .artifact_lifecycle import (
@@ -1078,7 +1083,7 @@ def _recipe_definition(
     if isinstance(document, RecipeDefinition):
         return document
     try:
-        return RecipeDefinition.model_validate(document)
+        return read_recipe(document)
     except (TypeError, ValueError) as error:
         raise ModelCacheResolutionError(
             "model_cache.recipe_invalid", "canonical recipe definition is invalid"
@@ -1142,11 +1147,6 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[dict[str, o
             "canonical model definition is invalid",
         ) from error
     if isinstance(definition.source, GitHubReleaseSource):
-        if definition.access.visibility != "public":
-            raise ModelCacheResolutionError(
-                "model_cache.source_untrusted",
-                "anonymous GitHub release downloads require a public model",
-            )
         repository = definition.source.repository
         revision = f"github-release:{definition.source.release_id}"
         release_id = definition.source.release_id
@@ -1206,11 +1206,7 @@ def _model_lineage_signature(
 ) -> tuple[object, object, object]:
     """Return the logical model and representation identity from ModelDefinition."""
 
-    model = (
-        document
-        if isinstance(document, ModelDefinition)
-        else ModelDefinition.model_validate(document)
-    )
+    model = document if isinstance(document, ModelDefinition) else read_model(document)
     identity = model.identity
     publisher = identity.model.publisher
     slug = identity.model.slug
@@ -1221,14 +1217,6 @@ def _model_lineage_signature(
         variant,
         json.dumps(representation, sort_keys=True, separators=(",", ":")),
     )
-
-
-def _supersedes_revision(
-    revision: CatalogDocumentRevision, current: CatalogDocumentRevision
-) -> bool:
-    document = read_catalog_document(revision)
-    value = document.supersedes if isinstance(document, ModelDefinition) else None
-    return value is not None and value.content_sha256 == current.content_digest
 
 
 def _revision_identity(row: CatalogDocumentRevision | None) -> dict[str, object] | None:
@@ -1726,9 +1714,9 @@ class ModelCacheService:
                     )
                     if model_revision is None:
                         continue
-                    model = ModelDefinition.model_validate(
-                        read_catalog_document(model_revision)
-                    )
+                    model = read_catalog_document(model_revision)
+                    if not isinstance(model, ModelDefinition):
+                        continue
                     variant = model.identity.variant
                     if requested_variant is None or variant == requested_variant:
                         return digest, variant
@@ -1763,10 +1751,7 @@ class ModelCacheService:
                         return {
                             "archive_sha256": archive,
                             "image_bytes": size,
-                            "platform_manifest_digest": (
-                                authorization.platform_manifest_digest
-                            ),
-                            "source": authorization.source,
+                            "image_digest": authorization.image_digest,
                         }
                 return None
 
@@ -1831,9 +1816,7 @@ class ModelCacheService:
 
             recipe_cached = receipt is not None
             image_bytes = receipt["image_bytes"] if receipt is not None else None
-            image_digest = (
-                receipt["platform_manifest_digest"] if receipt is not None else None
-            )
+            image_digest = receipt["image_digest"] if receipt is not None else None
             latest = next(
                 (
                     item
@@ -1868,7 +1851,6 @@ class ModelCacheService:
                     else None,
                     "expected_bytes": image_bytes,
                     "verified_bytes": image_bytes,
-                    "source": receipt["source"] if receipt else None,
                     "image_digest": image_digest,
                     "update_available": latest is not None,
                 },
@@ -8236,23 +8218,16 @@ class ModelCacheService:
             candidate_document = read_catalog_document(candidate)
             if not isinstance(candidate_document, ModelDefinition):
                 continue
-            same_lineage = (
-                _model_lineage_signature(candidate_document) == current_signature
-            )
-            if not same_lineage and not _supersedes_revision(candidate, current):
+            if _model_lineage_signature(candidate_document) != current_signature:
                 continue
             if not _same_model_artifact_identity(candidate, manifest) and (
                 candidate.revision_number > current.revision_number
                 or _datetime(candidate.created_at) > _datetime(current.created_at)
-                or _supersedes_revision(candidate, current)
             ):
                 candidates.append(candidate)
         # Multiple incomparable successors are deliberately exposed as
         # ambiguous; choosing one by wall-clock order would hide a catalog
         # lineage decision from operators.
-        explicit = [item for item in candidates if _supersedes_revision(item, current)]
-        if explicit:
-            return current, explicit
         return current, candidates
 
     @staticmethod

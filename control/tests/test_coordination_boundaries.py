@@ -119,12 +119,12 @@ def test_in_memory_hashing_and_validation_inside_a_transaction_are_allowed() -> 
             _wrap(
                 """\
                     import hashlib
-                    from vonk_forge_contracts import content_sha256
+                    from vonk_forge_contracts import document_sha256
 
                     with self._session() as session:
                         row = session.get('thing')
                         digest = hashlib.sha256(b'bytes').hexdigest()
-                        canonical = content_sha256(row)
+                        canonical = document_sha256(row.model_dump(mode="json"))
                         session.add((digest, canonical))
                 """
             )

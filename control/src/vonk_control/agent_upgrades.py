@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 from vonk_agent_protocol.package_source import AgentPackageSource
 
 from .agent_jobs import (
@@ -36,7 +37,6 @@ _ONLINE_WINDOW = timedelta(seconds=150)
 # An ambiguous install result can leave durable apt/dpkg recovery in progress.
 # Every automatic retry waits through this controller safety window.
 _AGENT_UPGRADE_RECOVERY_FENCE = AGENT_UPGRADE_RECOVERY_FENCE
-_TARGET_PROTOCOL_VERSION = 3
 _ACTIVE_ROLLOUT_STATES = ("queued", "running", "waiting-for-operator")
 _ALREADY_CURRENT = "already runs the requested agent build"
 
@@ -919,21 +919,17 @@ class AgentUpgradeService:
             observed >= dispatched
             and node.state == "active"
             and node.revoked_at is None
-            and node.protocol_version == _TARGET_PROTOCOL_VERSION
-            and "agent.runtime.rust.v1" in set(node.capabilities or ())
-            and "agent.upgrade.v1" in set(node.capabilities or ())
+            and node.protocol_version == AGENT_PROTOCOL_VERSION
             and node.architecture == package.get("architecture")
             # Signed package and binary/build digests are the compatibility
             # identity.  Version strings remain audit metadata and may differ
             # across packaging schemes without invalidating an exact upgrade.
             and node.build_digest == package.get("target_build_digest")
             and node.binary_digest == package.get("target_binary_digest")
-            and node.self_test_passed is True
             and evidence.get("architecture") == package.get("architecture")
             and evidence.get("build_digest") == package.get("target_build_digest")
             and evidence.get("binary_digest") == package.get("target_binary_digest")
             and evidence.get("package_sha256") == package.get("package_sha256")
-            and evidence.get("self_test_passed") is True
             and evidence.get("status") == "upgraded"
         )
 
@@ -1067,8 +1063,6 @@ class AgentUpgradeService:
 
         if node.state != "active" or node.revoked_at is not None:
             return "is not active"
-        if "agent.upgrade.v1" not in set(node.capabilities or ()):
-            return "does not support controller upgrades"
         if node.architecture != package["architecture"]:
             return "has an incompatible architecture"
         return None
@@ -1099,5 +1093,4 @@ class AgentUpgradeService:
         return bool(
             node.build_digest == package["target_build_digest"]
             and node.binary_digest == package["target_binary_digest"]
-            and node.self_test_passed is True
         )

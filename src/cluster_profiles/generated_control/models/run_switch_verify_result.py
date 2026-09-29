@@ -39,7 +39,6 @@ class RunSwitchVerifyResult:
             cached_target_totals (RunSwitchVerifyResultCachedTargetTotals | Unset):
             evidence (list[ArtifactVerificationEvidence] | Unset):
             skipped (bool | Unset):  Default: False.
-            verified_registry_manifest_digest (None | str | Unset):
      """
 
     phase: Literal['verify']
@@ -53,7 +52,6 @@ class RunSwitchVerifyResult:
     cached_target_totals: RunSwitchVerifyResultCachedTargetTotals | Unset = UNSET
     evidence: list[ArtifactVerificationEvidence] | Unset = UNSET
     skipped: bool | Unset = False
-    verified_registry_manifest_digest: None | str | Unset = UNSET
 
 
 
@@ -100,12 +98,6 @@ class RunSwitchVerifyResult:
 
         skipped = self.skipped
 
-        verified_registry_manifest_digest: None | str | Unset
-        if isinstance(self.verified_registry_manifest_digest, Unset):
-            verified_registry_manifest_digest = UNSET
-        else:
-            verified_registry_manifest_digest = self.verified_registry_manifest_digest
-
 
         field_dict: dict[str, Any] = {}
 
@@ -126,8 +118,6 @@ class RunSwitchVerifyResult:
             field_dict["evidence"] = evidence
         if skipped is not UNSET:
             field_dict["skipped"] = skipped
-        if verified_registry_manifest_digest is not UNSET:
-            field_dict["verified_registry_manifest_digest"] = verified_registry_manifest_digest
 
         return field_dict
 
@@ -190,16 +180,6 @@ class RunSwitchVerifyResult:
 
         skipped = d.pop("skipped", UNSET)
 
-        def _parse_verified_registry_manifest_digest(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        verified_registry_manifest_digest = _parse_verified_registry_manifest_digest(d.pop("verified_registry_manifest_digest", UNSET))
-
-
         run_switch_verify_result = cls(
             phase=phase,
             subphase=subphase,
@@ -212,7 +192,6 @@ class RunSwitchVerifyResult:
             cached_target_totals=cached_target_totals,
             evidence=evidence,
             skipped=skipped,
-            verified_registry_manifest_digest=verified_registry_manifest_digest,
         )
 
         return run_switch_verify_result

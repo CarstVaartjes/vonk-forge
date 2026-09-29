@@ -11,6 +11,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ContainerRuntimeAction, canonical_message
+from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
@@ -98,7 +99,6 @@ def derive_runtime_plan_binding(
         else:
             stop = stop_payload_from_start(
                 start,
-                node_id,
                 cancel_pending_start=cancellation_requested,
             )
             plan = stop
@@ -109,7 +109,6 @@ def derive_runtime_plan_binding(
                 runtime_target_id=stop.target_runtime_id,
                 runtime_installation_id=stop.installation_id,
             )
-        _reject_unhandled_stop_hooks(plan, action)
         return binding
     if operation.kind == "recipe.job.run.v1":
         job_plan = _parse_job_run(operation.payload)
@@ -133,7 +132,6 @@ def derive_runtime_plan_binding(
         else:
             plan = stop_payload_from_job_run(
                 job_plan,
-                node_id,
                 cancel_pending_start=cancellation_requested,
             )
             binding = RuntimePlanBinding(
@@ -143,7 +141,6 @@ def derive_runtime_plan_binding(
                 runtime_target_id=plan.target_runtime_id,
                 runtime_installation_id=plan.installation_id,
             )
-        _reject_unhandled_stop_hooks(plan, action)
         return binding
     if action is not ContainerRuntimeAction.STOP or operation.kind != "recipe.stop":
         raise RuntimePlanAuthorityError("lifecycle plan owner does not match action")
@@ -157,7 +154,6 @@ def derive_runtime_plan_binding(
         stop=stop,
         now=now,
     )
-    _reject_unhandled_stop_hooks(stop, action)
     return RuntimePlanBinding(
         stop_plan_sha256=_payload_sha256(stop),
         run_generation=stop.run_generation,
@@ -189,11 +185,8 @@ def _service_run_authority(
         or start.run_id != run.id
         or start.installation_id != run.installation_id
         or start.mapping_id != run.mapping_id
-        or start.mapping_generation != run.mapping_generation
         or start.plan_digest != run.plan_digest
         or start.recipe_revision_id != authority.revision.id
-        or start.recipe_content_sha256 != authority.revision.content_digest
-        or start.image_digest != authority.installation.image_digest
         or parent.authority_revision
         != authority.revision.content_digest.removeprefix("sha256:")
     ):
@@ -248,11 +241,8 @@ def _job_run_authority(
         or parent.payload.get("plan_digest") != run.plan_digest
         or request.installation_id != run.installation_id
         or request.mapping_id != run.mapping_id
-        or request.mapping_generation != run.mapping_generation
         or request.plan_digest != run.plan_digest
         or request.recipe_revision_id != authority.revision.id
-        or request.recipe_content_sha256 != authority.revision.content_digest
-        or request.image_digest != authority.installation.image_digest
         or parent.authority_revision
         != authority.revision.content_digest.removeprefix("sha256:")
     ):
@@ -289,10 +279,8 @@ def _service_stop_authority(
         stop.target_runtime_id != run.id
         or stop.installation_id != run.installation_id
         or stop.mapping_id != run.mapping_id
-        or stop.mapping_generation != run.mapping_generation
         or stop.plan_digest != run.plan_digest
         or stop.recipe_revision_id != authority.revision.id
-        or stop.recipe_content_sha256 != authority.revision.content_digest
         or parent.payload.get("owner_id") != run.id
         or parent.authority_revision != run.plan_digest.removeprefix("sha256:")
     ):
@@ -326,7 +314,6 @@ def _service_stop_authority(
     expected = exact.get(node_id)
     if (
         expected is None
-        or stop.node_id != node_id
         or canonical_message(stop) != canonical_message(expected)
         or stored.run_generation != run.run_generation
         or operation.kind != "recipe.stop"
@@ -411,14 +398,12 @@ def _validate_recovery_start_generation(
                     or start.run_id != authority.run.id
                     or start.installation_id != authority.run.installation_id
                     or start.mapping_id != authority.run.mapping_id
-                    or start.mapping_generation != authority.run.mapping_generation
                     or start.plan_digest != authority.run.plan_digest
                     or start.recipe_revision_id != authority.revision.id
-                    or start.recipe_content_sha256 != authority.revision.content_digest
                     or not any(
                         node.node_id == node_id
-                        and node.rank == start.rank
-                        and node.role == start.role
+                        and node.rank == _placement(start).rank
+                        and node.role == _placement(start).role
                         for node in stored.nodes
                     )
                 ):
@@ -457,7 +442,7 @@ def _validate_recovery_start_generation(
             node.rank != 0
             or node.role != "entrypoint"
             or not stored_node.endpoint_owner
-            or (start.rank, start.role, start.world_size) != (0, "entrypoint", 1)
+            or _placement_key(start) != (0, "entrypoint", 1)
         ):
             raise RuntimePlanAuthorityError(
                 "singleton recovery Start placement is invalid"
@@ -469,7 +454,7 @@ def _validate_recovery_start_generation(
         raise RuntimePlanAuthorityError("recovery Start target set is invalid")
     for node_id, start in rank_launches.items():
         node = expected_nodes[node_id]
-        if (start.rank, start.role, start.world_size) != (
+        if _placement_key(start) != (
             node.rank,
             node.role,
             len(expected_nodes),
@@ -477,12 +462,21 @@ def _validate_recovery_start_generation(
             raise RuntimePlanAuthorityError("recovery Start placement is invalid")
     readiness_node = expected_nodes[readiness[0][0]]
     readiness_start = readiness[0][1]
-    if (readiness_start.rank, readiness_start.role, readiness_start.world_size) != (
+    if _placement_key(readiness_start) != (
         readiness_node.rank,
         readiness_node.role,
         len(expected_nodes),
     ):
         raise RuntimePlanAuthorityError("recovery readiness placement is invalid")
+
+
+def _placement(start: RecipeStartPayload) -> CompiledPlacement:
+    return start.compiled_execution_plan.runtime.placement
+
+
+def _placement_key(start: RecipeStartPayload) -> tuple[int, str, int]:
+    placement = _placement(start)
+    return placement.rank, placement.role, placement.world_size
 
 
 def _load_run_authority(session: Session, run: RecipeRun | None) -> _RunAuthority:
@@ -555,8 +549,6 @@ def _check_operation_target(
         node is None
         or operation.node_id != node_id
         or payload.run_id != authority.run.id
-        or payload.rank != node.rank
-        or payload.role != node.role
         or payload.compiled_execution_plan.runtime.placement.rank != node.rank
         or payload.compiled_execution_plan.runtime.placement.role != node.role
         or payload.compiled_execution_plan.runtime.placement.world_size
@@ -623,19 +615,6 @@ def _parse_stop(value: object) -> RecipeStopPayload:
         return RecipeStopPayload.model_validate_json(canonical_message(value))
     except (TypeError, ValueError) as error:
         raise RuntimePlanAuthorityError("durable Stop plan is invalid") from error
-
-
-def _reject_unhandled_stop_hooks(
-    plan: RecipeStartPayload | RecipeJobRunRequest | RecipeStopPayload,
-    action: ContainerRuntimeAction,
-) -> None:
-    if (
-        action is ContainerRuntimeAction.STOP
-        and plan.compiled_execution_plan.lifecycle.post_stop
-    ):
-        raise RuntimePlanAuthorityError(
-            "hook-bearing Stop requires lifecycle hook authority"
-        )
 
 
 def _payload_sha256(payload: object) -> str:

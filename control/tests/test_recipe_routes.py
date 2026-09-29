@@ -49,7 +49,7 @@ from vonk_control.route_runtime import (
     AtomicRouteBundlePublisher,
     RouteRuntimeError,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
 GATEWAY = "https://control.test.example/v1"
@@ -149,25 +149,25 @@ def setup(
                 node_id=node,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=[],
             )
             for node in nodes
         )
-        model = ModelDefinition.model_validate(
-            json.loads(
-                files("vonk_forge_contracts")
-                .joinpath("examples", "model-definition.json")
-                .read_text(encoding="utf-8")
-            )
+        model_document = json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "model-definition.json")
+            .read_text(encoding="utf-8")
         )
+        model = ModelDefinition.model_validate(model_document)
         recipe_document = json.loads(
             files("vonk_forge_contracts")
-            .joinpath("examples", "recipe-image.json")
+            .joinpath("examples", "recipe-source-build.json")
             .read_text(encoding="utf-8")
         )
         recipe_document["identity"]["slug"] = "qwen"
         recipe_document["metadata"]["title"] = "Qwen"
-        recipe_document["models"][0]["model"]["content_sha256"] = content_sha256(model)
+        recipe_document["models"][0]["model"]["content_sha256"] = document_sha256(
+            model_document
+        )
         if interfaces is None:
             recipe_document["interfaces"] = [
                 {
@@ -181,9 +181,7 @@ def setup(
             recipe_document["interfaces"] = [
                 {
                     "adapter": "video-job",
-                    "path": "/outputs",
                     "output": {
-                        "path": "/outputs",
                         "max_total_bytes": 1,
                         "slots": [
                             {
@@ -211,7 +209,6 @@ def setup(
                         "request": {
                             "transport": "job",
                             "fixture": "fixture",
-                            "output_path": "/outputs",
                             "output_slot": "output",
                         },
                         "assertions": ["artifact.output"],
@@ -221,7 +218,6 @@ def setup(
         else:
             recipe_document["interfaces"] = interfaces
         recipe = RecipeDefinition.model_validate(recipe_document)
-        recipe_document = recipe.model_dump(mode="json")
         recipe_id = str(uuid4())
         revision_id = str(uuid4())
         model_id = str(uuid4())
@@ -261,7 +257,7 @@ def setup(
             schema_version=2,
             state="active",
             document=recipe_document,
-            content_digest=content_sha256(recipe),
+            content_digest=document_sha256(recipe_document),
             projected={},
             created_by="admin",
             created_at=NOW,
@@ -278,8 +274,8 @@ def setup(
                     revision_number=1,
                     schema_version=2,
                     state="active",
-                    document=model.model_dump(mode="json"),
-                    content_digest=content_sha256(model),
+                    document=model_document,
+                    content_digest=document_sha256(model_document),
                     projected={},
                     created_by="admin",
                     created_at=NOW,
@@ -421,9 +417,7 @@ def setup(
                     observed_run_generation=(
                         run.run_generation if exact_distributed else None
                     ),
-                    observation_receipt_sha256=(
-                        str(rank + 1) * 64 if exact_distributed else None
-                    ),
+                    observation_observed_at=NOW if exact_distributed else None,
                     observation_endpoint_ready=(
                         True
                         if exact_distributed and rank == endpoint_owner_rank
@@ -471,7 +465,6 @@ def add_running_run(
                 node_id=node_id,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=[],
             )
         )
         mapping = ClusterMapping(
@@ -585,7 +578,7 @@ def add_running_run(
                 reserved_memory_bytes=100,
                 endpoint={"url": f"http://10.0.0.{identity}:8000"},
                 observed_run_generation=1,
-                observation_receipt_sha256=f"{identity:x}" * 64,
+                observation_observed_at=NOW,
                 observation_endpoint_ready=True,
                 updated_at=NOW,
             )
@@ -1122,7 +1115,7 @@ def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
         run.observation_deadline_at = NOW + timedelta(seconds=60)
         for node in session.query(RunNode).filter_by(run_id=run_id):
             node.observed_run_generation = None
-            node.observation_receipt_sha256 = None
+            node.observation_observed_at = None
             node.observation_endpoint_ready = None
         session.add(
             Job(
@@ -1180,11 +1173,11 @@ def test_direct_publication_accepts_renewed_exact_observation_after_initial_dead
         run.observation_deadline_at = deadline
         for node in session.query(RunNode).filter_by(run_id=run_id):
             node.observed_run_generation = run.run_generation
-            node.observation_receipt_sha256 = "a" * 64
+            node.observation_observed_at = deadline + timedelta(microseconds=1)
             node.observation_endpoint_ready = node.role == "entrypoint" or None
             node.updated_at = deadline + timedelta(microseconds=1)
 
-    # Signed ingress has already enforced the first-receipt deadline. The
+    # Observation ingress has already enforced the first-observation deadline. The
     # latest timestamp is a renewal and must retain its current health meaning.
     generation = service.publish_run(run_id)
     assert generation.generation == 1

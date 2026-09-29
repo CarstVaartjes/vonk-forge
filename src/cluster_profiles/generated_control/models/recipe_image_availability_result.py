@@ -29,16 +29,13 @@ class RecipeImageAvailabilityResult:
             image_digest (str):
             model_content_digests (list[str]):
             oci_archive_sha256 (str):
-            platform_manifest_digest (str):
             recipe_content_sha256 (str):
-            source (str):
             artifact_set_sha256 (None | str | Unset):
             build_id (None | str | Unset):
             build_input_sha256 (None | str | Unset):
             local_image_config_id (None | str | Unset):
             model_child_id (None | str | Unset):
             model_digest (None | str | Unset):
-            registry_manifest_digest (None | str | Unset):
             schema_version (Literal[2] | Unset):  Default: 2.
      """
 
@@ -46,16 +43,13 @@ class RecipeImageAvailabilityResult:
     image_digest: str
     model_content_digests: list[str]
     oci_archive_sha256: str
-    platform_manifest_digest: str
     recipe_content_sha256: str
-    source: str
     artifact_set_sha256: None | str | Unset = UNSET
     build_id: None | str | Unset = UNSET
     build_input_sha256: None | str | Unset = UNSET
     local_image_config_id: None | str | Unset = UNSET
     model_child_id: None | str | Unset = UNSET
     model_digest: None | str | Unset = UNSET
-    registry_manifest_digest: None | str | Unset = UNSET
     schema_version: Literal[2] | Unset = 2
 
 
@@ -73,11 +67,7 @@ class RecipeImageAvailabilityResult:
 
         oci_archive_sha256 = self.oci_archive_sha256
 
-        platform_manifest_digest = self.platform_manifest_digest
-
         recipe_content_sha256 = self.recipe_content_sha256
-
-        source = self.source
 
         artifact_set_sha256: None | str | Unset
         if isinstance(self.artifact_set_sha256, Unset):
@@ -115,12 +105,6 @@ class RecipeImageAvailabilityResult:
         else:
             model_digest = self.model_digest
 
-        registry_manifest_digest: None | str | Unset
-        if isinstance(self.registry_manifest_digest, Unset):
-            registry_manifest_digest = UNSET
-        else:
-            registry_manifest_digest = self.registry_manifest_digest
-
         schema_version = self.schema_version
 
 
@@ -131,9 +115,7 @@ class RecipeImageAvailabilityResult:
             "image_digest": image_digest,
             "model_content_digests": model_content_digests,
             "oci_archive_sha256": oci_archive_sha256,
-            "platform_manifest_digest": platform_manifest_digest,
             "recipe_content_sha256": recipe_content_sha256,
-            "source": source,
         })
         if artifact_set_sha256 is not UNSET:
             field_dict["artifact_set_sha256"] = artifact_set_sha256
@@ -147,8 +129,6 @@ class RecipeImageAvailabilityResult:
             field_dict["model_child_id"] = model_child_id
         if model_digest is not UNSET:
             field_dict["model_digest"] = model_digest
-        if registry_manifest_digest is not UNSET:
-            field_dict["registry_manifest_digest"] = registry_manifest_digest
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -168,11 +148,7 @@ class RecipeImageAvailabilityResult:
 
         oci_archive_sha256 = d.pop("oci_archive_sha256")
 
-        platform_manifest_digest = d.pop("platform_manifest_digest")
-
         recipe_content_sha256 = d.pop("recipe_content_sha256")
-
-        source = d.pop("source")
 
         def _parse_artifact_set_sha256(data: object) -> None | str | Unset:
             if data is None:
@@ -234,16 +210,6 @@ class RecipeImageAvailabilityResult:
         model_digest = _parse_model_digest(d.pop("model_digest", UNSET))
 
 
-        def _parse_registry_manifest_digest(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        registry_manifest_digest = _parse_registry_manifest_digest(d.pop("registry_manifest_digest", UNSET))
-
-
         schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
@@ -253,16 +219,13 @@ class RecipeImageAvailabilityResult:
             image_digest=image_digest,
             model_content_digests=model_content_digests,
             oci_archive_sha256=oci_archive_sha256,
-            platform_manifest_digest=platform_manifest_digest,
             recipe_content_sha256=recipe_content_sha256,
-            source=source,
             artifact_set_sha256=artifact_set_sha256,
             build_id=build_id,
             build_input_sha256=build_input_sha256,
             local_image_config_id=local_image_config_id,
             model_child_id=model_child_id,
             model_digest=model_digest,
-            registry_manifest_digest=registry_manifest_digest,
             schema_version=schema_version,
         )
 

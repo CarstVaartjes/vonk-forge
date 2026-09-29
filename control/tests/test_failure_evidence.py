@@ -32,23 +32,13 @@ from vonk_control.models import (
     Job,
 )
 
+from .agent_fences import fenced_attempt
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import NODE_A, NODE_B, Clock, parent
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
 COMMIT = "a" * 64
-DISTRIBUTION_SUCCESS = {
-    "assignment_id": "33333333-3333-4333-8333-333333333333",
-    "model_artifact_set_sha256": COMMIT,
-    "verified": True,
-    "verified_digests": [COMMIT],
-    "verified_image_digest": "sha256:" + COMMIT,
-    "imported_image_digest": "sha256:" + COMMIT,
-    "verified_oci_layout_sha256": COMMIT,
-    "oci_image_digest": "sha256:" + COMMIT,
-    "downloaded_bytes": 200,
-    "evidence_digest": COMMIT,
-}
+DISTRIBUTION_SUCCESS = {"downloaded_bytes": 200}
 
 
 @pytest.fixture
@@ -474,12 +464,10 @@ def durable_evidence(tmp_path):
                     node_id=node_id,
                     state="active",
                     workload_intent_ordinal=1,
-                    capabilities=[],
                     architecture="linux-arm64",
                     semantic_version="1.0.0",
                     build_digest="sha256:" + "f" * 64,
                     binary_digest="f" * 64,
-                    self_test_passed=True,
                 )
             )
             session.add(
@@ -496,18 +484,7 @@ def durable_evidence(tmp_path):
 
 
 def _claim_envelope(claim) -> dict[str, object]:
-    return {
-        key: claim.model_dump(mode="json")[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    }
+    return {key: claim.model_dump(mode="json")[key] for key in ("fence",)}
 
 
 def _enqueue_distribution(jobs, sessions, clock):
@@ -516,7 +493,7 @@ def _enqueue_distribution(jobs, sessions, clock):
         NODE_A,
         ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
         COMMIT,
-        {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+        {"plan_digest": COMMIT},
     )
 
 
@@ -535,14 +512,12 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
 
     jobs, sessions, clock, evidence = durable_evidence
     operation = _enqueue_distribution(jobs, sessions, clock)
-    capabilities = [
-        "agent.runtime.rust.v1",
-        ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
-    ]
     first = claim_agent(
-        jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+        jobs,
+        NODE_A,
+        "serial-a",
     )
-    assert first is not None and first.attempt == 1
+    assert first is not None and fenced_attempt(sessions, first).attempt == 1
     # The agent's own failure arrives after the lease lapsed.  The Controller
     # keeps it on the expired attempt rather than discarding it.
     clock.advance(seconds=31)
@@ -571,9 +546,11 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
         stored.retry_due_at = None
     clock.advance(seconds=1)
     second = claim_agent(
-        jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+        jobs,
+        NODE_A,
+        "serial-a",
     )
-    assert second is not None and second.attempt == 2
+    assert second is not None and fenced_attempt(sessions, second).attempt == 2
     jobs.succeed(second, DISTRIBUTION_SUCCESS)
 
     bundle = evidence.read(operation.id, 1)

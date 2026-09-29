@@ -49,7 +49,6 @@ def _client(
                     state="active",
                     protocol_version=1,
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=datetime(2026, 9, 10, tzinfo=UTC),
                 )
             )
@@ -263,7 +262,7 @@ def test_cli_edits_and_exports_the_persisted_definition_through_real_api(
         "installation_policy": "exact",
         "assignments": [
             {
-                "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                "recipe_selector": "vonk-forge/synthetic-tiny-build",
                 "spark_ids": [NODE_1],
                 "assignment_name": "installed-draft",
                 "model_variant": "precise-variant",

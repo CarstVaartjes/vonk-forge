@@ -20,34 +20,16 @@ INSTALLATION_ID = "00000000-0000-4000-8000-000000000001"
 RUN_ID = "00000000-0000-4000-8000-000000000003"
 RECIPE_DIGEST = "a" * 64
 PLAN_DIGEST = "b" * 64
-NODE_ID = "spk_" + "c" * 32
-RECONCILE = {
-    "schema_version": 1,
-    "node_id": NODE_ID,
-    "installation_id": INSTALLATION_ID,
-    "install_operation_id": RUN_ID,
-    "install_operation_payload_sha256": "d" * 64,
-    "plan_digest": PLAN_DIGEST,
-    "recipe_revision_id": "00000000-0000-4000-8000-000000000004",
-    "recipe_content_sha256": RECIPE_DIGEST,
-    "compiled_spec_canonical_sha256": "e" * 64,
-}
+RECONCILE = {"installation_id": INSTALLATION_ID, "plan_digest": PLAN_DIGEST}
 STOP = RecipeStopPayload.model_validate(
     {
-        "schema_version": 2,
         "run_id": RUN_ID,
         "target_runtime_id": RUN_ID,
         "run_generation": 1,
-        "node_id": NODE_ID,
         "installation_id": INSTALLATION_ID,
         "recipe_revision_id": "00000000-0000-4000-8000-000000000004",
-        "recipe_content_sha256": RECIPE_DIGEST,
         "mapping_id": "00000000-0000-4000-8000-000000000005",
-        "mapping_generation": 1,
         "plan_digest": PLAN_DIGEST,
-        "rank": 0,
-        "role": "entrypoint",
-        "world_size": 1,
         "compiled_execution_plan": json.loads(
             (
                 Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json"
@@ -57,7 +39,6 @@ STOP = RecipeStopPayload.model_validate(
     }
 ).model_dump(mode="json")
 UNINSTALL = {
-    "schema_version": 1,
     "installation_id": INSTALLATION_ID,
     "recipe_content_sha256": RECIPE_DIGEST,
     "cleanup_model_content_sha256": None,
@@ -108,21 +89,13 @@ def test_uninstall_cleanup_key_is_required_and_nullable() -> None:
     assert parsed.cleanup_model_content_sha256 is None
 
 
-def test_reconciliation_payload_requires_exact_node_and_original_install_identity() -> (
-    None
-):
+def test_reconciliation_payload_names_only_the_installation() -> None:
     parsed = RecipeOperationRequest.parse(AgentOperation.RECIPE_RECONCILE, RECONCILE)
     assert isinstance(parsed.payload, RecipeReconcilePayload)
-    for change in (
-        {"node_id": "spk_" + "f" * 31},
-        {"install_operation_payload_sha256": "invalid"},
-        {"compiled_spec_canonical_sha256": "F" * 64},
-        {"installation_id": "bad-id"},
-    ):
-        with pytest.raises(AgentProtocolError):
-            RecipeOperationRequest.parse(
-                AgentOperation.RECIPE_RECONCILE, RECONCILE | change
-            )
+    with pytest.raises(AgentProtocolError):
+        RecipeOperationRequest.parse(
+            AgentOperation.RECIPE_RECONCILE, RECONCILE | {"installation_id": "bad-id"}
+        )
     with pytest.raises(AgentProtocolError):
         RecipeOperationRequest.parse(AgentOperation.RECIPE_UNINSTALL, RECONCILE)
 
@@ -130,26 +103,9 @@ def test_reconciliation_payload_requires_exact_node_and_original_install_identit
 @pytest.mark.parametrize(
     ("operation", "body", "result_type"),
     [
-        (AgentOperation.RECIPE_STOP, {"stopped": True}, RecipeStopResult),
-        (
-            AgentOperation.RECIPE_UNINSTALL,
-            {"uninstalled": True, "removed_model_bytes": 0},
-            RecipeUninstallResult,
-        ),
-        (
-            AgentOperation.RECIPE_RECONCILE,
-            {
-                "reconciled": True,
-                **{
-                    key: value
-                    for key, value in RECONCILE.items()
-                    if key != "schema_version"
-                },
-                "removed_bytes": 18,
-                "cleanup_receipt_sha256": "f" * 64,
-            },
-            RecipeReconcileResult,
-        ),
+        (AgentOperation.RECIPE_STOP, {}, RecipeStopResult),
+        (AgentOperation.RECIPE_UNINSTALL, {}, RecipeUninstallResult),
+        (AgentOperation.RECIPE_RECONCILE, {}, RecipeReconcileResult),
     ],
 )
 def test_recipe_success_results_are_operation_specific(

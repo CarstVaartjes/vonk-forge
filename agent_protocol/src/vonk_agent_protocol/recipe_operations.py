@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import ipaddress
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import Field, ValidationError, model_validator
 
-from .compiled_execution_plan import CompiledExecutionPlan, MemoryKind
+from .compiled_execution_plan import CompiledExecutionPlan
 from .contracts import (
     AgentOperation,
     AgentProtocolError,
     canonical_message,
 )
-from .host_helper import NodeId, RecipeReconciliationIdentity
+from .host_helper import RecipeReconciliationIdentity
 from .wire_model import WireModel
 
 RECIPE_OPERATIONS = frozenset(
@@ -33,14 +32,8 @@ _UUID_PATTERN = (
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 )
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-OciDigest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 CanonicalUuid = Annotated[str, Field(pattern=f"^{_UUID_PATTERN}$")]
-Role = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")]
-Alias = Annotated[str, Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$")]
 ByteCount = Annotated[int, Field(ge=0, le=16 * 1024**4)]
-PositiveByteCount = Annotated[int, Field(ge=1, le=16 * 1024**4)]
-Port = Annotated[int, Field(ge=1024, le=65535)]
-PositiveInt = Annotated[int, Field(ge=1)]
 RunGeneration = Annotated[int, Field(ge=1, le=2**31 - 1, strict=True)]
 
 
@@ -49,45 +42,21 @@ class _StrictPayload(WireModel):
 
 
 class RecipeInstallPayload(_StrictPayload):
-    schema_version: Literal[2]
     installation_id: CanonicalUuid
     plan_digest: Digest
-    rank: Annotated[int, Field(ge=0)]
-    role: Role
     expected_bytes: ByteCount
     compiled_execution_plan: CompiledExecutionPlan
 
-    @model_validator(mode="after")
-    def identity_matches(self) -> RecipeInstallPayload:
-        placement = self.compiled_execution_plan.runtime.placement
-        if (self.rank, self.role) != (placement.rank, placement.role):
-            raise ValueError("install placement does not match compiled plan")
-        return self
-
 
 class RecipeStartPayload(_StrictPayload):
-    schema_version: Literal[2]
+    """Start one rank; placement, image and addresses come from the plan."""
+
     run_id: CanonicalUuid
     installation_id: CanonicalUuid
     recipe_revision_id: CanonicalUuid
-    recipe_content_sha256: Digest
     mapping_id: CanonicalUuid
-    mapping_generation: PositiveInt
-    image_digest: OciDigest
     plan_digest: Digest
-    alias: Alias
-    rank: Annotated[int, Field(ge=0)]
-    role: Role
-    port: Port
-    reserved_memory_bytes: PositiveByteCount
-    memory_floor_bytes: ByteCount
-    memory_kind: MemoryKind
-    endpoint_address: str = Field(json_schema_extra={"format": "ip"})
-    world_size: PositiveInt
     compiled_execution_plan: CompiledExecutionPlan
-    local_address: str | None = Field(json_schema_extra={"format": "ip"})
-    master_address: str | None = Field(json_schema_extra={"format": "ip"})
-    master_port: Port | None
     phase: Literal["rank-launch", "collective-readiness"] | None = None
     start_deadline: str | None = Field(
         default=None, json_schema_extra={"format": "date-time"}
@@ -95,126 +64,48 @@ class RecipeStartPayload(_StrictPayload):
     run_generation: RunGeneration
 
     @model_validator(mode="after")
-    def placement_matches(self) -> RecipeStartPayload:
-        if self.rank >= self.world_size:
-            raise ValueError("start placement is invalid")
-        placement = self.compiled_execution_plan.runtime.placement
-        if (self.rank, self.role, self.world_size) != (
-            placement.rank,
-            placement.role,
-            placement.world_size,
-        ):
-            raise ValueError("start placement does not match compiled plan")
-        if self.image_digest != self.compiled_execution_plan.runtime.image_digest:
-            raise ValueError("start image does not match compiled plan")
-        if (
-            self.recipe_content_sha256
-            != self.compiled_execution_plan.identity.recipe_revision_sha256
-        ):
-            raise ValueError("start recipe digest does not match compiled plan")
-        placement = self.compiled_execution_plan.runtime.placement
-        endpoint_matches = self.endpoint_address == placement.endpoint_address
-        if placement.endpoint_address is None and self.world_size > 1:
-            endpoint_matches = self.endpoint_address == self.local_address
-        if (
-            not endpoint_matches
-            or self.port != placement.port
-            or self.reserved_memory_bytes != placement.reserved_memory_bytes
-            or self.memory_floor_bytes != placement.memory_floor_bytes
-            or self.memory_kind != placement.memory_kind
-            or self.local_address != placement.local_address
-            or self.master_address != placement.master_address
-            or self.master_port != placement.master_port
-        ):
-            raise ValueError("start placement does not match compiled plan")
-        for name, address in (
-            ("endpoint_address", self.endpoint_address),
-            ("local_address", self.local_address),
-            ("master_address", self.master_address),
-        ):
-            if address is None:
-                continue
-            parsed_address = ipaddress.ip_address(address)
-            if (
-                parsed_address.is_loopback
-                or parsed_address.is_link_local
-                or parsed_address.is_multicast
-                or parsed_address.is_unspecified
-                or str(parsed_address) != address
-            ):
-                raise ValueError(f"{name} is invalid")
-        if self.world_size == 1:
-            if (
-                self.rank != 0
-                or self.local_address is not None
-                or self.master_address is not None
-                or self.master_port is not None
-            ):
-                raise ValueError("single-node rendezvous is invalid")
-        elif (
-            self.local_address is None
-            or self.master_address is None
-            or self.master_port is None
-            or self.master_port < 1024
+    def start_is_serving(self) -> RecipeStartPayload:
+        plan = self.compiled_execution_plan
+        placement = plan.runtime.placement
+        if plan.endpoint is None or placement.port is None:
+            raise ValueError("start requires a serving plan")
+        if placement.world_size > 1 and (
+            placement.local_address is None
+            or placement.master_address is None
+            or placement.master_port is None
         ):
             raise ValueError("distributed rendezvous is invalid")
-        if self.world_size == 1 and (
+        if placement.world_size == 1 and (
             self.phase is not None or self.start_deadline is not None
         ):
             raise ValueError("single-node start phases are invalid")
-        if self.phase is not None:
+        if (self.phase is None) != (self.start_deadline is None):
+            raise ValueError("start phase binding is invalid")
+        if self.start_deadline is not None:
             try:
-                deadline = datetime.fromisoformat(self.start_deadline or "")
+                deadline = datetime.fromisoformat(self.start_deadline)
             except ValueError as error:
                 raise ValueError("start deadline is invalid") from error
             if deadline.tzinfo is None or deadline.utcoffset() != UTC.utcoffset(
                 deadline
             ):
                 raise ValueError("start deadline must be UTC")
-        if self.phase is None and self.start_deadline is not None:
-            raise ValueError("start phase binding is invalid")
-        if self.phase is not None and self.start_deadline is None:
-            raise ValueError("start phase binding is invalid")
         return self
 
 
 class RecipeStopPayload(_StrictPayload):
-    schema_version: Literal[2]
     run_id: CanonicalUuid
     target_runtime_id: CanonicalUuid
     run_generation: RunGeneration
-    node_id: NodeId
     installation_id: CanonicalUuid
     recipe_revision_id: CanonicalUuid
-    recipe_content_sha256: Digest
     mapping_id: CanonicalUuid
-    mapping_generation: PositiveInt
     plan_digest: Digest
-    rank: Annotated[int, Field(ge=0)]
-    role: Role
-    world_size: PositiveInt
     compiled_execution_plan: CompiledExecutionPlan
     cancel_pending_start: bool = False
 
-    @model_validator(mode="after")
-    def placement_matches(self) -> RecipeStopPayload:
-        placement = self.compiled_execution_plan.runtime.placement
-        if (self.rank, self.role, self.world_size) != (
-            placement.rank,
-            placement.role,
-            placement.world_size,
-        ):
-            raise ValueError("stop placement does not match compiled plan")
-        if (
-            self.recipe_content_sha256
-            != self.compiled_execution_plan.identity.recipe_revision_sha256
-        ):
-            raise ValueError("stop recipe digest does not match compiled plan")
-        return self
-
 
 class RecipeUninstallPayload(_StrictPayload):
-    schema_version: Literal[1]
     installation_id: CanonicalUuid
     plan_digest: Digest
     recipe_content_sha256: Digest
@@ -224,12 +115,11 @@ class RecipeUninstallPayload(_StrictPayload):
 
 
 class RecipeStopResult(_StrictPayload):
-    stopped: Literal[True]
+    """A stop succeeds with an empty result."""
 
 
 class RecipeUninstallResult(_StrictPayload):
-    uninstalled: Literal[True]
-    removed_model_bytes: int = Field(ge=0, le=16 * 1024**4)
+    """An uninstall succeeds with an empty result."""
 
 
 class RecipeReconcilePayload(RecipeReconciliationIdentity):
@@ -237,23 +127,7 @@ class RecipeReconcilePayload(RecipeReconciliationIdentity):
 
 
 class RecipeReconcileResult(_StrictPayload):
-    reconciled: Literal[True]
-    node_id: Annotated[str, Field(pattern=r"^spk_[0-9a-f]{32}$")]
-    installation_id: CanonicalUuid
-    install_operation_id: CanonicalUuid
-    install_operation_payload_sha256: Digest
-    plan_digest: Digest
-    recipe_revision_id: CanonicalUuid
-    recipe_content_sha256: Digest
-    compiled_spec_canonical_sha256: Digest
-    removed_bytes: ByteCount = Field(
-        description=(
-            "Measured bytes in the removed agent-owned installation tree, excluding "
-            "the exact helper-managed runtime-cache subtree. The helper separately "
-            "confirms removal of that private cache without reporting its byte count."
-        )
-    )
-    cleanup_receipt_sha256: Digest
+    """A reconciliation succeeds with an empty result."""
 
 
 _REQUEST_MODELS = {
@@ -301,10 +175,6 @@ class RecipeOperationRequest(_StrictPayload):
         return self
 
     @property
-    def schema_version(self) -> int:
-        return self.payload.schema_version
-
-    @property
     def plan_digest(self) -> str:
         return self.payload.plan_digest
 
@@ -317,56 +187,8 @@ class RecipeOperationRequest(_StrictPayload):
         return getattr(self.payload, "recipe_revision_id", None)
 
     @property
-    def recipe_content_sha256(self) -> str | None:
-        return getattr(self.payload, "recipe_content_sha256", None)
-
-    @property
     def mapping_id(self) -> str | None:
         return getattr(self.payload, "mapping_id", None)
-
-    @property
-    def mapping_generation(self) -> int | None:
-        return getattr(self.payload, "mapping_generation", None)
-
-    @property
-    def image_digest(self) -> str | None:
-        return getattr(self.payload, "image_digest", None)
-
-    @property
-    def alias(self) -> str | None:
-        return getattr(self.payload, "alias", None)
-
-    @property
-    def port(self) -> int | None:
-        return getattr(self.payload, "port", None)
-
-    @property
-    def reserved_memory_bytes(self) -> int | None:
-        return getattr(self.payload, "reserved_memory_bytes", None)
-
-    @property
-    def memory_floor_bytes(self) -> int | None:
-        return getattr(self.payload, "memory_floor_bytes", None)
-
-    @property
-    def endpoint_address(self) -> str | None:
-        return getattr(self.payload, "endpoint_address", None)
-
-    @property
-    def world_size(self) -> int | None:
-        return getattr(self.payload, "world_size", None)
-
-    @property
-    def local_address(self) -> str | None:
-        return getattr(self.payload, "local_address", None)
-
-    @property
-    def master_address(self) -> str | None:
-        return getattr(self.payload, "master_address", None)
-
-    @property
-    def master_port(self) -> int | None:
-        return getattr(self.payload, "master_port", None)
 
     @property
     def phase(self) -> str | None:
@@ -387,14 +209,6 @@ class RecipeOperationRequest(_StrictPayload):
     @property
     def run_id(self) -> str | None:
         return getattr(self.payload, "run_id", None)
-
-    @property
-    def rank(self) -> int | None:
-        return getattr(self.payload, "rank", None)
-
-    @property
-    def role(self) -> str | None:
-        return getattr(self.payload, "role", None)
 
     @property
     def compiled_execution_plan(self) -> Mapping[str, Any] | None:

@@ -82,9 +82,7 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
             break
     assert stop_id is not None
     for node_id in nodes:
-        lifecycle.record_node_result(
-            stop_id, node_id, succeeded=True, evidence={"stopped": True}
-        )
+        lifecycle.record_node_result(stop_id, node_id, succeeded=True, evidence={})
     with sessions() as session:
         run = session.get(RecipeRun, old.owner_id)
         assert run is not None and run.state == "stopped" and run.stopped_at is not None

@@ -120,7 +120,6 @@ pub fn verify_readiness_at(
         || receipt.process_start_ticks != expected_start_ticks
         || receipt.boot_id != expected_boot_id
         || receipt.runtime_identity != *expected_identity
-        || !receipt.runtime_identity.self_test_passed
         || age > max_age
     {
         return Err(ReadinessError::Mismatch);

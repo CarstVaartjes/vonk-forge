@@ -33,7 +33,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     ModelCacheOperation,
 )
-from vonk_forge_contracts import ModelDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, document_sha256
 
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
 
@@ -508,7 +508,7 @@ def _insert_model_revision(
     sessions, document: dict[str, object], *, created_at: datetime
 ) -> str:
     supersedes = document.pop("_supersedes", None)
-    digest = content_sha256(ModelDefinition.model_validate(document))
+    digest = document_sha256(document)
     identity = document["identity"]
     assert isinstance(identity, dict)
     root_id = f"00000000-0000-4000-8000-{digest[:12]}"

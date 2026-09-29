@@ -17,18 +17,18 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import DistributionAssignment, DistributionObject
+from vonk_agent_protocol import DistributionObject
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distribution import (
-    ControllerRuntimeImageVerifiedObjectSource,
     DistributionService,
     MemoryVerifiedObjectSource,
     build_distribution_service_from_components,
 )
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor import (
     CompositeDistributionPhaseExecutor,
     DurableDistributionPhaseExecutor,
@@ -61,7 +61,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationService,
     _validate_artifact_execution,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 from .test_recipe_operations import NOW, setup_services
@@ -307,19 +307,12 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         ExecuteContainerRuntimeRequestOperation(
             type="execute-container-runtime-request",
             action="image-import",
-            job_id=child.id,
-            operation_id=stored.id,
-            attempt=1,
             fence=str(uuid4()),
             request_sha256="a" * 64,
         )
         # ArtifactDistributionRequest is a plan reference. The agent fetches
         # the registered assignment through its authenticated distribution API.
-        assert stored.payload == {
-            "schema_version": 1,
-            "authority_revision": plan.plan_digest,
-            "plan_digest": plan.plan_digest,
-        }
+        assert stored.payload == {"plan_digest": plan.plan_digest}
         assert (
             distribution.authorize(
                 node_id=NODE_A, plan_digest=plan.plan_digest
@@ -346,11 +339,6 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
                 },
                 result={
                     "downloaded_bytes": 26,
-                    "verified": True,
-                    "verified_digests": ["a" * 64, "b" * 64],
-                    "verified_image_digest": "sha256:" + "e" * 64,
-                    "imported_image_digest": "sha256:" + "e" * 64,
-                    "verified_oci_layout_sha256": "c" * 64,
                 },
             )
         )
@@ -429,9 +417,8 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
     artifact_digest = "c" * 64
     image_digest = "sha256:" + "a" * 64
     layout_digest = "b" * 64
-    assignment = DistributionAssignment.parse(
+    assignment = NodeDistributionAssignment.parse(
         {
-            "schema_version": 2,
             "assignment_id": str(uuid4()),
             "plan_digest": "d" * 64,
             "generation": 1,
@@ -514,11 +501,6 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
             {
                 "node_id": node_id,
                 "downloaded_bytes": 18,
-                "verified": True,
-                "verified_digests": [artifact_digest],
-                "verified_image_digest": image_digest,
-                "imported_image_digest": image_digest,
-                "verified_oci_layout_sha256": layout_digest,
             },
         ]
     }
@@ -606,11 +588,7 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
             NODE_A,
             "artifact.distribution.v1",
             "f" * 64,
-            ArtifactDistributionPayload(
-                schema_version=1,
-                authority_revision="f" * 64,
-                plan_digest="f" * 64,
-            ).model_dump(mode="json"),
+            ArtifactDistributionPayload(plan_digest="f" * 64).model_dump(mode="json"),
             operation_id=str(uuid4()),
         )
         operation = (
@@ -894,7 +872,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             .read_text(encoding="utf-8")
         )
     )
-    model_content_sha256 = content_sha256(model)
+    model_content_sha256 = document_sha256(model.model_dump(mode="json"))
     recipe_document = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "recipe-source-build.json")
@@ -904,7 +882,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     recipe_document["models"][0]["model"]["content_sha256"] = model_content_sha256
     recipe = RecipeDefinition.model_validate(recipe_document)
     recipe_document = recipe.model_dump(mode="json")
-    recipe_digest = content_sha256(recipe)
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     model_payload = b"model weights"
     auxiliary_payload = b"tokenizer auxiliary"
     model_source = tmp_path / "weights.source"
@@ -1197,11 +1175,6 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                     },
                     result={
                         "downloaded_bytes": target_bytes,
-                        "verified": True,
-                        "verified_digests": [item["sha256"] for item in artifacts],
-                        "verified_image_digest": image_digest,
-                        "imported_image_digest": image_digest,
-                        "verified_oci_layout_sha256": archive_digest,
                     },
                 )
             )
@@ -1437,110 +1410,6 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     )
 
 
-def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
-    agent_system,  # noqa: F811
-    tmp_path: Path,
-) -> None:
-    _client, services, _tokens, clock = agent_system
-    recipe_document = json.loads(
-        files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
-        .read_text(encoding="utf-8")
-    )
-    recipe_document["identity"]["slug"] = "published-fallback-guard"
-    recipe = RecipeDefinition.model_validate(recipe_document)
-    recipe_digest = content_sha256(recipe)
-    registry_digest = "sha256:" + "d" * 64
-    image_digest = "sha256:" + "e" * 64
-    assert registry_digest != image_digest
-    assert recipe_document["execution"]["image"][
-        "digest"
-    ] == registry_digest.removeprefix("sha256:")
-    archive_payload = b"coincident build archive"
-    archive_digest = hashlib.sha256(archive_payload).hexdigest()
-    recipe_id = str(uuid.uuid4())
-    revision_id = str(uuid.uuid4())
-    build_id = str(uuid.uuid4())
-    plan_digest = "f" * 64
-    with services.sessions.begin() as session:
-        session.add(
-            CatalogDocument(
-                id=recipe_id,
-                kind="recipe",
-                publisher=recipe.identity.publisher,
-                slug=recipe.identity.slug,
-                title=recipe.metadata.title,
-                created_by="test",
-                created_at=clock.now,
-                updated_at=clock.now,
-            )
-        )
-        session.flush()
-        session.add_all(
-            [
-                CatalogDocumentRevision(
-                    id=revision_id,
-                    document_id=recipe_id,
-                    kind="recipe",
-                    publisher=recipe.identity.publisher,
-                    slug=recipe.identity.slug,
-                    revision_number=1,
-                    schema_version=2,
-                    state="active",
-                    document=recipe.model_dump(mode="json"),
-                    content_digest=recipe_digest,
-                    projected={},
-                    created_by="test",
-                    created_at=clock.now,
-                ),
-                RecipeBuild(
-                    id=build_id,
-                    recipe_revision_id=revision_id,
-                    builder_node_id=NODE_A,
-                    source_bundle_sha256="c" * 64,
-                    build_input_sha256="e" * 64,
-                    state="succeeded",
-                    policy_report={},
-                    plan={},
-                    image_digest=image_digest,
-                    oci_layout_sha256=archive_digest,
-                    image_bytes=len(archive_payload),
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-                Job(
-                    id=str(uuid.uuid4()),
-                    request_id=str(uuid.uuid4()),
-                    kind="recipe.run-switch.v2",
-                    state="running",
-                    actor="test",
-                    authority_revision=plan_digest,
-                    targets=[NODE_A],
-                    payload_digest="a" * 64,
-                    payload={
-                        "plan_digest": plan_digest,
-                        "plan": {
-                            "recipe_revision_id": revision_id,
-                            "recipe_build_id": None,
-                        },
-                    },
-                    result={},
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-            ]
-        )
-    source = ControllerRuntimeImageVerifiedObjectSource(
-        services.sessions, services.artifact_root
-    )
-    assignment = DistributionAssignment.model_construct(
-        plan_digest=plan_digest,
-        oci_image_digest=image_digest,
-        oci_archive_sha256=archive_digest,
-    )
-    assert source.verify_runtime_image_assignment(assignment) is False
-
-
 def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
 
     entered = threading.Event()
@@ -1549,8 +1418,6 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
     executor._async_runtime_image_preparation = True
     executor._runtime_image_pool = ThreadPoolExecutor(max_workers=1)
     executor._runtime_image_futures = {}
-    executor._runtime_image_progress = {}
-    executor._runtime_image_progress_lock = threading.Lock()
 
     def prepare(
         _plan,
@@ -1560,17 +1427,14 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
         actor,
         request_key,
         progress,
-        transfer_progress=None,
         wait_for_busy_owner=False,
     ) -> None:
         assert item_index == 0
         assert actor == "operator"
         assert request_key
         assert not progress
-        assert transfer_progress is not None
         # Off the tick thread, publication waits for the owner row.
         assert wait_for_busy_owner is True
-        transfer_progress("copy", 23, 100)
         entered.set()
         assert release.wait(5)
 
@@ -1599,10 +1463,7 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
             progress={},
         )
         assert observed.waiting
-        assert (
-            observed.status_reason
-            == "Runtime image copy: 23 bytes transferred of 100 bytes"
-        )
+        assert "still running" in (observed.status_reason or "")
     finally:
         release.set()
         executor.close()

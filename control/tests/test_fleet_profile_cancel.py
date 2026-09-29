@@ -44,6 +44,7 @@ from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
+from .agent_fences import fenced_operation
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_artifact_jobs import running_artifact_service, submitted_artifact_job
 from .test_fleet_profile_api import _client, _headers
@@ -180,7 +181,6 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
     assert len(payloads) == len(stop.targets)
     assert all(payload["target_runtime_id"] == artifact.id for payload in payloads)
     assert all(payload["run_id"] == run_id for payload in payloads)
-    assert all(payload["node_id"] == node_id for payload in payloads)
     assert all(payload["cancel_pending_start"] is True for payload in payloads)
     assert all(payload["run_generation"] == 1 for payload in payloads), (
         "Stop retains the exact older JobRun generation instead of rewriting it"
@@ -220,12 +220,13 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
                 select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
             )
         )
-    assert stop_claim is not None and stop_claim.job_id == stop.id, (
-        f"profile Stop child is not claimable: {stop_children!r}"
-    )
+    assert (
+        stop_claim is not None
+        and fenced_operation(sessions, stop_claim).parent_job_id == stop.id
+    ), f"profile Stop child is not claimable: {stop_children!r}"
     if stop_receipt_state == "succeeded":
         agent_jobs.record_result(
-            _agent_result(stop_claim, state="succeeded", result={"stopped": True})
+            _agent_result(stop_claim, state="succeeded", result={})
         )
     else:
         agent_jobs.record_result(
@@ -394,13 +395,7 @@ def _resume_profile_cancel_process(
 def _agent_result(claim, *, state: str, result: dict[str, object]) -> AgentResult:
     return AgentResult.model_validate(
         {
-            "schema_version": 1,
-            "job_id": claim.job_id,
-            "operation_id": claim.operation_id,
-            "attempt": claim.attempt,
             "fence": claim.fence,
-            "node_id": claim.node_id,
-            "deadline": claim.deadline,
             "state": state,
             "result": result,
         }
@@ -479,13 +474,7 @@ def _start_profile_stop_child(sessions, run_switch, service, application):
 def _agent_service_and_target_claim(
     sessions, lifecycle, node_id, nodes, *, clock, jobs: AgentJobService | None = None
 ):
-    capabilities = ["agent.runtime.rust.v1", "recipe.stop", "recipe.operations.v1"]
     if jobs is None:
-        with sessions.begin() as session:
-            for node in session.scalars(
-                select(AgentNode).where(AgentNode.node_id.in_(nodes))
-            ):
-                node.capabilities = sorted(set(node.capabilities) | set(capabilities))
         jobs = AgentJobService(
             sessions, clock=clock, result_consumer=lifecycle.consume_agent_result
         )
@@ -494,16 +483,10 @@ def _agent_service_and_target_claim(
         node = session.get(AgentNode, node_id)
         assert node is not None
         identity = {**PACKAGED_RUNTIME_IDENTITY, "architecture": node.architecture}
-        if node.observation_receipt_public_key is not None:
-            identity["observation_receipt_public_key"] = (
-                node.observation_receipt_public_key
-            )
     claim = claim_agent(
         jobs,
         node_id,
         f"serial-{index}",
-        300,
-        capabilities=capabilities,
         runtime_identity=identity,
     )
     return jobs, claim
@@ -529,10 +512,11 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
     agent_jobs, first_claim = _agent_service_and_target_claim(
         sessions, lifecycle, nodes[0], nodes, clock=lambda: now[0]
     )
-    assert first_claim is not None and first_claim.job_id == stop_job_id
-    agent_jobs.record_result(
-        _agent_result(first_claim, state="succeeded", result={"stopped": True})
+    assert (
+        first_claim is not None
+        and fenced_operation(sessions, first_claim).parent_job_id == stop_job_id
     )
+    agent_jobs.record_result(_agent_result(first_claim, state="succeeded", result={}))
     _, second_claim = _agent_service_and_target_claim(
         sessions,
         lifecycle,
@@ -541,7 +525,10 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
         clock=lambda: now[0],
         jobs=agent_jobs,
     )
-    assert second_claim is not None and second_claim.job_id == stop_job_id
+    assert (
+        second_claim is not None
+        and fenced_operation(sessions, second_claim).parent_job_id == stop_job_id
+    )
 
     with sessions() as session:
         first_node = session.scalar(
@@ -581,7 +568,9 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
         for effect in pending.cancellation.pending_effects
     )
     with sessions() as session:
-        second_operation = session.get(AgentOperation, second_claim.operation_id)
+        second_operation = session.get(
+            AgentOperation, fenced_operation(sessions, second_claim).id
+        )
         assert second_operation is not None and second_operation.state == "running"
         assert second_operation.parent_job_id == stop_job_id
     directive = agent_jobs.heartbeat(second_claim, None, 30)
@@ -613,8 +602,12 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
     assert run_switch.get(child_id).state == "cancelled"
     with sessions() as session:
         stop_jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
-        first_operation = session.get(AgentOperation, first_claim.operation_id)
-        second_operation = session.get(AgentOperation, second_claim.operation_id)
+        first_operation = session.get(
+            AgentOperation, fenced_operation(sessions, first_claim).id
+        )
+        second_operation = session.get(
+            AgentOperation, fenced_operation(sessions, second_claim).id
+        )
         first_node = session.scalar(
             select(RunNode).where(
                 RunNode.run_id == run.owner_id, RunNode.node_id == nodes[0]
@@ -655,7 +648,10 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
     agent_jobs, claim = _agent_service_and_target_claim(
         sessions, lifecycle, nodes[0], nodes, clock=lambda: now[0]
     )
-    assert claim is not None and claim.job_id == stop_job_id
+    assert (
+        claim is not None
+        and fenced_operation(sessions, claim).parent_job_id == stop_job_id
+    )
     pending = service.cancel(
         application.id,
         profile_number=profile.number,
@@ -682,7 +678,7 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         durable = session.get(FleetProfileApplication, application.id)
         parent_job = session.get(Job, child_id)
         stop_job = session.get(Job, stop_job_id)
-        operation = session.get(AgentOperation, claim.operation_id)
+        operation = session.get(AgentOperation, fenced_operation(sessions, claim).id)
         assert durable is not None
         assert durable.state == "running"
         cancellation_progress = durable.progress.get("cancellation")
@@ -762,9 +758,7 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
         sessions, lifecycle, nodes[0], nodes, clock=lambda: now[0]
     )
     assert first_claim is not None
-    agent_jobs.record_result(
-        _agent_result(first_claim, state="succeeded", result={"stopped": True})
-    )
+    agent_jobs.record_result(_agent_result(first_claim, state="succeeded", result={}))
     _, second_claim = _agent_service_and_target_claim(
         sessions,
         lifecycle,
@@ -804,7 +798,9 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
         )
         old_child = session.get(Job, child_id)
         stop_job = session.get(Job, stop_job_id)
-        issued = session.get(AgentOperation, second_claim.operation_id)
+        issued = session.get(
+            AgentOperation, fenced_operation(sessions, second_claim).id
+        )
     assert old is not None and old.state == "cancelled"
     assert new is not None and new.state == "queued"
     assert old_child is not None and old_child.id == child_id
@@ -837,7 +833,9 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
         )
     )
     with sessions() as session:
-        settled = session.get(AgentOperation, second_claim.operation_id)
+        settled = session.get(
+            AgentOperation, fenced_operation(sessions, second_claim).id
+        )
         old_after_receipt = session.get(FleetProfileApplication, application.id)
         new_after_receipt = session.get(FleetProfileApplication, replacement.id)
         nodes_after_receipt = tuple(
@@ -1350,19 +1348,15 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
         topology.update(
             {
                 "name": "solo",
-                "mode": "single",
                 "node_count": 1,
                 "parallelism": {
                     "backend": "local",
                     "data": 1,
                     "pipeline": 1,
                     "tensor": 1,
-                    "world_size": 1,
                 },
-                "fabric": {"connectivity": "none", "minimum_bandwidth_mbps": 0},
                 "roles": [entrypoint],
                 "start_order": ["entrypoint"],
-                "stop_order": ["entrypoint"],
             }
         )
         document["models"][0]["files"][0]["roles"] = ["entrypoint"]

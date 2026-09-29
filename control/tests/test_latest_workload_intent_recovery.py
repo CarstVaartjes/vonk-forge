@@ -28,8 +28,9 @@ from vonk_control.run_switch_operations import (
     RecipeLifecyclePhaseExecutor,
     RunSwitchOperationService,
 )
-from vonk_control.runtime_preflight import mandatory_capabilities, request_digest
+from vonk_control.runtime_preflight import mandatory_capabilities
 
+from .agent_fences import fenced_operation
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_fleet_profiles import _uuid
 from .test_recipe_operations import installed_recipe, setup_services
@@ -42,13 +43,7 @@ from .test_run_switch_operations import (
 def _result(claim, *, state: str, evidence: dict[str, object]) -> AgentResult:
     return AgentResult.model_validate(
         {
-            "schema_version": 1,
-            "job_id": claim.job_id,
-            "operation_id": claim.operation_id,
-            "attempt": claim.attempt,
             "fence": claim.fence,
-            "node_id": claim.node_id,
-            "deadline": claim.deadline,
             "state": state,
             "result": evidence,
         }
@@ -65,19 +60,10 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         )
         node_id = nodes[0]
         fingerprint = "a" * 64
-        agent_capabilities = (
-            "agent.runtime.rust.v1",
-            "runtime.vonk.v1",
-            "recipe.install",
-            "recipe.start",
-            "recipe.stop",
-            "runtime.preflight.v1",
-            f"runtime.preflight.fingerprint.{fingerprint}",
-        )
         with sessions.begin() as session:
             node = session.get(AgentNode, node_id)
             assert node is not None
-            node.capabilities = sorted(set(node.capabilities) | set(agent_capabilities))
+            node.preflight_fingerprint = fingerprint
         agent_jobs = AgentJobService(sessions, clock=lifecycle._clock)
         agent_jobs.set_result_consumer(lifecycle.consume_agent_result)
         lifecycle._agent_jobs = agent_jobs
@@ -96,11 +82,13 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             agent_jobs,
             node_id,
             "serial-0",
-            30,
-            capabilities=agent_capabilities,
             runtime_identity=identity,
+            preflight_fingerprint=fingerprint,
         )
-        assert old_claim is not None and old_claim.job_id == old_start.id
+        assert (
+            old_claim is not None
+            and fenced_operation(sessions, old_claim).parent_job_id == old_start.id
+        )
 
         with sessions() as session:
             revision = session.scalar(
@@ -178,14 +166,14 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             agent_jobs,
             node_id,
             "serial-0",
-            30,
-            capabilities=agent_capabilities,
             runtime_identity=identity,
+            preflight_fingerprint=fingerprint,
         )
-        assert stop_claim is not None and stop_claim.job_id == stop_job.id
-        agent_jobs.record_result(
-            _result(stop_claim, state="succeeded", evidence={"stopped": True})
+        assert (
+            stop_claim is not None
+            and fenced_operation(sessions, stop_claim).parent_job_id == stop_job.id
         )
+        agent_jobs.record_result(_result(stop_claim, state="succeeded", evidence={}))
         with sessions() as session:
             old_run = session.get(RecipeRun, old_start.owner_id)
             assert old_run is not None and old_run.state == "stopped"
@@ -251,23 +239,21 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
                     agent_jobs,
                     node_id,
                     "serial-0",
-                    30,
-                    capabilities=agent_capabilities,
                     runtime_identity=identity,
+                    preflight_fingerprint=fingerprint,
                 )
                 assert preflight_claim is not None
-                assert preflight_claim.job_id == preflight.id
+                assert (
+                    fenced_operation(sessions, preflight_claim).parent_job_id
+                    == preflight.id
+                )
                 agent_jobs.record_result(
                     _result(
                         preflight_claim,
                         state="succeeded",
                         evidence={
-                            "schema_version": 1,
                             "fingerprint": fingerprint,
-                            "request_sha256": request_digest(probe),
                             "observed_at": int(lifecycle._clock().timestamp()),
-                            "duration_ms": 1,
-                            "cached": False,
                             "findings": [
                                 {
                                     "capability": capability,
@@ -286,11 +272,16 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             agent_jobs,
             node_id,
             "serial-0",
-            30,
-            capabilities=agent_capabilities,
             runtime_identity=identity,
+            preflight_fingerprint=fingerprint,
         )
-        assert new_claim is not None and new_claim.job_id == replacement.id
-        assert new_claim.operation_id != old_claim.operation_id
+        assert (
+            new_claim is not None
+            and fenced_operation(sessions, new_claim).parent_job_id == replacement.id
+        )
+        assert (
+            fenced_operation(sessions, new_claim).id
+            != fenced_operation(sessions, old_claim).id
+        )
     finally:
         engine.dispose()

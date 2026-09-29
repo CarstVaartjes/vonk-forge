@@ -28,7 +28,6 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
-    DistributionAssignment,
     OperationProgress,
     canonical_message,
 )
@@ -53,6 +52,7 @@ from .cluster_mappings import (
     validate_mapping_parameters,
 )
 from .disk_reservations import outstanding_disk_reservation_bytes
+from .distribution_assignment import NodeDistributionAssignment
 from .failure_classification import error_code, is_redownload, is_security_failure
 from .install_admission import InstallAdmissionBusy, InstallPreflightExpired
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
@@ -212,17 +212,6 @@ from .runtime_image_preparation import (
 from .runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,
 )
-
-
-class PublishedImageReceiptLookup(Protocol):
-    def __call__(
-        self,
-        registry_manifest_digest: str,
-        *,
-        expected_architecture: str,
-        expected_runtime_interface: str,
-    ) -> RuntimeImageReceiptDocument | None: ...
-
 
 # Persisted progress and catalog documents arrive as decoded JSON, so the
 # contract's closed value sets are read back through the declared alias instead
@@ -2076,26 +2065,20 @@ class RecipeLifecyclePhaseExecutor:
         installation_id = plan.installation_id
         if installation_id is None:
             raise RunSwitchOperationConflict("run-switch.uninstall_target_unavailable")
-        exact_reconciliation_receipts = True
+        reconciliation_complete = True
         reconcile_request_id: str | None = None
-        reconciliation_receipts: list[dict[str, object]] = []
         if plan.cleanup_mode == "reconcile":
             if self._lifecycle is None or plan.reconciliation_authority is None:
                 raise RunSwitchOperationConflict(
                     "run-switch.reconciliation-authority-unavailable"
                 )
             reconcile_request_id = str(uuid.uuid5(uuid.UUID(request_key), "reconcile"))
-            verified_receipts = self._lifecycle.reconciliation_operation_receipts(
+            reconciliation_complete = self._lifecycle.reconciliation_complete(
                 reconcile_request_id,
                 expected_authority=plan.reconciliation_authority.model_dump(
                     mode="json"
                 ),
             )
-            exact_reconciliation_receipts = verified_receipts is not None
-            if verified_receipts is not None:
-                reconciliation_receipts = [
-                    receipt.model_dump(mode="json") for receipt in verified_receipts
-                ]
         with self._sessions() as session:
             installation = session.get(RecipeInstallation, installation_id)
             members = tuple(
@@ -2127,11 +2110,11 @@ class RecipeLifecyclePhaseExecutor:
                 and installation.state == "uninstalled"
                 and exact_members
                 and all(node.state == "uninstalled" for node in members)
-                and exact_reconciliation_receipts
+                and reconciliation_complete
             )
-            if not exact_reconciliation_receipts:
+            if not reconciliation_complete:
                 raise RunSwitchOperationConflict(
-                    "run-switch.reconciliation-receipt-verification-failed"
+                    "run-switch.reconciliation-verification-failed"
                 )
             if (
                 installation is None
@@ -2153,11 +2136,7 @@ class RecipeLifecyclePhaseExecutor:
             "active_runs": active_runs,
             "cleanup_mode": plan.cleanup_mode,
             **(
-                {
-                    "reconciliation_request_id": reconcile_request_id,
-                    "exact_reconciliation_receipts": exact_reconciliation_receipts,
-                    "reconciliation_receipts": reconciliation_receipts,
-                }
+                {"reconciliation_request_id": reconcile_request_id}
                 if plan.cleanup_mode == "reconcile"
                 else {}
             ),
@@ -2201,7 +2180,6 @@ class RunSwitchOperationService:
         phase_executor: RunSwitchPhaseExecutor | None = None,
         model_cache: ModelCacheService | None = None,
         build_archive_available: Callable[[str, int], bool] | None = None,
-        published_image_receipt: PublishedImageReceiptLookup | None = None,
         inventory_max_age_seconds: int = 300,
         memory_floor_bytes: int = 0,
     ) -> None:
@@ -2216,7 +2194,6 @@ class RunSwitchOperationService:
         self._artifacts = artifacts or DatabaseRunSwitchArtifactInspector(model_cache)
         self._artifact_phase_executor = artifact_phase_executor
         self._build_archive_available = build_archive_available
-        self._published_image_receipt = published_image_receipt
         self._custom_phase_executor = phase_executor is not None
         self._phase_executor = phase_executor or (
             RecipeLifecyclePhaseExecutor(
@@ -2421,7 +2398,6 @@ class RunSwitchOperationService:
                     build_candidate,
                     original_group,
                     require_available=False,
-                    published_receipt_lookup=self._published_image_receipt,
                 )
             )
             stop_digest = self._stop_digest(
@@ -2721,7 +2697,6 @@ class RunSwitchOperationService:
                     build_candidate,
                     group,
                     require_available=False,
-                    published_receipt_lookup=self._published_image_receipt,
                 )
             )
             node_ids = [node.node_id for node in group.nodes]
@@ -3624,12 +3599,16 @@ class RunSwitchOperationService:
                         expected_image,
                         {
                             name: getattr(compiled.runtime_image, name)
-                            for name in RuntimeImageIdentity.model_fields
+                            for name in (
+                                "image_digest",
+                                "oci_layout_sha256",
+                                "image_bytes",
+                                "build_id",
+                            )
                         },
                     )
             if (
                 installation is not None
-                and _is_source_build(revision.document)
                 and (
                     build is None
                     or not installation_matches_runtime_image(
@@ -3657,7 +3636,6 @@ class RunSwitchOperationService:
                     group,
                     defer_source_build=defer_source_build,
                     expected_image=expected_image,
-                    published_receipt_lookup=self._published_image_receipt,
                 )
             )
             blockers.extend(build_blockers)
@@ -4189,9 +4167,6 @@ class RunSwitchOperationService:
         *,
         expected_image: RuntimeImageIdentity | None,
     ) -> RecipeBuild | None:
-        revision = session.get(CatalogDocumentRevision, revision_id)
-        if revision is not None and not _is_source_build(revision.document):
-            return None
         if expected_image is not None:
             # Accepted work remains bound to its approved receipt even when a
             # newer completed build becomes available while it is waiting.
@@ -4208,7 +4183,6 @@ class RunSwitchOperationService:
                     select(RuntimeImageAuthorization.id)
                     .where(
                         RuntimeImageAuthorization.recipe_revision_id == revision_id,
-                        RuntimeImageAuthorization.source == "controller-build",
                         RuntimeImageAuthorization.state == "authorized",
                         RuntimeImageAuthorization.build_id == build.id,
                         RuntimeImageAuthorization.oci_archive_sha256
@@ -4246,7 +4220,6 @@ class RunSwitchOperationService:
             select(RuntimeImageAuthorization.build_id)
             .where(
                 RuntimeImageAuthorization.recipe_revision_id == revision_id,
-                RuntimeImageAuthorization.source == "controller-build",
                 RuntimeImageAuthorization.state == "authorized",
                 RuntimeImageAuthorization.build_id.is_not(None),
             )
@@ -4289,12 +4262,6 @@ class RunSwitchOperationService:
         receipt; bytes are produced by ``recipe.build.v1`` during apply.
         """
 
-        if not _is_source_build(revision.document):
-            # Published images are selected by the canonical recipe and a
-            # verified RuntimeImageReceipt.  Creating a synthetic RecipeBuild
-            # would change the authority boundary and make a direct install
-            # depend on source availability.
-            return _BuildSelection(build=None, candidate=None)
         if build is not None:
             return _BuildSelection(build=build, candidate=build)
 
@@ -4439,7 +4406,6 @@ class RunSwitchOperationService:
             or node.revoked_at is not None
             or node.architecture != "linux-arm64"
             or not _is_hex_digest(node.binary_digest)
-            or "recipe.build.v1" not in node.capabilities
             or freshness.state != "fresh"
         ):
             return freshness, False
@@ -4463,7 +4429,6 @@ class RunSwitchOperationService:
         *,
         require_available: bool = True,
         defer_source_build: bool = False,
-        published_receipt_lookup: PublishedImageReceiptLookup | None = None,
         expected_image: RuntimeImageIdentity | None = None,
     ) -> tuple[
         RunSwitchBuildEvidence,
@@ -4473,81 +4438,11 @@ class RunSwitchOperationService:
     ]:
         blockers: list[RunSwitchReason] = []
         warnings: list[RunSwitchReason] = []
-        authorization: RuntimeImageAuthorization | None = None
         document = revision.document if revision is not None else {}
         execution = document.get("execution") if isinstance(document, Mapping) else None
-        source_build = _is_source_build(document)
-        published_digest = _published_manifest_digest(document)
-        direct_receipt = None
-        direct_receipt_verified = False
-        direct_receipt_missing = False
-        direct_receipt_issue: str | None = None
-        if not source_build and revision is not None and published_digest is not None:
-            # Preview has not yet compiled mapping parameters into the
-            # effective execution key. Reuse the same immutable published
-            # image identity across parameter-only keys; compile/install
-            # resolves and persists the exact effective key before planning.
-            authorization = session.scalar(
-                select(RuntimeImageAuthorization)
-                .where(
-                    RuntimeImageAuthorization.recipe_revision_id == revision.id,
-                    RuntimeImageAuthorization.source == "published",
-                    RuntimeImageAuthorization.state == "authorized",
-                    RuntimeImageAuthorization.registry_manifest_digest
-                    == published_digest,
-                )
-                .order_by(
-                    RuntimeImageAuthorization.authorized_at.desc(),
-                    RuntimeImageAuthorization.id.desc(),
-                )
-                .limit(1)
-            )
-            if authorization is not None:
-                direct_receipt = {
-                    "platform_manifest_digest": (
-                        authorization.platform_manifest_digest
-                    ),
-                    "image_bytes": authorization.image_bytes,
-                    "oci_archive_sha256": authorization.oci_archive_sha256,
-                }
         raw_build = execution.get("build") if isinstance(execution, Mapping) else None
-        raw_platform = None
-        if isinstance(raw_build, Mapping):
-            base_image = raw_build.get("base_image")
-            if isinstance(base_image, Mapping):
-                raw_platform = base_image.get("platform")
-            if raw_platform is None:
-                raw_platform = raw_build.get("platform")
-        expected_architecture = (
-            str(raw_platform)
-            if isinstance(raw_platform, str) and raw_platform
-            else "linux/arm64"
-            if not source_build
-            else "unknown"
-        )
-        if authorization is not None:
-            if published_receipt_lookup is None:
-                direct_receipt_missing = True
-            else:
-                try:
-                    observed_receipt = published_receipt_lookup(
-                        published_digest or "",
-                        expected_architecture=expected_architecture,
-                        expected_runtime_interface=RUNTIME_INTERFACE,
-                    )
-                except RuntimeImagePreparationError as error:
-                    direct_receipt_issue = f"{error.code}: {error}"
-                else:
-                    if observed_receipt is None:
-                        direct_receipt_missing = True
-                    elif _published_receipt_matches_authorization(
-                        observed_receipt,
-                        authorization,
-                        expected_architecture=expected_architecture,
-                    ):
-                        direct_receipt_verified = True
-                    else:
-                        direct_receipt_issue = "managed published receipt does not match its durable authorization"
+        # Every recipe image is built for the DGX Spark platform.
+        expected_architecture = "linux/arm64"
         source_digest = (
             candidate.source_bundle_sha256
             if candidate is not None
@@ -4564,8 +4459,6 @@ class RunSwitchOperationService:
             else None
         )
         source_state = "available" if source_row is not None else "missing"
-        if not source_build:
-            source_state = "available"
         source = BuildSourceEvidence(
             state=source_state,
             source_bundle_sha256=(
@@ -4581,7 +4474,7 @@ class RunSwitchOperationService:
         candidate_plan_valid = True
         if candidate is not None:
             try:
-                candidate_plan = parse_stored_build_plan(candidate.plan)
+                parse_stored_build_plan(candidate.plan)
             except RecipeExecutionContractError:
                 candidate_plan_valid = False
                 blockers.append(
@@ -4592,19 +4485,13 @@ class RunSwitchOperationService:
                     )
                 )
             else:
-                observed_architecture = candidate_plan.platform
+                observed_architecture = "linux/arm64"
             if candidate_plan_valid and observed_architecture is None:
                 builder = session.get(AgentNode, candidate.builder_node_id)
                 if builder is not None and isinstance(builder.architecture, str):
                     observed_architecture = _normalise_architecture(
                         builder.architecture
                     )
-        elif direct_receipt is not None:
-            # A runtime-image authorization is a verified platform image; the
-            # runtime-image contract fixes its architecture to linux-arm64, so
-            # the observation is that constant rather than a column the
-            # authorization does not carry.
-            observed_architecture = RUNTIME_IMAGE_ARCHITECTURE
         node_architectures = tuple(
             _normalise_architecture(node.architecture)
             for node in session.scalars(
@@ -4655,47 +4542,30 @@ class RunSwitchOperationService:
         source_identity = build if build is not None else candidate
         image_digest = (
             source_identity.image_digest
-            if source_build
-            and source_identity is not None
-            and source_identity.image_digest is not None
+            if source_identity is not None and source_identity.image_digest is not None
             else expected_image.image_digest
-            if source_build and build is None and expected_image is not None
+            if build is None and expected_image is not None
             else build.image_digest
             if build is not None
-            else direct_receipt["platform_manifest_digest"]
-            if direct_receipt is not None
-            else expected_image.image_digest
-            if not source_build and expected_image is not None
             else None
         )
         image_bytes = (
             source_identity.image_bytes
-            if source_build
-            and source_identity is not None
-            and source_identity.image_bytes is not None
+            if source_identity is not None and source_identity.image_bytes is not None
             else expected_image.image_bytes
-            if source_build and build is None and expected_image is not None
+            if build is None and expected_image is not None
             else build.image_bytes
             if build is not None
-            else direct_receipt["image_bytes"]
-            if direct_receipt is not None
-            else expected_image.image_bytes
-            if not source_build and expected_image is not None
             else None
         )
         oci_layout = (
             source_identity.oci_layout_sha256
-            if source_build
-            and source_identity is not None
+            if source_identity is not None
             and source_identity.oci_layout_sha256 is not None
             else expected_image.oci_layout_sha256
-            if source_build and build is None and expected_image is not None
+            if build is None and expected_image is not None
             else build.oci_layout_sha256
             if build is not None
-            else direct_receipt["oci_archive_sha256"]
-            if direct_receipt is not None
-            else expected_image.oci_layout_sha256
-            if not source_build and expected_image is not None
             else None
         )
         runtime_reused = 0
@@ -4746,13 +4616,7 @@ class RunSwitchOperationService:
                 if candidate is not None
                 else None
             ),
-            preparation_required=(
-                not source_build
-                and published_digest is not None
-                and direct_receipt_issue is None
-                and not direct_receipt_verified
-            ),
-            registry_manifest_digest=published_digest,
+            preparation_required=False,
             image_digest=image_digest,
             oci_layout_sha256=oci_layout,
             image_bytes=image_bytes,
@@ -4761,45 +4625,23 @@ class RunSwitchOperationService:
             ),
             reused_bytes=runtime_reused,
             copied_bytes=runtime_missing,
-            missing_nas_bytes=(
-                image_bytes
-                if direct_receipt_missing or (source_build and build is None)
-                else 0
-                if direct_receipt_verified
-                else None
-            ),
+            missing_nas_bytes=image_bytes if build is None else None,
             missing_spark_bytes=(runtime_missing if image_bytes is not None else None),
             missing_image_distribution_bytes=(
                 runtime_missing if image_bytes is not None else None
             ),
             nas_coverage=(
                 "partial"
-                if direct_receipt_missing or (source_build and build is None)
+                if build is None
                 else "complete"
-                if direct_receipt_verified
-                or (
-                    source_build
-                    and build is not None
-                    and image_bytes is not None
-                    and oci_layout is not None
-                )
+                if image_bytes is not None and oci_layout is not None
                 else "unknown"
             ),
             spark_coverage=runtime_coverage,
             reclaimable_bytes=runtime_reclaimable,
             reclaimable_digests=sorted(runtime_reclaimable_digests),
         )
-        state = (
-            "available"
-            if direct_receipt_verified
-            else "incompatible"
-            if direct_receipt_issue is not None
-            else "missing"
-            if direct_receipt is not None
-            else "missing"
-            if candidate is None
-            else str(candidate.state)
-        )
+        state = "missing" if candidate is None else str(candidate.state)
         detail: str | None = None
         if build is not None:
             state = "available"
@@ -4814,16 +4656,10 @@ class RunSwitchOperationService:
                 )
             else:
                 detail = candidate.error
-        elif not source_build and direct_receipt is None:
-            detail = "No verified published runtime image receipt is available for this recipe revision."
-        elif direct_receipt_issue is not None:
-            detail = direct_receipt_issue
-        elif direct_receipt_missing:
-            detail = "The authorized published runtime image archive is missing from Controller storage."
         if compatibility_state == "incompatible":
             state = "incompatible"
         if require_available:
-            if source_build and build is None:
+            if build is None:
                 pending = candidate is not None and candidate.state in {
                     "planned",
                     "building",
@@ -4855,36 +4691,6 @@ class RunSwitchOperationService:
                             node_ids=[node.node_id for node in group.nodes],
                         )
                     )
-            elif direct_receipt_issue is not None:
-                blockers.append(
-                    _as_reason(
-                        "run-switch.runtime-image-authorization-mismatch",
-                        direct_receipt_issue,
-                        scope="artifact",
-                        node_ids=[node.node_id for node in group.nodes],
-                    )
-                )
-            elif direct_receipt_missing:
-                warnings.append(
-                    _as_reason(
-                        "run-switch.runtime-image-preparation-required",
-                        "The exact authorized published image archive is missing from Controller storage and will be restored before install admission.",
-                        scope="operation",
-                        severity="warning",
-                        node_ids=[node.node_id for node in group.nodes],
-                    )
-                )
-            elif not source_build and direct_receipt is None:
-                warnings.append(
-                    _as_reason(
-                        "run-switch.runtime-image-preparation-required",
-                        detail
-                        or "The pinned published image will be pulled and verified before install admission.",
-                        scope="operation",
-                        severity="warning",
-                        node_ids=[node.node_id for node in group.nodes],
-                    )
-                )
             if compatibility_state == "incompatible":
                 blockers.append(
                     _as_reason(
@@ -4956,7 +4762,7 @@ class RunSwitchOperationService:
 
         if revision is None or (build is None and runtime_storage.image_digest is None):
             # There is no honest immutable runtime image identity to place in
-            # RolloutPreparation until a successful build or published receipt
+            # RolloutPreparation until a successful build receipt
             # exists.
             return None
         primary_model_digest = _primary_model_digest(revision.document)
@@ -5111,11 +4917,7 @@ class RunSwitchOperationService:
                 and runtime_storage.missing_nas_bytes in (None, 0)
                 else None
             ),
-            source=(
-                "controller-build"
-                if build is not None or build_candidate is not None
-                else "published"
-            ),
+            source="controller-build",
             reason=(
                 None
                 if runtime_storage.nas_coverage == "complete"
@@ -5543,15 +5345,9 @@ class RunSwitchOperationService:
         blockers: list[RunSwitchReason] = []
         warnings: list[RunSwitchReason] = []
         insufficient_components_by_node: dict[str, frozenset[str]] = {}
-        topology = revision.document.get("topology") if revision is not None else None
-        roles = topology.get("roles") if isinstance(topology, Mapping) else None
         role_by_name = (
-            {
-                str(role.get("name")): role
-                for role in roles
-                if isinstance(role, Mapping) and isinstance(role.get("name"), str)
-            }
-            if isinstance(roles, list)
+            {role.name: role for role in recipe_topology(revision.document).roles}
+            if revision is not None
             else {}
         )
         excluded = set(excluded_run_ids)
@@ -5629,9 +5425,8 @@ class RunSwitchOperationService:
                     )
                 )
             role = role_by_name.get(item.role)
-            resources = role.get("resources") if isinstance(role, Mapping) else None
-            memory = resources.get("memory") if isinstance(resources, Mapping) else None
-            disk = resources.get("disk") if isinstance(resources, Mapping) else None
+            memory = None if role is None else role.resources.memory
+            disk = None if role is None else role.resources.disk
             required_memory: int | None = None
             memory_kind = None
             memory_floor = None
@@ -5643,7 +5438,7 @@ class RunSwitchOperationService:
             disk_free: int | None = None
             disk_free_after: int | None = None
             demand: ResourceDemand | None = None
-            if not isinstance(memory, Mapping) or not isinstance(disk, Mapping):
+            if memory is None or disk is None:
                 node_blockers.append(
                     _as_reason(
                         "run-switch.resource-contract-invalid",
@@ -5796,14 +5591,12 @@ class RunSwitchOperationService:
                                 node_blockers.append(projected)
                 try:
                     image_size = (
-                        image_bytes
-                        if image_bytes is not None
-                        else _required_int(disk.get("image_bytes"))
+                        image_bytes if image_bytes is not None else disk.image_bytes
                     )
                     artifact_size = (
                         artifact_bytes
                         if artifact_bytes is not None
-                        else _required_int(disk.get("artifact_bytes"))
+                        else disk.artifact_bytes
                     )
                     if image_size is None or artifact_size is None:
                         raise ValueError("payload size is unavailable")
@@ -8671,7 +8464,7 @@ def _phase_result(
         assignments = normalized.get("assignments")
         if isinstance(assignments, Mapping):
             normalized["assignments"] = {
-                node_id: DistributionAssignment.parse(raw)
+                node_id: NodeDistributionAssignment.parse(raw)
                 if isinstance(raw, Mapping)
                 else raw
                 for node_id, raw in assignments.items()
@@ -9422,7 +9215,6 @@ def _validate_artifact_execution(
             ) from error
         image_digest = receipt.image_digest
         layout_digest = receipt.oci_archive_sha256
-        registry_digest = receipt.registry_manifest_digest
         if expected_image is not None:
             _require_profile_runtime_image(
                 expected_image,
@@ -9435,11 +9227,7 @@ def _validate_artifact_execution(
                     "runtime_interface": receipt.runtime_interface,
                 },
             )
-        if (
-            plan.image_digest is not None
-            and image_digest != plan.image_digest
-            and registry_digest != plan.image_digest
-        ):
+        if plan.image_digest is not None and image_digest != plan.image_digest:
             raise RunSwitchOperationConflict(
                 "run-switch.runtime-image-preparation-digest-mismatch"
             )
@@ -9515,40 +9303,10 @@ def _validate_artifact_execution(
             raise RunSwitchOperationConflict(
                 "run-switch.artifact-digest-verification-failed"
             )
-        expected = set(plan.storage.artifact_digests)
-        if expected:
-            raw_digests = result.get("verified_digests")
-            if (
-                not isinstance(raw_digests, list)
-                or not all(isinstance(value, str) for value in raw_digests)
-                or set(raw_digests) != expected
-            ):
-                raise RunSwitchOperationConflict(
-                    "run-switch.artifact-digest-verification-mismatch"
-                )
-        if plan.image_digest is not None:
-            verified_image = result.get("verified_image_digest")
-            verified_registry = result.get("verified_registry_manifest_digest")
-            if (
-                verified_image != plan.image_digest
-                and verified_registry != plan.image_digest
-            ):
-                raise RunSwitchOperationConflict(
-                    "run-switch.runtime-image-verification-mismatch"
-                )
-            expected_layout = plan.build.oci_layout_sha256
-            if (
-                expected_layout is not None
-                and result.get("verified_oci_layout_sha256") != expected_layout
-            ):
-                raise RunSwitchOperationConflict(
-                    "run-switch.runtime-layout-verification-mismatch"
-                )
         if verification.verified_build_id != plan.recipe_build_id:
             # A build performed by the same high-level operation has no OCI
             # output digest at preview time.  The distribution adapter must
-            # bind its verification receipt to the exact durable build row;
-            # published-image plans must carry an explicit null build ID.
+            # bind its verification receipt to the exact durable build row.
             raise RunSwitchOperationConflict(
                 "run-switch.runtime-build-verification-mismatch"
             )
@@ -9631,49 +9389,6 @@ def _is_oci_digest(value: object) -> TypeGuard[str]:
     )
 
 
-def _is_source_build(document: Mapping[str, object]) -> bool:
-    execution = document.get("execution")
-    return isinstance(execution, Mapping) and execution.get("mode") == "build"
-
-
-def _published_manifest_digest(document: Mapping[str, object]) -> str | None:
-    execution = document.get("execution")
-    image = execution.get("image") if isinstance(execution, Mapping) else None
-    digest = image.get("digest") if isinstance(image, Mapping) else None
-    if isinstance(digest, str) and _is_oci_digest(digest):
-        return digest
-    if isinstance(digest, str) and _is_hex_digest(digest):
-        return f"sha256:{digest}"
-    return None
-
-
-def _published_receipt_matches_authorization(
-    receipt: RuntimeImageReceiptDocument,
-    authorization: RuntimeImageAuthorization,
-    *,
-    expected_architecture: str,
-) -> bool:
-    """Match every durable published-image identity field to managed bytes."""
-
-    return (
-        receipt.source == "published"
-        and receipt.distribution_content_sha256 == authorization.original_content_digest
-        and receipt.registry_manifest_digest == authorization.registry_manifest_digest
-        and receipt.platform_manifest_digest == authorization.platform_manifest_digest
-        and receipt.image_digest == authorization.platform_manifest_digest
-        and receipt.local_image_config_id == authorization.local_image_config_id
-        and receipt.oci_archive_sha256 == authorization.oci_archive_sha256
-        and receipt.image_bytes == authorization.image_bytes
-        and receipt.build_id is None
-        and receipt.build_input_sha256 is None
-        and _normalise_architecture(receipt.architecture)
-        == _normalise_architecture(expected_architecture)
-        and receipt.runtime_interface == RUNTIME_INTERFACE
-        and receipt.runtime_adapter is None
-        and receipt.runtime_adapter_sha256 is None
-    )
-
-
 def _primary_model_digest(document: object) -> str | None:
     if not isinstance(document, Mapping):
         return None
@@ -9688,9 +9403,6 @@ def _primary_model_digest(document: object) -> str | None:
     model = selection.get("model") if isinstance(selection, Mapping) else None
     value = model.get("content_sha256") if isinstance(model, Mapping) else None
     return value if _is_hex_digest(value) else None
-
-
-RUNTIME_IMAGE_ARCHITECTURE = "linux/arm64"
 
 
 def _normalise_architecture(value: str) -> str:
@@ -9955,10 +9667,10 @@ def _persist_run_switch_runtime_image_reference(
             raise identity_invalid(
                 "runtime image no longer matches the approved recipe"
             )
-        if plan.image_digest is not None and plan.image_digest not in {
-            parsed_receipt.image_digest,
-            parsed_receipt.registry_manifest_digest,
-        }:
+        if (
+            plan.image_digest is not None
+            and plan.image_digest != parsed_receipt.image_digest
+        ):
             raise identity_invalid(
                 "runtime image differs from the approved image digest"
             )
@@ -9968,14 +9680,6 @@ def _persist_run_switch_runtime_image_reference(
         ):
             raise identity_invalid(
                 "runtime image differs from the approved platform digest"
-            )
-        if (
-            plan.runtime_storage.registry_manifest_digest is not None
-            and plan.runtime_storage.registry_manifest_digest
-            != parsed_receipt.registry_manifest_digest
-        ):
-            raise identity_invalid(
-                "runtime image differs from the approved registry digest"
             )
         expected_layout = (
             plan.runtime_storage.oci_layout_sha256 or plan.build.oci_layout_sha256
@@ -10015,36 +9719,31 @@ def _persist_run_switch_runtime_image_reference(
             raise identity_invalid("runtime image size differs from the approved build")
 
         expected_build_id = plan.recipe_build_id or plan.build.build_id
-        if parsed_receipt.source == "controller-build":
-            if (
-                expected_build_id is None
-                or parsed_receipt.build_id != expected_build_id
-                or plan.recipe_revision_id is None
-            ):
-                raise identity_invalid("runtime image is not the approved build result")
-            try:
-                build = _build_receipt_in_session(session, plan)
-            except RunSwitchOperationConflict as error:
-                raise identity_invalid(
-                    "approved recipe build is no longer available"
-                ) from error
-            if any(
-                parsed_receipt_value != build_value
-                for parsed_receipt_value, build_value in (
-                    (parsed_receipt.build_id, build["build_id"]),
-                    (parsed_receipt.build_input_sha256, build["build_input_sha256"]),
-                    (parsed_receipt.image_digest, build["image_digest"]),
-                    (parsed_receipt.oci_archive_sha256, build["oci_layout_sha256"]),
-                    (parsed_receipt.image_bytes, build["image_bytes"]),
-                    (parsed_receipt.build_input_sha256, plan.build.build_input_sha256),
-                )
-            ):
-                raise identity_invalid(
-                    "runtime image receipt differs from the approved build"
-                )
-        elif expected_build_id is not None:
+        if (
+            expected_build_id is None
+            or parsed_receipt.build_id != expected_build_id
+            or plan.recipe_revision_id is None
+        ):
+            raise identity_invalid("runtime image is not the approved build result")
+        try:
+            build = _build_receipt_in_session(session, plan)
+        except RunSwitchOperationConflict as error:
             raise identity_invalid(
-                "published runtime image conflicts with the selected build"
+                "approved recipe build is no longer available"
+            ) from error
+        if any(
+            parsed_receipt_value != build_value
+            for parsed_receipt_value, build_value in (
+                (parsed_receipt.build_id, build["build_id"]),
+                (parsed_receipt.build_input_sha256, build["build_input_sha256"]),
+                (parsed_receipt.image_digest, build["image_digest"]),
+                (parsed_receipt.oci_archive_sha256, build["oci_layout_sha256"]),
+                (parsed_receipt.image_bytes, build["image_bytes"]),
+                (parsed_receipt.build_input_sha256, plan.build.build_input_sha256),
+            )
+        ):
+            raise identity_invalid(
+                "runtime image receipt differs from the approved build"
             )
 
         if profile_application_id is not None:
@@ -10083,8 +9782,6 @@ def _persist_run_switch_runtime_image_reference(
             recipe_revision_id=recipe_revision_id,
             profile_application_id=profile_application_id,
             execution_keys=list(canonical_execution_keys),
-            source=parsed_receipt.source,
-            registry_manifest_digest=parsed_receipt.registry_manifest_digest,
             image_digest=parsed_receipt.image_digest,
             archive_sha256=parsed_receipt.oci_archive_sha256,
             image_bytes=parsed_receipt.image_bytes,

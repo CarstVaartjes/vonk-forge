@@ -367,11 +367,6 @@ def _exact_repair_script_fixture(
         b"# package-repair.receipt package-repair-helper.receipt\n"
         b"package_version='@VERSION@'\n"
         b"authority_sha256='@REPAIR_AUTHORITY_SHA256@'\n"
-        b"observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8\n"
-        b"observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub\n"
-        b"# openssl genpkey -algorithm ED25519 -outform DER\n"
-        b"# openssl pkey -inform DER; tail -c 32; root:vonk-agent:640:1\n"
-        b"ensure_observation_receipt_key() { :; }\n"
     )
     control_template = (
         b"Package: vonk-forge-agent\nVersion: @VERSION@\n"
@@ -1186,7 +1181,6 @@ def test_recovery_lifecycle_collision_check_cannot_remove_host_state() -> None:
         "/var/lib/vonk-forge/package-upgrade",
         "/var/lib/vonk-forge/helper-upgrade.pending",
         "/var/lib/vonk-forge/helper-upgrade.receipt",
-        '"$observation_receipt_private"',
         '"$package_recovery_gate"',
         "vonk-forge-package-helper.socket.d",
     ):
@@ -1483,8 +1477,6 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     )
     home_cleanup = cleanup.index("rm -rf -- /var/lib/vonk-forge-agent", package_purge)
     assert recovery_state_cleanup < package_purge < home_cleanup
-    assert '"$observation_receipt_private"' in cleanup
-    assert '"$observation_receipt_public"' in cleanup
     assert cleanup.count("dpkg-query --show vonk-forge-agent") == 2
     assert 'trap - EXIT\n  exit "$cleanup_status"' in cleanup
     assert 'return "$cleanup_status"' not in cleanup

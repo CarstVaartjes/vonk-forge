@@ -26,7 +26,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .admission_locking import (
     AdmissionLockBusy,
@@ -219,7 +219,7 @@ def build_recipe_image_availability(
                     "selected recipe revision is unavailable or inactive",
                 )
             try:
-                recipe = RecipeDefinition.model_validate(revision.document)
+                recipe = read_recipe(revision.document)
                 entities = resolve_recipe_entities(session, revision.document)
             except Exception as error:
                 raise RecipeImageAvailabilityError(
@@ -232,49 +232,46 @@ def build_recipe_image_availability(
             session.close()
             package_handle: Mapping[str, object] | None = None
             builder_node_id: str | None = None
-            if recipe.execution.mode == "build":
-                resolution = None
-                resolve = getattr(recipe_builds, "resolve", None)
-                if isinstance(resolve, Callable):
-                    try:
-                        resolution = resolve(recipe_revision_id)
-                    except Exception as error:
-                        raise RecipeImageAvailabilityError(
-                            str(
-                                getattr(error, "code", "recipe_image.build_unavailable")
-                            ),
-                            str(error)[:512],
-                            retryable=True,
-                            recovery_actions=("retry",),
-                        ) from error
-                if resolution is not None:
-                    cached = None if force else _cached_build_receipt(resolution)
-                    if cached is not None:
-                        package_handle = {
-                            "build_input_sha256": cached["build_input_sha256"],
-                            "image_digest": str(cached["image_digest"]).removeprefix(
-                                "sha256:"
-                            ),
-                            "image_reference": (
-                                f"localhost/vonk/recipe-build@{cached['image_digest']}"
-                            ),
-                        }
-                    else:
-                        # Builder selection and final input binding happen only
-                        # at dispatch. Persist the immutable intent so
-                        # saturation can queue a durable parent operation.
-                        package_handle = {
-                            "input_intent_sha256": resolution.input_intent_sha256,
-                            # A source-build operation has no final image until
-                            # dispatch. Compile a provisional runtime identity
-                            # so the durable parent can queue without a builder;
-                            # the verified build receipt replaces it on success.
-                            "image_digest": resolution.input_intent_sha256,
-                            "image_reference": (
-                                "localhost/vonk/recipe-build@sha256:"
-                                f"{resolution.input_intent_sha256}"
-                            ),
-                        }
+            resolution = None
+            resolve = getattr(recipe_builds, "resolve", None)
+            if isinstance(resolve, Callable):
+                try:
+                    resolution = resolve(recipe_revision_id)
+                except Exception as error:
+                    raise RecipeImageAvailabilityError(
+                        str(getattr(error, "code", "recipe_image.build_unavailable")),
+                        str(error)[:512],
+                        retryable=True,
+                        recovery_actions=("retry",),
+                    ) from error
+            if resolution is not None:
+                cached = None if force else _cached_build_receipt(resolution)
+                if cached is not None:
+                    package_handle = {
+                        "build_input_sha256": cached["build_input_sha256"],
+                        "image_digest": str(cached["image_digest"]).removeprefix(
+                            "sha256:"
+                        ),
+                        "image_reference": (
+                            f"localhost/vonk/recipe-build@{cached['image_digest']}"
+                        ),
+                    }
+                else:
+                    # Builder selection and final input binding happen only
+                    # at dispatch. Persist the immutable intent so
+                    # saturation can queue a durable parent operation.
+                    package_handle = {
+                        "input_intent_sha256": resolution.input_intent_sha256,
+                        # A source-build operation has no final image until
+                        # dispatch. Compile a provisional runtime identity
+                        # so the durable parent can queue without a builder;
+                        # the verified build receipt replaces it on success.
+                        "image_digest": resolution.input_intent_sha256,
+                        "image_reference": (
+                            "localhost/vonk/recipe-build@sha256:"
+                            f"{resolution.input_intent_sha256}"
+                        ),
+                    }
             try:
                 runtime = _compile_consistent_runtime(
                     recipe,
@@ -555,7 +552,6 @@ def build_recipe_image_availability(
                             .order_by(AgentNode.node_id)
                         )
                         if candidate.architecture == "linux-arm64"
-                        and "recipe.build.v1" in (candidate.capabilities or ())
                     )
                     candidate_ids = tuple(candidate.node_id for candidate in candidates)
                     active_jobs = tuple(
@@ -1146,11 +1142,6 @@ def _observe_build(
         raise RecipeImageAvailabilityError(
             "recipe_image.build_invalid", "canonical Recipe build evidence is invalid"
         ) from error
-    if evidence.build_input_sha256 != build_input_sha256:
-        raise RecipeImageAvailabilityError(
-            "recipe_image.identity_conflict",
-            "canonical Recipe build evidence does not match its inputs",
-        )
     return evidence.model_dump(mode="json") | {
         "state": operation.state,
         "build_id": operation.owner_id,

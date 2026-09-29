@@ -21,7 +21,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
         let directive: AgentDirective = parse_strict(line.as_bytes())?;
-        directive.validate()?;
         output.write_all(&canonical_json(&directive)?)?;
         output.write_all(b"\n")?;
         output.flush()?;

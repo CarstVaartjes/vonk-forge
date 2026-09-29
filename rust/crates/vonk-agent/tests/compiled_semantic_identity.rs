@@ -63,13 +63,7 @@ fn cli_version_and_self_test_share_the_compiled_semantic_identity() {
     ))
     .unwrap();
 
-    let identity = self_test::run_with_observation_receipt_key(
-        &config,
-        agent.as_ref(),
-        &runtime,
-        Some([9; 32]),
-    )
-    .unwrap();
+    let identity = self_test::run(&config, agent.as_ref(), &runtime).unwrap();
     assert_eq!(identity.semantic_version, semantic_version);
     assert_eq!(identity.build_digest.len(), 71);
     assert_eq!(identity.binary_digest.len(), 64);
@@ -81,6 +75,4 @@ fn cli_version_and_self_test_share_the_compiled_semantic_identity() {
             "linux-amd64"
         }
     );
-    assert!(identity.self_test_passed);
-    assert_eq!(identity.observation_receipt_public_key, "09".repeat(32));
 }

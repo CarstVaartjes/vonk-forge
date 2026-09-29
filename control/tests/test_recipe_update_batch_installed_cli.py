@@ -27,7 +27,6 @@ from vonk_control.recipe_image_availability_api import (
 from vonk_control.recipe_update_contract import RecipeUpdateResponse
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
-    PulledImageEvidence,
     persist_runtime_image_receipt,
     prepare_runtime_image,
 )
@@ -40,8 +39,11 @@ from .test_profile_load_installed_cli import (
 )
 from .test_recipe_image_availability import (
     ARCHIVE,
+    IMAGE_DIGEST,
+    Transport,
     _add_head,
     _add_revision,
+    _build_id,
     _recipe,
     _runtime,
 )
@@ -50,19 +52,9 @@ pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
 def _cached_recipe(slug: str):
-    base = _recipe("recipe-image.json")
-    execution = base.execution
-    assert execution.mode == "image"
-    image_digest = hashlib.sha256(slug.encode()).hexdigest()
+    base = _recipe("recipe-source-build.json")
     return base.model_copy(
-        update={
-            "identity": base.identity.model_copy(update={"slug": slug}),
-            "execution": execution.model_copy(
-                update={
-                    "image": execution.image.model_copy(update={"digest": image_digest})
-                }
-            ),
-        }
+        update={"identity": base.identity.model_copy(update={"slug": slug})}
     )
 
 
@@ -70,36 +62,30 @@ def _archive_variant(variant: int) -> bytes:
     return bytes(byte ^ variant for byte in ARCHIVE)
 
 
-class _ImageTransport:
-    def __init__(self, payload: bytes) -> None:
-        self.payload = payload
+def _prepared_build(
+    storage: FilesystemRuntimeImageStorage,
+    revision_id: str,
+    recipe: RecipeDefinition,
+    archive: bytes,
+):
+    """The verified receipt of the revision's finished build archive."""
 
-    def pull_and_export(
-        self, reference: str, destination: Path, **_: object
-    ) -> PulledImageEvidence:
-        destination.write_bytes(self.payload)
-        image_digest = reference.rsplit("@", 1)[1]
-        return PulledImageEvidence(
-            manifest_digest=image_digest,
-            requested_manifest_digest=image_digest,
-            config_id="sha256:" + hashlib.sha256(reference.encode()).hexdigest(),
-            local_reference=reference,
-            architecture="linux/arm64",
-            runtime_interface="v1",
-            archive_sha256=hashlib.sha256(self.payload).hexdigest(),
-            archive_bytes=len(self.payload),
-        )
-
-    def inspect_archive(
-        self,
-        archive: Path,
-        *,
-        expected_architecture: str,
-        expected_runtime_interface: str,
-        expected_archive_sha256: str,
-        expected_archive_bytes: int,
-    ) -> PulledImageEvidence:
-        raise AssertionError(archive)
+    digest = hashlib.sha256(archive).hexdigest()
+    (storage.root / digest).write_bytes(archive)
+    return prepare_runtime_image(
+        recipe.model_dump(mode="json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=Transport(),  # type: ignore[arg-type]
+        build_receipt={
+            "state": "succeeded",
+            "build_id": _build_id(revision_id),
+            "build_input_sha256": "f" * 64,
+            "image_digest": IMAGE_DIGEST,
+            "oci_layout_sha256": digest,
+            "image_bytes": len(archive),
+        },
+    )
 
 
 def _update_app(service: RecipeImageAvailabilityService) -> FastAPI:
@@ -137,15 +123,11 @@ def test_installed_update_survives_cli_and_worker_death_with_frozen_cache_scope(
         recipe = _cached_recipe(f"installed-batch-{index}")
         revision_id = str(uuid.uuid4())
         recipes[revision_id] = recipe
-        receipt = prepare_runtime_image(
-            recipe,
-            runtime=_runtime(),
-            storage=storage,
-            transport=_ImageTransport(_archive_variant(index)),
-        )
+        archive = _archive_variant(index)
+        receipt = _prepared_build(storage, revision_id, recipe, archive)
         receipts[revision_id] = receipt
         with sessions.begin() as session:
-            revision = _add_revision(session, revision_id, recipe)
+            revision = _add_revision(session, revision_id, recipe, archive=archive)
             revision.document_id = str(uuid.uuid4())
             _add_head(session, revision)
             assert revision.execution_key is not None
@@ -260,14 +242,14 @@ def test_installed_update_survives_cli_and_worker_death_with_frozen_cache_scope(
     replacement = _cached_recipe("installed-batch-added-after-acceptance")
     replacement_id = str(uuid.uuid4())
     recipes[replacement_id] = replacement
-    replacement_receipt = prepare_runtime_image(
-        replacement,
-        runtime=_runtime(),
-        storage=storage,
-        transport=_ImageTransport(_archive_variant(7)),
+    replacement_archive = _archive_variant(7)
+    replacement_receipt = _prepared_build(
+        storage, replacement_id, replacement, replacement_archive
     )
     with sessions.begin() as session:
-        revision = _add_revision(session, replacement_id, replacement)
+        revision = _add_revision(
+            session, replacement_id, replacement, archive=replacement_archive
+        )
         revision.document_id = str(uuid.uuid4())
         _add_head(session, revision)
         assert revision.execution_key is not None

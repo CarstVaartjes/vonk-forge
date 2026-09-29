@@ -84,17 +84,13 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
             (
                 "scripts/generate-control-clients",
                 "scripts/export-qualification-campaign-schemas",
-                "src/cluster_profiles/schemas/qualification-authority-v4.schema.json",
+                "src/cluster_profiles/schemas/qualification-authority-v5.schema.json",
                 "src/cluster_profiles/schemas/qualification-campaign-manifest-v2.schema.json",
-                "src/cluster_profiles/schemas/recovery-coverage-receipt-v1.schema.json",
-                "src/cluster_profiles/schemas/recovery-coverage-use-v1.schema.json",
-                "src/cluster_profiles/schemas/recovery-coverage-consumption-v1.schema.json",
                 "control/packaging/public-contracts.lock",
-                "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
+                "inventory/wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl",
                 "control/openapi-python-client.yaml",
                 "control/openapi.json",
                 "src/cluster_profiles/schemas/control-openapi.json",
-                "schemas/control-openapi.json",
             ),
         ):
             selected["generated"] = True

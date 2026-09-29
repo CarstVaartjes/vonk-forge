@@ -8,10 +8,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from typing import cast
 
-if TYPE_CHECKING:
-  from ..models.recipe_release_history_entry import RecipeReleaseHistoryEntry
 
 
 
@@ -23,14 +20,18 @@ T = TypeVar("T", bound="RecipeRelease")
 
 @_attrs_define
 class RecipeRelease:
-    """
+    """ The version this recipe runs.
+
+    When the upstream project publishes versions, this is the upstream version
+    and its release date (for example ``1.6`` released 2026-09-17). A recipe
+    whose upstream has no versions carries its own semantic version instead.
+    The recipe library's own version follows the contract, not recipe content.
+
         Attributes:
-            history (list[RecipeReleaseHistoryEntry]):
             released_at (str):
             version (str):
      """
 
-    history: list[RecipeReleaseHistoryEntry]
     released_at: str
     version: str
 
@@ -39,14 +40,6 @@ class RecipeRelease:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_release_history_entry import RecipeReleaseHistoryEntry # noqa: PLC0415
-        history = []
-        for history_item_data in self.history:
-            history_item = history_item_data.to_dict()
-            history.append(history_item)
-
-
-
         released_at = self.released_at
 
         version = self.version
@@ -55,7 +48,6 @@ class RecipeRelease:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "history": history,
             "released_at": released_at,
             "version": version,
         })
@@ -66,24 +58,12 @@ class RecipeRelease:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_release_history_entry import RecipeReleaseHistoryEntry # noqa: PLC0415
         d = dict(src_dict)
-        history = []
-        _history = d.pop("history")
-        for history_item_data in (_history):
-            history_item = RecipeReleaseHistoryEntry.from_dict(history_item_data)
-
-
-
-            history.append(history_item)
-
-
         released_at = d.pop("released_at")
 
         version = d.pop("version")
 
         recipe_release = cls(
-            history=history,
             released_at=released_at,
             version=version,
         )

@@ -62,7 +62,7 @@ from vonk_control.models import (
 )
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_control.worker import Worker
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
@@ -557,7 +557,7 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
         file_id="weights",
         file_digest=hashlib.sha256(data).hexdigest(),
     )
-    digest = content_sha256(model)
+    digest = document_sha256(model.model_dump(mode="json"))
     selector = f"{model.identity.publisher}/{model.identity.slug}"
     with sessions.begin() as session:
         document = CatalogDocument(
@@ -628,7 +628,7 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
                 schema_version=2,
                 state="active",
                 document=newer.model_dump(mode="json"),
-                content_digest=content_sha256(newer),
+                content_digest=document_sha256(newer.model_dump(mode="json")),
                 projected={},
                 created_by="operator",
                 created_at=NOW,
@@ -760,7 +760,7 @@ def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> Non
         }
     ]
     document = ModelDefinition.model_validate(document).model_dump(mode="json")
-    digest = content_sha256(ModelDefinition.model_validate(document))
+    digest = document_sha256(document)
     with sessions.begin() as session:
         root = CatalogDocument(
             id="00000000-0000-0000-0000-000000000031",
@@ -816,14 +816,14 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         file_id="weights",
         file_digest="1" * 64,
     )
-    model_digest = content_sha256(model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
     newer_model = _canonical_model(
         publisher="vonk-forge",
         slug="resolver-model",
         file_id="weights",
         file_digest="2" * 64,
     )
-    newer_model_digest = content_sha256(newer_model)
+    newer_model_digest = document_sha256(newer_model.model_dump(mode="json"))
     old_document = _canonical_recipe(model_digest)
     old_document["identity"] = {"publisher": "vonk-forge", "slug": "resolver-recipe"}
     old_recipe = RecipeDefinition.model_validate(old_document)
@@ -851,8 +851,8 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         created_at=NOW,
         updated_at=NOW,
     )
-    old_digest = content_sha256(old_recipe)
-    new_digest = content_sha256(new_recipe)
+    old_digest = document_sha256(old_recipe.model_dump(mode="json"))
+    new_digest = document_sha256(new_recipe.model_dump(mode="json"))
     old_revision = CatalogDocumentRevision(
         id="00000000-0000-0000-0000-000000000103",
         document_id=recipe_root.id,
@@ -934,11 +934,9 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     authorization = RuntimeImageAuthorization(
         id="00000000-0000-0000-0000-000000000108",
         recipe_revision_id=old_revision.id,
-        source="controller-build",
         original_content_digest=old_digest,
         effective_execution_key=old_revision.execution_key,
-        registry_manifest_digest=None,
-        platform_manifest_digest="sha256:" + "6" * 64,
+        image_digest="sha256:" + "6" * 64,
         local_image_config_id="sha256:" + "7" * 64,
         oci_archive_sha256="8" * 64,
         image_bytes=17,
@@ -1024,7 +1022,6 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
     )
     assert resolved["recipe"]["recipe_revision_id"] == old_revision.id
-    assert resolved["recipe"]["source"] == "controller-build"
     assert resolved["recipe"]["update_available"] is True
     assert resolved["model"]["content_sha256"] == model_digest
     assert resolved["resources"] == {
@@ -1139,7 +1136,7 @@ def test_canonical_dependency_closure_reaches_run_switch(
         }
     )
     companion = ModelDefinition.model_validate(companion_document)
-    companion_digest = content_sha256(companion)
+    companion_digest = document_sha256(companion.model_dump(mode="json"))
     primary = _canonical_model(
         publisher="vonk-forge",
         slug="primary",
@@ -1154,7 +1151,7 @@ def test_canonical_dependency_closure_reaches_run_switch(
             }
         ],
     )
-    primary_digest = content_sha256(primary)
+    primary_digest = document_sha256(primary.model_dump(mode="json"))
     recipe_document = _canonical_recipe(primary_digest)
     models = recipe_document["models"]
     assert isinstance(models, list) and models
@@ -1164,7 +1161,7 @@ def test_canonical_dependency_closure_reaches_run_switch(
     assert isinstance(model_reference, dict)
     model_reference["slug"] = "primary"
     recipe = RecipeDefinition.model_validate(recipe_document)
-    recipe_digest = content_sha256(recipe)
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     with sessions.begin() as session:
         for index, (definition, digest, slug) in enumerate(
             (
@@ -3286,8 +3283,8 @@ def test_remove_model_supersedes_an_older_download_of_the_same_set(
         file_id="weights",
         file_digest="a" * 64,
     )
-    digest_a = content_sha256(model_a)
-    digest_b = content_sha256(model_b)
+    digest_a = document_sha256(model_a.model_dump(mode="json"))
+    digest_b = document_sha256(model_b.model_dump(mode="json"))
     with sessions.begin() as session:
         for index, (slug, model, digest) in enumerate(
             (
@@ -3550,8 +3547,8 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
         file_id="weights",
         file_digest="b" * 64,
     )
-    digest_a = content_sha256(model_a)
-    digest_b = content_sha256(model_b)
+    digest_a = document_sha256(model_a.model_dump(mode="json"))
+    digest_b = document_sha256(model_b.model_dump(mode="json"))
     document_id = "00000000-0000-4000-8000-000000001050"
     with sessions.begin() as session:
         document = CatalogDocument(

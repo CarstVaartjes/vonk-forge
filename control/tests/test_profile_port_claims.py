@@ -184,9 +184,7 @@ def test_profile_port_promise_preserves_live_owner_and_survives_reviewed_stop(
         old_ids = {claim.id for claim in old_ports}
     stop_id = _drive_to_job(profiles, planner, sessions, "recipe.stop")
     for node_id in nodes:
-        lifecycle.record_node_result(
-            stop_id, node_id, succeeded=True, evidence={"stopped": True}
-        )
+        lifecycle.record_node_result(stop_id, node_id, succeeded=True, evidence={})
     # Even after the old owner releases its active port, unrelated work cannot
     # take the promised port in the gap before the replacement worker starts.
     competing = lifecycle.preview_run(installation_id, "competing")

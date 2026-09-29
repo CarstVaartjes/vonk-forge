@@ -16,8 +16,9 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
 )
-from vonk_control.runtime_preflight import mandatory_capabilities, request_digest
+from vonk_control.runtime_preflight import mandatory_capabilities
 
+from .agent_fences import fenced_operation
 from .test_recipe_operations import NOW, setup_services
 
 
@@ -59,12 +60,8 @@ def _finish(sessions, checkpoint, now, *, failed=None, fingerprint="a" * 64):
                 agent_certificate_serial="serial-0",
                 state="succeeded",
                 result={
-                    "schema_version": 1,
                     "fingerprint": fingerprint,
-                    "request_sha256": request_digest(request),
                     "observed_at": int(now.timestamp()),
-                    "duration_ms": 1,
-                    "cached": False,
                     "findings": [
                         {
                             "capability": capability,
@@ -170,8 +167,6 @@ def _fail_child(sessions, pending, now, *, reason, result):
         "helper_request_replayed",
         "helper_request_installation_identity_invalid",
         "helper_request_plan_binding_invalid",
-        "helper_inspection_receipt_invalid",
-        "helper_observation_receipt_invalid",
         "helper_operation_invalid_artifact",
         "helper_runtime_image_identity_invalid",
         # Helper wire rejection codes carried verbatim.
@@ -182,8 +177,6 @@ def _fail_child(sessions, pending, now, *, reason, result):
         "request_replayed",
         "operation_invalid_artifact",
         "runtime_image_identity_invalid",
-        "runtime_helper_inspection_receipt_invalid",
-        "runtime_helper_observation_receipt_invalid",
         # Controller/agent authentication, enrollment and identity codes.
         "controller.authentication_required",
         "controller.request_rejected",
@@ -300,7 +293,7 @@ def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path
         host_helper_grant_signing_bytes,
     )
     from vonk_control.agent_api import HostRuntimeGrantRequest
-    from vonk_control.agent_jobs import _NEXT_CAPABILITIES, AgentJobService
+    from vonk_control.agent_jobs import AgentJobService
     from vonk_control.host_helper_authority import (
         HostHelperGrantIssuer,
         HostRuntimeAuthorityService,
@@ -317,18 +310,15 @@ def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path
         queue,
         node_id,
         "serial-0",
-        60,
-        capabilities=sorted(_NEXT_CAPABILITIES | {"runtime.preflight.v1"}),
         runtime_identity={**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"},
     )
-    assert claim is not None and claim.job_id == pending.pending_job_id
+    assert (
+        claim is not None
+        and fenced_operation(sessions, claim).parent_job_id == pending.pending_job_id
+    )
     # Exercise the HTTP request contract against IDs from the real dispatcher.
     request = HostRuntimeGrantRequest.model_validate(
         {
-            "node_id": claim.node_id,
-            "job_id": claim.job_id,
-            "operation_id": claim.operation_id,
-            "attempt": claim.attempt,
             "fence": claim.fence,
             "action": "runtime-preflight",
             "request_sha256": "e" * 64,
@@ -342,12 +332,11 @@ def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path
     authority = HostRuntimeAuthorityService(sessions, issuer, clock=lambda: clock.now)
     grant = authority.issue_grant(
         **{**request.model_dump(), "action": ContainerRuntimeAction.RUNTIME_PREFLIGHT},
+        node_id=node_id,
         certificate_serial="serial-0",
     )
     claims_operation = grant.claims.operation
     assert isinstance(claims_operation, ExecuteContainerRuntimeRequestOperation)
-    assert claims_operation.job_id == claim.job_id
-    assert claims_operation.operation_id == claim.operation_id
     assert claims_operation.fence == claim.fence
     issuer.public_key.verify(
         bytes.fromhex(grant.signature.value),
@@ -367,7 +356,7 @@ def test_probe_restart_and_duplicate_dispatch_converge_without_advancing_work(tm
     _finish(sessions, pending, clock.now)
     complete, error = restarted.ensure(**arguments, previous=pending)
     assert error is None and complete.pending_job_id is None
-    assert complete.receipts[node_id].request_sha256
+    assert complete.receipts[node_id].fingerprint
     with sessions() as session:
         assert len(list(session.scalars(select(AgentOperation)))) == 1
 
@@ -399,11 +388,7 @@ def test_only_preflight_checkpoint_refreshes_when_dependent_identity_changes(
         with sessions.begin() as session:
             node = session.get(AgentNode, node_id)
             assert node is not None
-            node.capabilities = [
-                v
-                for v in node.capabilities
-                if not v.startswith("runtime.preflight.fingerprint.")
-            ] + ["runtime.preflight.fingerprint." + "b" * 64]
+            node.preflight_fingerprint = "b" * 64
     elif change == "age":
         clock.now += timedelta(seconds=301)
     else:
@@ -428,11 +413,7 @@ def test_changed_earlier_rank_is_reprobed_after_pending_peer_completes(tmp_path)
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.capabilities = [
-            value
-            for value in node.capabilities
-            if not value.startswith("runtime.preflight.fingerprint.")
-        ] + ["runtime.preflight.fingerprint." + "b" * 64]
+        node.preflight_fingerprint = "b" * 64
     _finish(sessions, second, clock.now)
     refreshed, error = service.ensure(**arguments, previous=second)
     assert error is None

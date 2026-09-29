@@ -11,12 +11,12 @@ use vonk_agent_protocol::generated::{
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, MAX_DOCUMENT_BYTES, RecipeOperationRequest,
-    canonical_json, hex_sha256,
+    canonical_json,
 };
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
-fn claim(attempt: u32, deadline: &str) -> AgentClaim {
+fn claim(attempt: u128, deadline: &str) -> AgentClaim {
     let compiled_execution_plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
         "../../../../control/tests/fixtures/compiled_workload_v2.json"
     ))
@@ -26,33 +26,19 @@ fn claim(attempt: u32, deadline: &str) -> AgentClaim {
         cancel_pending_start: false,
         compiled_execution_plan: compiled_execution_plan.clone(),
         installation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000004").unwrap(),
-        mapping_generation: 1,
         mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
-        node_id: NODE_ID.to_owned(),
-        plan_digest: compiled_execution_plan.identity.execution_sha256,
-        rank: compiled_execution_plan.runtime.placement.rank,
-        recipe_content_sha256: compiled_execution_plan.identity.recipe_revision_sha256,
+        plan_digest: "e".repeat(64),
         recipe_revision_id: Uuid::parse_str("00000000-0000-4000-8000-000000000006").unwrap(),
-        role: compiled_execution_plan.runtime.placement.role,
         run_generation: 1,
         run_id,
-        schema_version: 2,
         target_runtime_id: run_id,
-        world_size: compiled_execution_plan.runtime.placement.world_size,
     };
-    let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
     AgentClaim {
-        attempt,
-        authority_revision: "b".repeat(64),
         deadline: DateTime::<FixedOffset>::parse_from_rfc3339(deadline).unwrap(),
-        fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
-        job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
-        node_id: NODE_ID.to_owned(),
+        // One fence per attempt.
+        fence: Uuid::from_u128(0x44d4e914_34df_4962_a802_d1f7dcd92800 + attempt),
         operation: AgentOperation::RecipeStop,
-        operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
-        payload_digest,
         payload: AgentClaimPayload::RecipeStopPayload(payload),
-        schema_version: 1,
     }
 }
 
@@ -79,7 +65,7 @@ fn operation_progress(phase: &str) -> OperationProgress {
 }
 
 #[test]
-fn claims_fail_closed_on_deadline_identity_and_stale_attempt() {
+fn claims_fail_closed_on_deadline_and_replay_by_fence() {
     let directory = tempdir().unwrap();
     let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
     let now = Utc::now();
@@ -91,15 +77,12 @@ fn claims_fail_closed_on_deadline_identity_and_stale_attempt() {
 
     let live = claim(2, "2099-01-01T00:00:00+00:00");
     assert_eq!(state.begin(&live, now).unwrap(), BeginDecision::Execute);
-    let stale = claim(1, "2099-01-01T00:00:00+00:00");
-    assert!(matches!(state.begin(&stale, now), Err(StateError::Stale)));
-
-    let mut foreign = live;
-    foreign.node_id = "spk_ffffffffffffffffffffffffffffffff".to_owned();
-    assert!(matches!(
-        state.begin(&foreign, now),
-        Err(StateError::Identity)
-    ));
+    assert!(matches!(state.begin(&live, now), Err(StateError::Busy)));
+    let result = state.finish(&live, "succeeded", json!({})).unwrap();
+    assert_eq!(
+        state.begin(&live, now).unwrap(),
+        BeginDecision::Replay(Box::new(result))
+    );
 }
 
 #[test]
@@ -112,34 +95,19 @@ fn heartbeat_renewal_is_durable_and_used_by_the_terminal_result() {
         BeginDecision::Execute
     );
     let request = AgentProgress {
-        attempt: claim.attempt,
-        deadline: claim.deadline,
         fence: claim.fence,
-        job_id: claim.job_id,
-        node_id: claim.node_id.clone(),
-        operation_id: claim.operation_id,
         progress: Some(operation_progress("executing")),
-        schema_version: claim.schema_version,
     };
     let renewed = AgentDirective {
-        attempt: claim.attempt,
         cancel_requested: false,
         deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
         fence: claim.fence,
-        job_id: claim.job_id,
-        node_id: claim.node_id.clone(),
-        operation_id: claim.operation_id,
-        schema_version: claim.schema_version,
     };
 
     state.apply_heartbeat(&request, &renewed).unwrap();
     drop(state);
     let mut reopened = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
-    let result = reopened
-        .finish(&claim, "succeeded", json!({"stopped": true}))
-        .unwrap();
-
-    assert_eq!(result.deadline, renewed.deadline);
+    reopened.finish(&claim, "succeeded", json!({})).unwrap();
 }
 
 #[test]
@@ -149,24 +117,13 @@ fn heartbeat_renewal_rejects_stale_or_foreign_directives() {
     let claim = claim(2, "2099-01-01T00:00:00+00:00");
     state.begin(&claim, Utc::now()).unwrap();
     let request = AgentProgress {
-        attempt: claim.attempt,
-        deadline: claim.deadline,
         fence: claim.fence,
-        job_id: claim.job_id,
-        node_id: claim.node_id.clone(),
-        operation_id: claim.operation_id,
         progress: Some(operation_progress("executing")),
-        schema_version: claim.schema_version,
     };
     let mut directive = AgentDirective {
-        attempt: claim.attempt,
         cancel_requested: false,
         deadline: claim.deadline - chrono::Duration::seconds(1),
         fence: claim.fence,
-        job_id: claim.job_id,
-        node_id: claim.node_id.clone(),
-        operation_id: claim.operation_id,
-        schema_version: claim.schema_version,
     };
     assert!(matches!(
         state.apply_heartbeat(&request, &directive),
@@ -205,10 +162,7 @@ fn claim_response_parser_enforces_status_size_and_protocol() {
     let parsed = vonk_agent::client::parse_claim_response(200, &body)
         .unwrap()
         .unwrap();
-    assert_eq!(
-        parsed.operation_id,
-        claim(1, "2099-01-01T00:00:00+00:00").operation_id
-    );
+    assert_eq!(parsed.fence, claim(1, "2099-01-01T00:00:00+00:00").fence);
 
     assert!(
         vonk_agent::client::parse_claim_response(200, &vec![b'x'; MAX_DOCUMENT_BYTES + 1]).is_err()
@@ -224,21 +178,16 @@ fn real_751_artifact_claim_parses_through_rust_and_full_plan_dto() {
     assert_eq!(plan["artifacts"].as_array().unwrap().len(), 751);
     let compiled_execution_plan: CompiledExecutionPlan = serde_json::from_value(plan).unwrap();
     let payload = RecipeInstallPayload {
-        schema_version: 2,
         installation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
         plan_digest: "a".repeat(64),
         expected_bytes: 4096,
-        rank: 0,
-        role: "entrypoint".to_owned(),
         compiled_execution_plan,
     };
-    let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
     let mut raw = claim(1, "2099-01-01T00:00:00+00:00");
     raw.operation = AgentOperation::RecipeInstall;
-    raw.payload_digest = payload_digest;
     raw.payload = AgentClaimPayload::RecipeInstallPayload(payload);
     let body = canonical_json(&raw).unwrap();
-    assert!(body.len() > 500 * 1024);
+    assert!(body.len() > 256 * 1024);
     let parsed = vonk_agent::client::parse_claim_response(200, &body)
         .unwrap()
         .unwrap();

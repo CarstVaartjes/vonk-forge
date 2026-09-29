@@ -21,13 +21,13 @@ from vonk_control.models import (
 )
 from vonk_control.run_admission import RunAdmissionBusy
 
+from .agent_fences import fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
 NOW = datetime(2026, 9, 7, tzinfo=UTC)
 NODES = ("spk_" + "a" * 32, "spk_" + "b" * 32)
 REVISION = "a" * 64
-CAPABILITIES = ("agent.runtime.rust.v1", "recipe.stop")
 
 
 @pytest.fixture
@@ -41,7 +41,6 @@ def queue(postgres_engine):
                     node_id=node,
                     state="active",
                     protocol_version=3,
-                    capabilities=list(CAPABILITIES),
                     workload_intent_ordinal=1,
                 )
             )
@@ -90,9 +89,6 @@ def _claim(service, index):
         service,
         NODES[index],
         f"serial-{index}",
-        30,
-        protocol_version=3,
-        capabilities=CAPABILITIES,
     )
 
 
@@ -131,15 +127,15 @@ def _concurrent_node_lock_calls(engine, calls):
 
 
 def test_dual_node_claims_lock_complete_scope_before_identity(queue, postgres_engine):
-    _, _, services, operations = queue
+    sessions, _, services, operations = queue
     claims = _concurrent_node_lock_calls(
         postgres_engine,
         [lambda: _claim(services[0], 0), lambda: _claim(services[1], 1)],
     )
     assert all(claim is not None for claim in claims)
-    assert {claim.operation_id for claim in claims if claim is not None} == {
-        op.id for op in operations
-    }
+    assert {
+        fenced_operation(sessions, claim).id for claim in claims if claim is not None
+    } == {op.id for op in operations}
     assert len({claim.fence for claim in claims if claim is not None}) == 2
 
 
@@ -156,7 +152,7 @@ def test_dual_node_active_attempts_share_the_same_lock_order(
             return services[index].heartbeat(
                 claims[index].fence, {"phase": "stopping"}, 30
             )
-        return services[index].succeed(claims[index].fence, {"stopped": True})
+        return services[index].succeed(claims[index].fence, {})
 
     _concurrent_node_lock_calls(
         postgres_engine, [lambda: complete(0), lambda: complete(1)]
@@ -227,7 +223,7 @@ def test_changed_candidate_does_not_claim_another_operation(queue, postgres_engi
         event.remove(postgres_engine, "before_cursor_execute", hook)
     replaced = _claim(services[0], 0)
     assert replaced is not None
-    assert replaced.operation_id == replacement[0].id
+    assert fenced_operation(sessions, replaced).id == replacement[0].id
 
 
 def test_revocation_between_hint_and_lock_stays_fail_closed(queue, postgres_engine):

@@ -149,10 +149,6 @@
           "title": "Key",
           "type": "string"
         },
-        "operator_acceptance_required": {
-          "title": "Operator Acceptance Required",
-          "type": "boolean"
-        },
         "spdx": {
           "maxLength": 128,
           "minLength": 1,
@@ -182,8 +178,7 @@
         "content_sha256",
         "spdx",
         "url",
-        "attribution",
-        "operator_acceptance_required"
+        "attribution"
       ],
       "title": "ModelLicenseReference",
       "type": "object"
@@ -301,8 +296,7 @@
         "disposition": {
           "enum": [
             "actionable",
-            "capacity-review",
-            "operator-acceptance-required"
+            "capacity-review"
           ],
           "title": "Disposition",
           "type": "string"
@@ -346,10 +340,6 @@
           "minimum": 1,
           "title": "Node Count",
           "type": "integer"
-        },
-        "operator_acceptance_required": {
-          "title": "Operator Acceptance Required",
-          "type": "boolean"
         },
         "package": {
           "$ref": "#/$defs/AuthorityPackage"
@@ -417,7 +407,6 @@
         "recipe_version",
         "package",
         "disposition",
-        "operator_acceptance_required",
         "model_license_refs",
         "qualification_inputs",
         "smoke_cases",
@@ -453,26 +442,6 @@
           "title": "Failure Mode",
           "type": "string"
         },
-        "invalidated_by": {
-          "items": {
-            "enum": [
-              "recipe_content_sha256",
-              "package_sha256",
-              "model_content_sha256s",
-              "runtime_stack_sha256",
-              "topology_sha256",
-              "coverage_membership",
-              "runtime_image_digest",
-              "platform_build_sha256",
-              "agent_build_sha256",
-              "target_node_ids",
-              "smoke_receipt_sha256"
-            ],
-            "type": "string"
-          },
-          "title": "Invalidated By",
-          "type": "array"
-        },
         "members": {
           "items": {
             "$ref": "#/$defs/RecoveryCoverageMember"
@@ -499,7 +468,6 @@
         "members",
         "shared",
         "equivalence_rationale",
-        "invalidated_by",
         "coverage_id"
       ],
       "title": "RecoveryCoverage",
@@ -605,10 +573,7 @@
       "description": "An explicit per-recipe operator review gate.",
       "properties": {
         "kind": {
-          "enum": [
-            "capacity-review",
-            "operator-acceptance-required"
-          ],
+          "const": "capacity-review",
           "title": "Kind",
           "type": "string"
         },
@@ -627,7 +592,7 @@
       "type": "object"
     }
   },
-  "$id": "https://api.vonkforge.ai/contracts/qualification-authority-v4.schema.json",
+  "$id": "https://api.vonkforge.ai/contracts/qualification-authority-v5.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "The current source of recipe qualification order and recovery references.",
@@ -667,7 +632,7 @@
       "type": "array"
     },
     "schema_version": {
-      "const": 4,
+      "const": 5,
       "title": "Schema Version",
       "type": "integer"
     },

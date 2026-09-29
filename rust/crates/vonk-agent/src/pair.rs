@@ -23,7 +23,6 @@ use crate::{
         IdentityMaterial, PendingIdentity, generate_pending, load_pending, persist_paired_identity,
         persist_pending,
     },
-    runtime_identity::{OBSERVATION_RECEIPT_PUBLIC_KEY_PATH, load_observation_public_key},
 };
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
@@ -88,7 +87,6 @@ pub async fn pair(
     evidence
         .csr_public_key_fingerprint
         .clone_from(&pending.public_key_fingerprint);
-    evidence.validate().map_err(|_| PairingError::Response)?;
     let client = Client::builder()
         .https_only(true)
         .tls_certs_only([Certificate::from_pem(&ca_pem).map_err(|_| PairingError::CaInvalid)?])
@@ -187,15 +185,11 @@ pub fn verify_ca_pin(ca_pem: &[u8], expected: &str) -> Result<(), PairingError> 
 }
 
 pub fn collect_evidence(agent_path: &Path) -> Result<EnrollmentEvidence, PairingError> {
-    let observation_receipt_public_key =
-        load_observation_public_key(Path::new(OBSERVATION_RECEIPT_PUBLIC_KEY_PATH))
-            .map_err(|_| PairingError::Response)?;
     collect_evidence_from(
         agent_path,
         Path::new("/etc/machine-id"),
         Path::new("/proc/sys/kernel/random/boot_id"),
         Path::new(MACHINE_EVIDENCE_PATH),
-        observation_receipt_public_key,
     )
 }
 
@@ -204,7 +198,6 @@ fn collect_evidence_from(
     machine_path: &Path,
     boot_path: &Path,
     native_evidence_path: &Path,
-    observation_receipt_public_key: [u8; 32],
 ) -> Result<EnrollmentEvidence, PairingError> {
     let machine = bounded_file(machine_path)?;
     let native_evidence = bounded_file(native_evidence_path)?;
@@ -222,7 +215,6 @@ fn collect_evidence_from(
         hardware_fingerprint: hex::encode(Sha256::digest(machine.as_bytes())),
         host_key_fingerprint: hex::encode(Sha256::digest(native_evidence.as_bytes())),
         node_id: String::new(),
-        observation_receipt_public_key: hex::encode(observation_receipt_public_key),
     })
 }
 
@@ -306,7 +298,7 @@ mod tests {
         )
         .unwrap();
 
-        let evidence = collect_evidence_from(&agent, &machine, &boot, &native, [9; 32]).unwrap();
+        let evidence = collect_evidence_from(&agent, &machine, &boot, &native).unwrap();
 
         assert_eq!(evidence.boot_id, "boot-id");
         assert_eq!(
@@ -318,12 +310,6 @@ mod tests {
             hex::encode(Sha256::digest(
                 b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
             ))
-        );
-        assert_eq!(evidence.observation_receipt_public_key, "09".repeat(32));
-        let fields = serde_json::to_value(&evidence).unwrap();
-        assert_eq!(
-            fields["observation_receipt_public_key"],
-            evidence.observation_receipt_public_key
         );
     }
 }

@@ -25,7 +25,6 @@ from vonk_control.availability_production import (
     build_recipe_image_availability,
 )
 from vonk_control.bounded_json import require_mapping
-from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.catalog_service import CatalogService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
@@ -52,7 +51,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_recipe_builds import _write_controller_build_receipt
 from .test_recipe_builds import setup as _build_setup
@@ -77,7 +76,6 @@ class _Service(RecipeImageAvailabilityService):
             RecipeImageAvailabilityClaim(
                 operation_id="operation",
                 recipe_revision_id="revision",
-                image_identity=None,
                 build_input_sha256=None,
                 claim_owner="owner",
                 execution_attempt=1,
@@ -154,84 +152,6 @@ def test_production_factory_separates_api_service_and_worker_scheduler(
     assert scheduler.executor._shutdown is True
 
 
-def test_production_factory_claim_compiles_and_persists_sql_receipt(
-    tmp_path, monkeypatch
-) -> None:
-    recipe = RecipeDefinition.model_validate(
-        json.loads(
-            files("vonk_forge_contracts")
-            .joinpath("examples", "recipe-image.json")
-            .read_text()
-        )
-    )
-    model = json.loads(
-        files("vonk_forge_contracts")
-        .joinpath("examples", "model-definition.json")
-        .read_text()
-    )
-    engine = create_engine(f"sqlite:///{tmp_path / 'authority.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine)
-    now = datetime.now(UTC)
-    with sessions.begin() as session:
-        catalog = CatalogEntityService(session, clock=lambda: now)
-        model_revision = catalog.create_draft(model, actor="test")
-        catalog.resolve(model_revision.id, actor="test")
-        recipe_revision = catalog.create_draft(
-            recipe.model_dump(mode="json"), actor="test"
-        )
-        catalog.resolve(recipe_revision.id, actor="test")
-        recipe_revision_id = recipe_revision.id
-
-    class Transport:
-        def pull_and_export(self, reference, destination, **_kwargs):
-            archive = b"production availability archive"
-            destination.write_bytes(archive)
-            return PulledImageEvidence(
-                manifest_digest="sha256:" + "e" * 64,
-                requested_manifest_digest="sha256:" + "d" * 64,
-                config_id="sha256:" + "c" * 64,
-                local_reference=reference,
-                architecture="linux/arm64",
-                runtime_interface="v1",
-                archive_sha256=hashlib.sha256(archive).hexdigest(),
-                archive_bytes=len(archive),
-            )
-
-    monkeypatch.setattr(availability_production, "SkopeoOCIImageTransport", Transport)
-
-    class Settings:
-        agent_artifact_root = tmp_path / "artifacts"
-
-    production = build_recipe_image_availability(
-        sessions,
-        settings=Settings(),
-        managed_catalog_sync=None,
-        recipe_builds=object(),
-        recipe_operations=object(),
-        clock=lambda: now,
-    )
-    queued = production.service.start(
-        recipe_revision_id, actor="operator", request_id="r" * 36
-    )
-    claim = production.service.claim_pending(owner_id="worker-a")[0]
-    production.service.run_claim(claim)
-    assert production.service.get(queued.id).state == "succeeded"
-    with sessions() as session:
-        authorization = session.scalar(
-            select(RuntimeImageAuthorization).where(
-                RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id
-            )
-        )
-        assert authorization is not None
-        assert authorization.state == "authorized"
-        receipt = production.service._storage.read_receipt(
-            authorization.oci_archive_sha256
-        )
-        assert receipt.image_bytes == authorization.image_bytes
-    production.close()
-
-
 def test_recipe_download_api_reuses_verified_cached_source_build(
     tmp_path, monkeypatch
 ) -> None:
@@ -274,9 +194,6 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
     class NoNetworkTransport:
         def inspect_archive(self, *_args, **_kwargs):
             pytest.fail("a complete verified build receipt must be reused")
-
-        def pull_and_export(self, *_args, **_kwargs):
-            pytest.fail("source-build cache reuse must not download an image")
 
     monkeypatch.setattr(
         availability_production, "SkopeoOCIImageTransport", NoNetworkTransport
@@ -362,7 +279,7 @@ def test_source_build_without_builder_queues_provisional_parent(
                 schema_version=2,
                 state="active",
                 document=recipe.model_dump(mode="json"),
-                content_digest=content_sha256(recipe),
+                content_digest=document_sha256(recipe.model_dump(mode="json")),
                 artifact_key="c" * 64,
                 execution_key="a" * 64,
                 projected={},
@@ -452,7 +369,7 @@ def test_authority_resolves_builds_without_an_open_transaction(
                 schema_version=2,
                 state="active",
                 document=recipe.model_dump(mode="json"),
-                content_digest=content_sha256(recipe),
+                content_digest=document_sha256(recipe.model_dump(mode="json")),
                 artifact_key="c" * 64,
                 execution_key="a" * 64,
                 projected={},
@@ -534,7 +451,6 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
                 node_id="builder-node-000000000000000000000000000000",
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["recipe.build.v1"],
             )
         )
         session.add(
@@ -554,6 +470,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
                         "input_intent_sha256": "a" * 64,
                     },
                     "build_input_sha256": None,
+                    "claim_until": (now - timedelta(seconds=1)).isoformat(),
                 },
                 result=None,
                 current_attempt=1,
@@ -569,7 +486,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
         def resolve(self, _revision_id: str):
             return RecipeBuildResolution(
                 recipe_revision_id=_revision_id,
-                recipe_content_sha256=content_sha256(recipe),
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
                 source_bundle_sha256="c" * 64,
                 input_intent_sha256="a" * 64,
                 input_intent={},
@@ -603,15 +520,9 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
                     "failed_nodes": [],
                     "node_evidence": {
                         plan.builder_node_id: {
-                            "build_input_sha256": "b" * 64,
                             "image_bytes": 1,
                             "image_digest": "sha256:" + "d" * 64,
                             "oci_layout_sha256": "e" * 64,
-                            "policy": {
-                                "passed": True,
-                                "dockerfile": "Dockerfile",
-                                "findings": [],
-                            },
                         }
                     },
                 },
@@ -777,7 +688,7 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
                 schema_version=2,
                 state="active",
                 document=recipe.model_dump(mode="json"),
-                content_digest=content_sha256(recipe),
+                content_digest=document_sha256(recipe.model_dump(mode="json")),
                 artifact_key="c" * 64,
                 execution_key="a" * 64,
                 projected={},
@@ -790,7 +701,6 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
                 node_id=builder_node_id,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["recipe.build.v1"],
             )
         )
 
@@ -814,7 +724,7 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
         def resolve(self, revision_id: str):
             return RecipeBuildResolution(
                 recipe_revision_id=revision_id,
-                recipe_content_sha256=content_sha256(recipe),
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
                 source_bundle_sha256="c" * 64,
                 input_intent_sha256="a" * 64,
                 input_intent={},
@@ -824,7 +734,7 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
             return RecipeBuildPlan(
                 build_id="00000000-0000-4000-8000-000000000743",
                 recipe_revision_id=revision_id,
-                recipe_content_sha256=content_sha256(recipe),
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
                 source_bundle_sha256="c" * 64,
                 agent_payload={},
                 build_input_sha256="b" * 64,
@@ -977,6 +887,7 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
                         "builder_node_id": "builder-node",
                     },
                     "build_input_sha256": "b" * 64,
+                    "claim_until": (now - timedelta(seconds=1)).isoformat(),
                 },
                 current_attempt=1,
                 created_at=now,
@@ -1050,7 +961,6 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                     node_id=node_id,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=["recipe.build.v1"],
                 )
                 for node_id in node_ids
             ]
@@ -1059,7 +969,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                     id=operation_id,
                     request_id=operation_id,
                     kind="recipe.image.availability.v2",
-                    state="running",
+                    state="queued",
                     actor="operator",
                     authority_revision="revision-builder",
                     targets=["revision-builder"],
@@ -1073,7 +983,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                         "build_input_sha256": None,
                     },
                     result=None,
-                    current_attempt=1,
+                    current_attempt=0,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1119,7 +1029,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         def resolve(self, _revision_id: str):
             return RecipeBuildResolution(
                 recipe_revision_id=_revision_id,
-                recipe_content_sha256=content_sha256(recipe),
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
                 source_bundle_sha256="c" * 64,
                 input_intent_sha256="a" * 64,
                 input_intent={},
@@ -1171,15 +1081,9 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                     "failed_nodes": [],
                     "node_evidence": {
                         plan.builder_node_id: {
-                            "build_input_sha256": plan.build_input_sha256,
                             "image_bytes": 1,
                             "image_digest": "sha256:" + "d" * 64,
                             "oci_layout_sha256": "e" * 64,
-                            "policy": {
-                                "passed": True,
-                                "dockerfile": "Dockerfile",
-                                "findings": [],
-                            },
                         }
                     },
                 },
@@ -1196,6 +1100,8 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         recipe_builds=builds,
         recipe_operations=Operations(),
         clock=lambda: now,
+        # Both builds must run at once to contend for the same builder nodes.
+        max_parallel_builds=2,
     )
 
     claims = {
@@ -1256,7 +1162,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     model_raw["files"][0]["size_bytes"] = len(model_bytes)
 
     model = ModelDefinition.model_validate(model_raw)
-    model_digest = content_sha256(model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
     recipe_raw = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "recipe-source-build.json")
@@ -1264,7 +1170,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     )
     recipe_raw["models"][0]["model"]["content_sha256"] = model_digest
     recipe = RecipeDefinition.model_validate(recipe_raw)
-    recipe_digest = content_sha256(recipe)
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     now = datetime.now(UTC)
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -1308,7 +1214,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
         def resolve(self, _revision_id: str):
             return RecipeBuildResolution(
                 recipe_revision_id=_revision_id,
-                recipe_content_sha256=content_sha256(recipe),
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
                 source_bundle_sha256="c" * 64,
                 input_intent_sha256=intent,
                 input_intent={},
@@ -1357,15 +1263,9 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                     "failed_nodes": [],
                     "node_evidence": {
                         plan.builder_node_id: {
-                            "build_input_sha256": final_input,
                             "image_digest": image_digest,
                             "oci_layout_sha256": archive_digest,
                             "image_bytes": len(archive),
-                            "policy": {
-                                "passed": True,
-                                "dockerfile": "Dockerfile",
-                                "findings": [],
-                            },
                         }
                     },
                 },
@@ -1376,7 +1276,6 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
             assert archive_path.exists()
             return PulledImageEvidence(
                 manifest_digest=image_digest,
-                requested_manifest_digest=None,
                 config_id="sha256:" + "b" * 64,
                 local_reference="localhost/vonk/recipe-build@" + image_digest,
                 architecture="linux/arm64",
@@ -1427,7 +1326,6 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                 node_id="spk_" + "7" * 32,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["recipe.build.v1"],
             )
         )
         session.commit()

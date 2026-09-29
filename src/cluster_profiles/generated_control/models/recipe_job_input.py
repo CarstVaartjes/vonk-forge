@@ -10,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.recipe_input_slot import RecipeInputSlot
@@ -29,14 +28,12 @@ class RecipeJobInput:
         Attributes:
             max_bytes (int):
             media_types (list[str]):
-            path (Literal['/inputs']):
             required (bool):
             slots (list[RecipeInputSlot] | None | Unset):
      """
 
     max_bytes: int
     media_types: list[str]
-    path: Literal['/inputs']
     required: bool
     slots: list[RecipeInputSlot] | None | Unset = UNSET
 
@@ -51,8 +48,6 @@ class RecipeJobInput:
         media_types = self.media_types
 
 
-
-        path = self.path
 
         required = self.required
 
@@ -75,7 +70,6 @@ class RecipeJobInput:
         field_dict.update({
             "max_bytes": max_bytes,
             "media_types": media_types,
-            "path": path,
             "required": required,
         })
         if slots is not UNSET:
@@ -93,10 +87,6 @@ class RecipeJobInput:
 
         media_types = cast(list[str], d.pop("media_types"))
 
-
-        path = cast(Literal['/inputs'] , d.pop("path"))
-        if path != '/inputs':
-            raise ValueError(f"path must match const '/inputs', got '{path}'")
 
         required = d.pop("required")
 
@@ -128,7 +118,6 @@ class RecipeJobInput:
         recipe_job_input = cls(
             max_bytes=max_bytes,
             media_types=media_types,
-            path=path,
             required=required,
             slots=slots,
         )

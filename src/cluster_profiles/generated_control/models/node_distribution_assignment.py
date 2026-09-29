@@ -9,7 +9,6 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from typing import cast
-from typing import Literal, cast
 from uuid import UUID
 import datetime
 
@@ -20,13 +19,16 @@ if TYPE_CHECKING:
 
 
 
-T = TypeVar("T", bound="DistributionAssignment")
+T = TypeVar("T", bound="NodeDistributionAssignment")
 
 
 
 @_attrs_define
-class DistributionAssignment:
-    """ Controller authorization for one node, generation and object set.
+class NodeDistributionAssignment:
+    """ A distribution grant scoped to one node, plan and model set.
+
+    Only the object set travels to the agent (``wire``); the scope fields stay
+    with the Controller, which authorizes every download against them.
 
         Attributes:
             assignment_id (UUID):
@@ -38,7 +40,6 @@ class DistributionAssignment:
             oci_archive_sha256 (str):
             oci_image_digest (str):
             plan_digest (str):
-            schema_version (Literal[2]):
      """
 
     assignment_id: UUID
@@ -50,7 +51,6 @@ class DistributionAssignment:
     oci_archive_sha256: str
     oci_image_digest: str
     plan_digest: str
-    schema_version: Literal[2]
 
 
 
@@ -81,8 +81,6 @@ class DistributionAssignment:
 
         plan_digest = self.plan_digest
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -96,7 +94,6 @@ class DistributionAssignment:
             "oci_archive_sha256": oci_archive_sha256,
             "oci_image_digest": oci_image_digest,
             "plan_digest": plan_digest,
-            "schema_version": schema_version,
         })
 
         return field_dict
@@ -139,11 +136,7 @@ class DistributionAssignment:
 
         plan_digest = d.pop("plan_digest")
 
-        schema_version = cast(Literal[2] , d.pop("schema_version"))
-        if schema_version != 2:
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
-        distribution_assignment = cls(
+        node_distribution_assignment = cls(
             assignment_id=assignment_id,
             expires_at=expires_at,
             generation=generation,
@@ -153,7 +146,6 @@ class DistributionAssignment:
             oci_archive_sha256=oci_archive_sha256,
             oci_image_digest=oci_image_digest,
             plan_digest=plan_digest,
-            schema_version=schema_version,
         )
 
-        return distribution_assignment
+        return node_distribution_assignment

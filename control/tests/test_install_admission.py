@@ -8,7 +8,6 @@ from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan
-from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import (
     InstallAdmissionBusy,
@@ -36,7 +35,12 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    read_recipe,
+)
 
 from .preflight_fixtures import record_passing_preflight
 
@@ -50,9 +54,8 @@ RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
 def _canonical_catalog_documents(
     *,
     denied_jurisdictions: tuple[str, ...] = (),
-    recipe_mode: str = "build",
     disk_estimates: tuple[int, int] = (30, 70),
-) -> tuple[ModelDefinition, RecipeDefinition]:
+) -> tuple[ModelDefinition, RecipeDefinition, dict, dict]:
     raw_model = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")
@@ -64,9 +67,7 @@ def _canonical_catalog_documents(
             "notice": "Synthetic test restrictions.",
         }
     model = ModelDefinition.model_validate(raw_model)
-    recipe_filename = (
-        "recipe-source-build.json" if recipe_mode == "build" else "recipe-image.json"
-    )
+    recipe_filename = "recipe-source-build.json"
     raw_recipe = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", recipe_filename)
@@ -81,14 +82,12 @@ def _canonical_catalog_documents(
         {
             "image_bytes": disk_estimates[0],
             "artifact_bytes": disk_estimates[1],
-            "staging_bytes": 20,
-            "cache_bytes": 0,
-            "rollback_bytes": 0,
+            "working_bytes": 20,
             "safety_margin_bytes": 10,
         }
     )
-    raw_recipe["models"][0]["model"]["content_sha256"] = content_sha256(model)
-    return model, RecipeDefinition.model_validate(raw_recipe)
+    raw_recipe["models"][0]["model"]["content_sha256"] = document_sha256(raw_model)
+    return model, RecipeDefinition.model_validate(raw_recipe), raw_model, raw_recipe
 
 
 def _seed_canonical_catalog(
@@ -96,22 +95,14 @@ def _seed_canonical_catalog(
     now: datetime,
     *,
     denied_jurisdictions: tuple[str, ...] = (),
-    recipe_mode: str = "build",
     disk_estimates: tuple[int, int] = (30, 70),
 ) -> CatalogDocumentRevision:
-    model, recipe = _canonical_catalog_documents(
+    model, recipe, model_document, recipe_document = _canonical_catalog_documents(
         denied_jurisdictions=denied_jurisdictions,
-        recipe_mode=recipe_mode,
         disk_estimates=disk_estimates,
     )
-    model_digest = content_sha256(model)
-    recipe_digest = content_sha256(recipe)
-    model_document = model.model_dump(mode="json")
-    stored_model = ModelDefinition.model_validate(model_document)
-    assert content_sha256(stored_model) == model_digest
-    recipe_document = recipe.model_dump(mode="json")
-    stored_recipe = RecipeDefinition.model_validate(recipe_document)
-    assert stored_recipe.models[0].model.content_sha256 == model_digest
+    model_digest = document_sha256(model_document)
+    recipe_digest = document_sha256(recipe_document)
     with sessions.begin() as session:
         session.add_all(
             [
@@ -203,9 +194,7 @@ def _seed_canonical_catalog(
         stored_model_revision = session.get(CatalogDocumentRevision, MODEL_REVISION_ID)
         assert stored_model_revision is not None
         assert (
-            content_sha256(
-                ModelDefinition.model_validate(stored_model_revision.document)
-            )
+            document_sha256(stored_model_revision.document)
             == stored_model_revision.content_digest
         )
         stored_recipe_revision = session.get(
@@ -247,36 +236,21 @@ def _compiled_plan(
     rank: int,
     model_digest: str,
     recipe_digest: str,
-    build_input: str | None,
-    build_id: str | None,
+    build_id: str,
     memory_floor_bytes: int,
-    memory_kind: MemoryKind,
-    image_digest: str | None = None,
 ) -> dict[str, object]:
     artifact_digest = "3" * 64
-    image_digest = image_digest or "sha256:" + "1" * 64
+    image_digest = "sha256:" + "1" * 64
     layout_digest = "2" * 64
     payload = {
-        "schema_version": 2,
         "identity": {
             "recipe_revision_sha256": recipe_digest,
-            "execution_sha256": "b" * 64,
-            "harness_sha256": "c" * 64,
-            "build_input_sha256": build_input,
             "model_artifact_set_sha256": "e" * 64,
-            "model_artifact_bytes": 70,
         },
         "runtime": {
             "executable": "/opt/vonk/bin/vllm",
             "argv": ["serve"],
             "env": [],
-            "image_digest": image_digest,
-            "telemetry": {
-                "engine": "vllm",
-                "engine_version": None,
-                "metrics_format": "prometheus",
-                "metrics_path": "/metrics",
-            },
             "placement": {
                 "endpoint_address": None,
                 "rank": rank,
@@ -288,7 +262,6 @@ def _compiled_plan(
                 "port": 8000,
                 "reserved_memory_bytes": 1,
                 "memory_floor_bytes": memory_floor_bytes,
-                "memory_kind": memory_kind,
             },
         },
         "artifacts": [
@@ -299,17 +272,11 @@ def _compiled_plan(
                 "sha256": artifact_digest,
                 "size_bytes": 70,
                 "roles": ["entrypoint", "weights"],
-                "mount": {"target": "/models", "read_only": True},
+                "mount": {"target": "/models"},
                 "model": {
                     "publisher": "vonk-forge",
                     "slug": "synthetic-tiny-fp16",
                     "content_sha256": model_digest,
-                },
-                "distribution_object": {
-                    "name": "model.safetensors",
-                    "sha256": artifact_digest,
-                    "bytes": 70,
-                    "kind": "model",
                 },
             }
         ],
@@ -317,51 +284,19 @@ def _compiled_plan(
             "image_digest": image_digest,
             "oci_layout_sha256": layout_digest,
             "image_bytes": 30,
-            "architecture": "linux-arm64",
-            "runtime_interface": "vonk.runtime.v1",
-            "source": "controller-build" if build_id is not None else "published",
             "build_id": build_id,
-            "registry_manifest_digest": None if build_id is not None else image_digest,
-            "platform_manifest_digest": image_digest,
             "local_image_config_id": "sha256:" + "4" * 64,
-            "local_image_reference": (
-                f"localhost/vonk/compiled-runtime-{layout_digest}@{image_digest}"
-            ),
             "runtime_interface_label": "v1",
-            "distribution_object": {
-                "name": "image.oci.tar",
-                "sha256": layout_digest,
-                "bytes": 30,
-                "kind": "oci-archive",
-            },
         },
         "security": {
-            "devices": [],
-            "capabilities": [],
+            "gpu": True,
             "network_mode": "none",
-            "host_network": False,
-            "privileged": False,
             "user": "10001:10001",
-            "mounts": [{"source": "model", "target": "/models", "read_only": True}],
-            "read_only_root": True,
-            "no_new_privileges": True,
+            "mounts": [{"source": "model", "target": "/models"}],
         },
-        "topology": {
-            "name": "solo",
-            "mode": "single",
-            "backend": "local",
-            "node_count": 1,
-            "world_size": 1,
-            "rank": rank,
-            "role": role,
-        },
-        "lifecycle": {
-            "pre_start": [],
-            "post_stop": [],
-            "stop_timeout_seconds": 30,
-        },
+        "topology": {"name": "solo", "node_count": 1},
+        "lifecycle": {"stop_timeout_seconds": 30},
         "endpoint": {
-            "protocol": "openai",
             "port": 8000,
             "model_aliases": ["synthetic-tiny"],
             "health_path": "/v1/models",
@@ -375,7 +310,7 @@ def _compiled_plan_provider(
     *,
     mapping_nodes: Sequence[ClusterMappingNode],
     revision: CatalogDocumentRevision,
-    build: RecipeBuild | None,
+    build: RecipeBuild,
     resolved_entities: Mapping[str, object],
     **_unused: object,
 ) -> dict[str, dict[str, object]]:
@@ -383,29 +318,18 @@ def _compiled_plan_provider(
     assert isinstance(raw_models, Sequence) and raw_models
     model_revision = raw_models[0]
     assert isinstance(model_revision, CatalogDocumentRevision)
-    recipe = RecipeDefinition.model_validate_json(json.dumps(revision.document))
+    recipe = read_recipe(revision.document)
     memory_by_role = {
         role.name: role.resources.memory for role in recipe.topology.roles
     }
-    build_input = build.build_input_sha256 if build is not None else None
-    execution = revision.document.get("execution", {})
-    image = execution.get("image") if isinstance(execution, dict) else None
-    image_digest = (
-        f"sha256:{image['digest']}"
-        if isinstance(image, dict) and isinstance(image.get("digest"), str)
-        else None
-    )
     return {
         node.node_id: _compiled_plan(
             role=node.role,
             rank=node.rank,
             model_digest=model_revision.content_digest,
             recipe_digest=revision.content_digest,
-            build_input=build_input,
-            build_id=build.id if build is not None else None,
-            memory_floor_bytes=memory_by_role[node.role].system_reserve_bytes,
-            memory_kind=memory_by_role[node.role].kind,
-            image_digest=image_digest,
+            build_id=build.id,
+            memory_floor_bytes=memory_by_role[node.role].reserve_bytes,
         )
         for node in mapping_nodes
     }
@@ -435,7 +359,6 @@ def setup(
     read_only=False,
     observed_age=0,
     denied_jurisdictions=(),
-    recipe_mode="build",
     disk_estimates=(30, 70),
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -450,7 +373,6 @@ def setup(
                 node_id=node_id,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["runtime.vonk.v1"],
             )
         )
         session.flush()
@@ -483,7 +405,6 @@ def setup(
         sessions,
         now,
         denied_jurisdictions=tuple(denied_jurisdictions),
-        recipe_mode=recipe_mode,
         disk_estimates=disk_estimates,
     )
     mappings = ClusterMappingService(sessions)
@@ -504,12 +425,10 @@ def setup(
             created_at=now,
             updated_at=now,
         )
-        build_id = None
-        if recipe_mode == "build":
-            session.add(build)
-            session.flush()
-            build_id = build.id
-        image_digest = "1" * 64 if recipe_mode == "build" else "d" * 64
+        session.add(build)
+        session.flush()
+        build_id = build.id
+        image_digest = "1" * 64
         session.add(
             NodeArtifact(
                 node_id=node_id,
@@ -527,17 +446,15 @@ def setup(
 
 
 def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
-    sessions, now, _node, mapping, _build = setup(
-        tmp_path, free=100, recipe_mode="image"
-    )
+    sessions, now, _node, mapping, build = setup(tmp_path, free=100)
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
-    plan = service.plan_install(mapping, None, now=now)
+    plan = service.plan_install(mapping, build, now=now)
     assert plan.allowed is True
     assert plan.nodes[0].required_bytes == 90
     assert plan.nodes[0].free_after_bytes == 10
 
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=11)
-    blocked = service.plan_install(mapping, None, now=now)
+    blocked = service.plan_install(mapping, build, now=now)
     assert blocked.allowed is False
     assert blocked.nodes[0].blockers[0].code == "install.insufficient_disk"
 
@@ -545,7 +462,7 @@ def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
 def test_install_admission_reads_mapping_parameters_through_typed_boundary(
     tmp_path,
 ) -> None:
-    sessions, now, _node, mapping_id, _build = setup(tmp_path, recipe_mode="image")
+    sessions, now, _node, mapping_id, build = setup(tmp_path)
     captured: dict[str, object] = {}
 
     def provider(
@@ -558,6 +475,7 @@ def test_install_admission_reads_mapping_parameters_through_typed_boundary(
         **_unused: object,
     ) -> dict[str, dict[str, object]]:
         captured["parameters"] = parameters
+        assert build is not None
         return _compiled_plan_provider(
             mapping_nodes=mapping_nodes,
             revision=revision,
@@ -583,7 +501,7 @@ def test_install_admission_reads_mapping_parameters_through_typed_boundary(
         inventory_max_age=300,
         disk_floor_bytes=10,
     )
-    plan = service.plan_install(mapping_id, None, now=now)
+    plan = service.plan_install(mapping_id, build, now=now)
 
     assert plan.allowed is True
     assert captured["parameters"] == {
@@ -599,7 +517,7 @@ def test_install_admission_reads_mapping_parameters_through_typed_boundary(
 
 
 def test_install_admission_blocks_malformed_mapping_parameters(tmp_path) -> None:
-    sessions, now, _node, mapping_id, _build = setup(tmp_path, recipe_mode="image")
+    sessions, now, _node, mapping_id, build = setup(tmp_path)
     with sessions.begin() as session:
         session.execute(
             update(ClusterMapping)
@@ -608,7 +526,7 @@ def test_install_admission_blocks_malformed_mapping_parameters(tmp_path) -> None
         )
 
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
-        mapping_id, None, now=now
+        mapping_id, build, now=now
     )
 
     assert plan.allowed is False
@@ -624,14 +542,14 @@ def test_install_admission_blocks_malformed_mapping_parameters(tmp_path) -> None
 def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estimates(
     tmp_path, free: int, allowed: bool
 ) -> None:
-    sessions, now, _node, mapping, _build = setup(
-        tmp_path, free=free, recipe_mode="image", disk_estimates=(1, 1)
+    sessions, now, _node, mapping, build = setup(
+        tmp_path, free=free, disk_estimates=(1, 1)
     )
     with sessions.begin() as session:
         for artifact in session.scalars(select(NodeArtifact)):
             session.delete(artifact)
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
-        mapping, None, now=now
+        mapping, build, now=now
     )
     assert plan.allowed is allowed
     assert plan.nodes[0].required_download_bytes == 100
@@ -642,15 +560,14 @@ def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estima
 
 
 def test_territorial_license_install_admission_is_informational(tmp_path) -> None:
-    sessions, now, _node, mapping, _build = setup(
+    sessions, now, _node, mapping, build = setup(
         tmp_path,
         denied_jurisdictions=("EU", "GB", "KR"),
-        recipe_mode="image",
     )
 
     unconfigured = _service(
         sessions, inventory_max_age=300, disk_floor_bytes=10
-    ).plan_install(mapping, None, now=now)
+    ).plan_install(mapping, build, now=now)
     assert unconfigured.allowed is True
     assert not any(
         blocker.code.startswith("install.license.")
@@ -859,7 +776,6 @@ def test_install_topology_uses_authenticated_inventory_capabilities(tmp_path) ->
     with sessions.begin() as session:
         registered = session.get(AgentNode, node)
         assert registered is not None
-        registered.capabilities = []
 
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
@@ -873,7 +789,6 @@ def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
     with sessions.begin() as session:
         registered = session.get(AgentNode, node)
         assert registered is not None
-        registered.capabilities = []
     InventoryRepository(sessions, clock=lambda: now).record(
         InventorySnapshotInput(
             node,
@@ -1007,11 +922,7 @@ def test_refreshable_preflight_and_capacity_changes_wait_for_fresh_state(
         with sessions.begin() as session:
             host = session.get(AgentNode, node)
             assert host is not None
-            host.capabilities = [
-                value
-                for value in host.capabilities
-                if not value.startswith("runtime.preflight.fingerprint.")
-            ] + ["runtime.preflight.fingerprint." + "b" * 64]
+            host.preflight_fingerprint = "b" * 64
 
     with pytest.raises(InstallAdmissionBusy):
         service.accept_install(plan, actor="admin", now=later)
@@ -1041,11 +952,7 @@ def test_moved_host_fingerprint_refreshes_instead_of_failing_the_identical_plan(
     with sessions.begin() as session:
         host = session.get(AgentNode, node)
         assert host is not None
-        host.capabilities = [
-            value
-            for value in host.capabilities
-            if not value.startswith("runtime.preflight.fingerprint.")
-        ] + ["runtime.preflight.fingerprint." + "b" * 64]
+        host.preflight_fingerprint = "b" * 64
 
     with pytest.raises(InstallPreflightExpired) as moved:
         service.accept_install(plan, actor="admin", now=later)
@@ -1067,22 +974,19 @@ def test_moved_host_fingerprint_refreshes_instead_of_failing_the_identical_plan(
 
 
 def test_runtime_preflight_is_required_and_host_changes_invalidate_install(tmp_path):
-    sessions, now, node_id, mapping, _build = setup(tmp_path, recipe_mode="image")
+    sessions, now, node_id, mapping, build = setup(tmp_path)
     service = _service(sessions, preflight=False, disk_floor_bytes=10)
-    blocked = service.plan_install(mapping, None, now=now)
+    blocked = service.plan_install(mapping, build, now=now)
     assert "runtime_preflight.required" in {
         reason.code for reason in blocked.nodes[0].blockers
     }
     record_passing_preflight(sessions, now, floor=10)
-    assert service.plan_install(mapping, None, now=now).allowed
+    assert service.plan_install(mapping, build, now=now).allowed
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.capabilities = [
-            "runtime.vonk.v1",
-            "runtime.preflight.fingerprint." + "b" * 64,
-        ]
-    blocked = service.plan_install(mapping, None, now=now)
+        node.preflight_fingerprint = "b" * 64
+    blocked = service.plan_install(mapping, build, now=now)
     assert "runtime_preflight.host_changed" in {
         reason.code for reason in blocked.nodes[0].blockers
     }

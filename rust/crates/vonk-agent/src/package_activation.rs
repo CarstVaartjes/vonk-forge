@@ -56,7 +56,6 @@ pub async fn acknowledge(
     };
     if receipt.phase != PackageActivationPhase::Armed
         || receipt.candidate_binary_sha256 != identity.binary_digest
-        || !identity.self_test_passed
     {
         return Ok(Some(receipt));
     }
@@ -66,7 +65,7 @@ pub async fn acknowledge(
     let response = tokio::task::spawn_blocking(move || call_helper(&body))
         .await
         .map_err(|_| AgentUpgradeError::HelperResponseInvalid)??;
-    validate_helper_response(&response, &request_id, &receipt.candidate_package_sha256)?;
+    validate_helper_response(&response, &request_id)?;
     if response.status != "package-activation-confirmed" {
         return Err(AgentUpgradeError::HelperResponseInvalid);
     }

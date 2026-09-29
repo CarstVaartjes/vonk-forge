@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -32,20 +33,9 @@ class RecipeLibrarySourceContext:
 
 
 @dataclass(frozen=True, slots=True)
-class RecipeLibraryChange:
-    kind: str
-    summary: str
-    details: str | None = None
-    references: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class RecipeLibraryRelease:
     version: str
     released_at: str
-    content_sha256: str
-    upgrade_effect: str
-    changes: tuple[RecipeLibraryChange, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +50,7 @@ class RecipeLibraryItem:
     content_sha256: str
     uri: str
     document: dict[str, object]
-    release_history: tuple[RecipeLibraryRelease, ...] = ()
+    release: RecipeLibraryRelease | None = None
     dependencies: tuple[dict[str, object], ...] = ()
     source_context: RecipeLibrarySourceContext | None = None
     source_bundle: bytes | None = None
@@ -78,10 +68,13 @@ class RecipeLibrarySnapshot:
     # Index documents skipped because they could not be read, each a
     # ``{"recipe_uri", "code", "detail"}`` sync problem.
     problems: tuple[dict[str, object], ...] = ()
+    # The library release version (its contract version) and when its
+    # recipes last changed.
+    version: str | None = None
+    updated_at: datetime | None = None
 
 
 __all__ = [
-    "RecipeLibraryChange",
     "RecipeLibraryError",
     "RecipeLibraryItem",
     "RecipeLibraryRelease",

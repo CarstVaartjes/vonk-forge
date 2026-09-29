@@ -52,7 +52,7 @@ struct BuildLoop {
 impl LoopClient for BuildLoop {
     async fn claim(
         &self,
-        _capabilities: &[&str],
+        _preflight_fingerprint: Option<&str>,
         _wait_seconds: u64,
         _runtime_identity: Option<&AgentRuntimeIdentity>,
     ) -> Result<Option<AgentClaim>, ClientError> {
@@ -61,14 +61,9 @@ impl LoopClient for BuildLoop {
 
     async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         Ok(AgentDirective {
-            attempt: progress.attempt,
             cancel_requested: false,
-            deadline: progress.deadline,
+            deadline: (chrono::Utc::now() + chrono::Duration::seconds(30)).fixed_offset(),
             fence: progress.fence,
-            job_id: progress.job_id,
-            node_id: progress.node_id.clone(),
-            operation_id: progress.operation_id,
-            schema_version: progress.schema_version,
         })
     }
 
@@ -86,6 +81,7 @@ impl LoopClient for BuildLoop {
 struct Request {
     mode: String,
     data_root: PathBuf,
+    node_id: String,
     claim: AgentClaim,
     controller_url: Option<String>,
     ca_sha256: Option<String>,
@@ -106,13 +102,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request: Request = serde_json::from_str(&input)?;
     let claim = request.claim;
     claim.validate()?;
-    let mut state = StateStore::open(&request.data_root.join("state.sqlite"), &claim.node_id)?;
+    let mut state = StateStore::open(&request.data_root.join("state.sqlite"), &request.node_id)?;
     if request.mode == "recover" {
         state.recover_interrupted()?;
         let result = state
             .pending_results()?
             .into_iter()
-            .find(|(_, result)| result.operation_id == claim.operation_id)
+            .find(|(_, result)| result.fence == claim.fence)
             .ok_or("interrupted result was not retained")?
             .1;
         println!("{}", serde_json::to_string(&result)?);
@@ -139,7 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ca_path,
         ca_sha256: required(request.ca_sha256, "ca_sha256")?,
         data_dir: request.data_root.clone(),
-        node_id: claim.node_id.clone(),
+        node_id: request.node_id.clone(),
         fabric_address: None,
         fabric_bandwidth_mbps: None,
     };
@@ -165,17 +161,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 data_root: &request.data_root,
             },
             runtime_root: &request.data_root,
-            observation_receipt_public_key: [0; 32],
         };
-        run_once(
-            &loop_client,
-            &mut state,
-            &executor,
-            &["recipe.build.v1"],
-            0,
-            None,
-        )
-        .await?;
+        run_once(&loop_client, &mut state, &executor, None, 0, None).await?;
         let results = loop_client.results.lock().expect("result lock");
         if results.len() != 1 {
             return Err("build probe must produce exactly one result".into());

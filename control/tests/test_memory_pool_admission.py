@@ -26,7 +26,6 @@ from vonk_control.resource_planning import (
 from vonk_control.run_admission import (
     RunAdmissionBusy,
     RunAdmissionService,
-    RunPlanConflict,
 )
 
 from .test_profile_capacity_admission import _capacity_profile
@@ -105,44 +104,15 @@ def test_host_builder_claim_is_visible_to_unified_review_and_runtime(
         )
 
 
-@pytest.mark.parametrize("pool", ["shared", "separate"])
-def test_host_claim_competes_with_accelerator_only_when_pool_is_shared(
-    tmp_path, postgres_engine, pool
-):
-    sessions, now, node, installation = run_setup(
-        tmp_path, engine=postgres_engine, memory_kind="accelerator", memory_pool=pool
-    )
-    runs = RunAdmissionService(sessions)
-    original = runs.plan_run(installation, "gpu", now=now)
-    assert original.allowed
-    _claim(sessions, node, now, kind="host-memory", amount=300, owner="recipe-build")
-    current = runs.plan_run(installation, "gpu", now=now)
-    assert current.allowed == (pool == "separate")
-    if pool == "shared":
-        with pytest.raises(RunPlanConflict):
-            runs.accept_run(original, actor="admin", now=now)
-    else:
-        runs.accept_run(current, actor="admin", now=now)
-
-
-@pytest.mark.parametrize(
-    "pool,kind",
-    [
-        ("shared", "unified-memory"),
-        ("shared", "gpu-memory"),
-        ("separate", "gpu-memory"),
-    ],
-)
 @pytest.mark.parametrize("headroom", [0, -1])
 def test_builder_plan_and_acceptance_account_for_runtime_physical_pool(
-    tmp_path, postgres_engine, pool, kind, headroom
+    tmp_path, postgres_engine, headroom
 ):
     run_sessions, now, node, installation = run_setup(
         tmp_path,
         engine=postgres_engine,
         free_memory=1_000,
-        memory_kind="unified" if kind == "unified-memory" else "accelerator",
-        memory_pool=pool,
+        memory_pool="shared",
         system_reserve=50,
     )
     runs = RunAdmissionService(run_sessions)
@@ -159,7 +129,7 @@ def test_builder_plan_and_acceptance_account_for_runtime_physical_pool(
             )
         )
         assert snapshot is not None
-        snapshot.memory_pool = pool
+        snapshot.memory_pool = "shared"
     builds = RecipeBuildService(sessions, bundles=bundles)
     original = builds.plan(revision.id, node, now=now)
     required = parse_stored_build_plan(original.agent_payload).limits.memory_bytes
@@ -184,7 +154,7 @@ def test_builder_plan_and_acceptance_account_for_runtime_physical_pool(
         clock=lambda: now,
         builds=builds,
     )
-    if pool == "shared" and headroom < 0:
+    if headroom < 0:
         with pytest.raises(RecipeBuildError) as preview_failure:
             builds.plan(revision.id, node, now=now)
         assert preview_failure.value.code == "build.insufficient_memory"
@@ -222,7 +192,7 @@ def test_unified_demand_checks_each_separate_pool_without_adding_independent_cla
     tmp_path, postgres_engine, pool
 ):
     sessions, now, node, installation = run_setup(
-        tmp_path, engine=postgres_engine, memory_kind="unified", memory_pool=pool
+        tmp_path, engine=postgres_engine, memory_pool=pool
     )
     for kind in ("host-memory", "gpu-memory"):
         _claim(sessions, node, now, kind=kind, amount=50, owner="recipe-build")

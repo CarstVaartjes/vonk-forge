@@ -24,14 +24,16 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult, DistributionAssignment
+from vonk_agent_protocol import AgentResult, ArtifactDistributionResult
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.models import AgentCertificate, AgentNode, AgentOperation, Base
 
 from tests.wire_probes import prebuilt_probe
 
+from .agent_fences import fenced_attempt, fenced_operation
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_agent_jobs_postgres import NODE_A, NODE_B, Clock, parent
 
@@ -53,7 +55,6 @@ def controller(request):
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    capabilities=[],
                     workload_intent_ordinal=1,
                 )
             )
@@ -146,9 +147,8 @@ def _assignment(source: MemoryVerifiedObjectSource, now: datetime):
     archive_digest = source.put(archive)
     plan_digest = "a" * 64
     image_digest = "sha256:" + "d" * 64
-    assignment = DistributionAssignment.parse(
+    assignment = NodeDistributionAssignment.parse(
         {
-            "schema_version": 2,
             "assignment_id": str(uuid4()),
             "plan_digest": plan_digest,
             "generation": 1,
@@ -207,7 +207,7 @@ class DistributionHandler(BaseHTTPRequestHandler):
         plan_digest = parse_qs(target.query).get("plan_digest", [None])[0]
         if target.path.startswith("/agent/distribution/manifests/"):
             assignment = server.service.authorize(node_id=NODE_A, plan_digest=digest)
-            body = json.dumps(assignment.to_mapping()).encode()
+            body = json.dumps(assignment.wire().to_mapping()).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -297,11 +297,18 @@ def restart_probe() -> Path:
 
 
 def _probe_request(
-    mode: str, claim, root: Path, server, certs: dict[str, Path]
+    mode: str,
+    claim,
+    root: Path,
+    server,
+    certs: dict[str, Path],
+    *,
+    node_id: str = NODE_A,
 ) -> dict[str, object]:
     return {
         "mode": mode,
         "data_root": str(root),
+        "node_id": node_id,
         "claim": claim.model_dump(mode="json"),
         "controller_url": f"https://localhost:{server.server_port}/",
         "ca_sha256": hashlib.sha256(
@@ -347,16 +354,17 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         NODE_A,
         "artifact.distribution.v1",
         assignment.plan_digest,
-        ArtifactDistributionPayload(
-            schema_version=1,
-            authority_revision=assignment.plan_digest,
-            plan_digest=assignment.plan_digest,
-        ).model_dump(mode="json"),
+        ArtifactDistributionPayload(plan_digest=assignment.plan_digest).model_dump(
+            mode="json"
+        ),
     )
     first = claim_agent(
-        jobs, NODE_A, "serial-a", 30, runtime_identity=PACKAGED_RUNTIME_IDENTITY
+        jobs,
+        NODE_A,
+        "serial-a",
+        runtime_identity=PACKAGED_RUNTIME_IDENTITY,
     )
-    assert first is not None and first.operation_id == operation.id
+    assert first is not None and fenced_operation(sessions, first).id == operation.id
     data_root = tmp_path / "agent-data"
     first_process = subprocess.Popen(
         [str(restart_probe)],
@@ -411,7 +419,7 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
     interrupted = _run_probe(
         restart_probe, _probe_request("recover", first, data_root, server, certs)
     )
-    assert interrupted.operation_id == first.operation_id
+    assert interrupted.fence == first.fence
     assert interrupted.state == "waiting-for-operator"
     assert interrupted.result["error_code"] == "agent_restart_interrupted"
     assert interrupted.result["failure_kind"] == "uncertain-effect"
@@ -420,7 +428,10 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         clock.now = first.deadline + timedelta(seconds=1)
         assert (
             claim_agent(
-                jobs, NODE_A, "serial-a", 30, runtime_identity=PACKAGED_RUNTIME_IDENTITY
+                jobs,
+                NODE_A,
+                "serial-a",
+                runtime_identity=PACKAGED_RUNTIME_IDENTITY,
             )
             is None
         )
@@ -433,10 +444,21 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         due = stored.retry_due_at
     clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
     second = claim_agent(
-        jobs, NODE_A, "serial-a", 30, runtime_identity=PACKAGED_RUNTIME_IDENTITY
+        jobs,
+        NODE_A,
+        "serial-a",
+        runtime_identity=PACKAGED_RUNTIME_IDENTITY,
     )
-    assert second is not None and second.operation_id == first.operation_id
-    assert second.attempt == first.attempt + 1 and second.fence != first.fence
+    assert (
+        second is not None
+        and fenced_operation(sessions, second).id
+        == fenced_operation(sessions, first).id
+    )
+    assert (
+        fenced_attempt(sessions, second).attempt
+        == fenced_attempt(sessions, first).attempt + 1
+        and second.fence != first.fence
+    )
     completed = _run_probe(
         restart_probe,
         _probe_request("execute-distribution", second, data_root, server, certs),
@@ -460,5 +482,6 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         == large_digest
     )
     assert hashlib.sha256(small.read_bytes()).hexdigest() == small_digest
-    assert completed.result["verified_digests"] == [large_digest, small_digest]
+    assert isinstance(completed.result, ArtifactDistributionResult)
+    assert completed.result.downloaded_bytes > 0
     assert not partial.exists()

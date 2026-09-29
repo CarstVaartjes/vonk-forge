@@ -5,7 +5,6 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ring::rand::SystemRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -51,8 +50,10 @@ fn main() {
     }
     let archive_sha = env_required("VONK_HELPER_ARCHIVE_SHA");
     let archive_bytes: u64 = env_required("VONK_HELPER_ARCHIVE_BYTES").parse().unwrap();
-    let registry_digest = env_required("VONK_HELPER_REGISTRY_DIGEST");
     let platform_digest = env_required("VONK_HELPER_PLATFORM_DIGEST");
+    // Recipe images are built locally, never pulled: the agent names the
+    // platform manifest for both digests, exactly as production imports do.
+    let registry_digest = platform_digest.clone();
     let image_ref = env_required("VONK_HELPER_IMAGE_REF");
     let action = match mode.as_str() {
         "import" => HostRuntimeAction::ImageImport,
@@ -84,27 +85,16 @@ fn main() {
             Some(plan),
         )
     };
-    let job_id = Uuid::parse_str(PROBE_RUN_ID).unwrap();
-    let operation_id = if action == HostRuntimeAction::ImageImport {
-        Uuid::parse_str("50000000-0000-4000-8000-000000000005").unwrap()
-    } else {
-        Uuid::parse_str("50000000-0000-4000-8000-000000000006").unwrap()
-    };
     let fence = if action == HostRuntimeAction::ImageImport {
         Uuid::parse_str("60000000-0000-4000-8000-000000000005").unwrap()
     } else {
         Uuid::parse_str("60000000-0000-4000-8000-000000000006").unwrap()
     };
     let request = HostRuntimeRequest {
-        schema_version: 1,
         action,
-        job_id,
-        operation_id,
-        attempt: 1,
         fence,
         arguments: arguments.clone(),
         job_plan: None,
-        observation: None,
         installation_id: None,
         reconciliation_identity: None,
         run_generation: start_plan.as_ref().map(|plan| plan.run_generation),
@@ -136,12 +126,8 @@ fn main() {
                 }
                 _ => unreachable!(),
             },
-            job_id,
-            operation_id,
-            attempt: 1,
             fence,
             request_sha256: request_sha.clone(),
-            observation_identity_sha256: None,
             installation_id: None,
             reconciliation_identity: None,
             start_plan_sha256: start_plan
@@ -204,31 +190,9 @@ fn setup_files() {
         "0000000000000000000000000000000000000000000000000000000000000000",
     )
     .unwrap();
-    let observation = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
-    let observation_pair = Ed25519KeyPair::from_pkcs8(observation.as_ref()).unwrap();
-    fs::write(
-        "/var/lib/vonk-forge/helper/observation-receipt.pk8",
-        observation.as_ref(),
-    )
-    .unwrap();
-    fs::write(
-        "/etc/vonk-forge-agent/observation-receipt.pub",
-        observation_pair.public_key().as_ref(),
-    )
-    .unwrap();
     fs::write(
         "/etc/vonk-forge-agent/agent.toml",
         "node_id = \"spk_0123456789abcdef0123456789abcdef\"\n",
-    )
-    .unwrap();
-    fs::set_permissions(
-        "/var/lib/vonk-forge/helper/observation-receipt.pk8",
-        fs::Permissions::from_mode(0o600),
-    )
-    .unwrap();
-    fs::set_permissions(
-        "/etc/vonk-forge-agent/observation-receipt.pub",
-        fs::Permissions::from_mode(0o640),
     )
     .unwrap();
     fs::set_permissions(
@@ -262,21 +226,13 @@ fn production_start_arguments() -> (Vec<String>, RecipeStartRequest) {
     ]);
     let archive_sha = env_required("VONK_HELPER_ARCHIVE_SHA");
     let archive_bytes: u64 = env_required("VONK_HELPER_ARCHIVE_BYTES").parse().unwrap();
-    let registry_digest = env_required("VONK_HELPER_REGISTRY_DIGEST");
     let platform_digest = env_required("VONK_HELPER_PLATFORM_DIGEST");
     let config_id = env_required("VONK_HELPER_CONFIG_ID");
-    let image_ref = env_required("VONK_HELPER_IMAGE_REF");
-    value["runtime"]["image_digest"] = json!(platform_digest);
-    value["security"]["devices"] = json!([]);
+    value["security"]["gpu"] = json!(false);
     value["runtime_image"]["image_digest"] = json!(platform_digest);
-    value["runtime_image"]["registry_manifest_digest"] = json!(registry_digest);
-    value["runtime_image"]["platform_manifest_digest"] = json!(platform_digest);
     value["runtime_image"]["local_image_config_id"] = json!(config_id);
-    value["runtime_image"]["local_image_reference"] = json!(image_ref);
     value["runtime_image"]["oci_layout_sha256"] = json!(archive_sha);
     value["runtime_image"]["image_bytes"] = json!(archive_bytes);
-    value["runtime_image"]["distribution_object"]["sha256"] = json!(archive_sha);
-    value["runtime_image"]["distribution_object"]["bytes"] = json!(archive_bytes);
     value["runtime_image"]["runtime_interface_label"] = json!("v1");
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     let paths = CompiledOciPaths {
@@ -303,30 +259,13 @@ fn production_start_arguments() -> (Vec<String>, RecipeStartRequest) {
 }
 
 fn typed_start_plan(plan: &CompiledExecutionPlan) -> RecipeStartRequest {
-    let placement = &plan.runtime.placement;
     serde_json::from_value(json!({
-        "schema_version": 2,
         "run_id": PROBE_RUN_ID,
         "installation_id": PROBE_INSTALLATION_ID,
         "recipe_revision_id": "40000000-0000-4000-8000-000000000002",
-        "recipe_content_sha256": plan.identity.recipe_revision_sha256,
         "mapping_id": "40000000-0000-4000-8000-000000000007",
-        "mapping_generation": 1,
-        "image_digest": plan.runtime.image_digest,
-        "plan_digest": plan.identity.execution_sha256,
-        "alias": "helper-process-proof",
-        "rank": placement.rank,
-        "role": placement.role,
-        "port": placement.port,
-        "reserved_memory_bytes": placement.reserved_memory_bytes,
-        "memory_floor_bytes": placement.memory_floor_bytes,
-        "memory_kind": placement.memory_kind.to_string(),
-        "endpoint_address": placement.endpoint_address,
-        "world_size": placement.world_size,
+        "plan_digest": plan.identity.model_artifact_set_sha256,
         "compiled_execution_plan": plan,
-        "local_address": null,
-        "master_address": null,
-        "master_port": null,
         "run_generation": 1
     }))
     .unwrap()

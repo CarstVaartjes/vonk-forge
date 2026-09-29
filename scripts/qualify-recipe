@@ -57,10 +57,10 @@ class PackageSnapshot:
 @dataclass(frozen=True, slots=True)
 class QualificationInputs:
     recipe: object
-    models: tuple[object, ...]
+    models: dict[str, object]
     package: PackageSnapshot
     compiled: tuple[dict[str, object], ...]
-    source_digest: str | None
+    source_digest: str
     independent_validator: dict[str, object]
 
 
@@ -75,7 +75,6 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--engine", default="docker")
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--serving-url", help="base URL for executing declared HTTP serving checks")
-    parser.add_argument("--evidence-ledger", type=Path, help="private append-only ledger for serving step evidence")
     args = parser.parse_args()
     if not 0 < args.timeout_seconds <= 3600:
         parser.error("--timeout-seconds must be between 0 and 3600")
@@ -89,10 +88,6 @@ def _load_json(path: Path) -> object:
         raise QualificationError(f"invalid JSON: {path}") from error
 
 
-def _canonical_json(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-
-
 def _install_contract_path(library_root: Path) -> None:
     contract_root = (library_root / "contracts" / "src").resolve()
     if not (contract_root / "vonk_forge_contracts").is_dir():
@@ -101,23 +96,14 @@ def _install_contract_path(library_root: Path) -> None:
         sys.path.insert(0, str(contract_root))
 
 
-def _contracts(library_root: Path) -> tuple[ModuleType, type, type, object, tuple[object, object, object]]:
+def _contracts(library_root: Path) -> ModuleType:
     _install_contract_path(library_root)
     try:
-        from vonk_forge_contracts import (
-            ModelDefinition,
-            RecipeDefinition,
-            content_sha256,
-        )
-        from vonk_forge_contracts.resolver import (
-            validate_model_references,
-            validate_recipe_models,
-            validate_recipe_package_paths,
-        )
-    except (ImportError, AttributeError) as error:
+        import vonk_forge_contracts
+        import vonk_forge_contracts.resolver
+    except ImportError as error:
         raise QualificationError("canonical contracts package cannot be imported") from error
-    return (sys.modules["vonk_forge_contracts"], ModelDefinition, RecipeDefinition,
-            content_sha256, (validate_model_references, validate_recipe_models, validate_recipe_package_paths))
+    return vonk_forge_contracts
 
 
 def _safe_member(name: str) -> None:
@@ -126,7 +112,7 @@ def _safe_member(name: str) -> None:
         raise QualificationError(f"recipe package contains an unsafe member: {name}")
 
 
-def _read_package(path: Path, recipe: object, content_sha256: object) -> PackageSnapshot:
+def _read_package(path: Path, document: Mapping[str, object], contracts: ModuleType) -> PackageSnapshot:
     files: dict[str, bytes] = {}
     try:
         with tarfile.open(path, mode="r:gz") as archive:
@@ -170,18 +156,18 @@ def _read_package(path: Path, recipe: object, content_sha256: object) -> Package
         if len(payload) != entry["size"] or hashlib.sha256(payload).hexdigest() != entry["sha256"]:
             raise QualificationError(f"recipe package member digest is stale: {name}")
     try:
-        from vonk_forge_contracts import RecipeDefinition
-        package_recipe = RecipeDefinition.model_validate(json.loads(files["recipe.json"]))
-    except (KeyError, UnicodeError, json.JSONDecodeError, ValueError) as error:
+        package_document = json.loads(files["recipe.json"])
+    except (KeyError, UnicodeError, json.JSONDecodeError) as error:
         raise QualificationError("recipe package recipe.json is invalid") from error
-    if package_recipe.model_dump(mode="json") != recipe.model_dump(mode="json"):
+    expected_digest = contracts.document_sha256(document)
+    if not isinstance(package_document, Mapping) or contracts.document_sha256(package_document) != expected_digest:
         raise QualificationError("recipe package recipe.json does not match the selected recipe")
-    if manifest.get("recipe_content_sha256") != content_sha256(package_recipe):
+    if manifest.get("recipe_content_sha256") != expected_digest:
         raise QualificationError("recipe package recipe digest is stale")
     return PackageSnapshot(path, dict(manifest), files)
 
 
-def _catalog_package(library_root: Path, recipe: object, content_sha256: object) -> Path:
+def _catalog_package(library_root: Path, recipe: object, document: Mapping[str, object], contracts: ModuleType) -> Path:
     if not (library_root / "catalog-index.json").is_file():
         raise QualificationError(
             "recipe library index is not built; run "
@@ -192,7 +178,7 @@ def _catalog_package(library_root: Path, recipe: object, content_sha256: object)
     if not isinstance(rows, list):
         raise QualificationError("canonical catalog recipe rows are invalid")
     identity = recipe.identity
-    expected_digest = content_sha256(recipe)
+    expected_digest = contracts.document_sha256(document)
     for row in rows:
         if not isinstance(row, Mapping) or not isinstance(row.get("document"), Mapping):
             raise QualificationError("canonical catalog recipe row is invalid")
@@ -200,7 +186,7 @@ def _catalog_package(library_root: Path, recipe: object, content_sha256: object)
         if not isinstance(row_identity, Mapping) or (row_identity.get("publisher"), row_identity.get("slug")) != (identity.publisher, identity.slug):
             continue
         if row.get("content_sha256") != expected_digest:
-            raise QualificationError("catalog recipe digest does not match RecipeDefinition")
+            raise QualificationError("catalog recipe digest does not match the recipe document")
         package = row.get("package")
         package_path = package.get("path") if isinstance(package, Mapping) else None
         if not isinstance(package_path, str) or not package_path.startswith("packages/"):
@@ -220,10 +206,11 @@ def _catalog_package(library_root: Path, recipe: object, content_sha256: object)
     raise QualificationError("recipe is not present in the canonical catalog index")
 
 
-def _resolve_models(library_root: Path, recipe: object, package: PackageSnapshot, ModelDefinition: type,
-                    content_sha256: object, resolvers: tuple[object, object, object]) -> tuple[object, ...]:
-    validate_model_references, validate_recipe_models, validate_recipe_package_paths = resolvers
+def _resolve_models(library_root: Path, recipe: object, package: PackageSnapshot,
+                    contracts: ModuleType) -> dict[str, object]:
+    resolver = contracts.resolver
     models: dict[tuple[str, str], object] = {}
+    digests: dict[str, object] = {}
     pending = [selection.model for selection in recipe.models]
     while pending:
         reference = pending.pop(0)
@@ -235,34 +222,33 @@ def _resolve_models(library_root: Path, recipe: object, package: PackageSnapshot
         if payload is None:
             raise QualificationError(f"exact Model snapshot is missing from package: {name}")
         try:
-            model = ModelDefinition.model_validate(json.loads(payload))
-            catalog = ModelDefinition.model_validate(_load_json(library_root / "models" / f"{reference.slug}.json"))
-        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
+            document = json.loads(payload)
+            catalog = _load_json(library_root / "models" / f"{reference.slug}.json")
+            model = contracts.read_model(document)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError) as error:
             raise QualificationError(f"Model snapshot is invalid: {name}") from error
         if ((model.identity.publisher, model.identity.slug) != key
-                or content_sha256(model) != reference.content_sha256
-                or content_sha256(catalog) != reference.content_sha256):
+                or contracts.document_sha256(document) != reference.content_sha256
+                or not isinstance(catalog, Mapping)
+                or contracts.document_sha256(catalog) != reference.content_sha256):
             raise QualificationError(f"Model snapshot identity or digest is stale: {name}")
         models[key] = model
+        digests[reference.content_sha256] = model
         pending.extend(model.dependencies)
-        if model.supersedes is not None:
-            pending.append(model.supersedes)
     try:
-        validate_model_references(models.values())
-        validate_recipe_models(recipe, models.values())
+        resolver.validate_model_references(digests)
+        resolver.validate_recipe_models(recipe, digests)
         # The resolver expresses a directory requirement as the context path;
         # archives carry the directory's regular members, never a directory
         # TarInfo. Add that logical path while retaining every real member for
         # the manifest and compiler checks below.
         closure_paths = set(package.paths)
-        if recipe.execution.mode == "build":
-            build = recipe.execution.build
-            closure_paths.add(build.context.path)
+        closure_paths.add(recipe.execution.build.context.path)
         for check in recipe.validation.serving.checks:
             if getattr(check.request, "transport", None) == "job":
                 closure_paths.add(check.request.fixture)
                 closure_paths.update(check.request.input_slots.values())
-        validate_recipe_package_paths(recipe, closure_paths)
+        resolver.validate_recipe_package_paths(recipe, closure_paths)
     except Exception as error:
         raise QualificationError(f"canonical model or package closure resolution failed: {error}") from error
     expected_models = {f"models/{slug}.json" for _publisher, slug in models}
@@ -274,11 +260,7 @@ def _resolve_models(library_root: Path, recipe: object, package: PackageSnapshot
         for model in models.values()
         for file in model.files
     }
-    source_context = (
-        PurePosixPath(recipe.execution.build.context.path)
-        if recipe.execution.mode == "build"
-        else None
-    )
+    source_context = PurePosixPath(recipe.execution.build.context.path)
     fixture_paths = {
         request.fixture
         for check in recipe.validation.serving.checks
@@ -292,8 +274,6 @@ def _resolve_models(library_root: Path, recipe: object, package: PackageSnapshot
     )
 
     def is_source_member(name: str) -> bool:
-        if source_context is None:
-            return False
         try:
             PurePosixPath(name).relative_to(source_context)
         except ValueError:
@@ -308,7 +288,7 @@ def _resolve_models(library_root: Path, recipe: object, package: PackageSnapshot
         if is_source_member(name) or name in fixture_paths:
             continue
         raise QualificationError(f"recipe package member is outside declared namespaces: {name}")
-    return tuple(models.values())
+    return digests
 
 
 def _build_inputs(payload: bytes) -> list[dict[str, str]]:
@@ -330,9 +310,7 @@ def _build_inputs(payload: bytes) -> list[dict[str, str]]:
     return result
 
 
-def _source_digest(recipe: object, package: PackageSnapshot) -> str | None:
-    if recipe.execution.mode != "build":
-        return None
+def _source_digest(recipe: object, package: PackageSnapshot) -> str:
     build = recipe.execution.build
     context = build.context.path
     context_files = {name.removeprefix(context + "/"): payload for name, payload in package.files.items() if name.startswith(context + "/")}
@@ -345,7 +323,7 @@ def _source_digest(recipe: object, package: PackageSnapshot) -> str | None:
     if package.manifest.get("build_inputs") != actual_inputs:
         raise QualificationError("source-build manifest build inputs are stale")
     base = build.base_image
-    if not any(item["platform"] == base.platform and item["reference"].split("@sha256:", 1)[0].split(":", 1)[0] == base.repository and item["reference"].endswith("@sha256:" + base.digest) for item in actual_inputs):
+    if not any(item["platform"] == "linux/arm64" and item["reference"].split("@sha256:", 1)[0].split(":", 1)[0] == base.repository and item["reference"].endswith("@sha256:" + base.digest) for item in actual_inputs):
         raise QualificationError("source-build base image is absent from package build inputs")
     digest = hashlib.sha256()
     for name in sorted(context_files):
@@ -357,7 +335,7 @@ def _source_digest(recipe: object, package: PackageSnapshot) -> str | None:
     return digest.hexdigest()
 
 
-def _compile(recipe: object, models: tuple[object, ...], package: PackageSnapshot, source_digest: str | None, platform_root: Path) -> tuple[dict[str, object], ...]:
+def _compile(recipe: object, recipe_digest: str, models: dict[str, object], package: PackageSnapshot, source_digest: str, platform_root: Path) -> tuple[dict[str, object], ...]:
     control_src = platform_root / "control" / "src"
     if not control_src.is_dir():
         raise QualificationError("platform compiler source is unavailable")
@@ -368,28 +346,24 @@ def _compile(recipe: object, models: tuple[object, ...], package: PackageSnapsho
     except ImportError as error:
         raise QualificationError("canonical runtime compiler is unavailable") from error
     package_paths = set(package.paths)
-    if recipe.execution.mode == "build":
-        package_paths.add(recipe.execution.build.context.path)
+    package_paths.add(recipe.execution.build.context.path)
     package_handle: dict[str, object] = {"paths": tuple(sorted(package_paths))}
-    if source_digest is not None:
-        package_handle.update({"image_digest": source_digest, "image_reference": f"localhost/vonk/structural-build@sha256:{source_digest}", "platform": "linux/arm64", "build_input_sha256": source_digest})
+    package_handle.update({"image_digest": source_digest, "image_reference": f"localhost/vonk/structural-build@sha256:{source_digest}", "platform": "linux/arm64", "build_input_sha256": source_digest})
     roles: list[str] = []
     for declaration in recipe.topology.roles:
         roles.extend([declaration.name] * declaration.count)
     compiled: list[dict[str, object]] = []
     for rank, role in enumerate(roles):
         try:
-            spec = compile_runtime_spec(recipe, models=models, package_handle=package_handle, role=role, rank=rank)
+            spec = compile_runtime_spec(recipe, models=models, package_handle=package_handle, role=role, rank=rank, recipe_digest=recipe_digest)
         except Exception as error:
             raise QualificationError(f"canonical runtime compiler rejected {role}[{rank}]: {error}") from error
         security = spec.get("security")
-        if (not isinstance(security, Mapping) or security.get("privileged") is not False
-                or security.get("read_only_root") is not True or security.get("no_new_privileges") is not True
-                or security.get("capabilities")):
+        # Privileges, capabilities and the read-only root are platform constants;
+        # only the per-workload choices remain to be checked.
+        user = security.get("user") if isinstance(security, Mapping) else None
+        if not isinstance(user, str) or user.split(":")[0] in {"", "0", "root"}:
             raise QualificationError("compiled runtime security projection is unsafe")
-        mounts = security.get("mounts")
-        if not isinstance(mounts, list) or any(isinstance(item, Mapping) and str(item.get("target", "")).startswith("/run/vonk/models") and item.get("read_only") is not True for item in mounts):
-            raise QualificationError("compiled model mounts must be read-only")
         compiled.append(spec)
     checks = {
         assertion
@@ -432,16 +406,17 @@ def _independent_validator(library_root: Path, platform_root: Path) -> dict[str,
 
 
 def _structural(path: Path, *, library_root: Path, platform_root: Path) -> QualificationInputs:
-    _module, ModelDefinition, RecipeDefinition, content_sha256, resolvers = _contracts(library_root)
+    contracts = _contracts(library_root)
+    document = _load_json(path)
     try:
-        recipe = RecipeDefinition.model_validate(_load_json(path))
+        recipe = contracts.read_recipe(document)
     except (TypeError, ValueError) as error:
-        raise QualificationError("recipe does not satisfy RecipeDefinition v2") from error
-    package_path = _catalog_package(library_root, recipe, content_sha256)
-    package = _read_package(package_path, recipe, content_sha256)
-    models = _resolve_models(library_root, recipe, package, ModelDefinition, content_sha256, resolvers)
+        raise QualificationError(f"recipe does not satisfy contract {contracts.CONTRACT_VERSION}") from error
+    package_path = _catalog_package(library_root, recipe, document, contracts)
+    package = _read_package(package_path, document, contracts)
+    models = _resolve_models(library_root, recipe, package, contracts)
     source_digest = _source_digest(recipe, package)
-    compiled = _compile(recipe, models, package, source_digest, platform_root)
+    compiled = _compile(recipe, contracts.document_sha256(document), models, package, source_digest, platform_root)
     independent = _independent_validator(library_root, platform_root)
     return QualificationInputs(recipe, models, package, compiled, source_digest, independent)
 
@@ -469,14 +444,6 @@ def _serving_check_documents(recipe: object) -> tuple[dict[str, object], ...]:
     )
 
 
-def _serving_plan_digest(inputs: QualificationInputs) -> str:
-    payload = {
-        "recipe": inputs.recipe.model_dump(mode="json"),
-        "execution": inputs.compiled,
-    }
-    return hashlib.sha256(_canonical_json(payload)).hexdigest()
-
-
 def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Namespace) -> dict[str, object] | None:
     """Run declared HTTP checks when a real endpoint is supplied.
 
@@ -493,39 +460,21 @@ def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Nam
         ServingExecutionError,
         execute_http_check,
     )
-    try:
-        from cluster_profiles.fleet_qualification import EvidenceLedger
-    except ImportError as error:
-        raise QualificationError("qualification evidence ledger is unavailable") from error
-    ledger = EvidenceLedger(args.evidence_ledger) if args.evidence_ledger else None
-    plan_digest = _serving_plan_digest(inputs)
-    recipe_key = f"{inputs.recipe.identity.publisher}/{inputs.recipe.identity.slug}"
     checks = _serving_check_documents(inputs.recipe)
     alias_values = tuple(inputs.recipe.interfaces[0].model_aliases) if inputs.recipe.interfaces[0].adapter == "openai" else ()
     alias = alias_values[0] if alias_values else None
     results: list[dict[str, object]] = []
     for check in checks:
         step = f"serving.{check['name']}"
-        if ledger:
-            ledger.append("step.started", plan_digest=plan_digest, recipe=recipe_key, payload={"step": step, "transport": check["request"]["transport"]})
-        request = check["request"]
-        if request["transport"] != "http":
-            detail = "job serving requires the Controller artifact-job adapter"
-            if ledger:
-                ledger.append("step.blocked", plan_digest=plan_digest, recipe=recipe_key, payload={"step": step, "detail": detail, "status": "environment-limited"})
-            raise EnvironmentLimited(detail)
+        if check["request"]["transport"] != "http":
+            raise EnvironmentLimited("job serving requires the Controller artifact-job adapter")
         started = time.monotonic()
         try:
             result = execute_http_check(args.serving_url, check, timeout_seconds=args.timeout_seconds, model_alias=alias)
         except ServingExecutionError as error:
-            if ledger:
-                ledger.append("step.failed", plan_digest=plan_digest, recipe=recipe_key, payload={"step": step, "detail": str(error)[:512]})
             raise QualificationError(f"{step}: {error}") from error
-        result = {"check": check["name"], "elapsed_seconds": round(time.monotonic() - started, 6), **result}
-        results.append(result)
-        if ledger:
-            ledger.append("step.completed", plan_digest=plan_digest, recipe=recipe_key, payload={"step": step, "result": result})
-    return {"scope": "local-http", "status": "passed", "plan_digest": plan_digest, "checks": results, "evidence_ledger": str(args.evidence_ledger) if args.evidence_ledger else None}
+        results.append({"check": check["name"], "elapsed_seconds": round(time.monotonic() - started, 6), **result})
+    return {"scope": "local-http", "status": "passed", "checks": results}
 
 
 def _print(value: Mapping[str, object]) -> None:
@@ -549,7 +498,7 @@ def main() -> int:
         except (OSError, QualificationError) as error:
             _print({"compiled_roles": len(inputs.compiled), "error": str(error), "independent_validator": inputs.independent_validator, "model_count": len(inputs.models), "passed": False, "physical_claim": False, "recipe": recipe.identity.slug, "status": "failed"})
             return 1
-        result = {"compiled_roles": len(inputs.compiled), "independent_validator": inputs.independent_validator, "model_count": len(inputs.models), "package": {"members": len(inputs.package.files), "path": str(inputs.package.path), "schema_version": inputs.package.manifest["schema_version"]}, "passed": True, "physical_claim": False, "recipe": recipe.identity.slug, "source_build": recipe.execution.mode == "build", "status": "passed"}
+        result = {"compiled_roles": len(inputs.compiled), "independent_validator": inputs.independent_validator, "model_count": len(inputs.models), "package": {"members": len(inputs.package.files), "path": str(inputs.package.path), "schema_version": inputs.package.manifest["schema_version"]}, "passed": True, "physical_claim": False, "recipe": recipe.identity.slug, "status": "passed"}
         if serving is not None:
             result["serving"] = serving
         _print(result)

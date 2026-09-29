@@ -10,7 +10,7 @@ use std::io::{self, BufRead};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use vonk_agent::client::{ExactRecipeRunObservation, build_exact_recipe_run_observations};
-use vonk_agent::executor::{recipe_start_success_body, runtime_arguments_for_plan};
+use vonk_agent::executor::recipe_start_success_body;
 use vonk_agent::oci::{OciRuntime, RecipeRunStartIdentity};
 use vonk_agent::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
 use vonk_agent::workloads::CompiledExecutionPlan;
@@ -37,14 +37,12 @@ impl ProcessRunner for NoProcess {
 #[serde(deny_unknown_fields)]
 struct PersistBindingInput {
     request: RecipeStartRequest,
-    artifact_set_digest: String,
     data_root: std::path::PathBuf,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SerializeInput {
-    node_id: String,
     observed_at: DateTime<Utc>,
     runs: Vec<ExactRecipeRunObservation>,
 }
@@ -64,15 +62,9 @@ fn persist_binding(
     fs::write(installation.join("spec.json"), serde_json::to_vec(&spec)?)?;
     fs::write(
         installation.join("recipe-content.sha256"),
-        &input.request.recipe_content_sha256,
+        input.request.recipe_content_sha256(),
     )?;
-    let identity = RecipeRunStartIdentity {
-        mapping_generation: input.request.mapping_generation,
-        mapping_id: input.request.mapping_id,
-        recipe_content_sha256: input.request.recipe_content_sha256.clone(),
-        recipe_revision_id: input.request.recipe_revision_id,
-        run_generation,
-    };
+    let identity = RecipeRunStartIdentity { run_generation };
     let runner = NoProcess;
     let runtime = OciRuntime {
         runner: &runner,
@@ -98,19 +90,20 @@ fn persist_binding(
             &identity,
         )?
     };
-    let runtime_arguments = runtime_arguments_for_plan(&start_plan, &start_plan.main);
-    let evidence = recipe_start_success_body(
-        &input.request,
-        &spec,
-        &input.artifact_set_digest,
-        &runtime_arguments,
-    )?;
+    let _ = start_plan;
+    let evidence = recipe_start_success_body(&input.request);
     let binding = runtime
         .recipe_run_inspection_plans()?
         .into_iter()
-        .find(|plan| plan.binding.run_id == input.request.run_id)
-        .map(|plan| plan.binding)
-        .ok_or_else(|| "persisted observation binding was not planned".to_owned())?;
+        .find(|plan| plan.run_id == input.request.run_id)
+        .map(|plan| {
+            serde_json::json!({
+                "run_id": plan.run_id,
+                "run_generation": plan.run_generation,
+                "endpoint_owner": plan.endpoint_address.is_some(),
+            })
+        })
+        .ok_or_else(|| "persisted run was not planned for observation".to_owned())?;
     Ok(serde_json::json!({"binding": binding, "evidence": evidence}))
 }
 
@@ -130,16 +123,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
             "serialize" => {
                 let input: SerializeInput = serde_json::from_str(&line)?;
-                let envelope = build_exact_recipe_run_observations(
-                    &input.node_id,
-                    input.observed_at,
-                    &input.runs,
-                )?;
+                let envelope = build_exact_recipe_run_observations(input.observed_at, &input.runs)?;
                 println!("{}", serde_json::to_string(&envelope)?);
             }
             "parse" => {
                 let observation = parse_strict::<ExactRecipeRunObservation>(line.as_bytes())?;
-                observation.validate()?;
                 println!("{}", serde_json::to_string(&observation)?);
             }
             _ => return Err("unknown recipe observation probe mode".into()),

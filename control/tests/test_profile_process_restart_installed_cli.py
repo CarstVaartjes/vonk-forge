@@ -197,7 +197,7 @@ def test_installed_cli_follows_same_profile_application_after_api_process_restar
             "expected_revision": 0,
             "assignments": [
                 {
-                    "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                    "recipe_selector": "vonk-forge/synthetic-tiny-build",
                     "spark_ids": [NODE_1],
                     "desired_state": "running",
                     "assignment_name": "restart-owner",

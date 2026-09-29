@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -12,21 +12,18 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ring::signature::{Ed25519KeyPair, KeyPair};
 use rustix::net::sockopt::socket_peercred;
 use vonk_agent_helper::operations::{
     ManagedRoots, OperationError, OperationExecutor, ProcessCommandRunner,
 };
 use vonk_agent_helper::protocol::{
-    GrantVerifier, HelperError, HostOperation, PeerIdentity, parse_request, read_frame,
-    sign_observation_receipt, write_frame,
+    GrantVerifier, HelperError, HostOperation, PeerIdentity, parse_inspection_request,
+    parse_request, read_frame, write_frame,
 };
 use vonk_agent_protocol::generated::{HostHelperProcessLogs, HostHelperResponse as HelperResponse};
 
 const GRANT_KEY: &str = "/etc/vonk-forge-agent/host-helper-authority.pub";
 const RELEASE_KEY: &str = "/usr/share/keyrings/vonk-forge-release.pub";
-const OBSERVATION_RECEIPT_PRIVATE_KEY: &str = "/var/lib/vonk-forge/helper/observation-receipt.pk8";
-const OBSERVATION_RECEIPT_PUBLIC_KEY: &str = "/etc/vonk-forge-agent/observation-receipt.pub";
 const AGENT_CONFIG: &str = "/etc/vonk-forge-agent/agent.toml";
 const REQUEST_LEDGER: &str = "/var/lib/vonk-forge/helper/requests";
 const DATA_ROOT: &str = "/var/lib/vonk-forge";
@@ -94,7 +91,18 @@ impl HelperRejection {
         operation: &HostOperation,
         error: OperationError,
     ) -> Self {
-        let package_install = matches!(operation, HostOperation::InstallVonkDebOperation(_));
+        Self::for_error(
+            request_id,
+            matches!(operation, HostOperation::InstallVonkDebOperation(_)),
+            error,
+        )
+    }
+
+    fn for_error(
+        request_id: impl Into<String>,
+        package_install: bool,
+        error: OperationError,
+    ) -> Self {
         let (diagnostic, process_logs) = match &error {
             // The container's own output is the evidence for an exited
             // workload, so it crosses as its own typed per-stream document
@@ -182,13 +190,6 @@ fn run() -> Result<(), String> {
     let grant_key = load_root_public_key(Path::new(GRANT_KEY))?;
     let release_key = load_root_public_key(Path::new(RELEASE_KEY))?;
     let group_gid = group_gid(Path::new("/etc/group"), AGENT_GROUP)?;
-    let observation_receipt_public_key =
-        load_root_binary_public_key(Path::new(OBSERVATION_RECEIPT_PUBLIC_KEY), group_gid)?;
-    let observation_receipt_signer =
-        load_root_private_key(Path::new(OBSERVATION_RECEIPT_PRIVATE_KEY))?;
-    if observation_receipt_signer.public_key().as_ref() != observation_receipt_public_key {
-        return Err("observation receipt key pair does not match".to_owned());
-    }
     let agent_uid = user_uid(Path::new("/etc/passwd"), AGENT_GROUP)?;
     let node_id = node_id_from_config(&read_root_text(Path::new(AGENT_CONFIG), 64 * 1024)?)?;
     let verifier = Arc::new(GrantVerifier::new(&grant_key, group_gid).map_err(display)?);
@@ -206,7 +207,6 @@ fn run() -> Result<(), String> {
     .with_runtime_request_owner(agent_uid);
     executor.prepare_package_custody().map_err(display)?;
     let executor = Arc::new(executor);
-    let observation_receipt_signer = Arc::new(observation_receipt_signer);
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
     if sockets.len() != 1 {
@@ -235,18 +235,11 @@ fn run() -> Result<(), String> {
                 let verifier = Arc::clone(&verifier);
                 let executor = Arc::clone(&executor);
                 let node_id = Arc::clone(&node_id);
-                let observation_receipt_signer = Arc::clone(&observation_receipt_signer);
                 if let Err(error) = thread::Builder::new()
                     .name("vonk-helper-request".to_owned())
                     .spawn(move || {
                         let _permit = permit;
-                        if let Err(error) = handle(
-                            &mut stream,
-                            &verifier,
-                            &executor,
-                            &node_id,
-                            &observation_receipt_signer,
-                        ) {
+                        if let Err(error) = handle(&mut stream, &verifier, &executor, &node_id) {
                             reject(&mut stream, &error);
                         }
                     })
@@ -287,10 +280,9 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         schema_version: 1,
         request_id,
         status: "rejected".parse().expect("declared helper response status"),
-        evidence_sha256: None,
         exit_code,
         error_code: Some(error.error_code.to_owned()),
-        observation_receipt: None,
+        process_running: None,
     };
     if let Ok(body) = vonk_agent_protocol::canonical_generated_json(&response) {
         let _ = write_frame(stream, &body);
@@ -303,7 +295,6 @@ fn handle(
     verifier: &GrantVerifier,
     executor: &OperationExecutor<ProcessCommandRunner>,
     node_id: &str,
-    observation_receipt_signer: &Ed25519KeyPair,
 ) -> Result<(), HelperRejection> {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -319,6 +310,31 @@ fn handle(
         .map_err(|error| HelperRejection::new("peer_identity_invalid", error))?;
     let raw = read_frame(stream)
         .map_err(|error| HelperRejection::new("request_invalid", error.safe_detail()))?;
+    if let Ok(inspection) = parse_inspection_request(&raw) {
+        verifier
+            .authorize_peer(&peer)
+            .map_err(|error| HelperRejection::new("peer_identity_invalid", error.safe_detail()))?;
+        let request_id = inspection.request_id.to_string();
+        let running = executor
+            .inspect_recipe_run(&inspection.request_sha256)
+            .map_err(|error| HelperRejection::for_error(&request_id, false, error))?;
+        return respond(
+            stream,
+            &request_id,
+            HelperResponse {
+                diagnostic: None,
+                process_logs: None,
+                schema_version: 1,
+                request_id: Some(inspection.request_id),
+                status: "container-runtime-request-executed"
+                    .parse()
+                    .expect("declared helper response status"),
+                exit_code: None,
+                error_code: None,
+                process_running: Some(running),
+            },
+        );
+    }
     let request = parse_request(&raw)
         .map_err(|error| HelperRejection::new("grant_invalid", error.safe_detail()))?;
     let request_id = request.claims.request_id.to_string();
@@ -343,49 +359,6 @@ fn handle(
         .map_err(|error| {
             HelperRejection::for_operation(&request_id, &request.claims.operation, error)
         })?;
-    let observation_receipt = match (&request.claims.operation, outcome.recipe_run_observation) {
-        (
-            vonk_agent_helper::protocol::HostOperation::ExecuteContainerRuntimeRequestOperation(
-                vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
-                    action: vonk_agent_helper::protocol::ContainerRuntimeAction::RunInspect,
-                    request_sha256,
-                    observation_identity_sha256: Some(observation_identity_sha256),
-                    ..
-                },
-            ),
-            Some(observation_outcome),
-        ) => Some(
-            sign_observation_receipt(
-                observation_receipt_signer,
-                node_id,
-                request.claims.request_id,
-                request_sha256,
-                observation_identity_sha256,
-                observation_outcome,
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(|_error| {
-                        HelperRejection::for_request(
-                            &request_id,
-                            "operation_failed",
-                            "system clock is unavailable",
-                        )
-                    })?
-                    .as_secs() as i64,
-            )
-            .map_err(|error| {
-                HelperRejection::for_request(&request_id, "operation_failed", error.safe_detail())
-            })?,
-        ),
-        (_, None) => None,
-        _ => {
-            return Err(HelperRejection::for_request(
-                &request_id,
-                "operation_failed",
-                "runtime inspection outcome did not match its grant",
-            ));
-        }
-    };
     let response = HelperResponse {
         diagnostic: None,
         process_logs: None,
@@ -398,7 +371,6 @@ fn handle(
                 "invalid operation response status",
             )
         })?,
-        evidence_sha256: Some(outcome.evidence_sha256),
         exit_code: outcome
             .exit_code
             .map(u32::try_from)
@@ -411,17 +383,25 @@ fn handle(
                 )
             })?,
         error_code: None,
-        observation_receipt,
+        process_running: None,
     };
+    respond(stream, &request_id, response)
+}
+
+fn respond(
+    stream: &mut UnixStream,
+    request_id: &str,
+    response: HelperResponse,
+) -> Result<(), HelperRejection> {
     let body = vonk_agent_protocol::canonical_generated_json(&response).map_err(|_error| {
         HelperRejection::for_request(
-            &request_id,
+            request_id,
             "operation_failed",
             "helper response encoding failed",
         )
     })?;
     write_frame(stream, &body).map_err(|error| {
-        HelperRejection::for_request(&request_id, "operation_failed", error.safe_detail())
+        HelperRejection::for_request(request_id, "operation_failed", error.safe_detail())
     })
 }
 
@@ -527,64 +507,6 @@ fn load_root_public_key(path: &Path) -> Result<[u8; 32], String> {
         .map_err(|_| "public key must contain 32 bytes".to_owned())
 }
 
-fn load_root_binary_public_key(path: &Path, group_gid: u32) -> Result<[u8; 32], String> {
-    let raw = read_root_bytes(path, 32, 32, 0, group_gid, 0o640)?;
-    raw.try_into()
-        .map_err(|_| "public key must contain 32 bytes".to_owned())
-}
-
-fn load_root_private_key(path: &Path) -> Result<Ed25519KeyPair, String> {
-    let raw = read_root_bytes(path, 1, 128, 0, 0, 0o600)?;
-    parse_observation_private_key(&raw)
-}
-
-fn parse_observation_private_key(raw: &[u8]) -> Result<Ed25519KeyPair, String> {
-    // The Debian maintainer scripts deliberately use the system OpenSSL to
-    // generate this root-owned key. OpenSSL emits an Ed25519 PKCS#8 v1
-    // document, while ring's checked `from_pkcs8` accepts only v2 documents
-    // that embed a public key. Accept both encodings here, then compare the
-    // derived public key with the separately root-owned public-key file during
-    // helper startup. That preserves the key-pair consistency check without
-    // making helper availability depend on the host OpenSSL version.
-    Ed25519KeyPair::from_pkcs8_maybe_unchecked(raw)
-        .map_err(|_| "observation receipt private key is invalid".to_owned())
-}
-
-fn read_root_bytes(
-    path: &Path,
-    minimum_bytes: u64,
-    maximum_bytes: u64,
-    expected_uid: u32,
-    expected_gid: u32,
-    required_mode: u32,
-) -> Result<Vec<u8>, String> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
-        .open(path)
-        .map_err(display)?;
-    let metadata = file.metadata().map_err(display)?;
-    if !metadata.is_file()
-        || metadata.nlink() != 1
-        || metadata.uid() != expected_uid
-        || metadata.gid() != expected_gid
-        || metadata.permissions().mode() & 0o777 != required_mode
-        || metadata.len() < minimum_bytes
-        || metadata.len() > maximum_bytes
-    {
-        return Err(format!("{} is unsafe", path.display()));
-    }
-    let mut raw = Vec::with_capacity(metadata.len() as usize);
-    Read::by_ref(&mut file)
-        .take(maximum_bytes + 1)
-        .read_to_end(&mut raw)
-        .map_err(display)?;
-    if raw.len() as u64 != metadata.len() {
-        return Err(format!("{} changed while being read", path.display()));
-    }
-    Ok(raw)
-}
-
 fn read_root_text(path: &Path, maximum_bytes: u64) -> Result<String, String> {
     let metadata = fs::symlink_metadata(path).map_err(display)?;
     if metadata.file_type().is_symlink()
@@ -667,11 +589,7 @@ fn _classify_protocol_error(error: HelperError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        HelperRejection, HelperResponse, MAX_CONCURRENT_REQUESTS, acquire_worker,
-        parse_observation_private_key,
-    };
-    use ring::signature::KeyPair;
+    use super::{HelperRejection, HelperResponse, MAX_CONCURRENT_REQUESTS, acquire_worker};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -695,20 +613,6 @@ mod tests {
     }
 
     #[test]
-    fn openssl_ed25519_pkcs8_v1_key_is_accepted() {
-        // RFC 8410 PKCS#8 v1 wrapper around a deterministic 32-byte seed, the
-        // same document shape produced by `openssl genpkey -algorithm ED25519
-        // -outform DER` in the package post-install script.
-        let mut document = hex::decode("302e020100300506032b657004220420").unwrap();
-        document.extend(0_u8..32);
-
-        let key = parse_observation_private_key(&document).unwrap();
-
-        assert_eq!(key.public_key().as_ref().len(), 32);
-        assert!(parse_observation_private_key(b"not-pkcs8").is_err());
-    }
-
-    #[test]
     fn framed_rejection_uses_the_shared_response_contract() {
         let (mut client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
         super::reject(
@@ -719,7 +623,6 @@ mod tests {
         let response: HelperResponse = vonk_agent_protocol::parse_strict(&bytes).unwrap();
         assert_eq!(response.status, "rejected");
         assert!(response.request_id.is_none());
-        assert!(response.evidence_sha256.is_none());
         assert_eq!(response.error_code.as_deref(), Some("request_invalid"));
         assert_eq!(
             vonk_agent_protocol::canonical_generated_json(&response).unwrap(),
@@ -739,12 +642,8 @@ mod tests {
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
                 action: ContainerRuntimeAction::RunInspect,
-                job_id: uuid::Uuid::nil(),
-                operation_id: uuid::Uuid::nil(),
-                attempt: 1,
                 fence: uuid::Uuid::nil(),
                 request_sha256: "a".repeat(64),
-                observation_identity_sha256: None,
                 installation_id: None,
                 reconciliation_identity: None,
                 run_generation: None,
@@ -786,10 +685,9 @@ mod tests {
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: "rejected".parse().expect("declared helper response status"),
-            evidence_sha256: None,
             exit_code: None,
             error_code: Some("operation_failed".to_owned()),
-            observation_receipt: None,
+            process_running: None,
         };
         let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -807,10 +705,9 @@ mod tests {
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: "package-installed".parse().unwrap(),
-            evidence_sha256: Some("a".repeat(64)),
             exit_code: None,
             error_code: None,
-            observation_receipt: None,
+            process_running: None,
         };
         let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -909,12 +806,8 @@ mod tests {
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
                 action: ContainerRuntimeAction::ImageImport,
-                job_id: uuid::Uuid::nil(),
-                operation_id: uuid::Uuid::nil(),
-                attempt: 1,
                 fence: uuid::Uuid::nil(),
                 request_sha256: "a".repeat(64),
-                observation_identity_sha256: None,
                 installation_id: None,
                 reconciliation_identity: None,
                 run_generation: None,

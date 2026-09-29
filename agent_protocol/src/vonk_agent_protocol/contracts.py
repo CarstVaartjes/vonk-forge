@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import ipaddress
 import json
 import re
@@ -34,8 +33,6 @@ MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES = 16 * 1024 * 1024
 MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES = (
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES
 )
-NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
-AUTHORITY_REVISION = re.compile(r"[0-9a-f]{64}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 VERSIONED_PLATFORM_TARGET = re.compile(
     r"platform/releases/"
@@ -104,10 +101,6 @@ CanonicalUUID = Annotated[
         json_schema_extra={"format": "uuid"},
     ),
 ]
-NodeIdentifier = Annotated[
-    str,
-    Field(strict=True, pattern=r"^spk_[0-9a-f]{32}$"),
-]
 DigestText = Annotated[
     str,
     Field(strict=True, pattern=r"^[0-9a-f]{64}$"),
@@ -132,15 +125,7 @@ class AgentOperation(StrEnum):
 class ArtifactDistributionPayload(WireModel):
     """The complete payload accepted by the artifact transfer operation."""
 
-    schema_version: Literal[1]
-    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-    @model_validator(mode="after")
-    def plan_is_authority(self) -> ArtifactDistributionPayload:
-        if self.plan_digest != self.authority_revision:
-            raise ValueError("artifact distribution plan identity is invalid")
-        return self
 
 
 from .package_upgrade import PackageActivationReceipt, PackageRollbackAuthority
@@ -186,124 +171,18 @@ class AgentUpgradeResult(WireModel):
     package_version: Annotated[
         str, Field(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")
     ]
-    self_test_passed: Literal[True]
     status: Literal["upgraded"]
     activation_receipt: PackageActivationReceipt
 
 
-def _drop_retired_evidence_digest(value: Any) -> Any:
-    """Ignore the retired ``evidence_digest`` an older agent may still send.
-
-    During a fleet upgrade an agent that predates its removal can report to a
-    current Controller; the key carries no decision, so it is dropped rather
-    than failing the strict model.
-    """
-
-    if isinstance(value, Mapping) and "evidence_digest" in value:
-        return {key: item for key, item in value.items() if key != "evidence_digest"}
-    return value
-
-
-class _RecipeStartEvidenceCommon(WireModel):
-    recipe_revision_id: CanonicalUUID
-    recipe_content_sha256: DigestText
-    image_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
-    artifact_set_digest: DigestText
-    model_identity: str | None = Field(default=None, max_length=1024)
-    rank: int = Field(strict=True, ge=0)
-    world_size: int = Field(strict=True, ge=1)
-    memory_reservation_bytes: int = Field(strict=True, ge=1)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _ignore_retired_digest(cls, value: Any) -> Any:
-        return _drop_retired_evidence_digest(value)
-
-
-class RecipeStartSingleEvidence(_RecipeStartEvidenceCommon):
-    rank: Literal[0]
-    world_size: Literal[1]
-    endpoint: str
-    ready: Literal[True]
-    run_generation: int = Field(strict=True, ge=1)
-    runtime_arguments_sha256: DigestText
-    local_address: None
-    master_address: None
-    master_port: None
-
-
-class RecipeStartRankLaunchEvidence(_RecipeStartEvidenceCommon):
-    phase: Literal["rank-launch"]
-    run_id: CanonicalUUID
-    run_generation: int = Field(strict=True, ge=1)
-    runtime_arguments_sha256: DigestText
-    role: str = Field(min_length=1, max_length=80)
-    local_address: str | None
-    master_address: str | None
-    master_port: int | None = Field(default=None, strict=True, ge=1024, le=65535)
-    process_running: Literal[True]
-    fabric_projection_bound: Literal[True]
-    launched: Literal[True]
-
-
-class RecipeStartCollectiveReadinessEvidence(_RecipeStartEvidenceCommon):
-    phase: Literal["collective-readiness"]
-    run_id: CanonicalUUID
-    run_generation: int = Field(strict=True, ge=1)
-    runtime_arguments_sha256: DigestText
-    role: str = Field(min_length=1, max_length=80)
-    local_address: str | None
-    master_address: str | None
-    master_port: int | None = Field(default=None, strict=True, ge=1024, le=65535)
-    endpoint: str
-    ready: Literal[True]
-
-
-class TensorParallelStartEvidence(_RecipeStartEvidenceCommon):
-    """Exact endpoint evidence for a phase-free tensor-parallel start."""
-
-    endpoint: str
-    ready: Literal[True]
-    run_generation: int = Field(strict=True, ge=1)
-    runtime_arguments_sha256: DigestText
-    local_address: str
-    master_address: str
-    master_port: int = Field(strict=True, ge=1024, le=65535)
-
-
-RecipeStartEvidence = (
-    RecipeStartSingleEvidence
-    | RecipeStartRankLaunchEvidence
-    | RecipeStartCollectiveReadinessEvidence
-    | TensorParallelStartEvidence
-)
-
-
 class RecipeStartResult(WireModel):
-    endpoint: str | None = None
-    evidence: RecipeStartEvidence
+    """The serving rank reports its endpoint; every other rank reports ``{}``."""
 
-    @model_validator(mode="before")
-    @classmethod
-    def _ignore_retired_digest(cls, value: Any) -> Any:
-        return _drop_retired_evidence_digest(value)
+    endpoint: str | None = None
 
 
 class ArtifactDistributionResult(WireModel):
-    assignment_id: CanonicalUUID
-    model_artifact_set_sha256: DigestText
-    verified: Literal[True]
-    verified_digests: list[DigestText] = Field(max_length=4096)
-    verified_image_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
-    imported_image_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
-    verified_oci_layout_sha256: DigestText
-    oci_image_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
     downloaded_bytes: int = Field(strict=True, ge=0, le=16 * 1024**4)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _ignore_retired_digest(cls, value: Any) -> Any:
-        return _drop_retired_evidence_digest(value)
 
 
 class AgentFailureKind(StrEnum):
@@ -678,10 +557,8 @@ def _typed_result_string(path: tuple[str | int, ...], value: str) -> bool:
         and path[3] == "value"
     ):
         return len(value) <= 256 and "\x00" not in value
-    if path in {("endpoint",), ("evidence", "endpoint")}:
+    if path == ("endpoint",):
         return _recipe_endpoint(value)
-    if path == ("evidence", "model_identity"):
-        return _model_identity(value)
     if (
         len(path) == 4
         and path[:2] == ("output_manifest", "files")
@@ -833,12 +710,6 @@ def _fields(value: Mapping[str, Any], *, required: set[str]) -> None:
         raise AgentProtocolError(detail)
 
 
-def _version(value: Any) -> int:
-    if value != 1 or isinstance(value, bool):
-        raise AgentProtocolError("unsupported schema_version")
-    return 1
-
-
 def _uuid(value: Any, *, name: str) -> str:
     if not isinstance(value, str):
         raise AgentProtocolError(f"{name} must be a UUID")
@@ -848,18 +719,6 @@ def _uuid(value: Any, *, name: str) -> str:
         raise AgentProtocolError(f"{name} must be a UUID") from error
     if str(parsed) != value:
         raise AgentProtocolError(f"{name} must be a canonical UUID")
-    return value
-
-
-def _attempt(value: Any) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-        raise AgentProtocolError("attempt must be a positive integer")
-    return value
-
-
-def _node_id(value: Any) -> str:
-    if not isinstance(value, str) or not NODE_ID.fullmatch(value):
-        raise AgentProtocolError("node_id must match spk_[0-9a-f]{32}")
     return value
 
 
@@ -878,18 +737,6 @@ def _deadline(value: Any) -> datetime:
     if deadline.tzinfo is None or deadline.utcoffset() != UTC.utcoffset(deadline):
         raise AgentProtocolError("deadline must be aware UTC")
     return deadline.astimezone(UTC)
-
-
-def _attempt_fields(value: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "schema_version": _version(value["schema_version"]),
-        "job_id": _uuid(value["job_id"], name="job_id"),
-        "operation_id": _uuid(value["operation_id"], name="operation_id"),
-        "attempt": _attempt(value["attempt"]),
-        "fence": _uuid(value["fence"], name="fence"),
-        "node_id": _node_id(value["node_id"]),
-        "deadline": _deadline(value["deadline"]),
-    }
 
 
 from .build_import import (
@@ -1075,15 +922,8 @@ class _ProtocolEnvelopeModel(WireModel):
 
 
 class AgentClaim(_ProtocolEnvelopeModel):
-    schema_version: Literal[1]
-    job_id: CanonicalUUID
-    operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
-    node_id: NodeIdentifier
     operation: AgentOperation
-    authority_revision: DigestText
-    payload_digest: DigestText
     payload: AgentPayload
     deadline: datetime
 
@@ -1111,26 +951,12 @@ class AgentClaim(_ProtocolEnvelopeModel):
 
     @model_validator(mode="after")
     def validate_wire(self) -> AgentClaim:
-        _uuid(self.job_id, name="job_id")
-        _uuid(self.operation_id, name="operation_id")
-        _attempt(self.attempt)
         _uuid(self.fence, name="fence")
-        _node_id(self.node_id)
         expected_model = PAYLOAD_MODELS.get(self.operation)
         if expected_model is None or not isinstance(self.payload, expected_model):
             raise AgentProtocolError(
                 f"payload model is not registered for {self.operation.value}"
             )
-        if (
-            self.operation is AgentOperation.RECIPE_RECONCILE
-            and self.payload.node_id != self.node_id
-        ):
-            raise AgentProtocolError("reconciliation node does not match claim")
-        if (
-            self.operation is AgentOperation.RECIPE_STOP
-            and self.payload.node_id != self.node_id
-        ):
-            raise AgentProtocolError("stop node does not match claim")
         compiled_plan = getattr(self.payload, "compiled_execution_plan", None)
         if compiled_plan is not None and len(canonical_message(compiled_plan)) > (
             MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
@@ -1148,17 +974,12 @@ class AgentClaim(_ProtocolEnvelopeModel):
             }
             else MAX_DOCUMENT_BYTES
         )
-        payload = _validate_bounded_document(
+        _validate_bounded_document(
             payload_document,
             name="payload",
             operation=self.operation,
             maximum_bytes=maximum_bytes,
         )
-        if (
-            hashlib.sha256(canonical_message(payload)).hexdigest()
-            != self.payload_digest
-        ):
-            raise AgentProtocolError("payload digest does not match payload")
         object.__setattr__(self, "payload", self.payload)
         object.__setattr__(self, "deadline", _deadline(self.deadline))
         return self
@@ -1196,13 +1017,7 @@ class AgentClaim(_ProtocolEnvelopeModel):
 
 
 class AgentProgress(_ProtocolEnvelopeModel):
-    schema_version: Literal[1]
-    job_id: CanonicalUUID
-    operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
-    node_id: NodeIdentifier
-    deadline: datetime
     progress: OperationProgress | None = None
 
     @model_validator(mode="before")
@@ -1211,8 +1026,6 @@ class AgentProgress(_ProtocolEnvelopeModel):
         if not isinstance(value, Mapping):
             return value
         document = dict(value)
-        if "deadline" in document:
-            document["deadline"] = _deadline(document["deadline"])
         if "progress" in document and isinstance(document["progress"], Mapping):
             # Canonical JSON is the one adapter needed to thaw durable mappings.
             document["progress"] = json.loads(canonical_message(document["progress"]))
@@ -1220,12 +1033,7 @@ class AgentProgress(_ProtocolEnvelopeModel):
 
     @model_validator(mode="after")
     def validate_wire(self) -> AgentProgress:
-        _uuid(self.job_id, name="job_id")
-        _uuid(self.operation_id, name="operation_id")
-        _attempt(self.attempt)
         _uuid(self.fence, name="fence")
-        _node_id(self.node_id)
-        _deadline(self.deadline)
         if self.progress is not None:
             object.__setattr__(
                 self,
@@ -1249,12 +1057,7 @@ class AgentProgress(_ProtocolEnvelopeModel):
 class AgentDirective(_ProtocolEnvelopeModel):
     """Authenticated heartbeat response for deadline renewal and cancellation."""
 
-    schema_version: Literal[1]
-    job_id: CanonicalUUID
-    operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
-    node_id: NodeIdentifier
     deadline: datetime
     cancel_requested: bool
 
@@ -1270,11 +1073,7 @@ class AgentDirective(_ProtocolEnvelopeModel):
 
     @model_validator(mode="after")
     def validate_wire(self) -> AgentDirective:
-        _uuid(self.job_id, name="job_id")
-        _uuid(self.operation_id, name="operation_id")
-        _attempt(self.attempt)
         _uuid(self.fence, name="fence")
-        _node_id(self.node_id)
         _deadline(self.deadline)
         return self
 
@@ -1289,34 +1088,13 @@ class AgentDirective(_ProtocolEnvelopeModel):
 
 
 class AgentResult(_ProtocolEnvelopeModel):
-    schema_version: Literal[1]
-    job_id: CanonicalUUID
-    operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
-    node_id: NodeIdentifier
-    deadline: datetime
     state: Literal["succeeded", "failed", "cancelled", "waiting-for-operator"]
     result: AgentResultPayload
 
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_wire_scalars(cls, value: Any) -> Any:
-        if not isinstance(value, Mapping):
-            return value
-        document = dict(value)
-        if "deadline" in document:
-            document["deadline"] = _deadline(document["deadline"])
-        return document
-
     @model_validator(mode="after")
     def validate_wire(self) -> AgentResult:
-        _uuid(self.job_id, name="job_id")
-        _uuid(self.operation_id, name="operation_id")
-        _attempt(self.attempt)
         _uuid(self.fence, name="fence")
-        _node_id(self.node_id)
-        _deadline(self.deadline)
         if (
             self.state == "failed"
             and isinstance(self.result, AgentFailureResult)
@@ -1366,7 +1144,6 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         "agent-result.schema.json",
         "agent-directive.schema.json",
         "recipe-job-run.schema.json",
-        "telemetry-report.schema.json",
     }:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}")
     registry: dict[str, type[BaseModel]] = {
@@ -1380,12 +1157,6 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         from .recipe_jobs import RecipeJobRunRequest
 
         registry[schema_name] = RecipeJobRunRequest
-    if schema_name == "telemetry-report.schema.json":
-        # Telemetry is registered from the same Pydantic model used by the
-        # parser. The packaged JSON schema is an export artifact.
-        from .telemetry import TelemetryRequest
-
-        registry[schema_name] = TelemetryRequest
     document = registry[schema_name].model_json_schema()
     return Draft202012Validator(document, format_checker=PROTOCOL_FORMAT_CHECKER)
 
@@ -1479,10 +1250,6 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         "agent-result.schema.json": AgentResult.parse,
         "agent-directive.schema.json": AgentDirective.parse,
     }
-    if schema_name == "telemetry-report.schema.json":
-        from .telemetry import TelemetryRequest
-
-        parsers[schema_name] = TelemetryRequest.parse
     if schema_name == "recipe-job-run.schema.json":
         from .recipe_jobs import RecipeJobRunRequest
 
@@ -1491,13 +1258,4 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         parser = parsers[schema_name]
     except KeyError as error:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}") from error
-    if schema_name not in {
-        "agent-job.schema.json",
-        "agent-result.schema.json",
-        "agent-directive.schema.json",
-        "recipe-job-run.schema.json",
-    }:
-        errors = list(schema_validator(schema_name).iter_errors(raw))
-        if errors:
-            raise AgentProtocolError(f"schema validation failed: {errors[0].message}")
     return parser(raw)

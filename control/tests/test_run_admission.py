@@ -1,7 +1,7 @@
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib import resources
 
 import pytest
@@ -31,17 +31,15 @@ from vonk_control.run_admission import (
     RunPlanConflict,
     require_admissible,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 
 def setup(
     tmp_path,
     *,
     free_memory=300,
-    capabilities=("runtime.vonk.v1",),
     port_reserved=False,
     system_reserve=0,
-    memory_kind="unified",
     memory_pool: MemoryPool = "shared",
     denied_jurisdictions=(),
     github_release_source=False,
@@ -64,11 +62,7 @@ def setup(
         .read_text()
     )
     if github_release_source:
-        model_document["access"] = {
-            "visibility": "public",
-            "gated": False,
-            "authentication": "none",
-        }
+        model_document["requires_token"] = False
         model_document["source"] = {
             "provider": "github-release",
             "repository": "https://github.com/valeoai/NAF",
@@ -84,25 +78,15 @@ def setup(
             "notice": "Use is prohibited in the configured territories.",
         }
     model = ModelDefinition.model_validate(model_document)
-    model_document = model.model_dump(mode="json")
-    document["models"][0]["model"]["content_sha256"] = content_sha256(model)
+    document["models"][0]["model"]["content_sha256"] = document_sha256(model_document)
     memory = document["topology"]["roles"][0]["resources"]["memory"]
-    memory.update(
-        {
-            "kind": memory_kind,
-            "startup_peak_bytes": 225,
-            "steady_state_bytes": 200,
-            "runtime_growth_bytes": 25,
-            "system_reserve_bytes": system_reserve,
-        }
-    )
+    memory.update({"peak_bytes": 225, "reserve_bytes": system_reserve})
     with sessions.begin() as session:
         session.add(
             AgentNode(
                 node_id=node,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["runtime.vonk.v1"],
             )
         )
         model_root = CatalogDocument(
@@ -126,16 +110,15 @@ def setup(
                 schema_version=2,
                 state="active",
                 document=model_document,
-                content_digest=content_sha256(model),
+                content_digest=document_sha256(model_document),
                 artifact_key="a" * 64,
                 projected={},
                 created_by="admin",
                 created_at=now,
             )
         )
-        recipe_document = RecipeDefinition.model_validate(document).model_dump(
-            mode="json"
-        )
+        RecipeDefinition.model_validate(document)
+        recipe_document = document
         recipe = CatalogDocument(
             kind="recipe",
             publisher=recipe_document["identity"]["publisher"],
@@ -156,7 +139,7 @@ def setup(
             schema_version=2,
             state="active",
             document=recipe_document,
-            content_digest=content_sha256(RecipeDefinition.model_validate(document)),
+            content_digest=document_sha256(document),
             projected={},
             created_by="admin",
             created_at=now,
@@ -164,6 +147,22 @@ def setup(
         session.add(revision)
         session.flush()
         revision_id = revision.id
+    InventoryRepository(sessions, clock=lambda: now).record(
+        InventorySnapshotInput(
+            node,
+            now,
+            1000,
+            500,
+            1000,
+            free_memory,
+            1000,
+            free_memory,
+            1,
+            False,
+            ("runtime.vonk.v1",),
+            memory_pool=memory_pool,
+        )
+    )
     mappings = ClusterMappingService(sessions)
     mapping_plan = mappings.preview(revision_id, (node,), {}, "admin")
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=now)
@@ -225,22 +224,6 @@ def setup(
                     created_at=now,
                 )
             )
-    InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now,
-            1000,
-            500,
-            1000,
-            free_memory,
-            1000,
-            free_memory,
-            1,
-            False,
-            tuple(capabilities),
-            memory_pool=memory_pool,
-        )
-    )
     return sessions, now, node, installation.id
 
 
@@ -420,12 +403,26 @@ def test_stopped_run_can_repeat_the_same_plan_digest(tmp_path) -> None:
 
 
 def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
-    sessions, now, _node, installation = setup(
-        tmp_path,
-        free_memory=260,
-        capabilities=("runtime.sglang.v1",),
-        port_reserved=True,
+    sessions, now, node, installation = setup(
+        tmp_path, free_memory=260, port_reserved=True
     )
+    InventoryRepository(sessions, clock=lambda: now).record(
+        InventorySnapshotInput(
+            node,
+            now + timedelta(seconds=1),
+            1000,
+            500,
+            1000,
+            260,
+            1000,
+            260,
+            1,
+            False,
+            ("runtime.sglang.v1",),
+            memory_pool="shared",
+        )
+    )
+    now += timedelta(seconds=1)
     plan = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
     ).plan_run(installation, "qwen", now=now)

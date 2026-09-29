@@ -28,7 +28,7 @@ from vonk_agent_protocol import (
     recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .artifact_blob_store import (
     ArtifactBlobStore,
@@ -84,10 +84,8 @@ def _active_recipe_revision(
     ):
         return None
     try:
-        recipe = RecipeDefinition.model_validate(revision.document)
+        recipe = read_recipe(revision.document)
     except (TypeError, ValueError):
-        return None
-    if content_sha256(recipe) != revision.content_digest:
         return None
     return revision, recipe
 
@@ -1140,7 +1138,7 @@ class ArtifactJobService:
             )
             if installation is None or resolved is None:
                 raise ArtifactJobError("recipe job workload identity is unavailable")
-            revision, recipe = resolved
+            revision, _recipe = resolved
             node = self._job_node_in_session(session, run)
             try:
                 stored_run_plan = parse_stored_run_plan(run.plan)
@@ -1177,7 +1175,7 @@ class ArtifactJobService:
                 ) from error
             invocation = compile_job_invocation(
                 session,
-                recipe=recipe,
+                revision=revision,
                 installed=installation_plan.compiled_execution_plans[
                     node.node_id
                 ].model_dump(mode="json"),
@@ -1189,27 +1187,15 @@ class ArtifactJobService:
                 parameters=parameters,
                 timeout_seconds=artifact_job.timeout_seconds,
                 memory_floor_bytes=planned_node.memory_floor_bytes,
-                memory_kind=planned_node.memory_kind,
             )
             raw_files = _input_manifest(artifact_job).model_dump(mode="json")["files"]
             payload = {
-                "schema_version": 1,
                 "job_id": artifact_job.id,
                 "run_id": run.id,
                 "installation_id": installation.id,
                 "recipe_revision_id": revision.id,
-                "recipe_content_sha256": revision.content_digest,
-                "image_digest": installation.image_digest,
                 "plan_digest": run.plan_digest,
                 "mapping_id": run.mapping_id,
-                "mapping_generation": run.mapping_generation,
-                "interface": artifact_job.interface,
-                "rank": node.rank,
-                "role": node.role,
-                "reserved_memory_bytes": node.reserved_memory_bytes,
-                "memory_floor_bytes": planned_node.memory_floor_bytes,
-                "memory_kind": planned_node.memory_kind,
-                "contract_sha256": artifact_job.contract_sha256,
                 "input_manifest_sha256": artifact_job.input_manifest_sha256,
                 "input_total_bytes": artifact_job.input_total_bytes,
                 "inputs": raw_files,
@@ -1217,7 +1203,6 @@ class ArtifactJobService:
                 "run_generation": run.run_generation,
                 "output_mappings": _output_mappings(artifact_job.compiled_contract),
                 "output_limits": artifact_job.output_limits,
-                "timeout_seconds": artifact_job.timeout_seconds,
             }
             RecipeJobRunRequest.parse(payload)
             operation = self._recipe_operations.enqueue_one_shot_job_in_session(

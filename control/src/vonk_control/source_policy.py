@@ -55,7 +55,7 @@ def inspect_build_source_policy(
     dockerfile = build.get("dockerfile") if isinstance(build, Mapping) else None
     dockerfile_path = dockerfile if isinstance(dockerfile, str) else "Dockerfile"
     network = build.get("network") if isinstance(build, Mapping) else None
-    network_mode = network.get("mode") if isinstance(network, Mapping) else None
+    # An empty host list builds offline; otherwise only these hosts are public.
     allowed_hosts = (
         frozenset(
             host.lower() for host in network.get("hosts", ()) if isinstance(host, str)
@@ -88,7 +88,6 @@ def inspect_build_source_policy(
             _inspect_dockerfile(
                 dockerfile_path,
                 payload,
-                network_mode=network_mode,
                 allowed_hosts=allowed_hosts,
             )
         )
@@ -142,7 +141,6 @@ def _inspect_dockerfile(
     path: str,
     payload: bytes,
     *,
-    network_mode: object,
     allowed_hosts: frozenset[str],
 ) -> list[SourcePolicyFinding]:
     try:
@@ -217,11 +215,7 @@ def _inspect_dockerfile(
             lowered = argument.lower()
             for url in _HTTPS_URL.findall(argument):
                 host = urllib.parse.urlsplit(url).hostname
-                if (
-                    host is None
-                    or network_mode != "public"
-                    or host.lower() not in allowed_hosts
-                ):
+                if host is None or host.lower() not in allowed_hosts:
                     findings.append(
                         _finding(
                             "dockerfile.network_host",

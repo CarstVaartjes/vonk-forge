@@ -15,8 +15,8 @@ use std::{
 
 use vonk_agent::{
     executor::{
-        recipe_install_success_body, recipe_start_success_body, recipe_stop_success_body,
-        recipe_uninstall_success_body, runtime_arguments_for_plan,
+        recipe_empty_success_body, recipe_install_success_body, recipe_start_success_body,
+        runtime_arguments_for_plan,
     },
     oci::{RuntimeStartPlan, start_arguments_for_paths},
 };
@@ -61,15 +61,10 @@ fn runtime_plan(
     .map_err(|_| "compiled OCI projection is invalid".to_owned())?;
     Ok(RuntimeStartPlan {
         image_digest: spec.runtime_image.image_digest.clone(),
-        registry_index_digest: spec
-            .runtime_image
-            .registry_manifest_digest
-            .clone()
-            .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone()),
-        platform_manifest_digest: spec.runtime_image.platform_manifest_digest.clone(),
+        registry_index_digest: spec.runtime_image.image_digest.clone(),
+        platform_manifest_digest: spec.runtime_image.image_digest.clone(),
         archive_sha256: spec.runtime_image.oci_layout_sha256.clone(),
         image_reference: spec.runtime_image.local_image_reference(),
-        pre_start: Vec::new(),
         main,
     })
 }
@@ -95,33 +90,22 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
             let spec = request.compiled_execution_plan.clone();
             spec.validate()
                 .map_err(|_| "compiled execution plan is invalid".to_owned())?;
+            // Projecting the runtime plan still proves the launch is derivable.
             let plan = runtime_plan(&request, &spec)?;
-            let runtime_arguments = runtime_arguments_for_plan(&plan, &plan.main);
-            recipe_start_success_body(
-                &request,
-                &spec,
-                &spec.identity.model_artifact_set_sha256,
-                &runtime_arguments,
-            )
-            .map_err(|_| "readiness evidence is unavailable".to_owned())?
+            let _ = runtime_arguments_for_plan(&plan, &plan.main);
+            recipe_start_success_body(&request)
         }
-        RecipeOperationRequest::Stop(_request) => recipe_stop_success_body(),
-        RecipeOperationRequest::Uninstall(_request) => recipe_uninstall_success_body(0),
+        RecipeOperationRequest::Stop(_request) => recipe_empty_success_body(),
+        RecipeOperationRequest::Uninstall(_request) => recipe_empty_success_body(),
         _ => return Err(
             "probe only accepts recipe.install, recipe.start, recipe.stop, and recipe.uninstall"
                 .to_owned(),
         ),
     };
     let message = AgentResult {
-        attempt: claim.attempt,
-        deadline: claim.deadline,
         fence: claim.fence,
-        job_id: claim.job_id,
-        node_id: claim.node_id.clone(),
-        operation_id: claim.operation_id,
         result: serde_json::from_value(result)
             .map_err(|_| "canonical agent result is invalid".to_owned())?,
-        schema_version: 1,
         state: vonk_agent_protocol::generated::AgentResultState::Succeeded,
     };
     message

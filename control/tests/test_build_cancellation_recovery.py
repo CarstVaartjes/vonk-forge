@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy import select
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.models import (
-    AgentNode,
     AgentOperation,
     Job,
     RecipeBuild,
@@ -49,10 +48,6 @@ def _services(tmp_path, engine):
         clock=lambda: now,
         builds=builds,
     )
-    with sessions.begin() as session:
-        node = session.get(AgentNode, node_id)
-        assert node is not None
-        node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
     plan = builds.plan(revision.id, node_id, now=now)
     return sessions, builds, operations, storage, now, node_id, revision, plan
 
@@ -75,12 +70,7 @@ def _settle_cleanup(sessions, operations, build_id, node_id, child_id):
         )
         assert cleanup is not None
         cleanup_id = cleanup.id
-    evidence = {
-        "schema_version": 1,
-        "build_id": build_id,
-        "operation_id": child_id,
-        "stopped": True,
-    }
+    evidence: dict[str, object] = {}
     operations.record_node_result(
         cleanup_id, node_id, succeeded=True, evidence=evidence
     )
@@ -102,11 +92,9 @@ def _active_claims(sessions, build_id):
 
 def _evidence(plan):
     return {
-        "build_input_sha256": plan.build_input_sha256,
         "image_bytes": 500,
         "image_digest": "sha256:" + "b" * 64,
         "oci_layout_sha256": "c" * 64,
-        "policy": {"dockerfile": "Dockerfile", "findings": [], "passed": True},
     }
 
 

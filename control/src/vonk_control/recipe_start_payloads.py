@@ -1,4 +1,4 @@
-"""Canonical schema-2 recipe start payload construction."""
+"""Canonical recipe start payload construction."""
 
 from __future__ import annotations
 
@@ -40,46 +40,27 @@ def build_recipe_start_payload(
     run_id: str,
     installation_id: str,
     recipe_revision_id: str,
-    recipe_content_sha256: str,
     mapping_id: str,
-    mapping_generation: int,
     run_generation: int,
-    image_digest: str,
     plan_digest: str,
-    alias: str,
     placement: RecipeStartPlacement,
-    endpoint_address: str,
     compiled_endpoint_address: str | None,
     world_size: int,
     compiled_execution_plan: Mapping[str, object],
-    local_address: str | None,
     master_address: str | None,
     master_port: int | None,
     phase: str | None = None,
     start_deadline: str | None = None,
 ) -> dict[str, object]:
-    """Build and validate one complete current schema-2 start payload."""
+    """Build and validate one start payload; placement lives in the plan."""
 
     try:
         payload: dict[str, object] = {
-            "schema_version": 2,
             "run_id": run_id,
             "installation_id": installation_id,
             "recipe_revision_id": recipe_revision_id,
-            "recipe_content_sha256": recipe_content_sha256,
             "mapping_id": mapping_id,
-            "mapping_generation": mapping_generation,
-            "image_digest": image_digest,
             "plan_digest": plan_digest,
-            "alias": alias,
-            "rank": placement.rank,
-            "role": placement.role,
-            "port": placement.port,
-            "reserved_memory_bytes": placement.reserved_memory_bytes,
-            "memory_floor_bytes": placement.memory_floor_bytes,
-            "memory_kind": placement.memory_kind,
-            "endpoint_address": endpoint_address,
-            "world_size": world_size,
             "compiled_execution_plan": _bind_compiled_execution_plan(
                 compiled_execution_plan,
                 placement=placement,
@@ -88,9 +69,6 @@ def build_recipe_start_payload(
                 master_port=master_port,
                 world_size=world_size,
             ),
-            "local_address": local_address,
-            "master_address": master_address,
-            "master_port": master_port,
         }
         payload["run_generation"] = run_generation
         if phase is not None:
@@ -122,10 +100,6 @@ def _bind_compiled_execution_plan(
     )
     if not isinstance(runtime, dict) or not isinstance(compiled_placement, dict):
         raise RecipeStartPayloadError("compiled execution plan placement is invalid")
-    if compiled_placement.get("memory_kind") != placement.memory_kind:
-        raise RecipeStartPayloadError(
-            "compiled execution plan memory kind differs from accepted placement"
-        )
     compiled_placement.update(
         {
             "endpoint_address": endpoint_address,
@@ -138,23 +112,16 @@ def _bind_compiled_execution_plan(
             "port": placement.port,
             "reserved_memory_bytes": placement.reserved_memory_bytes,
             "memory_floor_bytes": placement.memory_floor_bytes,
-            "memory_kind": placement.memory_kind,
         }
     )
     security = payload.get("security")
     if isinstance(security, dict):
         native_fabric = world_size > 1 and master_port is not None
-        security["host_network"] = native_fabric
         security["network_mode"] = (
             "host"
             if native_fabric
             else "bridge"
             if endpoint_address is not None
             else "none"
-        )
-    topology = payload.get("topology")
-    if isinstance(topology, dict):
-        topology.update(
-            {"rank": placement.rank, "role": placement.role, "world_size": world_size}
         )
     return payload

@@ -34,7 +34,7 @@ from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalResult,
 )
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_removal_review_support import remove_after_review
 from .test_model_removal_reference_lifecycle import (
@@ -48,6 +48,7 @@ from .test_recipe_image_availability import (
     ARCHIVE_SHA,
     _add_head,
     _add_revision,
+    _build_id,
     _recipe,
     _reference_receipt,
     _runtime,
@@ -57,7 +58,7 @@ from .test_recipe_image_availability import (
 def _recipe_using_model(
     model_digest: str, publisher: str, slug: str
 ) -> RecipeDefinition:
-    document = json.loads(_recipe("recipe-image.json").model_dump_json())
+    document = json.loads(_recipe("recipe-source-build.json").model_dump_json())
     assert isinstance(document, dict)
     models = document.get("models")
     assert isinstance(models, list) and len(models) == 1
@@ -99,8 +100,8 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         str(uuid4()),
     )
     assert selected_selector == "vonk-forge/synthetic-tiny-fp16"
-    assert model_digest == content_sha256(selected_model)
-    assert sibling_digest == content_sha256(sibling_model)
+    assert model_digest == document_sha256(selected_model.model_dump(mode="json"))
+    assert sibling_digest == document_sha256(sibling_model.model_dump(mode="json"))
     assert selected_set != sibling_set
 
     shared_object_digest = hashlib.sha256(model_bytes).hexdigest()
@@ -123,22 +124,20 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     )
     now = [datetime.now(UTC)]
     revision_id = "rev-model-remove-001"
-    receipt = _reference_receipt()
+    receipt = _reference_receipt(_build_id(revision_id))
     with sessions.begin() as session:
         revision = _add_revision(session, revision_id, recipe)
         _add_head(session, revision)
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
-                source="published",
                 original_content_digest=revision.content_digest,
                 effective_execution_key=revision.execution_key,
-                registry_manifest_digest=receipt.registry_manifest_digest,
-                platform_manifest_digest=receipt.platform_manifest_digest,
+                image_digest=receipt.image_digest,
                 local_image_config_id=receipt.local_image_config_id,
                 oci_archive_sha256=receipt.oci_archive_sha256,
                 image_bytes=receipt.image_bytes,
-                build_id=None,
+                build_id=receipt.build_id,
                 authorized_at=now[0],
                 state="authorized",
             )
@@ -371,24 +370,22 @@ def test_postgres_recipe_review_recovers_from_failed_profile_scan(
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     revision_id = "rev-review-savepoint-001"
-    receipt = _reference_receipt()
+    receipt = _reference_receipt(_build_id(revision_id))
     with sessions.begin() as session:
         revision = _add_revision(session, revision_id, recipe)
         _add_head(session, revision)
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
-                source="published",
                 original_content_digest=revision.content_digest,
                 effective_execution_key=revision.execution_key,
-                registry_manifest_digest=receipt.registry_manifest_digest,
-                platform_manifest_digest=receipt.platform_manifest_digest,
+                image_digest=receipt.image_digest,
                 local_image_config_id=receipt.local_image_config_id,
                 oci_archive_sha256=receipt.oci_archive_sha256,
                 image_bytes=receipt.image_bytes,
-                build_id=None,
+                build_id=receipt.build_id,
                 authorized_at=datetime.now(UTC),
                 state="authorized",
             )

@@ -6,7 +6,6 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from pydantic import ValidationError
 from sqlalchemy import Select, create_engine, event, func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
@@ -17,13 +16,7 @@ from vonk_control.models import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from vonk_control.telemetry import (
-    TelemetryDetailsInput,
-    TelemetryRepository,
-    TelemetrySampleInput,
-)
-
-from .telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
+from vonk_control.telemetry import TelemetryRepository, TelemetrySampleInput
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -32,7 +25,6 @@ BOOT_B = uuid.UUID("00000000-0000-4000-8000-000000000002")
 NOW = datetime(2026, 8, 3, 12, tzinfo=UTC)
 START = NOW - timedelta(minutes=5)
 MAX_CAPACITY_BYTES = 16 * 1024**4
-MAX_NETWORK_BYTES_PER_SECOND = 1_000_000_000_000_000
 
 
 class Clock:
@@ -51,8 +43,8 @@ def telemetry(tmp_path):
     with sessions.begin() as session:
         session.add_all(
             (
-                AgentNode(node_id=NODE_A, state="active", capabilities=[]),
-                AgentNode(node_id=NODE_B, state="active", capabilities=[]),
+                AgentNode(node_id=NODE_A, state="active"),
+                AgentNode(node_id=NODE_B, state="active"),
             )
         )
     clock = Clock()
@@ -68,8 +60,6 @@ def sample(
     return TelemetrySampleInput(
         boot_id=boot_id,
         observed_at=observed_at or START + timedelta(seconds=sequence),
-        cpu_utilization_percent=12.5,
-        load_average_1m=1.25,
         memory_total_bytes=128_000_000_000,
         memory_available_bytes=64_000_000_000,
         disk_total_bytes=1_000_000_000_000,
@@ -77,16 +67,6 @@ def sample(
         gpu_utilization_percent=25.0,
         gpu_memory_total_bytes=128_000_000_000,
         gpu_memory_free_bytes=63_000_000_000,
-        temperature_c=41.5,
-        power_watts=17.25,
-        network_receive_bytes_per_second=1_024.5,
-        network_transmit_bytes_per_second=512.25,
-        gap_samples=0,
-        details=TelemetryDetailsInput(
-            accelerator_name="NVIDIA GB10",
-            accelerator_performance_state="P0",
-        ),
-        metrics=telemetry_metrics(),
     )
 
 
@@ -157,9 +137,8 @@ def test_new_boot_only_newer_observation_advances_latest(
 @pytest.mark.parametrize(
     ("changes", "message"),
     [
-        ({"cpu_utilization_percent": math.nan}, "CPU utilization"),
-        ({"cpu_utilization_percent": 100.01}, "CPU utilization"),
-        ({"load_average_1m": -0.01}, "load average"),
+        ({"gpu_utilization_percent": math.nan}, "GPU utilization"),
+        ({"gpu_utilization_percent": 100.01}, "GPU utilization"),
         ({"memory_available_bytes": -1}, "memory available"),
         (
             {"memory_available_bytes": 128_000_000_001},
@@ -171,17 +150,9 @@ def test_new_boot_only_newer_observation_advances_latest(
             "GPU memory free cannot exceed total",
         ),
         ({"gpu_utilization_percent": math.inf}, "GPU utilization"),
-        ({"temperature_c": 300.01}, "temperature"),
-        ({"power_watts": -0.01}, "power"),
-        ({"network_receive_bytes_per_second": -0.01}, "network receive rate"),
-        (
-            {"network_receive_bytes_per_second": MAX_NETWORK_BYTES_PER_SECOND + 1},
-            "network receive rate",
-        ),
         ({"memory_total_bytes": MAX_CAPACITY_BYTES + 1}, "memory total"),
         ({"disk_total_bytes": MAX_CAPACITY_BYTES + 1}, "disk total"),
         ({"gpu_memory_total_bytes": MAX_CAPACITY_BYTES + 1}, "GPU memory total"),
-        ({"gap_samples": 2**63}, "gap samples"),
     ],
 )
 def test_sample_rejects_non_finite_negative_and_out_of_range_values(
@@ -209,29 +180,6 @@ def test_capacity_pairs_are_both_known_or_both_unknown(
         replace(sample(sequence=1), **changes)
 
 
-def test_details_are_exact_and_bounded() -> None:
-    with pytest.raises(ValueError, match="accelerator name"):
-        TelemetryDetailsInput(accelerator_name="")
-    with pytest.raises(ValueError, match="accelerator name"):
-        TelemetryDetailsInput(accelerator_name="x" * 257)
-    with pytest.raises(ValueError, match="performance state"):
-        TelemetryDetailsInput(accelerator_performance_state="x" * 33)
-
-
-def test_latest_rejects_malformed_persisted_details(telemetry) -> None:
-    repository, sessions, _, _ = telemetry
-    stored = repository.record_batch(NODE_A, (sample(sequence=1),))[0]
-    with sessions.begin() as session:
-        session.get(NodeTelemetrySample, stored.id).details = {
-            "accelerator_name": "NVIDIA GB10",
-            "accelerator_performance_state": "P0",
-            "engine_owned": "preserve-if-declared",
-        }
-
-    with pytest.raises(ValidationError):
-        repository.latest((NODE_A,))
-
-
 def test_sample_rejects_nil_boot_id() -> None:
     with pytest.raises(ValueError, match="boot ID"):
         replace(sample(sequence=1), boot_id=uuid.UUID(int=0))
@@ -248,9 +196,6 @@ def test_database_rejects_half_present_capacity_pair(telemetry) -> None:
                 received_at=NOW,
                 memory_total_bytes=1,
                 memory_available_bytes=None,
-                gap_samples=0,
-                details={},
-                metrics=telemetry_metrics_document(),
             )
         )
 
@@ -270,8 +215,6 @@ def test_database_rejects_half_present_capacity_pair(telemetry) -> None:
             "gpu_memory_total_bytes": MAX_CAPACITY_BYTES + 1,
             "gpu_memory_free_bytes": MAX_CAPACITY_BYTES + 1,
         },
-        {"network_receive_bytes_per_second": MAX_NETWORK_BYTES_PER_SECOND + 1},
-        {"network_transmit_bytes_per_second": MAX_NETWORK_BYTES_PER_SECOND + 1},
     ],
 )
 def test_database_rejects_metrics_above_wire_maximums(
@@ -285,9 +228,6 @@ def test_database_rejects_metrics_above_wire_maximums(
                 boot_id=str(BOOT_A),
                 observed_at=NOW,
                 received_at=NOW,
-                gap_samples=0,
-                details={},
-                metrics=telemetry_metrics_document(),
                 **values,
             )
         )
@@ -305,8 +245,8 @@ def test_latest_pointer_cannot_reference_a_sample_from_another_node() -> None:
     with sessions.begin() as session:
         session.add_all(
             (
-                AgentNode(node_id=NODE_A, state="active", capabilities=[]),
-                AgentNode(node_id=NODE_B, state="active", capabilities=[]),
+                AgentNode(node_id=NODE_A, state="active"),
+                AgentNode(node_id=NODE_B, state="active"),
             )
         )
         row = NodeTelemetrySample(
@@ -314,9 +254,6 @@ def test_latest_pointer_cannot_reference_a_sample_from_another_node() -> None:
             boot_id=str(BOOT_A),
             observed_at=NOW,
             received_at=NOW,
-            gap_samples=0,
-            details={},
-            metrics=telemetry_metrics_document(),
         )
         session.add(row)
         session.flush()
@@ -422,7 +359,7 @@ def test_conflicting_replay_is_rejected(telemetry) -> None:
     with pytest.raises(ValueError, match="conflicts with stored sample"):
         repository.record_batch(
             NODE_A,
-            (replace(sample(sequence=4), cpu_utilization_percent=99.0),),
+            (replace(sample(sequence=4), gpu_utilization_percent=99.0),),
         )
 
 

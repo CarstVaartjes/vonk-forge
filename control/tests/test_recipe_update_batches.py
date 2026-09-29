@@ -7,6 +7,7 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, select, update
@@ -22,7 +23,6 @@ from vonk_control.models import (
 from vonk_control.operation_api import OperationQuery, operation_detail_response
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
-    RecipeImageAvailabilityService,
     RecipeImageAvailabilityView,
 )
 from vonk_control.recipe_update_contract import RecipeUpdateResponse
@@ -31,14 +31,19 @@ from vonk_control.runtime_image_preparation import (
     persist_runtime_image_receipt,
     prepare_runtime_image,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .test_recipe_image_availability import (
+    ARCHIVE,
+    IMAGE_DIGEST,
     Transport,
     _add_head,
     _add_revision,
+    _build_id,
+    _builder,
     _recipe,
     _runtime,
+    _service,
 )
 
 
@@ -46,7 +51,7 @@ def test_update_commits_parent_and_exact_scope_before_any_child_admission(tmp_pa
     engine = create_engine(f"sqlite:///{tmp_path / 'controller.db'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     revision_id = str(uuid.uuid4())
     with sessions.begin() as session:
         _add_head(session, _add_revision(session, revision_id, recipe))
@@ -57,7 +62,7 @@ def test_update_commits_parent_and_exact_scope_before_any_child_admission(tmp_pa
         authority_calls.append(recipe_revision_id)
         return recipe, _runtime()
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         authority=authority,
@@ -91,7 +96,7 @@ def update_env(tmp_path):
     now = [datetime.now(UTC)]
     recipes = {}
     for index in range(2):
-        base = _recipe("recipe-image.json")
+        base = _recipe("recipe-source-build.json")
         recipe = base.model_copy(
             update={
                 "identity": base.identity.model_copy(update={"slug": f"batch-{index}"})
@@ -106,7 +111,7 @@ def update_env(tmp_path):
     storage = FilesystemRuntimeImageStorage(tmp_path / "images")
 
     def fresh():
-        return RecipeImageAvailabilityService(
+        return _service(
             sessions,
             storage=storage,
             authority=lambda recipe_revision_id, **_: (
@@ -148,7 +153,7 @@ def test_changed_frozen_revision_is_refused_before_child_commit(update_env):
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == revision_id)
             .values(
-                content_digest=content_sha256(changed),
+                content_digest=document_sha256(changed.model_dump(mode="json")),
                 document=changed.model_dump(mode="json"),
             )
         )
@@ -345,14 +350,9 @@ def test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope
         actor="operator", request_id=empty_key, selectors=[], all=True
     )
     assert empty.state == "succeeded" and empty.children == []
-    receipt = prepare_runtime_image(
-        next(iter(recipes.values())),
-        runtime=_runtime(),
-        storage=service._storage,
-        transport=Transport(),
-    )
     base = next(iter(recipes.values()))
     expected = []
+    receipts = []
     with sessions.begin() as session:
         for index in range(103):
             recipe = base.model_copy(
@@ -363,9 +363,26 @@ def test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope
                 }
             )
             revision_id = str(uuid.uuid4())
-            revision = _add_revision(session, revision_id, recipe)
+            # Every revision owns the archive its own build produced.
+            archive = ARCHIVE + f"-{index}".encode()
+            archive_sha256 = hashlib.sha256(archive).hexdigest()
+            (service._storage.root / archive_sha256).write_bytes(archive)
+            revision = _add_revision(session, revision_id, recipe, archive=archive)
             _add_head(session, revision)
             assert revision.execution_key is not None
+            receipt = prepare_runtime_image(
+                recipe.model_dump(mode="json"),
+                runtime=_runtime() | {"image_bytes": len(archive)},
+                storage=service._storage,
+                transport=Transport(),
+                build_receipt={
+                    "state": "succeeded",
+                    "build_id": _build_id(revision_id),
+                    "image_digest": IMAGE_DIGEST,
+                    "oci_layout_sha256": archive_sha256,
+                    "image_bytes": len(archive),
+                },
+            )
             persist_runtime_image_receipt(
                 session,
                 recipe_revision_id=revision_id,
@@ -374,6 +391,7 @@ def test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope
                 receipt=receipt,
                 verified_at=now[0],
             )
+            receipts.append(receipt)
             expected.append(revision_id)
     # No successful availability Jobs exist: managed files are the evidence.
     parent = service.update(
@@ -384,7 +402,8 @@ def test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope
         service.update(actor="operator", request_id=empty_key, selectors=[], all=True)
         == empty
     )
-    Path(receipt.archive_path).unlink()
+    for receipt in receipts:
+        Path(receipt.archive_path).unlink()
     after_loss = service.update(
         actor="operator", request_id=str(uuid.uuid4()), selectors=[], all=True
     )
@@ -583,7 +602,7 @@ def test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_pare
 def postgres_update_env(postgres_engine, tmp_path):
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     revision_id = str(uuid.uuid4())
     with sessions.begin() as session:
         revision = _add_revision(session, revision_id, recipe)
@@ -593,7 +612,7 @@ def postgres_update_env(postgres_engine, tmp_path):
     now = [datetime.now(UTC)]
 
     def fresh():
-        return RecipeImageAvailabilityService(
+        return _service(
             sessions,
             storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
             authority=lambda *args, **kwargs: (recipe, _runtime()),
@@ -610,9 +629,10 @@ def postgres_multi_update_env(postgres_engine, tmp_path):
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)
     recipes: dict[str, RecipeDefinition] = {}
+    archives: dict[str, bytes] = {}
     with sessions.begin() as session:
         for index in range(2):
-            base = _recipe("recipe-image.json")
+            base = _recipe("recipe-source-build.json")
             recipe = base.model_copy(
                 update={
                     "identity": base.identity.model_copy(
@@ -621,7 +641,11 @@ def postgres_multi_update_env(postgres_engine, tmp_path):
                 }
             )
             revision_id = str(uuid.uuid4())
-            revision = _add_revision(session, revision_id, recipe)
+            # Every revision owns the archive its own build produced.
+            archives[revision_id] = ARCHIVE[:-1] + str(index).encode()
+            revision = _add_revision(
+                session, revision_id, recipe, archive=archives[revision_id]
+            )
             revision.document_id = str(uuid.uuid4())
             _add_head(session, revision)
             recipes[revision_id] = recipe
@@ -629,17 +653,26 @@ def postgres_multi_update_env(postgres_engine, tmp_path):
     now = [datetime.now(UTC)]
     storage = FilesystemRuntimeImageStorage(tmp_path / "images")
 
-    def fresh():
-        return RecipeImageAvailabilityService(
+    def build_own_image(*args: object, claim: Any, **kwargs: Any):
+        return _builder(storage, payload=archives[str(claim.recipe_revision_id)])(
+            *args, claim=claim, **kwargs
+        )
+
+    def fresh(**overrides: Any):
+        return _service(
             sessions,
-            storage=storage,
-            authority=lambda recipe_revision_id, **_: (
-                recipes[recipe_revision_id],
-                _runtime(),
-            ),
-            transport=Transport(),
-            clock=lambda: now[0],
-            claim_lease_seconds=10,
+            **{
+                "storage": storage,
+                "authority": lambda recipe_revision_id, **_: (
+                    recipes[recipe_revision_id],
+                    _runtime(),
+                ),
+                "builder": build_own_image,
+                "transport": Transport(),
+                "clock": lambda: now[0],
+                "claim_lease_seconds": 10,
+                **overrides,
+            },
         )
 
     return sessions, list(recipes), now, fresh
@@ -730,10 +763,8 @@ def test_postgres_update_cancel_after_first_child_prevents_later_admission_after
 def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer(
     postgres_multi_update_env, tmp_path: Path, request: pytest.FixtureRequest
 ):
-    from typing import Any
-
-    sessions, revisions, now, _fresh = postgres_multi_update_env
-    base_recipe = _recipe("recipe-image.json")
+    sessions, revisions, now, fresh = postgres_multi_update_env
+    base_recipe = _recipe("recipe-source-build.json")
     recipes = {
         revision_id: base_recipe.model_copy(
             update={
@@ -802,21 +833,7 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
         def signal_cancelled_operation(self, operation_id: str):
             return cache.signal_cancelled_operation(operation_id)
 
-    def authority(
-        recipe_revision_id: str, *, force: bool = False
-    ) -> tuple[RecipeDefinition, dict[str, object]]:
-        del force
-        return recipes[recipe_revision_id], _runtime()
-
-    service = RecipeImageAvailabilityService(
-        sessions,
-        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
-        authority=authority,
-        transport=Transport(),
-        model_cache=CacheAdapter(),
-        clock=lambda: now[0],
-        claim_lease_seconds=10,
-    )
+    service = fresh(model_cache=CacheAdapter())
     batch = _start(service, revisions)
     first_claim = service.claim_update(owner="shared-update-first")
     assert first_claim is not None

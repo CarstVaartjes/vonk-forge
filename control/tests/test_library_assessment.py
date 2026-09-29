@@ -39,7 +39,7 @@ from vonk_control.recipe_runtime_specs import (
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles.cli import main
 from cluster_profiles.cli_render import render_payload
@@ -59,7 +59,7 @@ def assessed_library(tmp_path: Path):
         .read_text()
     )
     model["source"]["repository"] = "https://huggingface.co/vonk-forge/synthetic-tiny"
-    digest = content_sha256(ModelDefinition.model_validate(model))
+    digest = document_sha256(model)
 
     def bind_model(recipe):
         recipe["models"][0]["model"]["content_sha256"] = digest
@@ -288,10 +288,9 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=recipe.identity.recipe_revision_id,
-                source="controller-build",
                 original_content_digest=recipe.identity.content_sha256,
                 effective_execution_key=identity["execution_sha256"],
-                platform_manifest_digest=build.image_digest,
+                image_digest=build.image_digest,
                 local_image_config_id="sha256:" + "4" * 64,
                 oci_archive_sha256=build.oci_layout_sha256,
                 image_bytes=build.image_bytes,
@@ -340,15 +339,12 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
     projection, sessions, *_ = assessed_library
     later = "spk_" + "f" * 32
     with sessions.begin() as session:
-        node = session.scalar(select(AgentNode))
-        assert node is not None
-        capabilities = tuple(node.capabilities)
+        capabilities = ("runtime.vonk.v1", "recipe.operations.v1")
         session.add(
             AgentNode(
                 node_id=later,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=list(capabilities),
             )
         )
         snapshot = session.scalar(select(NodeInventorySnapshot))
@@ -430,7 +426,7 @@ def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_libra
         assert first is not None
         document = json.loads(json.dumps(first.document))
         memory = document["topology"]["roles"][0]["resources"]["memory"]
-        memory.update(startup_peak_bytes=20_000, steady_state_bytes=20_000)
+        memory.update(peak_bytes=20_000)
         canonical = RecipeDefinition.model_validate(document)
         successor = CatalogDocumentRevision(
             id=str(uuid.uuid4()),
@@ -442,7 +438,7 @@ def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_libra
             schema_version=2,
             state="active",
             document=canonical.model_dump(mode="json"),
-            content_digest=content_sha256(canonical),
+            content_digest=document_sha256(canonical.model_dump(mode="json")),
             projected={},
             created_by="test",
             created_at=NOW,

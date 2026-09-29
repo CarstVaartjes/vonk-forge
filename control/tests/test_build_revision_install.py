@@ -40,7 +40,7 @@ from vonk_control.runtime_image_preparation import (
     resolve_persisted_runtime_image_receipt,
 )
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import document_sha256, read_model
 
 from .preflight_fixtures import record_passing_preflight
 from .test_recipe_builds import (
@@ -100,9 +100,9 @@ def _prepared_successor(tmp_path, *, change="runtime"):
             {"name": "max-model-len", "setting": "max_model_len"}
         )
     elif change == "build":
-        _json_array(
-            _json_object(_json_object(document["execution"])["build"])["arguments"]
-        ).append({"name": "executable_change", "value": "new"})
+        _json_object(_json_object(document["execution"])["build"])["network"] = {
+            "hosts": ["pypi.org"]
+        }
     draft = catalog.revise(original.document_id, document, actor="admin")
     with sessions.begin() as session:
         successor = session.get(CatalogDocumentRevision, draft.id)
@@ -118,9 +118,6 @@ def _prepared_successor(tmp_path, *, change="runtime"):
     class NoBuild:
         def build(self, *_args, **_kwargs):
             raise AssertionError("unchanged executable must not be built again")
-
-        def pull_and_export(self, *_args, **_kwargs) -> NoReturn:
-            raise AssertionError("verified archive must not be pulled again")
 
         def inspect_archive(self, *_args, **_kwargs) -> NoReturn:
             raise AssertionError("verified archive must not be rehashed")
@@ -145,7 +142,6 @@ def _prepared_successor(tmp_path, *, change="runtime"):
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.capabilities = [*node.capabilities, "runtime.vonk.v1"]
         session.add(
             AgentCertificate(
                 serial="revision-reuse-preflight",
@@ -161,7 +157,8 @@ def _prepared_successor(tmp_path, *, change="runtime"):
             )
         )
         assert model_revision is not None
-        model = ModelDefinition.model_validate(model_revision.document)
+        model = read_model(model_revision.document)
+        model_digest = model_revision.content_digest
         build = session.get(RecipeBuild, build_plan.build_id)
         revision = session.get(CatalogDocumentRevision, successor.id)
         assert build is not None and revision is not None
@@ -181,7 +178,7 @@ def _prepared_successor(tmp_path, *, change="runtime"):
         def verified_model_objects_for_set(self, _digest):
             return tuple(
                 {
-                    "model_content_sha256": content_sha256(model),
+                    "model_content_sha256": model_digest,
                     "file_id": file.id,
                     "path": file.path,
                     "sha256": file.sha256,
@@ -240,9 +237,7 @@ def _prepared_successor(tmp_path, *, change="runtime"):
             return resolve_persisted_runtime_image_receipt(
                 session,
                 recipe_revision_id=revision.id,
-                current_content_digest=content_sha256(
-                    RecipeDefinition.model_validate(document)
-                ),
+                current_content_digest=document_sha256(document),
                 effective_execution_key=runtime_spec["identity"]["execution_sha256"],
                 receipt=current,
             )

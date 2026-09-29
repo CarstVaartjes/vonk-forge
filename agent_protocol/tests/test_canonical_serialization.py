@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
@@ -81,11 +80,8 @@ def test_real_job_payload_normalizes_optional_slots_before_hashing() -> None:
     del broken["compiled_execution_plan"]["endpoint"]
     with pytest.raises(AgentProtocolError):
         canonical_payload(claim["operation"], broken)
-    claim.update(payload=normalized, payload_digest=hashlib.sha256(encoded).hexdigest())
-    assert (
-        AgentClaim.model_validate(claim).payload_digest
-        == hashlib.sha256(encoded).hexdigest()
-    )
+    claim.update(payload=normalized)
+    assert canonical_message(AgentClaim.model_validate(claim).payload) == encoded
 
 
 def probe(model: str, document: bytes) -> bytes:
@@ -103,7 +99,6 @@ def test_rust_and_python_canonicalize_actual_job_claim_and_build_identically() -
     claim = job_document()
     claim["payload"]["compiled_execution_plan"]["job"]["input"]["slots"] = None
     payload = canonical_payload(claim["operation"], claim["payload"])
-    claim["payload_digest"] = hashlib.sha256(payload).hexdigest()
     encoded = canonical_message(AgentClaim.model_validate(claim))
     rust_claim = probe("AgentClaim", canonical_message(claim))
     assert rust_claim == encoded
@@ -112,7 +107,6 @@ def test_rust_and_python_canonicalize_actual_job_claim_and_build_identically() -
     build = json.loads((VECTORS / "recipe-build-claim-v1.json").read_text())[
         "base_payload"
     ]
-    build["target"] = None
     build["options"].update(ignorefile=None, os_version=None, timestamp=None)
     assert probe("RecipeBuildRequest", canonical_message(build)) == canonical_payload(
         "recipe.build.v1", build
@@ -137,9 +131,6 @@ def test_host_grant_signing_bytes_use_the_same_optional_null_policy() -> None:
         "operation": {
             "type": "execute-container-runtime-request",
             "action": "start",
-            "job_id": "20000000-0000-4000-8000-000000000002",
-            "operation_id": "30000000-0000-4000-8000-000000000003",
-            "attempt": 1,
             "fence": "40000000-0000-4000-8000-000000000004",
             "request_sha256": "a" * 64,
             "start_plan_sha256": "b" * 64,
@@ -150,7 +141,7 @@ def test_host_grant_signing_bytes_use_the_same_optional_null_policy() -> None:
         },
     }
     omitted = HostHelperGrantClaims.model_validate(value)
-    value["operation"]["observation_identity_sha256"] = None
+    value["operation"]["installation_id"] = None
     explicit = HostHelperGrantClaims.model_validate(value)
     assert host_helper_grant_signing_bytes(omitted) == host_helper_grant_signing_bytes(
         explicit

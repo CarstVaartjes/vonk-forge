@@ -260,7 +260,7 @@ def test_postgres_completed_cleanup_child_is_adopted_after_checkpoint_crash(
                 uninstall_id,
                 node_id,
                 succeeded=True,
-                evidence={"uninstalled": True, "removed_model_bytes": 1},
+                evidence={},
             )
         for _ in range(4):
             if run_switch.get(child_id).state == "succeeded":

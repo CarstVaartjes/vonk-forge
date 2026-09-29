@@ -945,19 +945,10 @@ def _run_switch_runtime_image_intent(
         and phase.kind == "prepare"
         and phase.subphase == "runtime-image"
         and intent.item_index == 0
-        and (
-            plan.image_digest is None
-            or plan.image_digest
-            in {intent.image_digest, intent.registry_manifest_digest}
-        )
+        and (plan.image_digest is None or plan.image_digest == intent.image_digest)
         and (
             plan.runtime_storage.image_digest is None
             or plan.runtime_storage.image_digest == intent.image_digest
-        )
-        and (
-            plan.runtime_storage.registry_manifest_digest is None
-            or plan.runtime_storage.registry_manifest_digest
-            == intent.registry_manifest_digest
         )
         and (
             plan.runtime_storage.oci_layout_sha256 is None
@@ -968,25 +959,20 @@ def _run_switch_runtime_image_intent(
             or plan.runtime_storage.image_bytes == 0
             or plan.runtime_storage.image_bytes == intent.image_bytes
         )
+        and intent.build_id == expected_build_id
+        and intent.build_input_sha256 == plan.build.build_input_sha256
         and (
-            intent.source == "controller-build"
-            and intent.build_id == expected_build_id
-            and intent.build_input_sha256 == plan.build.build_input_sha256
-            and (
-                plan.build.image_digest is None
-                or plan.build.image_digest == intent.image_digest
-            )
-            and (
-                plan.build.oci_layout_sha256 is None
-                or plan.build.oci_layout_sha256 == intent.archive_sha256
-            )
-            and (
-                plan.build.image_bytes is None
-                or plan.build.image_bytes == 0
-                or plan.build.image_bytes == intent.image_bytes
-            )
-            or intent.source == "published"
-            and expected_build_id is None
+            plan.build.image_digest is None
+            or plan.build.image_digest == intent.image_digest
+        )
+        and (
+            plan.build.oci_layout_sha256 is None
+            or plan.build.oci_layout_sha256 == intent.archive_sha256
+        )
+        and (
+            plan.build.image_bytes is None
+            or plan.build.image_bytes == 0
+            or plan.build.image_bytes == intent.image_bytes
         )
     )
     if not valid:

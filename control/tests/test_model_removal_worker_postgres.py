@@ -23,7 +23,7 @@ from vonk_control.model_cache_contract import (
     parse_model_cache_payload,
 )
 from vonk_control.models import ModelCacheOperation
-from vonk_forge_contracts import content_sha256
+from vonk_forge_contracts import document_sha256
 
 from .test_model_cache import _artifact, _download, _remove_model
 from .test_model_removal_reference_lifecycle import (
@@ -63,7 +63,7 @@ def _prepare_removal_target(
 ) -> tuple[str, str, Path]:
     model = _one_model(tmp_path, slug, data)
     selector = _register_model(sessions, model)
-    model_digest = content_sha256(model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
     source_root = tmp_path / f"source-{slug}"
     source_root.mkdir()
     artifact = _artifact(

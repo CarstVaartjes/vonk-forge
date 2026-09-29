@@ -23,7 +23,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .test_fleet_profiles import (
     _assessment,
@@ -176,7 +176,6 @@ def test_selected_empty_profile_keeps_new_spark_idle_after_restart_and_saved_edi
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -255,7 +254,6 @@ def test_blocked_roster_preview_retries_without_advancing_selection(
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -320,7 +318,6 @@ def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recover
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -588,7 +585,7 @@ def test_pending_recipe_head_change_is_rejected_before_workload_fencing(
                 schema_version=2,
                 state="active",
                 document=document.model_dump(mode="json"),
-                content_digest=content_sha256(document),
+                content_digest=document_sha256(document.model_dump(mode="json")),
                 execution_key="d" * 64,
                 created_by="test",
                 created_at=NOW,

@@ -28,10 +28,17 @@ def export_schema() -> dict[str, object]:
                 isinstance(value, type)
                 and issubclass(value, BaseModel)
                 and value.__module__ == module.__name__
-                and value.model_fields
                 and not value.__name__.startswith("_")
             ):
                 models.add(value)
+    # A fieldless model is a wire message (an empty success) unless it is a
+    # shared base class of other models.
+    models = {
+        model
+        for model in models
+        if model.model_fields
+        or not any(other is not model and issubclass(other, model) for other in models)
+    }
 
     from vonk_control.contract_graph import discover_contracts, schema_application
 
