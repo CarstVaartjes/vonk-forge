@@ -55,7 +55,7 @@ test("the redesigned shell exposes the focused workspace routes", async ({page})
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeVisible();
   await expect(page.locator("h1")).toHaveCount(1);
   const primaryLinks = page.getByRole("navigation", {name: "Primary"}).getByRole("link");
-  await expect(primaryLinks).toHaveText(["Fleet", "Library"]);
+  await expect(primaryLinks).toHaveText(["Fleet", "Library", "Keys"]);
   await expect(page).toHaveURL(/\/library$/);
 
   for (const width of [760, 761, 768, 864, 865]) {
@@ -71,7 +71,7 @@ test("Fleet summary keeps each count above its label at narrow and wide widths",
   await page.route("**/api/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: new Date().toISOString(), authority_revision: commit, nodes: []}}));
   await page.goto("/fleet");
   const summary = page.getByRole("region", {name: "Fleet summary"});
-  await expect(summary.locator("strong")).toHaveCount(4);
+  await expect(summary.locator("strong")).toHaveCount(5);
 
   for (const width of [360, 768, 1280]) {
     await page.setViewportSize({width, height: 900});
