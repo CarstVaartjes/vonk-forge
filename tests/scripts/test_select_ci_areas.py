@@ -36,6 +36,8 @@ def test_frontend_change_selects_web_and_its_control_owner() -> None:
         "web": True,
         "compose": False,
         "generated": False,
+        "nas_install": True,
+        "agent_package": False,
     }
 
 
@@ -124,3 +126,38 @@ def test_deleted_rust_file_selects_rust_family(tmp_path: Path) -> None:
 )
 def test_launch_contract_inputs_select_controller_and_wire_checks(path: str) -> None:
     assert _module().select([path], "pull_request")["control"] is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "control/src/vonk_control/runtime_init.py",
+        "deploy/compose/compose.yaml",
+        "install/nas",
+        "rust/crates/vonk-nas-setup/src/lib.rs",
+        "scripts/build-nas-compose-bundle",
+        "tests/acceptance/runtime.py",
+    ],
+)
+def test_installer_compose_control_and_acceptance_select_the_nas_install(
+    path: str,
+) -> None:
+    assert _module().select([path], "pull_request")["nas_install"] is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "rust/crates/vonk-agent/src/main.rs",
+        "packaging/systemd/vonk-forge-agent.service",
+        "scripts/test-agent-package-native-lifecycle",
+    ],
+)
+def test_agent_and_packaging_select_the_native_package_lifecycle(path: str) -> None:
+    assert _module().select([path], "pull_request")["agent_package"] is True
+
+
+def test_unrelated_change_selects_neither_installed_system_proof() -> None:
+    selected = _module().select(["scripts/select-ci-areas"], "pull_request")
+    assert selected["nas_install"] is False
+    assert selected["agent_package"] is False

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import ipaddress
 import json
 import os
@@ -12,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -319,6 +321,26 @@ def control_hostname_suffix(bundle: Path) -> str:
     return control.split(".", 1)[1]
 
 
+def local_installer_command(root: Path, answers: Path) -> list[str] | None:
+    """Run the installer built from this checkout instead of a published one.
+
+    The pull-request lane has no published candidate. It runs the setup
+    program and payload built from the source under test, choosing install or
+    upgrade the way the public bootstrap does.
+    """
+    setup = os.environ.get("VONK_ACCEPTANCE_LOCAL_SETUP")
+    if not setup:
+        return None
+    return [
+        setup,
+        "--template",
+        required_environment("VONK_ACCEPTANCE_LOCAL_PAYLOAD"),
+        *(["--upgrade"] if (root / "vonk-forge").exists() else []),
+        "--answers-file",
+        os.fspath(answers),
+    ]
+
+
 def generate_bundle(
     root: Path,
     *,
@@ -342,7 +364,8 @@ def generate_bundle(
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write("".join(f"{answer}\n" for _, answer in responses))
         run(
-            bootstrap_command(candidate_url, "--answers-file", os.fspath(answers)),
+            local_installer_command(root, answers)
+            or bootstrap_command(candidate_url, "--answers-file", os.fspath(answers)),
             cwd=root,
             environment=child_environment,
             timeout=300,
@@ -1517,6 +1540,7 @@ def exercise_compose(
     hermes_dashboard_service: str = "svc:hermes-dashboard",
     require_external_tailnet_client: bool = True,
     tailscale_mode: str = "full",
+    reinstall: Callable[[], None] | None = None,
 ) -> None:
     if tailscale_mode not in {"disabled", "full"}:
         raise AcceptanceError("NAS Compose Tailscale mode is invalid")
@@ -1546,7 +1570,7 @@ def exercise_compose(
         candidate = yaml.safe_load(Path(overlay).read_text())
         assert_candidate_image_graph(document["services"], candidate["services"])
 
-    try:
+    def bring_up() -> None:
         try:
             run(
                 [
@@ -1568,6 +1592,8 @@ def exercise_compose(
             raise AcceptanceError(
                 f"NAS Compose startup failed; cause: {cause}; {diagnostics}"
             ) from error
+
+    def verify_running() -> None:
         status = run(
             [*reference_compose(), "ps", "--all", "--format", "json"],
             cwd=bundle,
@@ -1577,6 +1603,26 @@ def exercise_compose(
         assert_compose_services_healthy(status.stdout, expected)
         verify_controller_tls(bundle, nas_ip, enrollment_hostname)
         verify_postgres_databases(bundle)
+
+    try:
+        bring_up()
+        verify_running()
+        if reinstall is not None:
+            # The Controller has started and prepared its host mounts. The
+            # bundle must still be what the installer made for its owner, and
+            # a restart or a second installer run must come back healthy.
+            assert_bundle_contract(bundle)
+            if tailscale_mode == "disabled":
+                run(
+                    [*reference_compose(), "restart", "--timeout", "30"],
+                    cwd=bundle,
+                    timeout=180,
+                )
+                bring_up()
+                verify_running()
+                reinstall()
+                bring_up()
+                verify_running()
         if tailscale_mode == "disabled":
             return
         if not require_external_tailnet_client:
@@ -1663,8 +1709,11 @@ def reference_rollout_bundles(default: Path, hermes: Path) -> tuple[Path, ...]:
 def main() -> None:
     if os.name != "posix" or os.geteuid() == 0:
         raise AcceptanceError("NAS acceptance must run as an ordinary non-root user")
-    candidate_url = required_environment("VONK_ACCEPTANCE_CANDIDATE_URL")
-    if SAFE_URL.fullmatch(candidate_url) is None:
+    local_mode = bool(os.environ.get("VONK_ACCEPTANCE_LOCAL_SETUP"))
+    candidate_url = (
+        "" if local_mode else required_environment("VONK_ACCEPTANCE_CANDIDATE_URL")
+    )
+    if not local_mode and SAFE_URL.fullmatch(candidate_url) is None:
         raise AcceptanceError("candidate NAS URL is invalid")
     tailnet_suffix = required_environment("VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX")
     if SAFE_DNS_SUFFIX.fullmatch(tailnet_suffix) is None:
@@ -1766,6 +1815,16 @@ def main() -> None:
                 fixtures=fixtures,
                 environment=host_command_environment(),
             )
+
+        def reinstall_bundle(target: Path) -> None:
+            generate_bundle(
+                target,
+                candidate_url=candidate_url,
+                child_environment=child_environment,
+                responses=nas_responses(**common, hermes=True),
+                require_all_prompts=False,
+            )
+
         for bundle in reference_rollout_bundles(first, hermes):
             exercise_compose(
                 bundle,
@@ -1780,6 +1839,7 @@ def main() -> None:
                 hermes_dashboard_service=services["hermes_dashboard"],
                 require_external_tailnet_client=require_external_tailnet_client,
                 tailscale_mode=tailscale_mode,
+                reinstall=functools.partial(reinstall_bundle, bundle.parent),
             )
 
 

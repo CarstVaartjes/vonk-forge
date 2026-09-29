@@ -8,7 +8,16 @@ import json
 import sys
 from collections.abc import Iterable
 
-AREAS = ("rust", "repository", "control", "web", "compose", "generated")
+AREAS = (
+    "rust",
+    "repository",
+    "control",
+    "web",
+    "compose",
+    "generated",
+    "nas_install",
+    "agent_package",
+)
 
 
 def _matches(path: str, prefixes: tuple[str, ...], exact: tuple[str, ...] = ()) -> bool:
@@ -104,6 +113,41 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
     )
     if not any(selected.values()) and not known_documentation:
         selected["repository"] = True
+
+    # A clean NAS install runs the installer, the Compose graph and the
+    # Controller images together, so a change to any of them selects it.
+    selected["nas_install"] = selected["control"] or selected["compose"]
+    for path in changed:
+        if _matches(
+            path,
+            (
+                "install/",
+                "rust/crates/vonk-nas-setup/",
+                "tests/acceptance/",
+            ),
+            (
+                "Cargo.toml",
+                "Cargo.lock",
+                "scripts/build-nas-compose-bundle",
+                "scripts/render-dev-compose",
+            ),
+        ):
+            selected["nas_install"] = True
+        # The agent package lifecycle scripts read what the Rust agent and
+        # the packaging ship, so either one selects the native lifecycle.
+        if _matches(
+            path,
+            ("rust/", "packaging/", "tests/nodes/"),
+            (
+                "Cargo.toml",
+                "Cargo.lock",
+                "scripts/build-agent-deb",
+                "scripts/test-agent-package-native-lifecycle",
+                "scripts/verify-agent-deb",
+                "scripts/materialize-agent-tools",
+            ),
+        ):
+            selected["agent_package"] = True
     return selected
 
 

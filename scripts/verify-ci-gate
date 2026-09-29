@@ -6,7 +6,16 @@ from __future__ import annotations
 import argparse
 import sys
 
-AREAS = ("rust", "repository", "control", "web", "generated", "compose")
+AREAS = (
+    "rust",
+    "repository",
+    "control",
+    "web",
+    "generated",
+    "compose",
+    "nas-install",
+    "agent-package",
+)
 AREA_JOBS = {
     "rust": ("rust-quality", "rust-tests", "rust-platform"),
     "repository": ("repository",),
@@ -14,6 +23,8 @@ AREA_JOBS = {
     "web": ("web",),
     "generated": ("generated",),
     "compose": ("compose",),
+    "nas-install": ("nas-install",),
+    "agent-package": ("agent-package",),
 }
 
 
