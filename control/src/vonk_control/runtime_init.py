@@ -394,7 +394,7 @@ def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
     # creates it for the bundle owner, who keeps ownership so the host can
     # manage and back it up (owner -1 is left unchanged); the Controller
     # reaches it through the group.
-    _directory(paths.gateway, -1, 10001, 0o770)
+    _directory(paths.gateway, 10001, 10001, 0o700)
 
 
 def _identity(value: os.stat_result) -> tuple[int, ...]:
