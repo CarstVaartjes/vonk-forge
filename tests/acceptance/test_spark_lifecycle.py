@@ -511,27 +511,6 @@ def _set_bundle_environment(bundle: Path, values: dict[str, str]) -> None:
     ]
     lines.extend(f"{name}={json.dumps(value)}" for name, value in values.items())
     environment.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    # The rendered Compose file is self-contained and no longer reads `.env`;
-    # an operator applies a changed value by rerunning the installer. Write the
-    # same values into the file's service environments.
-    compose_path = bundle / "docker-compose.yaml"
-    document = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
-    applied = 0
-    for service in document["services"].values():
-        service_environment = service.get("environment")
-        if isinstance(service_environment, dict):
-            for name, value in values.items():
-                if name in service_environment:
-                    service_environment[name] = value
-                    applied += 1
-    if applied == 0:
-        raise LifecycleError("bundle Compose site values were not found")
-    mode = compose_path.stat().st_mode & 0o777
-    compose_path.write_text(
-        yaml.safe_dump(document, sort_keys=False, default_flow_style=False),
-        encoding="utf-8",
-    )
-    os.chmod(compose_path, mode)
 
 
 def _configure_acceptance_renewal(
