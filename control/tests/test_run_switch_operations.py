@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import httpx2
 import pytest
@@ -2054,6 +2054,42 @@ def test_runtime_install_capacity_busy_parks_and_retries_the_switch(
     recovered = switch.service.get(switch.operation.operation_id)
     assert recovered.state != "failed"
     assert recovered.result is not None and recovered.result.retry_attempt is None
+
+
+def test_run_switch_retry_reports_its_wait_and_is_not_failed(
+    tmp_path: Path, caplog
+) -> None:
+    """A retrying switch shows what it waits for and when, never "failed"."""
+
+    switch = _cold_compile_switch(tmp_path, runtime_install_busy_attempts=1)
+    with caplog.at_level("INFO"):
+        for _ in range(20):
+            switch.drive()
+            view = switch.service.get(switch.operation.operation_id)
+            if view.blockers:
+                break
+        else:
+            pytest.fail("the retry was never reported as a wait")
+
+    assert view.state != "failed"
+    assert [item.code for item in view.blockers] == ["run-switch.phase-retry"]
+    assert view.blockers[0].node_ids
+    assert view.next_attempt_at == view.result.observation_due_at
+    item: dict[str, Any] = dict(
+        RunSwitchOperationProvider(switch.service).get_operation(
+            switch.operation.operation_id
+        )
+    )
+    assert item["blockers"][0]["code"] == "run-switch.phase-retry"
+    assert item["next_attempt_at"] is not None
+    assert sum("is waiting" in line for line in caplog.messages) == 1
+
+    for _ in range(20):
+        switch.drive()
+        if switch.executor.events.count("runtime-install") >= 2:
+            break
+    recovered = switch.service.get(switch.operation.operation_id)
+    assert recovered.blockers == [] and recovered.next_attempt_at is None
 
 
 def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(

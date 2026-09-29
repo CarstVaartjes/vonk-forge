@@ -9731,6 +9731,14 @@
             "title": "Action",
             "type": "string"
           },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/OperationBlocker"
+            },
+            "maxItems": 16,
+            "title": "Blockers",
+            "type": "array"
+          },
           "cancellation": {
             "anyOf": [
               {
@@ -9790,6 +9798,18 @@
             "maxItems": 32,
             "title": "Next Actions",
             "type": "array"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
           },
           "operation_id": {
             "anyOf": [
@@ -16976,6 +16996,14 @@
             "title": "Action",
             "type": "string"
           },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/OperationBlocker"
+            },
+            "maxItems": 16,
+            "title": "Blockers",
+            "type": "array"
+          },
           "cleanup_mode": {
             "anyOf": [
               {
@@ -17050,6 +17078,18 @@
             ],
             "title": "Kind",
             "type": "string"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
           },
           "node_ids": {
             "items": {
@@ -17134,6 +17174,14 @@
         "additionalProperties": false,
         "description": "Exact durable result tree stored in ``Job.result``.",
         "properties": {
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/OperationBlocker"
+            },
+            "maxItems": 16,
+            "title": "Blockers",
+            "type": "array"
+          },
           "cancellation": {
             "anyOf": [
               {

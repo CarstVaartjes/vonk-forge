@@ -171,7 +171,17 @@ def test_controller_key_relay_forwards_only_litellm_key_routes() -> None:
 
     assert relay["listen"] == [":8087"]
     assert [route.get("match") for route in relay["routes"]] == [
-        [{"path": ["/key/generate", "/key/list", "/key/info", "/key/delete"]}],
+        [
+            {
+                "path": [
+                    "/key/generate",
+                    "/key/list",
+                    "/key/info",
+                    "/key/update",
+                    "/key/delete",
+                ]
+            }
+        ],
         None,
     ]
     assert _reverse_proxy_dials(relay["routes"][0]) == ["litellm:4000"]

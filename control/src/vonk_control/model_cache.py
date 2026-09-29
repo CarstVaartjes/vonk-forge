@@ -118,6 +118,12 @@ from .models import (
     RecipeRun,
     RuntimeImageAuthorization,
 )
+from .operation_blockers import (
+    OperationBlocker,
+    dump_blockers,
+    make_blocker,
+    read_blockers,
+)
 from .operation_contract import AvailabilityOperationFailure
 from .runtime_init import RuntimeSecretError, read_runtime_secret
 from .strict_json import read_stored_model, serialize_json_value
@@ -611,7 +617,9 @@ def _write_operation_payload(
     """Validate and normalize a newly assembled operation envelope."""
 
     try:
-        parsed = parse_model_cache_payload(kind, value)
+        parsed = parse_model_cache_payload(
+            kind, {**value, "blockers": _wait_blockers(value)}
+        )
         if isinstance(parsed, (ModelCacheDownloadPayload, ModelCacheRepairPayload)):
             ArtifactSetManifest.from_document(serialize_json_value(parsed.manifest))
         return dict(
@@ -622,6 +630,64 @@ def _write_operation_payload(
             "model_cache.payload_invalid",
             "cache operation payload is invalid",
         ) from error
+
+
+def _wait_blockers(payload: Mapping[str, object]) -> list[dict[str, object]]:
+    """What the operation waits for, taken from the failure it will retry.
+
+    A failure the Controller retries by itself (or resumes once a credential
+    changes) is a wait, so its reason is stored as a blocker; a terminal failure
+    or a running operation waits for nothing.
+    """
+
+    failure = payload.get("failure")
+    if not isinstance(failure, Mapping):
+        return []
+    code = failure.get("code")
+    waiting = (
+        failure.get("retryable") is True
+        or failure.get("retry_time") is not None
+        or code in _CREDENTIAL_FAILURE_PUBLIC_CODES
+    )
+    if not waiting or not isinstance(code, str):
+        return []
+    detail = failure.get("detail")
+    return dump_blockers(
+        [
+            make_blocker(
+                code,
+                detail if isinstance(detail, str) else code,
+                severity="info" if code == "model_cache.object_busy" else "warning",
+            )
+        ]
+    )
+
+
+def _store_operation_payload(
+    operation: ModelCacheOperation, kind: str, payload: Mapping[str, object]
+) -> None:
+    """Persist a payload and log one line when the reason it waits changes."""
+
+    before = read_blockers(
+        operation.payload.get("blockers")
+        if isinstance(operation.payload, Mapping)
+        else None
+    )
+    stored = _write_operation_payload(kind, payload)
+    after = read_blockers(stored.get("blockers"))
+    if after and {(b.code, tuple(b.node_ids)) for b in before} != {
+        (b.code, tuple(b.node_ids)) for b in after
+    }:
+        _LOGGER.log(
+            logging.WARNING
+            if any(item.severity == "error" for item in after)
+            else logging.INFO,
+            "model cache %s %s is waiting: %s",
+            operation.kind,
+            operation.id,
+            "; ".join(f"{item.code}: {item.detail}" for item in after[:4]),
+        )
+    operation.payload = stored
 
 
 @dataclass(frozen=True, slots=True)
@@ -669,6 +735,9 @@ class CacheOperationView:
     retryable: bool = False
     failure: Mapping[str, object] | None = None
     cancellation: Mapping[str, object] | None = None
+    #: What a queued or interrupted operation waits for, and when it retries.
+    blockers: tuple[OperationBlocker, ...] = ()
+    next_attempt_at: str | None = None
 
 
 def _cache_failure(
@@ -3102,7 +3171,7 @@ class ModelCacheService:
             operation.state = "running"
             operation.last_error = None
             operation.updated_at = now
-            operation.payload = _write_operation_payload("remove", payload)
+            _store_operation_payload(operation, "remove", payload)
         return True
 
     def _defer_model_removal(
@@ -3161,7 +3230,7 @@ class ModelCacheService:
             operation.state = "partial"
             operation.last_error = redact_text(detail)[:512]
             operation.updated_at = now
-            operation.payload = _write_operation_payload("remove", payload)
+            _store_operation_payload(operation, "remove", payload)
 
     def advance_removals(self, *, limit: int = 1) -> int:
         """Advance bounded durable model removals without holding transfer slots."""
@@ -3499,7 +3568,7 @@ class ModelCacheService:
         payload.pop("failure", None)
         previous = _validated_operation_progress(operation).model_dump(mode="json")
         operation.progress = cache_phase(previous, "completed", now)
-        operation.payload = _write_operation_payload("remove", payload)
+        _store_operation_payload(operation, "remove", payload)
         operation.state = "succeeded"
         operation.last_error = None
         operation.updated_at = now
@@ -4503,7 +4572,7 @@ class ModelCacheService:
                         dict.fromkeys([*checkpoint.completed_objects, spec.sha256])
                     ),
                 ).model_dump(mode="json")
-                operation.payload = _write_operation_payload("repair", payload)
+                _store_operation_payload(operation, "repair", payload)
 
     def _transfer_stop(self, operation_id: str) -> threading.Event:
         with self._lock:
@@ -5520,7 +5589,7 @@ class ModelCacheService:
                 retry.pop("credential_fingerprint", None)
                 payload["retry"] = retry
                 payload.pop("claim", None)
-                operation.payload = _write_operation_payload(operation.kind, payload)
+                _store_operation_payload(operation, operation.kind, payload)
                 operation.state = "queued"
                 operation.completed_at = None
                 operation.attempt = int(operation.attempt) + 1
@@ -5707,9 +5776,7 @@ class ModelCacheService:
                                 now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)
                             )
                         }
-                    operation.payload = _write_operation_payload(
-                        operation.kind, payload
-                    )
+                    _store_operation_payload(operation, operation.kind, payload)
                     old_progress = _validated_operation_progress(operation)
                     old_downloaded = old_progress.downloaded_bytes
                     old_completed = old_progress.completed_artifacts
@@ -5830,9 +5897,7 @@ class ModelCacheService:
                         )
                     }
                     payload.pop("claim", None)
-                    operation.payload = _write_operation_payload(
-                        operation.kind, payload
-                    )
+                    _store_operation_payload(operation, operation.kind, payload)
                     _total, received = self._transfer_totals(payload)
                     previous_progress = _validated_operation_progress(operation)
                     operation.progress = self._progress(
@@ -5893,7 +5958,7 @@ class ModelCacheService:
                 ),
             )
             payload.pop("claim", None)
-            operation.payload = _write_operation_payload(operation.kind, payload)
+            _store_operation_payload(operation, operation.kind, payload)
             operation.state = "queued"
             operation.completed_at = None
             operation.last_error = error.detail
@@ -6052,9 +6117,7 @@ class ModelCacheService:
                 else:
                     operation.completed_at = now
                 operation_payload.pop("claim", None)
-                operation.payload = _write_operation_payload(
-                    operation.kind, operation_payload
-                )
+                _store_operation_payload(operation, operation.kind, operation_payload)
                 operation.progress = cache_phase(
                     _validated_operation_progress(operation).model_dump(mode="json"),
                     "queued" if bounded_retry else "failed",
@@ -6291,7 +6354,7 @@ class ModelCacheService:
                     },
                 }
                 payload.pop("claim", None)
-                previous.payload = _write_operation_payload(previous.kind, payload)
+                _store_operation_payload(previous, previous.kind, payload)
                 return self._operation_view(previous)
 
         now = self._clock()
@@ -6455,7 +6518,7 @@ class ModelCacheService:
                 payload.pop("failure", None)
             if state in {"succeeded", "failed", "cancelled"}:
                 payload.pop("claim", None)
-            operation.payload = _write_operation_payload(operation.kind, payload)
+            _store_operation_payload(operation, operation.kind, payload)
             if state in {"succeeded", "failed", "cancelled"}:
                 operation.completed_at = now
 
@@ -6589,7 +6652,7 @@ class ModelCacheService:
             payload = _validated_operation_payload(operation)
             payload.pop("claim", None)
             payload.pop("failure", None)
-            operation.payload = _write_operation_payload(operation.kind, payload)
+            _store_operation_payload(operation, operation.kind, payload)
             operation.state = "cancelled"
             operation.completed_at = now
             operation.updated_at = now
@@ -6703,7 +6766,7 @@ class ModelCacheService:
         payload["cancellation"] = cancellation.model_dump(mode="json")
         payload.pop("failure", None)
         payload.pop("result", None)
-        operation.payload = _write_operation_payload(operation.kind, payload)
+        _store_operation_payload(operation, operation.kind, payload)
         now = self._clock()
         operation.progress = cache_phase(
             _validated_operation_progress(operation).model_dump(mode="json"),
@@ -6898,6 +6961,16 @@ class ModelCacheService:
         failure = ModelCacheService._canonical_failure(operation)
         model_digest = payload.get("model_content_sha256")
         stored_review_digest = payload.get("review_digest")
+        waiting = operation.state in {"queued", "partial", "failed"}
+        blockers = tuple(read_blockers(payload.get("blockers"))) if waiting else ()
+        retry = payload.get("retry")
+        next_attempt = (
+            retry.get("next_retry_at")
+            if blockers
+            and operation.state in {"queued", "partial"}
+            and isinstance(retry, Mapping)
+            else None
+        )
         view = CacheOperationView(
             id=operation.id,
             request_key=operation.request_key,
@@ -6929,6 +7002,8 @@ class ModelCacheService:
             retryable=(failure is not None and failure["retryable"] is True),
             failure=failure,
             cancellation=cancellation,
+            blockers=blockers,
+            next_attempt_at=next_attempt if isinstance(next_attempt, str) else None,
         )
         ModelCacheOperationResponse.model_validate(view, from_attributes=True)
         return view
@@ -7322,8 +7397,8 @@ class ModelCacheService:
                             now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)
                         )
                     }
-                    operation.payload = _write_operation_payload(
-                        operation.kind, operation_payload
+                    _store_operation_payload(
+                        operation, operation.kind, operation_payload
                     )
                     operation.updated_at = now
 
@@ -7474,7 +7549,7 @@ class ModelCacheService:
                         now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)
                     ),
                 }
-                operation.payload = _write_operation_payload(operation.kind, payload)
+                _store_operation_payload(operation, operation.kind, payload)
                 operation.updated_at = now
                 claimed.append((operation.id, operation.kind))
         return claimed

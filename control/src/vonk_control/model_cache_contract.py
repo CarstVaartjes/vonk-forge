@@ -15,6 +15,7 @@ from pydantic import (
 from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts.model import ModelReference
 
+from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure, OperationProgress
 from .strict_json import StrictJSONModel, read_stored_model
 
@@ -186,6 +187,8 @@ class _ModelCacheOperationPayload(StrictModel):
     )
     with_model: bool | None = None
     force_refresh: bool = False
+    #: What a queued or interrupted operation is waiting for; empty otherwise.
+    blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
 
 
 class ModelCacheDownloadPayload(_ModelCacheOperationPayload):
@@ -382,6 +385,9 @@ class ModelCacheOperatorResponse(StrictModel):
     cancellation: ModelCacheCancellation | None = None
     result: ModelCacheDownloadResult | ModelCacheRemovalResult | None = None
     failure: AvailabilityOperationFailure | None = None
+    #: What a queued operation waits for, and when it is checked again.
+    blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+    next_attempt_at: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def cancellation_matches_state(self) -> ModelCacheOperatorResponse:

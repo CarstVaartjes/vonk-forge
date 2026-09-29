@@ -22,8 +22,10 @@ from ..models.run_switch_operation_state import check_run_switch_operation_state
 from ..models.run_switch_operation_state import RunSwitchOperationState
 from ..types import UNSET, Unset
 from typing import cast
+import datetime
 
 if TYPE_CHECKING:
+  from ..models.operation_blocker import OperationBlocker
   from ..models.run_switch_operation_result import RunSwitchOperationResult
   from ..models.run_switch_progress import RunSwitchProgress
 
@@ -48,9 +50,11 @@ class RunSwitchOperation:
             progress (RunSwitchProgress):
             request_key (str):
             state (RunSwitchOperationState):
+            blockers (list[OperationBlocker] | Unset):
             cleanup_mode (None | RunSwitchOperationCleanupModeType0 | Unset):
             current_phase (None | RunSwitchOperationCurrentPhaseType0 | Unset):
             installation_id (None | str | Unset):
+            next_attempt_at (datetime.datetime | None | Unset):
             result (None | RunSwitchOperationResult | Unset):
             status_reason (None | str | Unset):
      """
@@ -64,9 +68,11 @@ class RunSwitchOperation:
     progress: RunSwitchProgress
     request_key: str
     state: RunSwitchOperationState
+    blockers: list[OperationBlocker] | Unset = UNSET
     cleanup_mode: None | RunSwitchOperationCleanupModeType0 | Unset = UNSET
     current_phase: None | RunSwitchOperationCurrentPhaseType0 | Unset = UNSET
     installation_id: None | str | Unset = UNSET
+    next_attempt_at: datetime.datetime | None | Unset = UNSET
     result: None | RunSwitchOperationResult | Unset = UNSET
     status_reason: None | str | Unset = UNSET
 
@@ -75,6 +81,7 @@ class RunSwitchOperation:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.run_switch_operation_result import RunSwitchOperationResult # noqa: PLC0415
         from ..models.run_switch_progress import RunSwitchProgress # noqa: PLC0415
         action: str = self.action
@@ -102,6 +109,15 @@ class RunSwitchOperation:
 
         state: str = self.state
 
+        blockers: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.blockers, Unset):
+            blockers = []
+            for blockers_item_data in self.blockers:
+                blockers_item = blockers_item_data.to_dict()
+                blockers.append(blockers_item)
+
+
+
         cleanup_mode: None | str | Unset
         if isinstance(self.cleanup_mode, Unset):
             cleanup_mode = UNSET
@@ -123,6 +139,14 @@ class RunSwitchOperation:
             installation_id = UNSET
         else:
             installation_id = self.installation_id
+
+        next_attempt_at: None | str | Unset
+        if isinstance(self.next_attempt_at, Unset):
+            next_attempt_at = UNSET
+        elif isinstance(self.next_attempt_at, datetime.datetime):
+            next_attempt_at = self.next_attempt_at.isoformat()
+        else:
+            next_attempt_at = self.next_attempt_at
 
         result: dict[str, Any] | None | Unset
         if isinstance(self.result, Unset):
@@ -152,12 +176,16 @@ class RunSwitchOperation:
             "request_key": request_key,
             "state": state,
         })
+        if blockers is not UNSET:
+            field_dict["blockers"] = blockers
         if cleanup_mode is not UNSET:
             field_dict["cleanup_mode"] = cleanup_mode
         if current_phase is not UNSET:
             field_dict["current_phase"] = current_phase
         if installation_id is not UNSET:
             field_dict["installation_id"] = installation_id
+        if next_attempt_at is not UNSET:
+            field_dict["next_attempt_at"] = next_attempt_at
         if result is not UNSET:
             field_dict["result"] = result
         if status_reason is not UNSET:
@@ -169,6 +197,7 @@ class RunSwitchOperation:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.run_switch_operation_result import RunSwitchOperationResult # noqa: PLC0415
         from ..models.run_switch_progress import RunSwitchProgress # noqa: PLC0415
         d = dict(src_dict)
@@ -209,6 +238,18 @@ class RunSwitchOperation:
         state = check_run_switch_operation_state(d.pop("state"))
 
 
+
+
+        _blockers = d.pop("blockers", UNSET)
+        blockers: list[OperationBlocker] | Unset = UNSET
+        if _blockers is not UNSET:
+            blockers = []
+            for blockers_item_data in _blockers:
+                blockers_item = OperationBlocker.from_dict(blockers_item_data)
+
+
+
+                blockers.append(blockers_item)
 
 
         def _parse_cleanup_mode(data: object) -> None | RunSwitchOperationCleanupModeType0 | Unset:
@@ -261,6 +302,26 @@ class RunSwitchOperation:
         installation_id = _parse_installation_id(d.pop("installation_id", UNSET))
 
 
+        def _parse_next_attempt_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                next_attempt_at_type_0 = datetime.datetime.fromisoformat(data)
+
+
+
+                return next_attempt_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
+
+
         def _parse_result(data: object) -> None | RunSwitchOperationResult | Unset:
             if data is None:
                 return data
@@ -301,9 +362,11 @@ class RunSwitchOperation:
             progress=progress,
             request_key=request_key,
             state=state,
+            blockers=blockers,
             cleanup_mode=cleanup_mode,
             current_phase=current_phase,
             installation_id=installation_id,
+            next_attempt_at=next_attempt_at,
             result=result,
             status_reason=status_reason,
         )

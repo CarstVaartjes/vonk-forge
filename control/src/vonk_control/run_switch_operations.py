@@ -87,6 +87,13 @@ from .operation_api import (
     OperationQuery,
     _activity_keyset_filter,
 )
+from .operation_blockers import (
+    OperationBlocker,
+    bound_blockers,
+    dump_blockers,
+    make_blocker,
+    read_blockers,
+)
 from .operation_progress import observe_progress, project_progress
 from .preparation_contract import (
     ControllerAssetState,
@@ -3425,6 +3432,7 @@ class RunSwitchOperationService:
         for job_id in job_ids:
             try:
                 advanced = self._advance(str(job_id)) or advanced
+                self._record_wait(str(job_id))
             except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
                 # One persisted operation must never deny unrelated operations
                 # their turn.  A malformed contract is rejected and retained by
@@ -3441,6 +3449,43 @@ class RunSwitchOperationService:
                 )
                 continue
         return advanced
+
+    def _record_wait(self, operation_id: str) -> None:
+        """Store what a waiting or retrying operation waits for; log changes.
+
+        A retry is a wait, so the reason is kept next to the progress and shown
+        wherever the operation is shown. The list is a current snapshot: it is
+        replaced at each check and empty once the operation runs on or settles.
+        """
+
+        with self._sessions.begin() as session:
+            job = session.get(Job, operation_id, with_for_update=True)
+            if job is None or job.kind not in _OPERATION_KINDS:
+                return
+            try:
+                progress = _read_progress(job.result)
+            except RunSwitchOperationConflict:
+                return
+            wanted = bound_blockers(_wait_blockers(job, progress))
+            stored = dump_blockers(wanted)
+            if stored == (progress.get("blockers") or []):
+                return
+            before = {
+                (item.code, tuple(item.node_ids))
+                for item in read_blockers(progress.get("blockers"))
+            }
+            if stored:
+                progress["blockers"] = stored
+            else:
+                progress.pop("blockers", None)
+            job.result = _persisted_result(progress)
+            after = {(item.code, tuple(item.node_ids)) for item in wanted}
+            if wanted and before != after:
+                _LOGGER.info(
+                    "run/switch %s is waiting: %s",
+                    operation_id,
+                    "; ".join(f"{item.code}: {item.detail}" for item in wanted[:4]),
+                )
 
     def _preview_run(
         self,
@@ -7912,6 +7957,12 @@ class RunSwitchOperationService:
             # Existing accepted rows parked by the prior automatic-observation
             # state are still auto-observed; present their actual behavior.
             projected_state = "waiting"
+        blockers = (
+            list(persisted_result.blockers)
+            if persisted_result is not None
+            and job.state in {"queued", "running", "waiting", "waiting-for-operator"}
+            else []
+        )
         return RunSwitchOperation(
             operation_id=job.id,
             kind=_OPERATION_KIND_ADAPTER.validate_python(job.kind, strict=True),
@@ -7934,6 +7985,12 @@ class RunSwitchOperationService:
             ),
             status_reason=job.status_reason,
             result=persisted_result,
+            blockers=blockers,
+            next_attempt_at=(
+                persisted_result.observation_due_at
+                if blockers and persisted_result is not None
+                else None
+            ),
         )
 
 
@@ -8105,6 +8162,12 @@ class RunSwitchOperationProvider:
             ),
             "result": _activity_result(operation),
             "detail": operation.status_reason,
+            "blockers": [item.model_dump(mode="json") for item in operation.blockers],
+            "next_attempt_at": (
+                operation.next_attempt_at.isoformat()
+                if operation.next_attempt_at is not None
+                else None
+            ),
         }
 
 
@@ -8159,8 +8222,12 @@ def _activity_progress(operation: RunSwitchOperation) -> dict[str, object]:
 def _activity_result(operation: RunSwitchOperation) -> dict[str, object] | None:
     """Keep family result data and add bounded generic failure evidence."""
 
+    # Blockers travel as their own Activity field; the failure evidence is
+    # bounded by key count, so they are not repeated inside the result.
     result = (
-        operation.result.model_dump(mode="json") if operation.result is not None else {}
+        operation.result.model_dump(mode="json", exclude={"blockers"})
+        if operation.result is not None
+        else {}
     )
     if operation.state == "failed":
         retryable = bool(result.get("retryable") is True)
@@ -8442,6 +8509,69 @@ def _read_progress(value: object) -> dict[str, object]:
     return (
         result.model_dump(mode="json", exclude_unset=True) if result is not None else {}
     )
+
+
+_WAIT_CODE = re.compile(
+    r"^(run-switch\.[a-z0-9-]+|[a-z][a-z0-9_]*\.[a-z0-9_.-]+)(?=[:;,]|$)"
+)
+
+
+_WAIT_PHRASES = (
+    ("Waiting for a target Spark", "run-switch.target-not-active"),
+    ("Runtime image preparation", "run-switch.runtime-image-preparing"),
+    ("Waiting for exact run and route", "run-switch.final-verification"),
+    ("Lifecycle effect is uncertain", "run-switch.effect-uncertain"),
+)
+
+
+def _wait_code(reason: str, fallback: str) -> str:
+    text = reason.strip()
+    match = _WAIT_CODE.match(text)
+    if match:
+        return match.group(1)
+    return next(
+        (code for phrase, code in _WAIT_PHRASES if text.startswith(phrase)), fallback
+    )
+
+
+def _wait_blockers(job: Job, progress: Mapping[str, object]) -> list[OperationBlocker]:
+    """The reasons a queued, waiting or retrying operation is not moving."""
+
+    reason = job.status_reason or ""
+    nodes = job.targets if isinstance(job.targets, list) else []
+    if job.state in {"waiting", "waiting-for-operator"}:
+        return [
+            make_blocker(
+                _wait_code(reason, "run-switch.waiting"),
+                reason or "waiting for the next check",
+                node_ids=nodes,
+            )
+        ]
+    retry_reason = progress.get("retry_reason")
+    if (
+        job.state == "running"
+        and isinstance(retry_reason, str)
+        and retry_reason
+        and progress.get("observation_due_at") is not None
+    ):
+        # A phase that will be tried again is waiting, not failed.
+        return [
+            make_blocker(
+                "run-switch.phase-retry",
+                retry_reason,
+                node_ids=nodes,
+            )
+        ]
+    if job.state == "running" and reason.startswith("Start result uncertain"):
+        return [
+            make_blocker(
+                "run-switch.start-observation",
+                reason,
+                severity="info",
+                node_ids=nodes,
+            )
+        ]
+    return []
 
 
 def _persisted_result(value: Mapping[str, object]) -> dict[str, object]:

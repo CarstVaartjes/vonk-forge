@@ -18,6 +18,7 @@ class FakeLiteLlm:
     def __init__(self) -> None:
         self.keys: dict[str, dict] = {}
         self.counter = 0
+        self.fail_generate_after: int | None = None
 
     def handle(self, request: httpx2.Request) -> httpx2.Response:
         assert request.headers["authorization"] == f"Bearer {MASTER}"
@@ -44,6 +45,11 @@ class FakeLiteLlm:
             return httpx2.Response(404, json={"error": "not found"})
         body = json.loads(request.content)
         if path == "/key/generate":
+            if (
+                self.fail_generate_after is not None
+                and self.counter >= self.fail_generate_after
+            ):
+                return httpx2.Response(500, json={"error": "database unavailable"})
             self.counter += 1
             key = body.get("key") or f"sk-generated-{self.counter:032d}"
             self.keys[body["key_alias"]] = {
@@ -55,6 +61,16 @@ class FakeLiteLlm:
                 "created_at": "2026-09-28T00:00:00Z",
             }
             return httpx2.Response(200, json=self.keys[body["key_alias"]])
+        if path == "/key/update":
+            for alias, item in list(self.keys.items()):
+                if item["key"] == body["key"]:
+                    del self.keys[alias]
+                    self.keys[body["key_alias"]] = {
+                        **item,
+                        "key_alias": body["key_alias"],
+                    }
+                    return httpx2.Response(200, json={"key": body["key"]})
+            return httpx2.Response(404)
         if path == "/key/delete":
             for alias in body["key_aliases"]:
                 del self.keys[alias]
@@ -91,6 +107,18 @@ def test_roll_replaces_the_secret_and_keeps_name_and_models():
     assert body["key"] != first["key"]
     assert [item["name"] for item in client.get("/api/key").json()["keys"]] == ["ci"]
     assert client.post("/api/key/missing/roll").status_code == 404
+
+
+def test_roll_that_fails_to_create_keeps_the_old_key_working():
+    litellm = FakeLiteLlm()
+    client = _client(_service(litellm))
+    first = client.post("/api/key", json={"name": "ci", "models": ["qwen"]}).json()
+    litellm.fail_generate_after = litellm.counter
+
+    assert client.post("/api/key/ci/roll").status_code == 503
+
+    assert list(litellm.keys) == ["ci"]
+    assert litellm.keys["ci"]["key"] == first["key"]
 
 
 def test_create_list_and_revoke_client_keys():
