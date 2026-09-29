@@ -312,7 +312,7 @@ def test_generic_job_submission_route_is_retired() -> None:
                 "payload": {},
             },
         ).status_code
-        == 405
+        == 404
     )
     assert jobs.calls == []
 
@@ -322,9 +322,10 @@ def test_cookie_authentication_resolves_only_through_browser_sessions() -> None:
     client, issued, _service, _sessions, _clock, _codec, _jobs = _browser_client()
     client.cookies.set("vonk_session", issued.token)
 
-    response = client.get("/api/jobs")
+    response = client.get("/api/fleet")
 
-    assert response.status_code == 200
+    # Authenticated; the fleet projection itself is not wired in this fixture.
+    assert response.status_code == 503
 
 
 def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
@@ -358,7 +359,7 @@ def test_cookie_authentication_is_unavailable_without_browser_service() -> None:
     client, headers, _jobs = _client("administrator")
     client.cookies.set("vonk_session", headers["Authorization"].removeprefix("Bearer "))
 
-    assert client.get("/api/jobs").status_code == 401
+    assert client.get("/api/fleet").status_code == 401
 
 
 def test_signed_bearer_authentication_remains_unchanged_and_takes_precedence() -> None:
@@ -367,13 +368,14 @@ def test_signed_bearer_authentication_remains_unchanged_and_takes_precedence() -
     client.cookies.set("vonk_session", "not-an-opaque-session")
     bearer = codec.issue(Actor("operator", "operator"), ttl_seconds=1000, now=0)
 
-    response = client.get("/api/jobs", headers={"authorization": f"Bearer {bearer}"})
+    response = client.get("/api/fleet", headers={"authorization": f"Bearer {bearer}"})
 
-    assert response.status_code == 200
+    # Authenticated; the fleet projection itself is not wired in this fixture.
+    assert response.status_code == 503
     client.cookies.set("vonk_session", issued.token)
     assert (
         client.get(
-            "/api/jobs", headers={"authorization": f"Bearer {issued.token}"}
+            "/api/fleet", headers={"authorization": f"Bearer {issued.token}"}
         ).status_code
         == 401
     )
@@ -394,7 +396,7 @@ def test_cookie_sessions_reflect_revocation_disablement_and_expiry() -> None:
         else:
             clock.value += timedelta(hours=12)
 
-        assert client.get("/api/jobs").status_code == 401
+        assert client.get("/api/fleet").status_code == 401
 
 
 class _RejectedPlan(BaseModel):

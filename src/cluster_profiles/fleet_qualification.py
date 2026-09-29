@@ -274,6 +274,7 @@ class ServiceSmokeAdapter:
     def run(
         self,
         client: Any,
+        number: int,
         alias: str,
         *,
         recipe_key: str,
@@ -287,7 +288,19 @@ class ServiceSmokeAdapter:
                 str(blocker["detail"] if blocker else "service fixture unavailable")
             )
         cases = [case.render(alias, self.fixtures.fixtures) for case in recipe.cases]
-        endpoint = client.request("GET", f"/api/endpoints/{_quote(alias)}")
+        view = client.request(
+            "GET", f"/api/profile/{number}/endpoints", query={"alias": alias}
+        )
+        endpoint = next(
+            (
+                item["endpoint"]
+                for item in view.get("assignments") or []
+                if item.get("alias") == alias and item.get("endpoint")
+            ),
+            None,
+        )
+        if endpoint is None:
+            raise QualificationError("published endpoint is unavailable")
         base = endpoint.get("api_base")
         if not isinstance(base, str):
             raise QualificationError("published endpoint API base is invalid")

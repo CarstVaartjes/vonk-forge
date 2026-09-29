@@ -2,7 +2,7 @@ import {availabilityProgress, LibraryAvailabilityProgress} from "../components/l
 import {availabilityFailure, LibraryAvailabilityFeedback} from "../components/library-availability-feedback";
 import {useCallback, useEffect, useId, useMemo, useRef, useState} from "react";
 import type {SyntheticEvent} from "react";
-import type {ControlApi, JobDetail, JobSummary, OperationDetail, VisualFleetSnapshot} from "../api/types";
+import type {ControlApi, JobDetail, OperationDetail, VisualFleetSnapshot} from "../api/types";
 import {StatusPill} from "../components/status-pill";
 import {nodeDisplayName} from "../lib/fleet";
 
@@ -10,8 +10,7 @@ type ActivityView = "timeline" | "table";
 type ActivityStatus = "recorded" | "in_progress" | "attention" | "unsuccessful" | "unknown";
 type ActivitySummary = {request_id: string; actor: string; action: string; targets: string[]};
 type ActivityRecord = ActivitySummary & {occurred_at?: string | null; source: "job" | "operation"; target_names?: string[]; operation?: OperationDetail};
-type TimestampedJob = JobSummary & {created_at?: string};
-type ActivityApi = Pick<ControlApi, "job" | "jobs" | "resumeJob" | "visualFleet" | "operations" | "operation">;
+type ActivityApi = Pick<ControlApi, "job" | "resumeJob" | "visualFleet" | "operations" | "operation">;
 
 const VIEW_PREFERENCE_KEY = "vonk.activity.view";
 
@@ -464,18 +463,14 @@ function ActivityOverview({events, filtering, loadedCount}: {events: ActivityRec
   </section>;
 }
 
-function jobRecord(job: TimestampedJob): ActivityRecord {
-  return {
-    request_id: job.id,
-    actor: "Vonk Forge",
-    action: `operation.${job.kind}.${job.state}`,
-    occurred_at: job.created_at,
-    targets: [],
-    source: "job",
-  };
-}
+const STANDALONE_JOB_PREFIX = "job:";
 
 function canonicalRecord(detail: OperationDetail, names: Map<string, string>): ActivityRecord {
+  // Standalone jobs (agent upgrades) are listed as operations; their
+  // progress and resume live in the job detail.
+  if (detail.id.startsWith(STANDALONE_JOB_PREFIX)) {
+    return {request_id: detail.id.slice(STANDALONE_JOB_PREFIX.length), actor: "Vonk Forge", action: `operation.${detail.kind}.${detail.state}`, occurred_at: detail.created_at, targets: detail.node_ids, target_names: detail.node_ids.map(id => names.get(id) ?? ""), source: "job"};
+  }
   return {request_id: detail.id, actor: "Vonk Forge", action: `operation.${detail.kind}.${detail.state}`, occurred_at: detail.created_at, targets: detail.node_ids, target_names: detail.node_ids.map(id => names.get(id) ?? ""), source: "operation", operation: detail};
 }
 
@@ -556,14 +551,8 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
   const [view, setView] = useState<ActivityView>(readViewPreference);
   const [sort, setSort] = useState<"recent" | "attention">("recent");
   const [targetNames, setTargetNames] = useState(new Map<string, string>());
-  const [loadedJobCount, setLoadedJobCount] = useState(0);
-  const [jobTotal, setJobTotal] = useState(0);
-  const [jobCursor, setJobCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [paginationError, setPaginationError] = useState("");
-  const [partialWarning, setPartialWarning] = useState("");
-  const [jobsAvailable, setJobsAvailable] = useState(true);
-  const operationIds = useRef(new Set<string>());
   const canonicalIds = useRef(new Set<string>());
   const [canonicalCount, setCanonicalCount] = useState(0);
   const [canonicalTotal, setCanonicalTotal] = useState(0);
@@ -577,46 +566,29 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     setLoading(true);
     setLoadingMore(false);
     setError("");
-    setPartialWarning("");
     const controller = new AbortController();
     void Promise.allSettled([
-      api.jobs(),
       api.operations(undefined, controller.signal),
       api.visualFleet(controller.signal).catch(() => null),
-    ]).then(([operationsResult, canonicalResult, fleetResult]) => {
+    ]).then(([canonicalResult, fleetResult]) => {
       if (!active) return;
-      const operations = operationsResult.status === "fulfilled" ? operationsResult.value : null;
-      const operationsError = operationsResult.status === "rejected" ? (operationsResult.reason instanceof Error ? operationsResult.reason.message : "Unable to load operations.") : "";
       const canonical = canonicalResult.status === "fulfilled" ? canonicalResult.value : null;
       const canonicalError = canonicalResult.status === "rejected" ? (canonicalResult.reason instanceof Error ? canonicalResult.reason.message : "Unable to load operations.") : "";
       setCanonicalAvailable(Boolean(canonical));
-      setJobsAvailable(Boolean(operations));
-      if (!operations && !canonical) {
+      if (!canonical) {
         setEvents(null);
-        setError(`Unable to load jobs or operations. ${[operationsError, canonicalError].filter(Boolean).join(" ")}`);
+        setError(`Unable to load activity. ${canonicalError}`);
         return;
       }
-      const warnings = [
-        !operations ? `Jobs could not be loaded (${operationsError}).` : "",
-        !canonical ? `Operations could not be loaded (${canonicalError}).` : "",
-      ].filter(Boolean);
-      if (warnings.length) setPartialWarning(`${warnings.join(" ")} Showing available activity only.`);
-      canonicalIds.current = new Set((canonical?.operations ?? []).map(operation => operation.id));
+      canonicalIds.current = new Set(canonical.operations.map(operation => operation.id));
       setCanonicalCount(canonicalIds.current.size);
-      setCanonicalTotal(canonical?.total ?? 0);
-      setCanonicalCursor(canonical?.next_cursor ?? null);
+      setCanonicalTotal(canonical.total);
+      setCanonicalCursor(canonical.next_cursor ?? null);
       const fleet = fleetResult.status === "fulfilled" ? fleetResult.value : null;
       const names = targetNameLookup(fleet);
       setTargetNames(names);
-      operationIds.current = new Set((operations?.jobs ?? []).map(job => job.id));
-      setLoadedJobCount(operationIds.current.size);
-      setJobTotal(operations?.total ?? 0);
-      setJobCursor(operations?.next_cursor ?? null);
       setPaginationError("");
-      setEvents([
-        ...(canonical?.operations ?? []).filter((operation, index, all) => all.findIndex(item => item.id === operation.id) === index).map(operation => canonicalRecord(operation, names)),
-        ...(operations?.jobs ?? []).filter((job, index, jobs) => jobs.findIndex(candidate => candidate.id === job.id) === index).map(job => jobRecord(job as TimestampedJob)),
-      ].sort(sortActivityByTime));
+      setEvents(canonical.operations.filter((operation, index, all) => all.findIndex(item => item.id === operation.id) === index).map(operation => canonicalRecord(operation, names)).sort(sortActivityByTime));
     }).catch(value => {
       if (!active) return;
       setEvents(null);
@@ -632,28 +604,14 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
   }, [api, attempt]);
 
   async function loadMoreOperations(): Promise<void> {
-    if ((!jobCursor && !canonicalCursor) || loading || loadingMore) return;
+    if (!canonicalCursor || loading || loadingMore) return;
     const generation = requestGeneration.current;
     setLoadingMore(true);
     setPaginationError("");
-    const [jobsResult, canonicalResult] = await Promise.allSettled([
-      jobCursor ? api.jobs(jobCursor) : Promise.resolve(null),
-      canonicalCursor ? api.operations(canonicalCursor) : Promise.resolve(null),
-    ]);
+    const [canonicalResult] = await Promise.allSettled([api.operations(canonicalCursor)]);
     if (requestGeneration.current !== generation) return;
     const additional: ActivityRecord[] = [];
     const errors: string[] = [];
-    if (jobsResult.status === "fulfilled" && jobsResult.value) {
-      const next = jobsResult.value;
-      for (const job of next.jobs) {
-        if (operationIds.current.has(job.id)) continue;
-        operationIds.current.add(job.id);
-        additional.push(jobRecord(job as TimestampedJob));
-      }
-      setLoadedJobCount(operationIds.current.size);
-      setJobTotal(next.total);
-      setJobCursor(next.next_cursor ?? null);
-    } else if (jobsResult.status === "rejected") errors.push(`Older jobs could not be loaded. ${jobsResult.reason instanceof Error ? jobsResult.reason.message : "Try again."}`);
     if (canonicalResult.status === "fulfilled" && canonicalResult.value) {
       const next = canonicalResult.value;
       for (const operation of next.operations) {
@@ -726,15 +684,12 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     {events && events.length > 0 && <ActivityOverview events={filtered} filtering={filtering} loadedCount={events.length}/>}
 
     {events && <section className="library-pagination" aria-label="Activity history coverage">
-      <p role="status">Showing {events.length} loaded {events.length === 1 ? "event" : "events"}.{(jobCursor || canonicalCursor) ? " Load older activity below." : ""}</p>
-      <details className="activity-technical"><summary>History coverage</summary><p>{jobsAvailable ? `Loaded ${loadedJobCount} of ${jobTotal} jobs` : "Jobs are unavailable"}, plus {canonicalAvailable ? `${canonicalCount} of ${canonicalTotal} operations` : "operations are unavailable"}. Summary counts and filters cover only these loaded records.</p></details>
-      {(jobCursor || canonicalCursor) && <button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => void loadMoreOperations()}>{loadingMore ? "Loading older operations…" : "Load older operations"}</button>}
-      {jobsAvailable && !jobCursor && loadedJobCount < jobTotal && <p role="status">The jobs API reports additional records but did not provide a continuation cursor.</p>}
+      <p role="status">Showing {events.length} loaded {events.length === 1 ? "event" : "events"}.{canonicalCursor ? " Load older activity below." : ""}</p>
+      <details className="activity-technical"><summary>History coverage</summary><p>{canonicalAvailable ? `Loaded ${canonicalCount} of ${canonicalTotal} operations` : "Operations are unavailable"}. Summary counts and filters cover only these loaded records.</p></details>
+      {canonicalCursor && <button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => void loadMoreOperations()}>{loadingMore ? "Loading older operations…" : "Load older operations"}</button>}
       {canonicalAvailable && !canonicalCursor && canonicalCount < canonicalTotal && <p role="status">The operations API reports additional records but did not provide a continuation cursor.</p>}
       {paginationError && <p role="alert">{paginationError}</p>}
     </section>}
-
-    {partialWarning && <section className="activity-source-warning" role="alert"><div><strong>Some activity could not be loaded</strong><p>{partialWarning}</p></div><button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => setAttempt(value => value + 1)}>Retry all sources</button></section>}
 
     <section className="activity-controls" aria-label="Activity controls">
       <label className="activity-search"><span>Search activity</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Action, operator, or technical ID"/></label>
@@ -756,7 +711,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
 
     {loading && !events && <section className="activity-state" role="status"><strong>Loading activity…</strong><p>Reading the latest operator and system events.</p></section>}
     {error && <section className="activity-state is-error" role="alert"><div><strong>Activity unavailable</strong><p>{error}</p></div><button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => setAttempt(value => value + 1)}>Try again</button></section>}
-    {!loading && !error && events?.length === 0 && <section className="activity-state"><strong>{partialWarning ? "No activity from available sources" : "No activity in the loaded window"}</strong><p>{partialWarning ? "The available activity source returned no records. Retry to check the unavailable source." : "No job or operation records were returned by the current API windows."}</p></section>}
+    {!loading && !error && events?.length === 0 && <section className="activity-state"><strong>No activity in the loaded window</strong><p>No operation records were returned by the current API window.</p></section>}
     {events && filtered.length === 0 && events.length > 0 && <section className="activity-state"><strong>No matching activity</strong><p>Try a broader search or remove one or more filters.</p><button type="button" className="button secondary" onClick={clearFilters}>Clear filters</button></section>}
     {displayed.length > 0 && (view === "timeline" ? <ActivityTimeline api={api} events={displayed} now={now} onJobUpdate={updateOperation} onOperationUpdate={updateCanonicalOperation} targetNames={targetNames}/> : <ActivityTable api={api} events={displayed} now={now} onJobUpdate={updateOperation} onOperationUpdate={updateCanonicalOperation} targetNames={targetNames}/>)}
   </div>;

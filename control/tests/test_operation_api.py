@@ -221,22 +221,6 @@ def test_openapi_exposes_only_current_document_contract() -> None:
     assert "/api/documents" not in paths
 
 
-def test_job_activity_summaries_include_their_authoritative_creation_time() -> None:
-    client, operator, *_ = _client()
-
-    response = client.get("/api/jobs", headers=operator)
-
-    assert response.status_code == 200
-    assert response.json()["jobs"] == [
-        {
-            "id": "11111111-1111-4111-8111-111111111111",
-            "state": "queued",
-            "kind": "reconcile",
-            "created_at": "2026-08-15T11:45:00Z",
-        }
-    ]
-
-
 def test_generic_operation_read_contract_projects_bounded_durable_state() -> None:
     item = {
         "id": "33333333-3333-4333-8333-333333333333",
@@ -271,7 +255,6 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
         "updated_at": "2026-08-15T12:00:00Z",
     }
     services = OperationApiServices(
-        endpoint=lambda _alias, _gateway: {},
         agents=lambda: (),
         job_operations=lambda _job_id, _cursor, _limit: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
@@ -466,7 +449,6 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
         )
 
     services = OperationApiServices(
-        endpoint=lambda _alias, _gateway: {},
         agents=lambda: (),
         job_operations=lambda _job_id, _cursor, _limit: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
@@ -793,7 +775,6 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
 def test_operator_resume_is_rbac_guarded_and_strict() -> None:
     resumed: list[str] = []
     services = OperationApiServices(
-        endpoint=lambda _alias, _gateway: {},
         agents=lambda: (),
         job_operations=lambda _job_id, _cursor, _limit: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
@@ -1606,7 +1587,6 @@ def test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault() -> N
         raise BoundedJSONError("stored operation progress is invalid")
 
     services = OperationApiServices(
-        endpoint=lambda _alias, _gateway: {},
         agents=lambda: (),
         job_operations=unavailable,
         resume_job=lambda _job_id: None,
@@ -1748,7 +1728,6 @@ def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None
         raise AssertionError("not used")
 
     services = OperationApiServices(
-        endpoint=lambda _alias, _gateway: {},
         agents=lambda: (),
         job_operations=unavailable,
         resume_job=lambda _job_id: None,
@@ -2016,7 +1995,6 @@ def test_operator_retire_is_a_distinct_disposition() -> None:
     resumed: list[str] = []
     retired: list[str] = []
     services = OperationApiServices(
-        endpoint=lambda _alias, _gateway: {},
         agents=lambda: (),
         job_operations=lambda _job_id, _cursor, _limit: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
@@ -2054,7 +2032,6 @@ def test_operator_retire_reports_a_live_operation_refusal() -> None:
         raise OperatorRetirementRefused("op-1", "its bounded retry budget is not spent")
 
     services = OperationApiServices(
-        endpoint=lambda _alias, _gateway: {},
         agents=lambda: (),
         job_operations=lambda _job_id, _cursor, _limit: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)

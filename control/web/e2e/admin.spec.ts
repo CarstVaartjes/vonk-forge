@@ -86,7 +86,7 @@ test("Fleet summary keeps each count above its label at narrow and wide widths",
   }
 });
 
-test("Activity combines current operations and jobs", async ({page}) => {
+test("Activity shows operations and standalone jobs", async ({page}) => {
   const requestId = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
   const targetId = `spk_${"1".repeat(32)}`;
   const expectedBinary = "b".repeat(64);
@@ -104,12 +104,19 @@ test("Activity combines current operations and jobs", async ({page}) => {
     progress: null,
     failure: null,
     recovery: null,
-  }], total: 1, next_cursor: null}}));
-  await page.route("**/api/jobs?*", route => route.fulfill({json: {
-    jobs: [{id: "upgrade-1", kind: "agent-upgrade", state: "waiting-for-operator", created_at: "2026-08-24T08:58:00Z"}],
-    next_cursor: null,
-    total: 1,
-  }}));
+  }, {
+    schema_version: 2,
+    id: "job:upgrade-1",
+    parent_id: null,
+    kind: "agent-upgrade",
+    state: "waiting-for-operator",
+    attempt: 1,
+    node_ids: [targetId],
+    created_at: "2026-08-24T08:58:00Z",
+    progress: null,
+    failure: null,
+    recovery: null,
+  }], total: 2, next_cursor: null}}));
   await page.route("**/api/jobs/upgrade-1?*", route => {
     detailRequests += 1;
     return route.fulfill({json: {

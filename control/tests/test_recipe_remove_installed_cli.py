@@ -110,7 +110,7 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
     token = codec.issue(actor, ttl_seconds=1_000, now=0)
     headers = {"Authorization": f"Bearer {token}"}
     api = create_app(
-        jobs=JobService(sessions, clock=lambda: now, cursors=codec.cursor_codec()),
+        jobs=JobService(sessions, clock=lambda: now),
         tokens=codec,
         recipe_image_availability=service,
         now=lambda: 100,

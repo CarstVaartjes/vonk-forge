@@ -76,7 +76,6 @@ from .catalog_sync import (
 from .cluster_mappings import ClusterMappingService
 from .distribution_executor import CompositeDistributionPhaseExecutor
 from .download_contract import download_responses
-from .endpoint_contract import EndpointResponse, inference_gateway_api_base
 from .failure_evidence import FailureEvidenceService
 from .failure_evidence_api import install_failure_evidence_routes
 from .fleet_profile_api import install_fleet_profile_routes
@@ -104,8 +103,6 @@ from .operation_api import (
     JobProgress,
     JobResumeRequest,
     JobResumeResponse,
-    JobsResponse,
-    JobSummary,
     OperationApiServices,
     OperationDetailResponse,
     OperationOwnerReference,
@@ -440,15 +437,6 @@ class JobQueue(Protocol):
         request_id: str,
     ) -> Any: ...
     def get(self, job_id: str) -> Any: ...
-    def list(self, *, limit: int = 100) -> list[Any]: ...
-    def list_page(
-        self,
-        *,
-        limit: int = 100,
-        cursor: str | None = None,
-        status: str | None = None,
-        target: str | None = None,
-    ) -> tuple[list[Any], str | None, int]: ...
 
 
 def refresh_fleet_metrics(
@@ -921,75 +909,6 @@ def create_app(
         fleet_services=fleet_services,
     )
 
-    @app.get(
-        "/api/endpoints/{alias}",
-        response_model=EndpointResponse,
-        responses=bounded_error_responses(401, 404, 503),
-        operation_id="getPublishedEndpoint",
-    )
-    def endpoint_view(
-        request: Request,
-        alias: str = ApiPath(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$"),
-        _actor: Actor = authenticated_actor,
-    ) -> EndpointResponse:
-        if operations is None:
-            raise HTTPException(
-                status_code=503, detail="endpoint publication unavailable"
-            )
-        try:
-            gateway = inference_gateway_api_base(request.headers.get("host"))
-            return EndpointResponse.model_validate(operations.endpoint(alias, gateway))
-        except KeyError:
-            raise HTTPException(status_code=404, detail="endpoint not found") from None
-        except (RuntimeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="endpoint publication unavailable"
-            ) from None
-
-    @app.get(
-        "/api/jobs",
-        response_model=JobsResponse,
-        responses=bounded_error_responses(401, 422),
-        operation_id="listJobs",
-    )
-    def jobs_view(
-        cursor: str | None = Query(default=None, max_length=512),
-        limit: int = Query(default=20, ge=1, le=100),
-        job_status: str | None = Query(
-            default=None, alias="status", pattern=r"^[a-z][a-z0-9-]{0,31}$"
-        ),
-        target: str | None = Query(default=None, pattern=r"^spk_[0-9a-f]{32}$"),
-        _actor: Actor = authenticated_actor,
-    ) -> JobsResponse:
-        try:
-            page, next_cursor, total = jobs.list_page(
-                limit=limit,
-                cursor=cursor,
-                status=job_status,
-                target=target,
-            )
-        except ValueError:
-            raise HTTPException(
-                status_code=422, detail="job cursor is invalid"
-            ) from None
-        return JobsResponse(
-            jobs=[
-                JobSummary(
-                    id=job.id,
-                    state=job.state,
-                    kind=job.kind,
-                    created_at=(
-                        job.created_at.replace(tzinfo=UTC)
-                        if job.created_at.tzinfo is None
-                        else job.created_at.astimezone(UTC)
-                    ),
-                )
-                for job in page
-            ],
-            next_cursor=next_cursor,
-            total=total,
-        )
-
     def activity_detail(
         item: Mapping[str, object], *, tolerate_unreadable: bool = False
     ) -> OperationDetailResponse:
@@ -1277,7 +1196,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
 
     token_codec = TokenCodec(settings.token_signing_key)
     cursor_codec = token_codec.cursor_codec()
-    job_service = JobService(sessions, clock=clock, cursors=cursor_codec)
+    job_service = JobService(sessions, clock=clock)
     database_bundles = DatabaseSourceBundleStore(sessions)
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
     fleet_event_repository = FleetEventRepository(sessions, clock=clock)
