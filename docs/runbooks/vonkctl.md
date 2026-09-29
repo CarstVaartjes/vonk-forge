@@ -140,6 +140,7 @@ vonkctl fleet upgrade --all --yes
 vonkctl fleet loginfo Atlas --since 15m --lines 100 --follow
 vonkctl fleet progress JOB_ID --follow
 vonkctl fleet activity --state waiting-for-operator --limit 20
+vonkctl fleet evidence OPERATION_ID --output evidence.json
 vonkctl fleet resume JOB_ID --yes
 ```
 
@@ -305,6 +306,7 @@ A timeout or Ctrl-C ends observation without cancelling removal.
 
 ```bash
 vonkctl recipe
+vonkctl recipe sync-status
 vonkctl recipe library
 vonkctl recipe library --model "Qwen 3.8" --all-models
 vonkctl recipe library --all-models --fits-fleet

@@ -1355,6 +1355,53 @@ def _enrollment(payload: Mapping[str, object]) -> None:
     _actions(payload.get("recovery"))
 
 
+def _catalog_sync(payload: Mapping[str, object]) -> None:
+    if payload.get("state") == "never-run":
+        print("The recipe catalog has not synced yet.")
+        print("Next: vonkctl recipe library")
+        return
+    _field("State", payload.get("state"))
+    _field("Last run", _time(payload.get("completed_at") or payload.get("created_at")))
+    _field("Trigger", payload.get("trigger"))
+    _field("Repository", payload.get("repository"))
+    _field("Library version", payload.get("library_version"))
+    _field("Library updated", _time(payload.get("library_updated_at")))
+    commit, expected = payload.get("commit"), payload.get("expected_commit")
+    _field("Commit", commit)
+    if expected is not None and expected != commit:
+        _field("Expected commit", expected)
+    _field(
+        "Recipes",
+        f"{_text(payload.get('processed_count'))} of {_text(payload.get('total_count'))} processed; "
+        f"{_text(payload.get('imported_count'))} imported, {_text(payload.get('updated_count'))} updated, "
+        f"{_text(payload.get('unchanged_count'))} unchanged, {_text(payload.get('skipped_count'))} skipped, "
+        f"{_text(payload.get('withdrawn_count'))} withdrawn",
+    )
+    failure = _optional(payload.get("last_error"), "last_error")
+    if failure:
+        _field(
+            "Last error",
+            f"{_text(failure.get('code'))}: {_text(failure.get('detail'))} ({_time(failure.get('occurred_at'))})",
+        )
+    problems = _records(payload, "problems")
+    for problem in problems:
+        uri = f" [{problem['recipe_uri']}]" if problem.get("recipe_uri") else ""
+        _field(
+            "Problem",
+            f"{_text(problem.get('code'))}: {_text(problem.get('detail'))}{uri}",
+        )
+    for stale in _records(payload, "stale_recipes"):
+        _field(
+            "Stale",
+            f"{_text(stale.get('recipe_id'))}: {_text(stale.get('stale_installation_count'))} installations, "
+            f"{_text(stale.get('stale_run_count'))} runs",
+        )
+    for gone in _records(payload, "withdrawn_recipes"):
+        _field("Withdrawn", gone.get("recipe_id"))
+    if problems or failure:
+        print("Next: vonkctl fleet activity")
+
+
 def _error(payload: Mapping[str, object]) -> None:
     _field("Error", payload.get("error"))
     if payload.get("usage") is not None:
@@ -1460,6 +1507,10 @@ def render_payload(
             _job(payload)
         elif action == "activity":
             _activity(payload, activity_filters)
+        elif action == "evidence":
+            _field("Operation", payload.get("operation_id"))
+            _field("Attempt", payload.get("attempt"))
+            _field("File", payload.get("output"))
         elif action == "loginfo":
             _field("Spark", payload.get("node_id"))
             entries = _records(payload, "entries")
@@ -1487,6 +1538,8 @@ def render_payload(
             raise ValueError(f"no fleet presentation for {action}")
     elif noun == "recipe" and artifact_job_action is not None:
         _artifact_job(payload, artifact_job_action)
+    elif noun == "recipe" and action == "sync-status":
+        _catalog_sync(payload)
     elif noun in {"model", "recipe"}:
         if action == "preview":
             _cache_removal_review(payload)

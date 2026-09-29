@@ -500,6 +500,19 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     activity.add_argument("--request-id", type=_uuid_argument)
     _add_output(activity)
 
+    evidence = fleet_actions.add_parser(
+        "evidence", help="Download the diagnostics of one failed operation attempt"
+    )
+    evidence.add_argument("operation_id")
+    evidence.add_argument(
+        "--attempt",
+        type=int,
+        metavar="N",
+        help="Attempt number (default: the operation's current attempt)",
+    )
+    evidence.add_argument("--output", type=Path, required=True, metavar="FILE")
+    _add_output(evidence)
+
     resume = fleet_actions.add_parser(
         "resume", help="Resume a job that waits for an operator"
     )
@@ -593,6 +606,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         help="Exact topology node count",
     )
     _add_output(recipe_library)
+    recipe_sync_status = recipe_actions.add_parser(
+        "sync-status", help="Show when the recipe catalog last synced and what it found"
+    )
+    _add_output(recipe_sync_status)
     recipe_detail = recipe_actions.add_parser("detail", help="Show an exact recipe")
     _selector(recipe_detail, "recipe", help="Exact recipe selector or friendly name")
     recipe_detail.add_argument(
@@ -2292,6 +2309,27 @@ def _fleet(
             request_id=args.request_id,
         )
         return client.request("GET", "/api/operations", query=query or None)
+    if action == "evidence":
+        operation_id = _quoted(args.operation_id)
+        attempt = args.attempt
+        if attempt is None:
+            attempt = client.request("GET", f"/api/operations/{operation_id}").get(
+                "attempt"
+            )
+        if type(attempt) is not int or attempt < 0:
+            raise ValueError("operation has no attempt; pass --attempt")
+        with PrivateOutput(args.output) as destination:
+            bundle = client.request(
+                "GET",
+                f"/api/operations/{operation_id}/evidence",
+                query={"attempt": attempt},
+            )
+            destination.write(bundle)
+        return {
+            "operation_id": args.operation_id,
+            "attempt": attempt,
+            "output": str(args.output.absolute()),
+        }
     if action == "resume":
         job_id = args.job_id
         path = f"/api/jobs/{_quoted(job_id)}"
@@ -2875,6 +2913,13 @@ def _recipe(
             "/api/recipe/library",
             query=_library_query(args, recipe=True) or None,
         )
+    if action == "sync-status":
+        try:
+            return client.request("GET", "/api/catalog/managed-recipes/sync-status")
+        except ControlHTTPError as error:
+            if error.status_code != 404:
+                raise
+            return {"state": "never-run"}
     if action == "detail":
         result = client.request(
             "GET",
