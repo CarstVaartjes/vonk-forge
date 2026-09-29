@@ -263,6 +263,55 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert by_sparks
     assert {item.node_count for item in by_sparks} == {sparks}
 
+    # Engine and creator are recipe facets and filters.
+    assert {item.engine for item in recipe_page.recipes} == set(
+        recipe_page.facets.engine
+    )
+    assert {item.creator for item in recipe_page.recipes if item.creator} == set(
+        recipe_page.facets.creator
+    )
+    assert len(recipe_page.facets.engine) > 1
+    assert "MiaAI-Lab" in recipe_page.facets.creator
+    for engine_name in recipe_page.facets.engine:
+        by_engine = projection.recipe_library(limit=100, engine=[engine_name]).recipes
+        assert by_engine
+        assert {item.engine for item in by_engine} == {engine_name}
+        assert len(by_engine) == sum(
+            1 for item in recipe_page.recipes if item.engine == engine_name
+        )
+    by_creator = projection.recipe_library(limit=100, creator=["miaai-lab"]).recipes
+    assert by_creator
+    assert {item.creator for item in by_creator} == {"MiaAI-Lab"}
+    both = projection.recipe_library(
+        limit=100, creator=["MiaAI-Lab"], engine=["sglang"]
+    ).recipes
+    assert both
+    assert {(item.creator, item.engine) for item in both} == {("MiaAI-Lab", "sglang")}
+    echoed = projection.recipe_library(limit=1, engine=["sglang"], creator=["x"])
+    assert echoed.filters.engine == ["sglang"]
+    assert echoed.filters.creator == ["x"]
+
+    # Alternatives are the other recipes serving the same model, never itself.
+    shared = next(
+        item
+        for item in recipe_page.recipes
+        if any(
+            other.selector != item.selector
+            and set(other.model_selectors) & set(item.model_selectors)
+            for other in recipe_page.recipes
+        )
+    )
+    expected_alternatives = {
+        other.selector
+        for other in recipe_page.recipes
+        if other.selector != shared.selector
+        and set(other.model_selectors) & set(shared.model_selectors)
+    }
+    alternatives = projection.recipe_detail(shared.selector).alternatives
+    assert {item.selector for item in alternatives} == expected_alternatives
+    assert shared.selector not in {item.selector for item in alternatives}
+    assert all(item.engine and item.node_count for item in alternatives)
+
     # Several model selectors are a union. A repeated query parameter used to
     # reach a single-value parameter, so every selector but the last was lost.
     selectors = sorted({model.selector for model in models})

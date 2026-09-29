@@ -59,6 +59,88 @@ def test_recipe_readiness_flags_are_forwarded_to_the_controller(capsys):
     assert json.loads(capsys.readouterr().out)["recipes"] == []
 
 
+def test_recipe_engine_and_creator_filters_are_forwarded(capsys):
+    client = Pages([{"recipes": [], "next_cursor": None}])
+    assert (
+        cli.main(
+            [
+                "--json",
+                "recipe",
+                "library",
+                "--engine",
+                "vllm",
+                "--engine",
+                "sglang",
+                "--creator",
+                "MiaAI-Lab",
+            ],
+            control_client=client,
+        )
+        == 0
+    )
+    query = client.calls[0][3]["query"]
+    assert query["engine"] == ["vllm", "sglang"]
+    assert query["creator"] == ["MiaAI-Lab"]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--engine", "vllm,sglang", "--sparks", "1,2", "--usage", "chat, code"],
+        [
+            "--engine",
+            "vllm",
+            "--engine",
+            "sglang",
+            "--sparks",
+            "1",
+            "--sparks",
+            "2",
+            "--usage",
+            "chat",
+            "--usage",
+            "code",
+        ],
+        [
+            "--engine",
+            "vllm,sglang,vllm",
+            "--engine",
+            " sglang, ,",
+            "--sparks",
+            "1,2",
+            "--sparks",
+            "2",
+            "--usage",
+            "chat,",
+            "--usage",
+            "code",
+        ],
+    ],
+)
+def test_multi_value_filters_take_commas_repetition_or_both(capsys, arguments):
+    client = Pages([{"recipes": [], "next_cursor": None}])
+    assert (
+        cli.main(
+            ["--json", "recipe", "library", *arguments],
+            control_client=client,
+        )
+        == 0
+    )
+    query = client.calls[0][3]["query"]
+    assert query["engine"] == ["vllm", "sglang"]
+    assert query["sparks"] == [1, 2]
+    assert query["usage"] == ["chat", "code"]
+
+
+def test_multi_value_filter_refuses_a_non_numeric_spark_count(capsys):
+    client = Pages([])
+    assert (
+        cli.main(["recipe", "library", "--sparks", "1,two"], control_client=client) != 0
+    )
+    assert client.calls == []
+    assert "--sparks" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     "selector", ["two/code", "11111111-1111-4111-8111-111111111111"]
 )
@@ -208,3 +290,30 @@ def test_a_selector_prefix_does_not_select_a_different_variant():
     client = Pages([{"recipes": [recipe("one/code-nvfp4", "Coding NVFP4")]}])
     with pytest.raises(SelectorError, match="unknown"):
         controller_cli._resolve_recipe_selector(client, "one/code")
+
+
+def test_recipe_alternatives_render_one_comparable_line_each(capsys):
+    from cluster_profiles import cli_render
+
+    cli_render._recipe_alternatives(
+        {
+            "alternatives": [
+                {
+                    "selector": "vonk-forge/glm-sglang-dual",
+                    "engine": "sglang",
+                    "node_count": 2,
+                    "creator": "MiaAI-Lab",
+                    "version": "1.7.2",
+                    "cache": "not_cached",
+                    "fits_fleet": "ready",
+                }
+            ]
+        }
+    )
+    out = capsys.readouterr().out
+    assert (
+        "vonk-forge/glm-sglang-dual  sglang, 2 Sparks, MiaAI-Lab, v1.7.2, "
+        "not cached, fits fleet"
+    ) in out
+    cli_render._recipe_alternatives({"alternatives": []})
+    assert capsys.readouterr().out == ""

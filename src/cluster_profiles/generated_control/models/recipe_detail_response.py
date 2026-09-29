@@ -17,6 +17,7 @@ if TYPE_CHECKING:
   from ..models.library_recipe_identity import LibraryRecipeIdentity
   from ..models.library_recipe_model import LibraryRecipeModel
   from ..models.library_resource_projection import LibraryResourceProjection
+  from ..models.recipe_alternative import RecipeAlternative
   from ..models.recipe_definition import RecipeDefinition
   from ..models.recipe_readiness import RecipeReadiness
 
@@ -33,6 +34,7 @@ class RecipeDetailResponse:
     """
         Attributes:
             document (RecipeDefinition): The sole public recipe authoring contract.
+            engine (str):
             identity (LibraryRecipeIdentity):
             local (LibraryLocalState): Controller cache and Spark-local runtime evidence kept separate.
             model_documents (list[LibraryRecipeModel]):
@@ -43,10 +45,13 @@ class RecipeDetailResponse:
             updated_at (datetime.datetime):
             usage (list[str]):
             alignment (None | str | Unset):
+            alternatives (list[RecipeAlternative] | Unset):
             assessment (None | RecipeReadiness | Unset):
+            creator (None | str | Unset):
      """
 
     document: RecipeDefinition
+    engine: str
     identity: LibraryRecipeIdentity
     local: LibraryLocalState
     model_documents: list[LibraryRecipeModel]
@@ -57,7 +62,9 @@ class RecipeDetailResponse:
     updated_at: datetime.datetime
     usage: list[str]
     alignment: None | str | Unset = UNSET
+    alternatives: list[RecipeAlternative] | Unset = UNSET
     assessment: None | RecipeReadiness | Unset = UNSET
+    creator: None | str | Unset = UNSET
 
 
 
@@ -68,9 +75,12 @@ class RecipeDetailResponse:
         from ..models.library_recipe_identity import LibraryRecipeIdentity # noqa: PLC0415
         from ..models.library_recipe_model import LibraryRecipeModel # noqa: PLC0415
         from ..models.library_resource_projection import LibraryResourceProjection # noqa: PLC0415
+        from ..models.recipe_alternative import RecipeAlternative # noqa: PLC0415
         from ..models.recipe_definition import RecipeDefinition # noqa: PLC0415
         from ..models.recipe_readiness import RecipeReadiness # noqa: PLC0415
         document = self.document.to_dict()
+
+        engine = self.engine
 
         identity = self.identity.to_dict()
 
@@ -105,6 +115,15 @@ class RecipeDetailResponse:
         else:
             alignment = self.alignment
 
+        alternatives: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.alternatives, Unset):
+            alternatives = []
+            for alternatives_item_data in self.alternatives:
+                alternatives_item = alternatives_item_data.to_dict()
+                alternatives.append(alternatives_item)
+
+
+
         assessment: dict[str, Any] | None | Unset
         if isinstance(self.assessment, Unset):
             assessment = UNSET
@@ -113,11 +132,18 @@ class RecipeDetailResponse:
         else:
             assessment = self.assessment
 
+        creator: None | str | Unset
+        if isinstance(self.creator, Unset):
+            creator = UNSET
+        else:
+            creator = self.creator
+
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
             "document": document,
+            "engine": engine,
             "identity": identity,
             "local": local,
             "model_documents": model_documents,
@@ -130,8 +156,12 @@ class RecipeDetailResponse:
         })
         if alignment is not UNSET:
             field_dict["alignment"] = alignment
+        if alternatives is not UNSET:
+            field_dict["alternatives"] = alternatives
         if assessment is not UNSET:
             field_dict["assessment"] = assessment
+        if creator is not UNSET:
+            field_dict["creator"] = creator
 
         return field_dict
 
@@ -143,6 +173,7 @@ class RecipeDetailResponse:
         from ..models.library_recipe_identity import LibraryRecipeIdentity # noqa: PLC0415
         from ..models.library_recipe_model import LibraryRecipeModel # noqa: PLC0415
         from ..models.library_resource_projection import LibraryResourceProjection # noqa: PLC0415
+        from ..models.recipe_alternative import RecipeAlternative # noqa: PLC0415
         from ..models.recipe_definition import RecipeDefinition # noqa: PLC0415
         from ..models.recipe_readiness import RecipeReadiness # noqa: PLC0415
         d = dict(src_dict)
@@ -150,6 +181,8 @@ class RecipeDetailResponse:
 
 
 
+
+        engine = d.pop("engine")
 
         identity = LibraryRecipeIdentity.from_dict(d.pop("identity"))
 
@@ -201,6 +234,18 @@ class RecipeDetailResponse:
         alignment = _parse_alignment(d.pop("alignment", UNSET))
 
 
+        _alternatives = d.pop("alternatives", UNSET)
+        alternatives: list[RecipeAlternative] | Unset = UNSET
+        if _alternatives is not UNSET:
+            alternatives = []
+            for alternatives_item_data in _alternatives:
+                alternatives_item = RecipeAlternative.from_dict(alternatives_item_data)
+
+
+
+                alternatives.append(alternatives_item)
+
+
         def _parse_assessment(data: object) -> None | RecipeReadiness | Unset:
             if data is None:
                 return data
@@ -221,8 +266,19 @@ class RecipeDetailResponse:
         assessment = _parse_assessment(d.pop("assessment", UNSET))
 
 
+        def _parse_creator(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        creator = _parse_creator(d.pop("creator", UNSET))
+
+
         recipe_detail_response = cls(
             document=document,
+            engine=engine,
             identity=identity,
             local=local,
             model_documents=model_documents,
@@ -233,7 +289,9 @@ class RecipeDetailResponse:
             updated_at=updated_at,
             usage=usage,
             alignment=alignment,
+            alternatives=alternatives,
             assessment=assessment,
+            creator=creator,
         )
 
         return recipe_detail_response

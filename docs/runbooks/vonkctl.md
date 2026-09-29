@@ -307,6 +307,7 @@ vonkctl recipe sync-status
 vonkctl recipe library
 vonkctl recipe library --cached
 vonkctl recipe library --model "Qwen 3.8"
+vonkctl recipe library --engine sglang --creator MiaAI-Lab --sparks 2
 vonkctl recipe library --fits-fleet
 vonkctl recipe library --ready
 vonkctl recipe detail qwen-code
@@ -371,6 +372,12 @@ operation ID or rerun the same command with its original request UUID.
 Recipe names (`publisher/slug` or an unambiguous slug) and logical recipe IDs
 select the current accepted revision. Use an exact revision ID or content digest
 to address a retained revision explicitly.
+
+`--engine` (the runtime engine) and `--creator` (the upstream creator, the
+owner of the recipe's source reference) repeat and narrow the list; `--wide`
+and `recipe detail` show both. `recipe detail` also lists the other recipes for
+the same model with their engine, Spark count, creator, version, cache and
+fleet-fit state.
 
 Recipe reads distinguish current fleet fit, exact NAS assets, and readiness.
 `--fits-fleet` requires a complete placement that fits fresh current capacity;

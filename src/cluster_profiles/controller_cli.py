@@ -132,6 +132,55 @@ def _add_output(parser: argparse.ArgumentParser) -> None:
     )
 
 
+class _ValueList(argparse.Action):
+    """A multi-value flag: repeat it, comma-separate values, or mix both.
+
+    ``--engine vllm,sglang`` equals ``--engine vllm --engine sglang``. Values
+    are trimmed, empties dropped, and duplicates removed in first-seen order.
+    Only use it where a value can never contain a comma.
+    """
+
+    def __init__(self, *args: object, item: Callable[[str], object] = str, **kwargs):
+        self._item = item
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+
+    def __call__(self, parser, namespace, values, option_string=None):  # type: ignore[no-untyped-def]
+        current = list(getattr(namespace, self.dest, None) or [])
+        for raw in str(values).split(","):
+            text = raw.strip()
+            if not text:
+                continue
+            try:
+                value = self._item(text)
+            except (ValueError, argparse.ArgumentTypeError):
+                raise argparse.ArgumentError(self, f"invalid value {text!r}") from None
+            if value not in current:
+                current.append(value)
+        setattr(namespace, self.dest, current)
+
+
+def _value_list(
+    parser: argparse.ArgumentParser,
+    flag: str,
+    metavar: str,
+    help: str,
+    *,
+    item: Callable[[str], object] = str,
+    dest: str | None = None,
+) -> None:
+    """Add a comma-or-repeat filter flag with the shared parsing."""
+
+    parser.add_argument(
+        flag,
+        action=_ValueList,
+        item=item,
+        default=[],
+        metavar=f"{metavar}[,{metavar}\u2026]",
+        help=f"{help}; comma-separated or repeated",
+        dest=dest,
+    )
+
+
 def _query(**values: object) -> dict[str, object]:
     return {
         key: value for key, value in values.items() if value not in (None, "", [], ())
@@ -239,7 +288,7 @@ def _filters(parser: argparse.ArgumentParser) -> None:
         "publisher",
         "alignment",
     ):
-        parser.add_argument(f"--{name}", action="append", default=[])
+        _value_list(parser, f"--{name}", name, f"Only this {name}")
     parser.add_argument("--updated-since")
     parser.add_argument(
         "--cached", action="store_true", help="Only what is already in the cache"
@@ -586,7 +635,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "library", help="List compatible recipes"
     )
     _filters(recipe_library)
-    recipe_library.add_argument("--model", action="append", default=[])
+    _value_list(recipe_library, "--model", "model", "Only recipes serving this model")
     recipe_library.add_argument(
         "--ready",
         action="store_true",
@@ -599,12 +648,24 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         default=None,
         help="Require a placement fitting fresh current fleet capacity",
     )
-    recipe_library.add_argument(
+    _value_list(
+        recipe_library,
+        "--engine",
+        "engine",
+        "Runtime engine, such as vllm or sglang",
+    )
+    _value_list(
+        recipe_library,
+        "--creator",
+        "creator",
+        "Upstream creator of the recipe, such as MiaAI-Lab",
+    )
+    _value_list(
+        recipe_library,
         "--sparks",
-        action="append",
-        type=int,
-        default=[],
-        help="Exact topology node count",
+        "count",
+        "Exact topology node count",
+        item=int,
     )
     _add_output(recipe_library)
     recipe_sync_status = recipe_actions.add_parser(
@@ -833,13 +894,12 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _add_yes(key_create)
     key_create.add_argument("name")
-    key_create.add_argument(
+    _value_list(
+        key_create,
         "--model",
+        "alias",
+        "Restrict the key to these models (default: every model)",
         dest="models",
-        action="append",
-        default=[],
-        metavar="ALIAS",
-        help="Restrict the key to this model (repeatable; default: every model)",
     )
     key_create.add_argument(
         "--expires", metavar="DURATION", help="Expire after e.g. 30d or 12h"
@@ -2571,6 +2631,8 @@ def _library_query(args: argparse.Namespace, *, recipe: bool) -> dict[str, objec
             ready=getattr(args, "ready", None),
             fits_fleet=getattr(args, "fits_fleet", None),
             sparks=getattr(args, "sparks", []),
+            engine=getattr(args, "engine", []),
+            creator=getattr(args, "creator", []),
         )
     return _query(**values)
 

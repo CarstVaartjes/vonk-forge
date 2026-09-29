@@ -923,3 +923,10 @@
 @media(max-width:34rem){.profile-composer-grid{grid-template-columns:minmax(0,1fr)}.profile-composer-wide{grid-column:1}.library-profile-composer>header,.library-profile-composer>footer,.profile-composer-success{align-items:stretch;flex-direction:column}.library-profile-composer>footer button,.profile-composer-success .button{width:100%}}
 .recipe-options{border:0;padding:0;margin:.8rem 0 0;display:grid;gap:.65rem}.recipe-options legend{color:var(--text-muted);font-size:.68rem;font-weight:750;padding:0}.recipe-option{display:grid;gap:.25rem}.recipe-option select{width:100%}.recipe-option small{color:var(--text-muted)}
 .spark-run-options{list-style:none;padding:0;display:grid;gap:.4rem}
+
+.library-badges { display: flex; flex-wrap: wrap; gap: .3rem; }
+.library-badge { padding: .05rem .4rem; border: 1px solid var(--border, #3b4336); border-radius: 999px; color: var(--text-muted, #abb5a7); font-size: .68rem; line-height: 1.4; white-space: nowrap; }
+.library-alternatives { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.library-alternatives a { display: grid; gap: .15rem; padding: .5rem .2rem; color: inherit; text-decoration: none; }
+.library-alternatives a:hover strong { text-decoration: underline; }
+.library-alternatives small { color: var(--text-muted, #abb5a7); font-size: .72rem; }

@@ -635,8 +635,11 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
         _field("Updated", _time(item.get("updated_at")))
         if noun == "recipe":
             _field("Required Sparks", item.get("node_count"))
+            _field("Engine", item.get("engine"))
+            _field("Creator", item.get("creator"))
             _field("Models", _words(item.get("model_selectors")))
             _recipe_options(_optional(item.get("document"), "document"))
+            _recipe_alternatives(item)
         else:
             _field("Variant", item.get("variant"))
             _field("Quantization", item.get("quantization"))
@@ -675,6 +678,35 @@ def _check_word(
     if key == "readiness" and _needs_download(assessment):
         return "needs download"
     return check.get("state")
+
+
+def _alternative_line(alternative: Mapping[str, object]) -> str:
+    """One comparable line: engine, Sparks, creator, version, cache and fit."""
+    sparks = alternative.get("node_count")
+    fit = {
+        "ready": "fits fleet",
+        "blocked": "does not fit fleet",
+    }.get(_text(alternative.get("fits_fleet")), "fit unknown")
+    return (
+        f"{_text(alternative.get('selector'))}  "
+        f"{_text(alternative.get('engine'))}, "
+        f"{_text(sparks)} Spark{'s' if sparks != 1 else ''}, "
+        f"{_text(alternative.get('creator') or 'unknown creator')}, "
+        f"v{_text(alternative.get('version'))}, "
+        f"{_cache_word(alternative.get('cache'))}, {fit}"
+    )
+
+
+def _recipe_alternatives(item: Mapping[str, object]) -> None:
+    """Other recipes for the same model, with a command to open each."""
+    alternatives = item.get("alternatives")
+    if not isinstance(alternatives, list) or not alternatives:
+        return
+    print("Other recipes for this model")
+    for alternative in alternatives:
+        if isinstance(alternative, Mapping):
+            print(f"  {_alternative_line(alternative)}")
+    print("  Compare: vonkctl recipe detail <recipe>")
 
 
 def _library_row(item: Mapping[str, object], noun: str) -> list[object]:
@@ -716,6 +748,8 @@ _LIBRARY_FILTER_FLAGS = (
     "publisher",
     "alignment",
     "sparks",
+    "engine",
+    "creator",
     "updated_since",
     "ready",
     "fits_fleet",

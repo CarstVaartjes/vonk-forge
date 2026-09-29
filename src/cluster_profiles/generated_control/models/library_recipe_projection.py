@@ -33,6 +33,7 @@ class LibraryRecipeProjection:
 
         Attributes:
             document (RecipeDefinition): The sole public recipe authoring contract.
+            engine (str):
             identity (LibraryRecipeIdentity):
             local (LibraryLocalState): Controller cache and Spark-local runtime evidence kept separate.
             model_selectors (list[str]):
@@ -43,9 +44,11 @@ class LibraryRecipeProjection:
             usage (list[str]):
             alignment (None | str | Unset):
             assessment (None | RecipeReadiness | Unset):
+            creator (None | str | Unset):
      """
 
     document: RecipeDefinition
+    engine: str
     identity: LibraryRecipeIdentity
     local: LibraryLocalState
     model_selectors: list[str]
@@ -56,6 +59,7 @@ class LibraryRecipeProjection:
     usage: list[str]
     alignment: None | str | Unset = UNSET
     assessment: None | RecipeReadiness | Unset = UNSET
+    creator: None | str | Unset = UNSET
 
 
 
@@ -68,6 +72,8 @@ class LibraryRecipeProjection:
         from ..models.recipe_definition import RecipeDefinition # noqa: PLC0415
         from ..models.recipe_readiness import RecipeReadiness # noqa: PLC0415
         document = self.document.to_dict()
+
+        engine = self.engine
 
         identity = self.identity.to_dict()
 
@@ -103,11 +109,18 @@ class LibraryRecipeProjection:
         else:
             assessment = self.assessment
 
+        creator: None | str | Unset
+        if isinstance(self.creator, Unset):
+            creator = UNSET
+        else:
+            creator = self.creator
+
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
             "document": document,
+            "engine": engine,
             "identity": identity,
             "local": local,
             "model_selectors": model_selectors,
@@ -121,6 +134,8 @@ class LibraryRecipeProjection:
             field_dict["alignment"] = alignment
         if assessment is not UNSET:
             field_dict["assessment"] = assessment
+        if creator is not UNSET:
+            field_dict["creator"] = creator
 
         return field_dict
 
@@ -138,6 +153,8 @@ class LibraryRecipeProjection:
 
 
 
+
+        engine = d.pop("engine")
 
         identity = LibraryRecipeIdentity.from_dict(d.pop("identity"))
 
@@ -199,8 +216,19 @@ class LibraryRecipeProjection:
         assessment = _parse_assessment(d.pop("assessment", UNSET))
 
 
+        def _parse_creator(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        creator = _parse_creator(d.pop("creator", UNSET))
+
+
         library_recipe_projection = cls(
             document=document,
+            engine=engine,
             identity=identity,
             local=local,
             model_selectors=model_selectors,
@@ -211,6 +239,7 @@ class LibraryRecipeProjection:
             usage=usage,
             alignment=alignment,
             assessment=assessment,
+            creator=creator,
         )
 
         return library_recipe_projection

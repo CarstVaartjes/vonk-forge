@@ -32,6 +32,8 @@ def _get_kwargs(
     publisher: list[str] | None | Unset = UNSET,
     alignment: list[str] | None | Unset = UNSET,
     sparks: list[int] | None | Unset = UNSET,
+    engine: list[str] | None | Unset = UNSET,
+    creator: list[str] | None | Unset = UNSET,
     search: None | str | Unset = UNSET,
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListRecipeLibrarySort | Unset = 'updated',
@@ -124,6 +126,28 @@ def _get_kwargs(
     else:
         json_sparks = sparks
     params["sparks"] = json_sparks
+
+    json_engine: list[str] | None | Unset
+    if isinstance(engine, Unset):
+        json_engine = UNSET
+    elif isinstance(engine, list):
+        json_engine = engine
+
+
+    else:
+        json_engine = engine
+    params["engine"] = json_engine
+
+    json_creator: list[str] | None | Unset
+    if isinstance(creator, Unset):
+        json_creator = UNSET
+    elif isinstance(creator, list):
+        json_creator = creator
+
+
+    else:
+        json_creator = creator
+    params["creator"] = json_creator
 
     json_search: None | str | Unset
     if isinstance(search, Unset):
@@ -220,6 +244,8 @@ def sync_detailed(
     publisher: list[str] | None | Unset = UNSET,
     alignment: list[str] | None | Unset = UNSET,
     sparks: list[int] | None | Unset = UNSET,
+    engine: list[str] | None | Unset = UNSET,
+    creator: list[str] | None | Unset = UNSET,
     search: None | str | Unset = UNSET,
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListRecipeLibrarySort | Unset = 'updated',
@@ -239,6 +265,8 @@ def sync_detailed(
         publisher (list[str] | None | Unset):
         alignment (list[str] | None | Unset):
         sparks (list[int] | None | Unset):
+        engine (list[str] | None | Unset):
+        creator (list[str] | None | Unset):
         search (None | str | Unset):
         updated_since (datetime.datetime | None | Unset):
         sort (ListRecipeLibrarySort | Unset):  Default: 'updated'.
@@ -264,6 +292,8 @@ usage=usage,
 publisher=publisher,
 alignment=alignment,
 sparks=sparks,
+engine=engine,
+creator=creator,
 search=search,
 updated_since=updated_since,
 sort=sort,
@@ -290,6 +320,8 @@ def sync(
     publisher: list[str] | None | Unset = UNSET,
     alignment: list[str] | None | Unset = UNSET,
     sparks: list[int] | None | Unset = UNSET,
+    engine: list[str] | None | Unset = UNSET,
+    creator: list[str] | None | Unset = UNSET,
     search: None | str | Unset = UNSET,
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListRecipeLibrarySort | Unset = 'updated',
@@ -309,6 +341,8 @@ def sync(
         publisher (list[str] | None | Unset):
         alignment (list[str] | None | Unset):
         sparks (list[int] | None | Unset):
+        engine (list[str] | None | Unset):
+        creator (list[str] | None | Unset):
         search (None | str | Unset):
         updated_since (datetime.datetime | None | Unset):
         sort (ListRecipeLibrarySort | Unset):  Default: 'updated'.
@@ -335,6 +369,8 @@ usage=usage,
 publisher=publisher,
 alignment=alignment,
 sparks=sparks,
+engine=engine,
+creator=creator,
 search=search,
 updated_since=updated_since,
 sort=sort,
@@ -355,6 +391,8 @@ async def asyncio_detailed(
     publisher: list[str] | None | Unset = UNSET,
     alignment: list[str] | None | Unset = UNSET,
     sparks: list[int] | None | Unset = UNSET,
+    engine: list[str] | None | Unset = UNSET,
+    creator: list[str] | None | Unset = UNSET,
     search: None | str | Unset = UNSET,
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListRecipeLibrarySort | Unset = 'updated',
@@ -374,6 +412,8 @@ async def asyncio_detailed(
         publisher (list[str] | None | Unset):
         alignment (list[str] | None | Unset):
         sparks (list[int] | None | Unset):
+        engine (list[str] | None | Unset):
+        creator (list[str] | None | Unset):
         search (None | str | Unset):
         updated_since (datetime.datetime | None | Unset):
         sort (ListRecipeLibrarySort | Unset):  Default: 'updated'.
@@ -399,6 +439,8 @@ usage=usage,
 publisher=publisher,
 alignment=alignment,
 sparks=sparks,
+engine=engine,
+creator=creator,
 search=search,
 updated_since=updated_since,
 sort=sort,
@@ -425,6 +467,8 @@ async def asyncio(
     publisher: list[str] | None | Unset = UNSET,
     alignment: list[str] | None | Unset = UNSET,
     sparks: list[int] | None | Unset = UNSET,
+    engine: list[str] | None | Unset = UNSET,
+    creator: list[str] | None | Unset = UNSET,
     search: None | str | Unset = UNSET,
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListRecipeLibrarySort | Unset = 'updated',
@@ -444,6 +488,8 @@ async def asyncio(
         publisher (list[str] | None | Unset):
         alignment (list[str] | None | Unset):
         sparks (list[int] | None | Unset):
+        engine (list[str] | None | Unset):
+        creator (list[str] | None | Unset):
         search (None | str | Unset):
         updated_since (datetime.datetime | None | Unset):
         sort (ListRecipeLibrarySort | Unset):  Default: 'updated'.
@@ -470,6 +516,8 @@ usage=usage,
 publisher=publisher,
 alignment=alignment,
 sparks=sparks,
+engine=engine,
+creator=creator,
 search=search,
 updated_since=updated_since,
 sort=sort,

@@ -39,6 +39,8 @@ function viewRecipe(recipe: RecipeLibrary["recipes"][number]): LibraryViewRecipe
     slug: recipe.identity.slug,
     title: recipe.identity.title,
     topology_name: recipe.document.topology.name,
+    engine: recipe.engine,
+    creator: recipe.creator,
     model_selectors: recipe.model_selectors,
   };
 }
@@ -111,8 +113,10 @@ function viewRecipeDetail(detail: RecipeDetail): LibraryViewRecipeDetail {
     slug: detail.identity.slug,
     title: detail.identity.title,
     topology_name: detail.document.topology.name,
+    engine: detail.engine,
+    creator: detail.creator,
   };
-  return {generated_at: detail.updated_at, definition: detail.document, recipe, model_documents: detail.model_documents, operational_state: {builds: [], installations: [], mappings: [], runs: []}, placement: [], reasons: [], topology: detail.document.topology};
+  return {generated_at: detail.updated_at, definition: detail.document, recipe, model_documents: detail.model_documents, operational_state: {builds: [], installations: [], mappings: [], runs: []}, placement: [], reasons: [], topology: detail.document.topology, alternatives: detail.alternatives};
 }
 
 /** Running runs of this exact recipe revision, as the fleet snapshot reports them. */

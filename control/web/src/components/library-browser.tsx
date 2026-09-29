@@ -38,7 +38,7 @@ export function LibraryBrowser({api, detail, detailError, detailLoading, fleet, 
   if (route.kind === "recipe") {
     if (detailLoading) return <section className="library-detail-state"><SkeletonBlock label="Loading the exact Recipe detail"/></section>;
     if (detailError) return <section className="library-detail-state is-error" role="alert"><p>{detailError}</p><button type="button" className="button secondary" onClick={onRetryDetail}>Retry Recipe detail</button></section>;
-    if (detail) return <LibraryRecipeAuthority api={api} detail={detail} onBusyChange={onBusyChange}/>;
+    if (detail) return <LibraryRecipeAuthority api={api} detail={detail} onBusyChange={onBusyChange} onNavigate={onNavigate}/>;
     return <section className="library-detail-state" role="status">Recipe detail is not available.</section>;
   }
   return <LibraryWorkcell api={api} detail={detail} detailError={detailError} detailLoading={detailLoading} fleet={fleet} filters={filters ?? EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={updateFilters} onNavigate={onNavigate} onQueryChange={onQueryChange} onRefresh={onRefresh} onRetryDetail={onRetryDetail} query={query} route={route} snapshot={snapshot}/>;

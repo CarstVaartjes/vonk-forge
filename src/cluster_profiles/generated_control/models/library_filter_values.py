@@ -33,6 +33,8 @@ class LibraryFilterValues:
         Attributes:
             alignment (list[str] | Unset):
             cached (bool | None | Unset):
+            creator (list[str] | Unset):
+            engine (list[str] | Unset):
             family (list[str] | Unset):
             fits_fleet (bool | None | Unset):
             model (list[str] | Unset):
@@ -49,6 +51,8 @@ class LibraryFilterValues:
 
     alignment: list[str] | Unset = UNSET
     cached: bool | None | Unset = UNSET
+    creator: list[str] | Unset = UNSET
+    engine: list[str] | Unset = UNSET
     family: list[str] | Unset = UNSET
     fits_fleet: bool | None | Unset = UNSET
     model: list[str] | Unset = UNSET
@@ -78,6 +82,18 @@ class LibraryFilterValues:
             cached = UNSET
         else:
             cached = self.cached
+
+        creator: list[str] | Unset = UNSET
+        if not isinstance(self.creator, Unset):
+            creator = self.creator
+
+
+
+        engine: list[str] | Unset = UNSET
+        if not isinstance(self.engine, Unset):
+            engine = self.engine
+
+
 
         family: list[str] | Unset = UNSET
         if not isinstance(self.family, Unset):
@@ -162,6 +178,10 @@ class LibraryFilterValues:
             field_dict["alignment"] = alignment
         if cached is not UNSET:
             field_dict["cached"] = cached
+        if creator is not UNSET:
+            field_dict["creator"] = creator
+        if engine is not UNSET:
+            field_dict["engine"] = engine
         if family is not UNSET:
             field_dict["family"] = family
         if fits_fleet is not UNSET:
@@ -205,6 +225,12 @@ class LibraryFilterValues:
             return cast(bool | None | Unset, data)
 
         cached = _parse_cached(d.pop("cached", UNSET))
+
+
+        creator = cast(list[str], d.pop("creator", UNSET))
+
+
+        engine = cast(list[str], d.pop("engine", UNSET))
 
 
         family = cast(list[str], d.pop("family", UNSET))
@@ -291,6 +317,8 @@ class LibraryFilterValues:
         library_filter_values = cls(
             alignment=alignment,
             cached=cached,
+            creator=creator,
+            engine=engine,
             family=family,
             fits_fleet=fits_fleet,
             model=model,

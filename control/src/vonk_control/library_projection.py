@@ -9,6 +9,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Literal, cast
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
@@ -44,6 +45,7 @@ from .library_contract import (
     ModelDetailResponse,
     ModelLibraryResponse,
     OperationalState,
+    RecipeAlternative,
     RecipeDetailResponse,
     RecipeLibraryResponse,
     _utc,
@@ -270,6 +272,26 @@ def _model_identity(
         slug=document.identity.slug,
         content_sha256=revision.content_digest,
     )
+
+
+def _recipe_creator(document: RecipeDefinition) -> str | None:
+    """The upstream creator: the owner in the source reference, else attribution.
+
+    The contract has no creator field and every recipe is published by the
+    platform, so the owner of the source repository (for example
+    ``MiaAI-Lab`` or ``nvidia``) is the creator; attribution is the fallback.
+    """
+
+    reference = document.provenance.source_reference
+    if reference:
+        parts = urlsplit(reference)
+        owner = parts.path.strip("/").split("/", 1)[0]
+        if parts.scheme in {"http", "https"} and owner:
+            return owner[:128]
+    for name in document.provenance.attribution:
+        if name.strip():
+            return name.strip()[:128]
+    return None
 
 
 def _canonical_recipe_summary(
@@ -806,6 +828,8 @@ class LibraryProjection:
             updated_at=_utc(revision.created_at),
             alignment=document.metadata.alignment,
             node_count=document.topology.node_count,
+            engine=document.runtime.engine,
+            creator=_recipe_creator(document),
         )
 
     @staticmethod
@@ -916,6 +940,11 @@ class LibraryProjection:
                 | set(model_facets.alignment)
             ),
             sparks=sorted({recipe.node_count for recipe in recipes}),
+            engine=sorted({recipe.engine for recipe in recipes}, key=str.casefold),
+            creator=sorted(
+                {recipe.creator for recipe in recipes if recipe.creator},
+                key=str.casefold,
+            ),
         )
 
     def models(
@@ -1205,6 +1234,8 @@ class LibraryProjection:
         publisher: Sequence[str] = (),
         alignment: Sequence[str] = (),
         sparks: Sequence[int] = (),
+        engine: Sequence[str] = (),
+        creator: Sequence[str] = (),
         search: str | None = None,
         updated_since: datetime | None = None,
         sort: Literal["updated", "name"] = "updated",
@@ -1297,6 +1328,8 @@ class LibraryProjection:
             and self._matches_any([item.identity.publisher], publisher)
             and self._matches_any([item.alignment] if item.alignment else [], alignment)
             and (not sparks or item.node_count in sparks)
+            and self._matches_any([item.engine], engine)
+            and self._matches_any([item.creator] if item.creator else [], creator)
             and (
                 wanted_search is None
                 or wanted_search in item.selector.casefold()
@@ -1348,6 +1381,8 @@ class LibraryProjection:
                     "publisher": list(publisher),
                     "alignment": list(alignment),
                     "sparks": list(sparks),
+                    "engine": list(engine),
+                    "creator": list(creator),
                     "collection": [
                         (
                             item.selector,
@@ -1422,6 +1457,8 @@ class LibraryProjection:
                 publisher=list(publisher),
                 alignment=list(alignment),
                 sparks=list(sparks),
+                engine=list(engine),
+                creator=list(creator),
                 search=search,
                 updated_since=None
                 if updated_since is None
@@ -1491,6 +1528,37 @@ class LibraryProjection:
             if row.content_digest == entry.identity.content_sha256
         )
         recipe = _canonical_recipe(recipe_row)
+        siblings = [
+            item
+            for item in entries
+            if item.identity.content_sha256 != entry.identity.content_sha256
+            and set(item.model_selectors) & set(entry.model_selectors)
+        ]
+        alternatives = [
+            RecipeAlternative(
+                selector=item.selector,
+                title=item.identity.title,
+                engine=item.engine,
+                creator=item.creator,
+                node_count=item.node_count,
+                version=item.document.release.version,
+                cache=item.local.controller,
+                fits_fleet=(
+                    "unavailable"
+                    if item.assessment is None
+                    else item.assessment.fleet_fit.state
+                ),
+            )
+            for item in sorted(
+                self._assessed(siblings),
+                key=lambda item: (
+                    item.node_count,
+                    item.engine,
+                    item.creator or "",
+                    item.selector,
+                ),
+            )
+        ]
         model_documents = []
         for selection in recipe.models:
             model = model_by_key.get(
@@ -1512,7 +1580,8 @@ class LibraryProjection:
             | {
                 "model_documents": [
                     model.model_dump(mode="json") for model in model_documents
-                ]
+                ],
+                "alternatives": [item.model_dump(mode="json") for item in alternatives],
             }
         )
 
