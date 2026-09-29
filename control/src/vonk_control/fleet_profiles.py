@@ -5461,6 +5461,12 @@ class FleetProfileService:
                     retry_parent.status_reason = (
                         f"Automatically reconciled by profile retry {row.id}"
                     )[:512]
+                    # Superseded by its retry: no attempt is scheduled for it.
+                    retry_parent.progress = _progress_with_blockers(
+                        _canonical_progress(retry_parent.progress),
+                        [],
+                        retry_due_at=None,
+                    )
                     retry_parent.updated_at = now
                 if (
                     selected_generation is None

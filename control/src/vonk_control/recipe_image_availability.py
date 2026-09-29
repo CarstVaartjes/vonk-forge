@@ -5128,6 +5128,12 @@ class RecipeImageAvailabilityService:
         with self._sessions.begin() as session:
             operation = self._claim_operation(session, claim)
             if operation is None:
+                _LOGGER.warning(
+                    "recipe image preparation %s failed after its claim was lost "
+                    "(%s); its next claim will retry",
+                    claim.operation_id,
+                    _failure_code(error),
+                )
                 return
             retry = operation.payload.get("retry", {})
             retry = dict(retry) if isinstance(retry, Mapping) else {}
