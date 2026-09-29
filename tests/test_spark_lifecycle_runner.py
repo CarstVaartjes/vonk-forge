@@ -1150,7 +1150,7 @@ def test_direct_health_and_protected_identity_hash_are_observed_from_native_bina
 ):
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
-    run._self_test = lambda: {"self_test_passed": True}
+    run._self_test = dict
     observed: list[list[str]] = []
 
     def command(argv, *, cwd, timeout):

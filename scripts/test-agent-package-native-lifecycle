@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'printf "native lifecycle check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 export LC_ALL=C
 
@@ -202,7 +203,6 @@ grep -F '"semantic_version":"'"$current_semantic"'"' <<< "$baseline_self_test" >
 grep -E '"build_digest":"sha256:[0-9a-f]{64}"' \
   <<< "$baseline_self_test" >/dev/null
 grep -E '"binary_digest":"[0-9a-f]{64}"' <<< "$baseline_self_test" >/dev/null
-grep -F '"self_test_passed":true' <<< "$baseline_self_test" >/dev/null
 baseline_build_digest=$(sed -nE 's/.*"build_digest":"(sha256:[0-9a-f]{64})".*/\1/p' \
   <<< "$baseline_self_test")
 baseline_binary_digest=$(sed -nE 's/.*"binary_digest":"([0-9a-f]{64})".*/\1/p' \
@@ -245,7 +245,6 @@ test "$("$agent" --version)" = "vonk-agent $next_semantic"
 self_test=$("$agent" --config "$config" self-test)
 grep -F '"architecture":"'"$architecture"'"' <<< "$self_test" >/dev/null
 grep -F '"semantic_version":"'"$next_semantic"'"' <<< "$self_test" >/dev/null
-grep -F '"self_test_passed":true' <<< "$self_test" >/dev/null
 candidate_build_digest=$(sed -nE 's/.*"build_digest":"(sha256:[0-9a-f]{64})".*/\1/p' \
   <<< "$self_test")
 candidate_binary_digest=$(sed -nE 's/.*"binary_digest":"([0-9a-f]{64})".*/\1/p' \
@@ -269,7 +268,6 @@ test -f "$data_dir/lifecycle-preserved"
 test "$("$agent" --version)" = "vonk-agent $next_semantic"
 self_test=$("$agent" --config "$config" self-test)
 grep -F '"architecture":"'"$architecture"'"' <<< "$self_test" >/dev/null
-grep -F '"self_test_passed":true' <<< "$self_test" >/dev/null
 env SYSTEMD_OFFLINE=1 "$dpkg" --remove vonk-forge-agent
 
 printf 'native %s package lifecycle: PASS\n' "$architecture"

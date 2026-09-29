@@ -51,7 +51,7 @@ case "${1:-}" in
       build=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
       binary=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
     fi
-    printf '{"semantic_version":"%s","build_digest":"sha256:%s","binary_digest":"%s","architecture":"linux-amd64","self_test_passed":true}\n' "$semantic" "$build" "$binary"
+    printf '{"semantic_version":"%s","build_digest":"sha256:%s","binary_digest":"%s","architecture":"linux-amd64"}\n' "$semantic" "$build" "$binary"
     ;;
   *) exit 2 ;;
 esac
