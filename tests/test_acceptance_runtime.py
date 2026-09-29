@@ -368,22 +368,28 @@ def test_https_tunnel_performs_bounded_post_with_hostname_verified_tls(
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
+    listener.settimeout(10)
     port = listener.getsockname()[1]
 
     def serve() -> None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(certificate, key)
-        connection, _ = listener.accept()
-        with context.wrap_socket(connection, server_side=True) as tls:
-            request = tls.recv(4096)
-            assert request.startswith(b"POST /login HTTP/1.1\r\nHost: localhost\r\n")
-            assert b"Content-Type: application/json\r\n" in request
-            assert b"Content-Length: 19\r\n" in request
-            assert request.endswith(b'\r\n\r\n{"subject":"admin"}')
-            tls.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-        listener.close()
+        try:
+            connection, _ = listener.accept()
+            connection.settimeout(10)
+            with context.wrap_socket(connection, server_side=True) as tls:
+                request = tls.recv(4096)
+                assert request.startswith(
+                    b"POST /login HTTP/1.1\r\nHost: localhost\r\n"
+                )
+                assert b"Content-Type: application/json\r\n" in request
+                assert b"Content-Length: 19\r\n" in request
+                assert request.endswith(b'\r\n\r\n{"subject":"admin"}')
+                tls.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+        finally:
+            listener.close()
 
-    server = threading.Thread(target=serve)
+    server = threading.Thread(target=serve, daemon=True)
     server.start()
     tunnel = tmp_path / "tunnel.py"
     tunnel.write_text(
@@ -413,7 +419,7 @@ def test_https_tunnel_performs_bounded_post_with_hostname_verified_tls(
         body=b'{"subject":"admin"}',
         headers={"Content-Type": "application/json"},
     )
-    server.join(timeout=5)
+    server.join(timeout=15)
 
     assert not server.is_alive()
     assert response.endswith(b"\r\n\r\nok")
@@ -449,18 +455,22 @@ def test_https_tunnel_rejects_a_successful_response_from_a_failing_child(
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
+    listener.settimeout(10)
     port = listener.getsockname()[1]
 
     def serve() -> None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(certificate, key)
-        connection, _ = listener.accept()
-        with context.wrap_socket(connection, server_side=True) as tls:
-            assert tls.recv(4096).startswith(b"GET /ready HTTP/1.1\r\n")
-            tls.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-        listener.close()
+        try:
+            connection, _ = listener.accept()
+            connection.settimeout(10)
+            with context.wrap_socket(connection, server_side=True) as tls:
+                assert tls.recv(4096).startswith(b"GET /ready HTTP/1.1\r\n")
+                tls.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+        finally:
+            listener.close()
 
-    server = threading.Thread(target=serve)
+    server = threading.Thread(target=serve, daemon=True)
     server.start()
     tunnel = tmp_path / "failing-tunnel.py"
     tunnel.write_text(
@@ -489,5 +499,5 @@ def test_https_tunnel_rejects_a_successful_response_from_a_failing_child(
             timeout=5,
             ca_file=certificate,
         )
-    server.join(timeout=5)
+    server.join(timeout=15)
     assert not server.is_alive()

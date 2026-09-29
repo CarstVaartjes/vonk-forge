@@ -63,7 +63,8 @@ PostgreSQL server or the installed CLI) is not charged to the test that first
 requests it: doing expensive work once is the intended fix. It does
 not interrupt the test: an alarm at an arbitrary point can leave shared state
 half-built and fail unrelated tests. pytest-timeout's `timeout = 120` in the
-pytest configuration is only the hang guard.
+pytest configuration (`timeout_method = "thread"`: a hang dumps every stack and
+ends the worker, whatever the test is blocked on) is only the hang guard.
 
 A test that needs longer because its subject is inherently expensive (a real
 process death, the whole published corpus) carries `@pytest.mark.slow(<seconds>)`
