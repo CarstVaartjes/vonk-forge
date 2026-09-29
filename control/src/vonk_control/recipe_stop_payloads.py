@@ -28,6 +28,7 @@ from .recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from .recipe_operation_phases import StoredPhases, decode_stored_phases
+from .strict_json import read_stored_model
 
 
 class RecipeStopAuthorityError(ValueError):
@@ -42,7 +43,9 @@ def stop_payload_from_start(
     """Project one exact Stop target from its complete typed Start effect."""
 
     try:
-        start = RecipeStartPayload.model_validate_json(canonical_message(value))
+        start = read_stored_model(
+            RecipeStartPayload, canonical_message(value), from_json=True
+        )
         if type(start.run_generation) is not int or start.run_generation < 1:
             raise ValueError("start generation is missing")
         payload = RecipeStopPayload(
@@ -56,7 +59,9 @@ def stop_payload_from_start(
             cancel_pending_start=cancel_pending_start,
             run_generation=start.run_generation,
         )
-        return RecipeStopPayload.model_validate_json(canonical_message(payload))
+        return read_stored_model(
+            RecipeStopPayload, canonical_message(payload), from_json=True
+        )
     except (TypeError, ValueError) as error:
         raise RecipeStopAuthorityError("recipe Start payload is invalid") from error
 
@@ -69,7 +74,9 @@ def stop_payload_from_job_run(
     """Project a transient artifact-container Stop from its typed job request."""
 
     try:
-        job = RecipeJobRunRequest.model_validate_json(canonical_message(value))
+        job = read_stored_model(
+            RecipeJobRunRequest, canonical_message(value), from_json=True
+        )
         if type(job.run_generation) is not int or job.run_generation < 1:
             raise ValueError("job run generation is missing")
         payload = RecipeStopPayload(
@@ -83,7 +90,9 @@ def stop_payload_from_job_run(
             cancel_pending_start=cancel_pending_start,
             run_generation=job.run_generation,
         )
-        return RecipeStopPayload.model_validate_json(canonical_message(payload))
+        return read_stored_model(
+            RecipeStopPayload, canonical_message(payload), from_json=True
+        )
     except (TypeError, ValueError) as error:
         raise RecipeStopAuthorityError("recipe JobRun payload is invalid") from error
 
@@ -215,8 +224,10 @@ def durable_run_stop_payloads(
                     # digest-bound phase entry below.
                     continue
                 try:
-                    start = RecipeStartPayload.model_validate_json(
-                        canonical_message(raw_payload)
+                    start = read_stored_model(
+                        RecipeStartPayload,
+                        canonical_message(raw_payload),
+                        from_json=True,
                     )
                 except (TypeError, ValueError) as error:
                     raise RecipeStopAuthorityError(

@@ -31,6 +31,7 @@ from .models import (
 from .preparation_contract import RuntimeImageIdentity
 from .resource_planning import memory_reservation_kind
 from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan, StopImpact
+from .strict_json import read_stored_model
 
 
 def reservation_visible(
@@ -213,11 +214,17 @@ def profile_memory_replacements(
     application = session.get(FleetProfileApplication, claim.owner_id)
     if application is None:
         raise ValueError("profile memory claim owner is missing")
-    review = FleetProfilePreview.model_validate_json(
-        canonical_message(application.plan), strict=True
+    review = read_stored_model(
+        FleetProfilePreview,
+        canonical_message(application.plan),
+        strict=True,
+        from_json=True,
     )
-    progress = FleetProfileApplicationProgress.model_validate_json(
-        canonical_message(application.progress), strict=True
+    progress = read_stored_model(
+        FleetProfileApplicationProgress,
+        canonical_message(application.progress),
+        strict=True,
+        from_json=True,
     )
     decision = next(
         (
@@ -314,11 +321,17 @@ def _profile_build_memory_claim(
 ) -> ResourceReservation | None:
     if job.state not in {"queued", "running"}:
         raise ValueError("profile build consumer is no longer active")
-    plan = RunSwitchPlan.model_validate_json(
-        canonical_message(job.payload["plan"]), strict=True
+    plan = read_stored_model(
+        RunSwitchPlan,
+        canonical_message(job.payload["plan"]),
+        strict=True,
+        from_json=True,
     )
-    progress = RunSwitchOperationResult.model_validate_json(
-        canonical_message(job.result), strict=True
+    progress = read_stored_model(
+        RunSwitchOperationResult,
+        canonical_message(job.result),
+        strict=True,
+        from_json=True,
     )
     if progress.profile_application_id is None:
         return None
@@ -386,8 +399,11 @@ def profile_memory_floor(session: Session, claim: ResourceReservation) -> int:
     application = session.get(FleetProfileApplication, claim.owner_id)
     if application is None:
         raise ValueError("profile memory claim owner is missing")
-    review = FleetProfilePreview.model_validate_json(
-        canonical_message(application.plan), strict=True
+    review = read_stored_model(
+        FleetProfilePreview,
+        canonical_message(application.plan),
+        strict=True,
+        from_json=True,
     )
     requirement = next(
         (
@@ -507,11 +523,17 @@ def _profile_assignment(
         "waiting-for-operator",
     }:
         raise ValueError("profile capacity owner is no longer active")
-    progress = FleetProfileApplicationProgress.model_validate_json(
-        canonical_message(application.progress), strict=True
+    progress = read_stored_model(
+        FleetProfileApplicationProgress,
+        canonical_message(application.progress),
+        strict=True,
+        from_json=True,
     )
-    review = FleetProfilePreview.model_validate_json(
-        canonical_message(application.plan), strict=True
+    review = read_stored_model(
+        FleetProfilePreview,
+        canonical_message(application.plan),
+        strict=True,
+        from_json=True,
     )
     if (
         workload_intent_ordinal is None
@@ -566,8 +588,11 @@ def accepted_profile_runtime_image(
     application = session.get(FleetProfileApplication, application_id)
     if application is None:
         raise ValueError("profile image owner is unavailable")
-    progress = FleetProfileApplicationProgress.model_validate_json(
-        canonical_message(application.progress), strict=True
+    progress = read_stored_model(
+        FleetProfileApplicationProgress,
+        canonical_message(application.progress),
+        strict=True,
+        from_json=True,
     )
     application, assignment, _ = _profile_assignment(
         session,
@@ -583,8 +608,8 @@ def accepted_profile_runtime_image(
     root = session.get(FleetProfileApplication, intended.reviewed_application_id)
     if root is None:
         raise ValueError("profile image review source is unavailable")
-    review = FleetProfilePreview.model_validate_json(
-        canonical_message(root.plan), strict=True
+    review = read_stored_model(
+        FleetProfilePreview, canonical_message(root.plan), strict=True, from_json=True
     )
     decisions = [
         item

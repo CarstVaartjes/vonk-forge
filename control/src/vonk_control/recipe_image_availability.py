@@ -130,7 +130,7 @@ from .runtime_image_preparation import (
     prepare_runtime_image,
     read_runtime_image_reference_intent,
 )
-from .strict_json import serialize_json_value
+from .strict_json import read_stored_model, serialize_json_value
 
 if TYPE_CHECKING:
     from .recipe_update_batches import RecipeUpdateClaim
@@ -867,7 +867,7 @@ class RecipeImageAvailabilityService:
                 raise ValueError(
                     "stored recipe removal owner exceeds the scan byte budget"
                 )
-            owner = RecipeCacheRemovalOwner.model_validate_json(encoded)
+            owner = read_stored_model(RecipeCacheRemovalOwner, encoded, from_json=True)
         except (TypeError, ValueError) as error:
             raise RecipeImageAvailabilityError(
                 "recipe_image.operation_invalid",
@@ -956,13 +956,15 @@ class RecipeImageAvailabilityService:
                     "successful removal has no stored result",
                 )
             try:
-                result = RecipeCacheRemovalResult.model_validate_json(
+                result = read_stored_model(
+                    RecipeCacheRemovalResult,
                     json.dumps(
                         serialize_json_value(operation.result),
                         ensure_ascii=False,
                         sort_keys=True,
                         separators=(",", ":"),
-                    )
+                    ),
+                    from_json=True,
                 )
             except (TypeError, ValidationError) as error:
                 raise RecipeImageAvailabilityError(
@@ -2240,7 +2242,7 @@ class RecipeImageAvailabilityService:
             if isinstance(operation.result, ModelCacheRemovalResult):
                 result = operation.result
             else:
-                result = ModelCacheRemovalResult.model_validate(operation.result)
+                result = read_stored_model(ModelCacheRemovalResult, operation.result)
         except (TypeError, ValueError, ValidationError):
             return self._record_recipe_removal_failure(
                 operation_id,
@@ -2359,7 +2361,8 @@ class RecipeImageAvailabilityService:
                     )
                     retry_time = _iso(now + timedelta(seconds=delay))
                 safe = sanitize_failure_evidence({"code": code, "detail": detail})
-                failure = AvailabilityOperationFailure.model_validate(
+                failure = read_stored_model(
+                    AvailabilityOperationFailure,
                     {
                         "code": safe.get("code", "recipe_image.removal_failed"),
                         "detail": safe.get("detail", "recipe removal did not complete"),
@@ -2367,7 +2370,7 @@ class RecipeImageAvailabilityService:
                         "retryable": retryable,
                         "retry_time": retry_time,
                         "retry_after_seconds": delay,
-                    }
+                    },
                 )
                 updated_checkpoint = checkpoint.model_copy(
                     update={"retry_attempts": retry_attempts, "failure": failure}
@@ -2676,8 +2679,10 @@ class RecipeImageAvailabilityService:
             value = payload.get("cancellation")
             if value is None:
                 return None
-            return RecipeOperationCancellationResult.model_validate_json(
-                json.dumps(value, allow_nan=False)
+            return read_stored_model(
+                RecipeOperationCancellationResult,
+                json.dumps(value, allow_nan=False),
+                from_json=True,
             )
         except (TypeError, ValueError) as error:
             raise RecipeImageAvailabilityError(
@@ -4607,7 +4612,9 @@ class RecipeImageAvailabilityService:
             raw = payload.get("cancellation")
             if raw is None:
                 return False
-            ModelCacheCancellation.model_validate_json(json.dumps(raw, allow_nan=False))
+            read_stored_model(
+                ModelCacheCancellation, json.dumps(raw, allow_nan=False), from_json=True
+            )
             return True
         except (TypeError, ValueError, ValidationError) as error:
             raise RecipeImageAvailabilityError(
@@ -5120,13 +5127,13 @@ class RecipeImageAvailabilityService:
         ]
         progress["members"] = image_members
         if model_child is not None:
-            child = OperationProgress.model_validate(model_child["progress"])
+            child = read_stored_model(OperationProgress, model_child["progress"])
             model_progress = child.model_dump(
                 mode="json",
                 exclude_none=True,
                 exclude={"members", "checkpoint", "total_bytes_known"},
             )
-            image = OperationProgress.model_validate(image_progress)
+            image = read_stored_model(OperationProgress, image_progress)
             image_member = image.model_dump(
                 mode="json",
                 exclude_none=True,
@@ -5134,16 +5141,18 @@ class RecipeImageAvailabilityService:
             )
             progress = aggregate_progress(
                 [
-                    OperationMemberProgress.model_validate(
+                    read_stored_model(
+                        OperationMemberProgress,
                         image_member
-                        | {"member_id": "runtime-image", "state": image_state}
+                        | {"member_id": "runtime-image", "state": image_state},
                     ),
-                    OperationMemberProgress.model_validate(
+                    read_stored_model(
+                        OperationMemberProgress,
                         model_progress
                         | {
                             "member_id": "model-cache",
                             "state": str(model_child["state"]),
-                        }
+                        },
                     ),
                 ]
             ).model_dump(mode="json", exclude_none=True)
