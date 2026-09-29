@@ -8,6 +8,7 @@ import logging
 import re
 import secrets
 import time
+import traceback
 import uuid
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -67,9 +68,8 @@ from .auth import (
 from .bounded_json import BoundedJSONError
 from .browser_auth import BrowserAuthenticationError, BrowserAuthService
 from .catalog_api import CatalogProblem, install_catalog_routes
-from .catalog_service import CatalogError, CatalogService
+from .catalog_service import CatalogService
 from .catalog_sync import (
-    CatalogSyncError,
     ManagedRecipeCatalogSyncService,
     catalog_sync_retry_delay,
 )
@@ -126,7 +126,6 @@ from .operator_projection_api import (
 )
 from .profile_application_cancel_api import install_profile_application_cancel_route
 from .recipe_builds import RecipeBuildService
-from .recipe_library_types import RecipeLibraryError
 from .recipe_operations import RecipeOperationService
 from .recipe_packages import RecipePackageClient
 from .run_switch_operations import RunSwitchOperationService
@@ -269,6 +268,25 @@ def _reject_duplicate_json_keys(
             raise _DuplicateJsonKey
         document[key] = value
     return document
+
+
+def _log_request_failure(
+    request: Request, status: int, cause: BaseException | None
+) -> None:
+    """Log a 5xx with the request id the caller sees and a redacted traceback."""
+    from .logging import log_event
+
+    log_event(
+        _LOGGER,
+        "api.request_failed",
+        service="controller",
+        operation=f"{request.method} {request.url.path}",
+        endpoint=request.url.path,
+        request_id=getattr(request.state, "request_id", None),
+        http_status=status,
+        failure_type=type(cause).__name__,
+        traceback=traceback.format_exception(cause)[-64:] if cause else [],
+    )
 
 
 async def _bounded_request_body(request: Request, maximum: int) -> bytes:
@@ -496,6 +514,11 @@ def create_app(
     ) -> Response:
         from .library_api import SelectorAmbiguityHTTPError
 
+        cause = error.__context__
+        if error.status_code >= 500 and cause is not None:
+            # A handler turned this failure into a bare 5xx; keep the cause
+            # (the raise ... from None only hides it from the traceback).
+            _log_request_failure(request, error.status_code, cause)
         if request.url.path.startswith("/api/catalog/"):
             return Response(
                 content=_catalog_error_content(request, error),
@@ -678,19 +701,10 @@ def create_app(
                     )
                 else:
                     response = await call_next(request)
-        except Exception:  # noqa: BLE001 - middleware safety net, see log below
+        except Exception as error:  # noqa: BLE001 - middleware safety net, see log below
             # Preserve the correlation key without serializing the exception,
             # request body, headers, or URL query into logs.
-            from .logging import log_event
-
-            log_event(
-                _LOGGER,
-                "api.request_failed",
-                service="controller",
-                operation=f"{request.method} {request.url.path}",
-                endpoint=request.url.path,
-                request_id=request_id,
-            )
+            _log_request_failure(request, 500, error)
             response = Response(
                 content=_bounded_error_content(
                     "internal server error",
@@ -1518,12 +1532,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             try:
                 await asyncio.to_thread(managed_catalog_sync.automatic)
                 failures = 0
-            except (
-                CatalogError,
-                CatalogSyncError,
-                RecipeLibraryError,
-                OSError,
-            ) as error:
+            except Exception as error:  # noqa: BLE001 - the loop must never die
                 # The previously imported catalog stays active; retry sooner
                 # than the steady-state interval, backing off per failure.
                 failures += 1

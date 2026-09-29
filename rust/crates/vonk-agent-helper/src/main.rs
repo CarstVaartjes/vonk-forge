@@ -15,7 +15,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rustix::net::sockopt::socket_peercred;
 use vonk_agent_helper::operations::{
     ManagedRoots, OperationError, OperationExecutor, ProcessCommandRunner,
-    UNCLAIMED_CONTAINER_GRACE,
 };
 use vonk_agent_helper::protocol::{
     GrantVerifier, HelperError, HostOperation, PeerIdentity, parse_inspection_request,
@@ -208,25 +207,6 @@ fn run() -> Result<(), String> {
     .with_runtime_request_owner(agent_uid);
     executor.prepare_package_custody().map_err(display)?;
     let executor = Arc::new(executor);
-    {
-        let executor = Arc::clone(&executor);
-        thread::Builder::new()
-            .name("vonk-helper-sweep".to_owned())
-            .spawn(move || {
-                let mut first_seen = std::collections::HashMap::new();
-                loop {
-                    if let Err(error) = executor.sweep_unclaimed_containers(
-                        std::time::Instant::now(),
-                        UNCLAIMED_CONTAINER_GRACE,
-                        &mut first_seen,
-                    ) {
-                        eprintln!("vonk-agent-helper: container sweep failed: {error}");
-                    }
-                    thread::sleep(Duration::from_secs(60));
-                }
-            })
-            .map_err(display)?;
-    }
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
     if sockets.len() != 1 {

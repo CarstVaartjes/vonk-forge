@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -8,7 +9,7 @@ from threading import Barrier
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.fleet_profile_contract import (
@@ -22,6 +23,7 @@ from vonk_control.models import (
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
+    FleetProfileApplication,
     User,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
@@ -593,3 +595,110 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
     assert profile.assignments[0].recipe["revision_id"] == newer_revision_id
     assert profile.assignments[0].recipe["state"] == "Recipe not cached"
     assert any("is not in the local cache" in warning for warning in profile.warnings)
+
+
+def test_profile_reads_the_newest_readable_revision_of_its_recipe() -> None:
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    profile = service.create(
+        FleetProfileInput(
+            name="Upgrade",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector="vonk-forge/synthetic-tiny-build",
+                    spark_ids=[NODE_1],
+                )
+            ],
+        ),
+        actor="test",
+    )
+    unreadable = {"contract": 1}
+    with sessions.begin() as session:
+        current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert current is not None
+        session.add(
+            CatalogDocumentRevision(
+                id="00000000-0000-4000-8000-000000000022",
+                document_id=RECIPE_DOCUMENT_ID,
+                kind="recipe",
+                publisher=current.publisher,
+                slug=current.slug,
+                revision_number=2,
+                schema_version=2,
+                state="active",
+                document=unreadable,
+                content_digest=hashlib.sha256(
+                    json.dumps(
+                        unreadable, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest(),
+                execution_key="c" * 64,
+                created_by="test",
+                created_at=datetime(2026, 9, 6, tzinfo=UTC),
+            )
+        )
+
+    # The newest revision is unreadable, so the profile keeps the readable one.
+    view = service.get_number(profile.number)
+    assert view.assignments[0].recipe["revision_id"] == RECIPE_REVISION_ID
+
+    with sessions.begin() as session:
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == RECIPE_REVISION_ID)
+            .values(document=unreadable)
+        )
+
+    # Nothing readable: the choice needs attention, the profile still reads.
+    view = service.get_number(profile.number)
+    assert view.assignments[0].recipe["state"] == "Needs attention"
+    assert view.assignments[0].spark_ids == [NODE_1]
+
+
+def test_stored_application_with_a_retired_field_does_not_block_apply() -> None:
+    from .test_fleet_profiles import _SwitchAdapter
+
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    profile = service.create(
+        FleetProfileInput(
+            name="Retired",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector="vonk-forge/synthetic-tiny-build",
+                    spark_ids=[NODE_1],
+                )
+            ],
+        ),
+        actor="test",
+    )
+    first = service.load(
+        profile.number,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000097",
+    )
+    # An older build stored fields the current contract no longer has.
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        session.execute(
+            update(FleetProfileApplication)
+            .where(FleetProfileApplication.id == first.id)
+            .values(
+                progress={**row.progress, "retired_field": 1},
+                plan={**row.plan, "retired_field": 1},
+            )
+        )
+
+    assert service.get_number(profile.number).number == profile.number
+    assert service.application(first.id).id == first.id
+    again = service.load(
+        profile.number,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000098",
+    )
+    assert again.id != first.id

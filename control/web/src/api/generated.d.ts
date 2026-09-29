@@ -157,23 +157,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/catalog/managed-recipes/sync": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Sync Managed Recipe Catalog */
-        post: operations["syncManagedRecipeCatalog"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/catalog/managed-recipes/sync-status": {
         parameters: {
             query?: never;
@@ -3947,13 +3930,6 @@ export interface components {
             detail: string;
             /** Recipe Uri */
             recipe_uri?: string | null;
-        };
-        /** ManagedCatalogSyncRequest */
-        ManagedCatalogSyncRequest: {
-            /** Expected Commit */
-            expected_commit?: string | null;
-            /** Request Key */
-            request_key?: string;
         };
         /** ManagedCatalogSyncResponse */
         ManagedCatalogSyncResponse: {
@@ -7901,75 +7877,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-        };
-    };
-    syncManagedRecipeCatalog: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ManagedCatalogSyncRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ManagedCatalogSyncResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
                 };
             };
         };

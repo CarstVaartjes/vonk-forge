@@ -15,7 +15,7 @@ from vonk_control.auth import Actor, CursorError, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_contract import _MAX_PAGE_RECIPES
-from vonk_control.library_projection import LibraryProjection, LibraryProjectionError
+from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -686,8 +686,9 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
             .where(CatalogDocumentRevision.id == revision_id)
             .values(document={"kind": "model"})
         )
-    with pytest.raises(LibraryProjectionError):
-        projection.models(limit=1)
+    # One document this Controller cannot read never takes the listing down.
+    assert len(projection.models(limit=_MAX_PAGE_RECIPES).models) == 4
+    assert len(projection.recipe_library(limit=1, all_models=True).recipes) == 1
 
 
 @pytest.mark.parametrize("total_bytes,expected_status", [(0, 200), (-1, 503)])

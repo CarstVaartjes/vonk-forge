@@ -103,12 +103,10 @@ current set. Cached older revisions do not become extra Library choices;
 their exact records remain available to the installations and runs that use
 them. A pending or failed update never replaces the accepted recipe.
 
-The latest durable result is available from
-`GET /api/catalog/managed-recipes/sync-status`. An explicit refresh uses
-`POST /api/catalog/managed-recipes/sync` with a fresh UUID `request_key` and,
-when the caller already reviewed a snapshot, its 40-character
-`expected_commit`. Reusing a request key with different semantics or racing a
-second sync fails closed.
+The Controller syncs the catalog automatically; there is no manual trigger. It
+syncs again after its own upgrade, even for the same commit, and retries while
+the last run left problems. The latest durable result is available from
+`GET /api/catalog/managed-recipes/sync-status`.
 
 The recipe library's GitHub Actions workflow calls the reusable validator in
 this repository. Before publishing a production recipe-library release, pin
@@ -167,8 +165,7 @@ requires the designated physical lane.
 
 The Controller is the only import path. It resolves the configured signed
 release, validates the package index and dependency closure, and records the
-durable result through
-`POST /api/catalog/managed-recipes/sync`. Use the matching
+durable result. Use the
 `GET /api/catalog/managed-recipes/sync-status` response to inspect the
 commit, counts, conflicts, and withdrawn revisions. There is no platform-local
 Model or Recipe ledger to edit or import around the Controller.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import functools
 import inspect
 from collections.abc import Callable, Mapping, Sequence
@@ -224,3 +225,41 @@ def stored_document_detail(error: Exception) -> str | None:
     issue = issues[0] if issues else {}
     location = ".".join(str(part) for part in issue.get("loc", ()))[:140] or "<root>"
     return f"stored document is invalid at {location} ({issue.get('type', 'invalid')})"
+
+
+def _drop_field(document: object, location: Sequence[object]) -> None:
+    """Remove the key a pydantic error location names, if it is in the document.
+
+    Union member names appear in a location but not in the JSON, so a segment
+    that does not exist is skipped rather than followed.
+    """
+
+    node: Any = document
+    for part in location[:-1]:
+        if isinstance(node, dict):
+            node = node.get(part)
+        elif isinstance(node, list) and isinstance(part, int) and part < len(node):
+            node = node[part]
+    if isinstance(node, dict):
+        node.pop(location[-1], None)
+
+
+def read_stored_document[T](validate: Callable[[object], T], document: object) -> T:
+    """Validate a persisted document, ignoring fields a newer contract retired.
+
+    Wire and request models stay strict; a document written by an older build
+    may carry fields that were since removed, and that must never make history
+    unreadable. Any other defect still raises the original error.
+    """
+
+    document = copy.deepcopy(document)
+    for _ in range(64):
+        try:
+            return validate(document)
+        except ValidationError as error:
+            issues = error.errors()
+            if not issues or any(i["type"] != "extra_forbidden" for i in issues):
+                raise
+            for issue in issues:
+                _drop_field(document, issue["loc"])
+    return validate(document)
