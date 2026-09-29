@@ -45,6 +45,7 @@ def _compile(
     role: str = "entrypoint",
     rank: int = 0,
     resolved_entities: dict[str, object] | None = None,
+    parameters: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Compile published raw documents the way the Controller reads them."""
 
@@ -59,6 +60,7 @@ def _compile(
         models=parsed,
         recipe_digest=contracts.document_sha256(recipe),
         package_handle=package_handle,
+        parameters=parameters,
         role=role,
         rank=rank,
     )
@@ -474,6 +476,8 @@ def test_canonical_argv_json_and_utf8_bounds() -> None:
         _validate_argv_size([*exact_command, "x"])
 
 
+# Compiles the whole published corpus, every option choice included.
+@pytest.mark.slow(60)
 def test_current_recipe_corpus_compiles_every_role() -> None:
     """Compile every role from the current canonical recipe checkout."""
     root = recipe_library_root()
@@ -481,6 +485,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
     assert len(recipe_files) == 85
     engines: set[str] = set()
     projection_count = 0
+    option_projection_count = 0
     for path in recipe_files:
         recipe_document, models, package = _published_recipe_context(path.stem)
         recipe = contracts.read_recipe(recipe_document)
@@ -496,6 +501,18 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
                     rank=rank,
                 )
                 projection_count += 1
+                # Every choice of every option compiles on every rank.
+                for option in recipe.options:
+                    for choice in option.choices:
+                        _compile(
+                            recipe_document,
+                            models,
+                            package_handle=package,
+                            role=role.name,
+                            rank=rank,
+                            parameters={"option_choices": {option.name: choice.value}},
+                        )
+                        option_projection_count += 1
                 artifacts = _mappings(spec["artifacts"], "runtime artifacts")
                 for artifact in artifacts:
                     assert _text(
@@ -515,6 +532,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
         "pytorch-pipeline",
     }
     assert projection_count == 109
+    assert option_projection_count > 0
 
 
 def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(

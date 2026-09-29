@@ -2549,6 +2549,10 @@ export interface components {
             desired_state: "installed" | "running";
             /** Node Ids */
             node_ids: string[];
+            /** Option Choices */
+            option_choices?: {
+                [key: string]: string;
+            };
             /** Reasons */
             reasons: components["schemas"]["FleetProfileReason"][];
             /** Recipe Revision Id */

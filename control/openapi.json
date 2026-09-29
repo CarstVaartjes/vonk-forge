@@ -4834,6 +4834,23 @@
             "title": "Node Ids",
             "type": "array"
           },
+          "option_choices": {
+            "maxProperties": 16,
+            "patternProperties": {
+              "^[a-z][a-z0-9_-]*$": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_-]*$",
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "title": "Option Choices",
+            "type": "object"
+          },
           "reasons": {
             "items": {
               "$ref": "#/components/schemas/FleetProfileReason"

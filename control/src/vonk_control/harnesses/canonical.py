@@ -391,6 +391,18 @@ def _distributed_args(
     )
 
 
+def validate_runtime_policy(recipe: RecipeDefinition) -> None:
+    """Apply the platform's argument and environment policy to a runtime.
+
+    This is the check ``compile_canonical_harness`` makes on the arguments and
+    environment; the recipe library also runs it on every recipe option choice
+    merged into its recipe, so a choice can never carry what a recipe cannot.
+    """
+
+    _environment(recipe)
+    _argv(recipe, _settings(recipe, None))
+
+
 def compile_canonical_harness(
     recipe: RecipeDefinition,
     models: Mapping[str, ModelDefinition],

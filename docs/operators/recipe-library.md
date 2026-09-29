@@ -186,6 +186,22 @@ interpreter injection hooks, and executable-path overrides. Values remain
 bounded recipe scalars; this capability does not grant secret access or shell
 execution.
 
+## Recipe options
+
+A recipe may declare options (contract 2.1.0): named settings with a fixed set
+of named choices, each carrying literal runtime arguments and environment, and
+exactly one default. A profile assignment stores the effective choice for every
+option (`option_choices`); a choice left out takes the recipe default, and an
+unknown option or value is refused with the valid choices. The Controller
+merges the chosen arguments and environment into the recipe (an argument or
+variable the recipe already sets is replaced in place, otherwise appended) and
+then applies the same platform checks as to authored values, identically on
+every rank. The choices are part of the profile revision and of the run's
+mapping: changing them needs a reload, which reuses the cached model and image
+(no download or build). A profile always resolves to the newest revision of its
+recipe, so a stored value that revision no longer offers falls back to the
+default and is reported in the profile's warnings.
+
 In the production Compose topology the control API retains no general outbound
 network. Its GitHub client uses internal Caddy listeners that accept only
 repository-scoped `GET` requests and remove credentials: `:8083` relays the

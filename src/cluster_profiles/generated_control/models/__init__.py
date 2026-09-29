@@ -133,6 +133,7 @@ from .fleet_profile_assignment_preview import FleetProfileAssignmentPreview
 from .fleet_profile_assignment_preview_actions_item import FleetProfileAssignmentPreviewActionsItem
 from .fleet_profile_assignment_preview_current_state import FleetProfileAssignmentPreviewCurrentState
 from .fleet_profile_assignment_preview_desired_state import FleetProfileAssignmentPreviewDesiredState
+from .fleet_profile_assignment_preview_option_choices import FleetProfileAssignmentPreviewOptionChoices
 from .fleet_profile_assignment_view import FleetProfileAssignmentView
 from .fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel
 from .fleet_profile_assignment_view_option_choices import FleetProfileAssignmentViewOptionChoices
@@ -669,6 +670,7 @@ __all__ = (
     "FleetProfileAssignmentPreviewActionsItem",
     "FleetProfileAssignmentPreviewCurrentState",
     "FleetProfileAssignmentPreviewDesiredState",
+    "FleetProfileAssignmentPreviewOptionChoices",
     "FleetProfileAssignmentView",
     "FleetProfileAssignmentViewModel",
     "FleetProfileAssignmentViewOptionChoices",

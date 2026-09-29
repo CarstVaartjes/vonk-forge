@@ -481,6 +481,36 @@ def _validate_v2_package(
                     )
 
 
+def _validate_recipe_option_policy(
+    recipe: Any, path: Path, platform_root: Path
+) -> None:
+    """Every option choice, merged into its recipe, passes the platform policy.
+
+    Choices are trusted recipe data like authored arguments and environment, so
+    they get the same platform-owned security, path and environment checks.
+    """
+
+    if not recipe.options:
+        return
+    source = platform_root / "control" / "src"
+    if str(source) not in sys.path:
+        sys.path.insert(0, str(source))
+    from vonk_control.harnesses.canonical import validate_runtime_policy
+    from vonk_control.harnesses.common import HarnessCompileError
+
+    for option in recipe.options:
+        for choice in option.choices:
+            try:
+                validate_runtime_policy(
+                    recipe.with_option_choices({option.name: choice.value})
+                )
+            except (HarnessCompileError, ValueError) as error:
+                raise LibraryValidationError(
+                    f"{path}: option {option.name}={choice.value} is refused by "
+                    f"the platform: {error}"
+                ) from error
+
+
 def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
     """Validate the central Model/Recipe producer and immutable packages."""
     contract_root = library_root / "contracts" / "src"
@@ -649,6 +679,7 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
                 f"{path}: topology mode is not supported by platform harness: "
                 f"{recipe.topology.mode}"
             )
+        _validate_recipe_option_policy(recipe, path, platform_root)
         row = indexed.get(key)
         digest = document_sha256(recipe_document)
         if row is None or row.get("content_sha256") != digest:

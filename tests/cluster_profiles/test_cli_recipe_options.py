@@ -64,8 +64,13 @@ class Fake:
             }
         if method == "PUT":
             self.saved = payload
-            return {"revision": 2, "definition": {k: v for k, v in payload.items()}}
+            return {"revision": 2, "definition": dict(payload or {})}
         raise AssertionError((method, path))
+
+
+def _saved(client: Fake) -> dict:
+    assert client.saved is not None
+    return client.saved
 
 
 def _add(client, *extra, capsys=None):
@@ -88,7 +93,7 @@ def _add(client, *extra, capsys=None):
 def test_option_flag_is_saved_and_others_default(capsys):
     client = Fake()
     assert _add(client, "--option", "verification=adaptive-k", "--no-input") == 0
-    [assignment] = client.saved["assignments"]
+    [assignment] = _saved(client)["assignments"]
     assert assignment["option_choices"] == {
         "verification": "adaptive-k",
         "projections": "stock",
@@ -106,7 +111,7 @@ def test_no_input_without_options_is_not_an_error_and_sends_no_choice(capsys):
     client = Fake()
     assert _add(client, "--no-input") == 0
     # The Controller fills every default when the profile is saved.
-    assert not client.saved["assignments"][0].get("option_choices")
+    assert not _saved(client)["assignments"][0].get("option_choices")
 
 
 def test_interactive_prompt_accepts_default_with_enter(monkeypatch, capsys):
@@ -123,7 +128,7 @@ def test_interactive_prompt_accepts_default_with_enter(monkeypatch, capsys):
         ("--profile", "1", "profile", "add", SELECTOR, "--spark", "Atlas"),
         control_client=client,
     )
-    assert client.saved["assignments"][0]["option_choices"] == {
+    assert _saved(client)["assignments"][0]["option_choices"] == {
         "verification": "standard",
         "projections": "dense-fp8",
     }
@@ -157,7 +162,7 @@ def test_configure_changes_choices_and_keeps_the_rest(capsys):
         )
         == 0
     )
-    assert client.saved["assignments"][0]["option_choices"] == {
+    assert _saved(client)["assignments"][0]["option_choices"] == {
         "verification": "adaptive-k",
         "projections": "dense-fp8",
     }
@@ -232,6 +237,6 @@ def test_definition_import_round_trips_option_choices(tmp_path, capsys):
         )
         == 0
     )
-    assert client.saved["assignments"][0]["option_choices"] == {
+    assert _saved(client)["assignments"][0]["option_choices"] == {
         "verification": "adaptive-k"
     }

@@ -39,7 +39,12 @@ from vonk_control.recipe_library_types import (
     RecipeLibrarySnapshot,
 )
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+from vonk_forge_contracts import (
+    CONTRACT_VERSION,
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+)
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
@@ -213,7 +218,7 @@ def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -
         reader.snapshot.version,
         reader.snapshot.updated_at,
     )
-    assert result.library_version == "2.0.0"
+    assert result.library_version == CONTRACT_VERSION
     assert reader.fetches == [item.uri]
     with sessions() as session:
         revisions = session.scalars(select(CatalogDocumentRevision)).all()

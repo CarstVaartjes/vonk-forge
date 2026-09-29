@@ -14,9 +14,11 @@ from ..models.fleet_profile_assignment_preview_current_state import check_fleet_
 from ..models.fleet_profile_assignment_preview_current_state import FleetProfileAssignmentPreviewCurrentState
 from ..models.fleet_profile_assignment_preview_desired_state import check_fleet_profile_assignment_preview_desired_state
 from ..models.fleet_profile_assignment_preview_desired_state import FleetProfileAssignmentPreviewDesiredState
+from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
+  from ..models.fleet_profile_assignment_preview_option_choices import FleetProfileAssignmentPreviewOptionChoices
   from ..models.fleet_profile_reason import FleetProfileReason
 
 
@@ -39,6 +41,7 @@ class FleetProfileAssignmentPreview:
             reasons (list[FleetProfileReason]):
             recipe_revision_id (str):
             recipe_title (str):
+            option_choices (FleetProfileAssignmentPreviewOptionChoices | Unset):
      """
 
     actions: list[FleetProfileAssignmentPreviewActionsItem]
@@ -49,12 +52,14 @@ class FleetProfileAssignmentPreview:
     reasons: list[FleetProfileReason]
     recipe_revision_id: str
     recipe_title: str
+    option_choices: FleetProfileAssignmentPreviewOptionChoices | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.fleet_profile_assignment_preview_option_choices import FleetProfileAssignmentPreviewOptionChoices # noqa: PLC0415
         from ..models.fleet_profile_reason import FleetProfileReason # noqa: PLC0415
         actions = []
         for actions_item_data in self.actions:
@@ -84,6 +89,10 @@ class FleetProfileAssignmentPreview:
 
         recipe_title = self.recipe_title
 
+        option_choices: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.option_choices, Unset):
+            option_choices = self.option_choices.to_dict()
+
 
         field_dict: dict[str, Any] = {}
 
@@ -97,6 +106,8 @@ class FleetProfileAssignmentPreview:
             "recipe_revision_id": recipe_revision_id,
             "recipe_title": recipe_title,
         })
+        if option_choices is not UNSET:
+            field_dict["option_choices"] = option_choices
 
         return field_dict
 
@@ -104,6 +115,7 @@ class FleetProfileAssignmentPreview:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.fleet_profile_assignment_preview_option_choices import FleetProfileAssignmentPreviewOptionChoices # noqa: PLC0415
         from ..models.fleet_profile_reason import FleetProfileReason # noqa: PLC0415
         d = dict(src_dict)
         actions = []
@@ -145,6 +157,16 @@ class FleetProfileAssignmentPreview:
 
         recipe_title = d.pop("recipe_title")
 
+        _option_choices = d.pop("option_choices", UNSET)
+        option_choices: FleetProfileAssignmentPreviewOptionChoices | Unset
+        if isinstance(_option_choices,  Unset):
+            option_choices = UNSET
+        else:
+            option_choices = FleetProfileAssignmentPreviewOptionChoices.from_dict(_option_choices)
+
+
+
+
         fleet_profile_assignment_preview = cls(
             actions=actions,
             assignment_id=assignment_id,
@@ -154,6 +176,7 @@ class FleetProfileAssignmentPreview:
             reasons=reasons,
             recipe_revision_id=recipe_revision_id,
             recipe_title=recipe_title,
+            option_choices=option_choices,
         )
 
         return fleet_profile_assignment_preview
