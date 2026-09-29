@@ -77,8 +77,7 @@ def _assert_current(catalog, first, expected):
     )
     library = _library(catalog)
     assert {
-        row.identity.recipe_revision_id
-        for row in library.recipe_library(all_models=True).recipes
+        row.identity.recipe_revision_id for row in library.recipe_library().recipes
     } == {expected.id}
     assert (
         library.recipe_detail(
@@ -171,7 +170,7 @@ def test_stable_recipe_reads_do_not_guess_when_active_head_is_missing(catalog):
     with pytest.raises(KeyError):
         catalog.get_recipe(first.document_id)
     assert catalog.recipe_catalog_local_revisions([(first.publisher, first.slug)]) == {}
-    assert _library(catalog).recipe_library(all_models=True).recipes == []
+    assert _library(catalog).recipe_library().recipes == []
     assert catalog.get_recipe(first.id).id == first.id
     with catalog._sessions() as session:
         assert _active_revision(session, first.document_id) is None

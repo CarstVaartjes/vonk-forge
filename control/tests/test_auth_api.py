@@ -42,19 +42,6 @@ class Jobs:
     def get(self, job_id: str) -> object:
         raise KeyError(job_id)
 
-    def list(self, *, limit: int = 100) -> list[object]:
-        return []
-
-    def list_page(
-        self,
-        *,
-        limit: int = 100,
-        cursor: str | None = None,
-        status: str | None = None,
-        target: str | None = None,
-    ) -> tuple[list[object], str | None, int]:
-        raise AssertionError
-
 
 def _client(*, maximum_subject_failures: int = 5) -> tuple[TestClient, str]:
     engine = create_engine(

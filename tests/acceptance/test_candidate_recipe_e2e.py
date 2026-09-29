@@ -335,9 +335,7 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
             # Compare canonical producer documents, not a second handwritten DTO.
             assert row["document"] == expected_models[key]
 
-        recipe_response = client.get(
-            "/api/recipe/library", params={"limit": 512, "all_models": True}
-        )
+        recipe_response = client.get("/api/recipe/library", params={"limit": 512})
         assert recipe_response.status_code == 200, recipe_response.text[:1024]
         recipe_payload = recipe_response.json()
         RecipeLibraryResponse.from_dict(recipe_payload)
@@ -392,7 +390,6 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
             "--json",
             "recipe",
             "library",
-            "--all-models",
             "--limit",
             "512",
         ],

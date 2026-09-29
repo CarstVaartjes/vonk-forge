@@ -24,19 +24,6 @@ def test_every_mutating_route_has_explicit_role() -> None:
         def get(self, job_id: str) -> object:
             raise KeyError
 
-        def list(self, *, limit: int = 100) -> list[object]:
-            return []
-
-        def list_page(
-            self,
-            *,
-            limit: int = 100,
-            cursor: str | None = None,
-            status: str | None = None,
-            target: str | None = None,
-        ) -> tuple[list[object], str | None, int]:
-            raise AssertionError
-
     app = create_app(jobs=Jobs(), tokens=TokenCodec(b"k" * 32))
     routes = {
         (method, route.path)

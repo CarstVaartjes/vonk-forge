@@ -144,7 +144,7 @@ export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path
   useEffect(() => setQuery(new URL(path, location.origin).searchParams.get("q") ?? ""), [path]);
   useEffect(() => {
     const controller = new AbortController(); setError("");
-    void loadLibraryView(api, controller.signal, librarySort, libraryRecencySince(libraryUpdated)).then(value => { if (!controller.signal.aborted) setSnapshot(value); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load Library"); });
+    void loadLibraryView(api, controller.signal, librarySort, libraryRecencySince(libraryUpdated)).then(value => { if (!controller.signal.aborted) setSnapshot(value); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 512) : "Unable to load Library"); });
     return () => controller.abort();
   }, [api, attempt, librarySort, libraryUpdated]);
   useEffect(() => {
@@ -157,7 +157,7 @@ export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path
     const recipeId = route.kind === "recipe" ? route.recipeId : undefined;
     if (!recipeId) { setDetail(undefined); setDetailError(""); setDetailLoading(false); return; }
     const controller = new AbortController(); setDetailLoading(true); setDetailError("");
-    void api.recipeDetail(recipeId, controller.signal).then(value => { if (!controller.signal.aborted) { setDetail(viewRecipeDetail(value)); setDetailLoading(false); } }).catch(value => { if (!controller.signal.aborted) { setDetailError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load Recipe detail"); setDetailLoading(false); } });
+    void api.recipeDetail(recipeId, controller.signal).then(value => { if (!controller.signal.aborted) { setDetail(viewRecipeDetail(value)); setDetailLoading(false); } }).catch(value => { if (!controller.signal.aborted) { setDetailError(value instanceof Error ? value.message.slice(0, 512) : "Unable to load Recipe detail"); setDetailLoading(false); } });
     return () => controller.abort();
   }, [api, detailAttempt, route]);
   useEffect(() => {

@@ -57,19 +57,6 @@ class Jobs:
         )
         return Enqueued()
 
-    def list(self, *, limit: int = 100) -> list[Enqueued]:
-        return []
-
-    def list_page(
-        self,
-        *,
-        limit: int = 100,
-        cursor: str | None = None,
-        status: str | None = None,
-        target: str | None = None,
-    ) -> tuple[list[Enqueued], str | None, int]:
-        return [], None, 0
-
 
 def _client(role: str, *, agent_upgrades=None, fleet_projection=None):
     codec = TokenCodec(b"k" * 32)

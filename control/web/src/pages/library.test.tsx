@@ -9,12 +9,12 @@ import {ApiClient} from "../api/client";
 afterEach(() => vi.unstubAllGlobals());
 
 test("loads recipes for uncached models through the real API client", async () => {
-  // The server defaults to locally cached models unless all_models is requested.
-  // Stubbing ControlApi.recipeLibrary directly concealed the missing query flag.
+  // The server narrows to what is cached only when asked with `cached`.
+  // Stubbing ControlApi.recipeLibrary directly would conceal a stray flag.
   vi.stubGlobal("fetch", async (request: Request) => {
     const url = new URL(request.url);
     const body = url.pathname === "/api/model/library" ? {...modelLibrary, models: modelLibrary.models.map(model => ({...model, local: {...model.local, controller: "not_cached"}}))}
-      : url.searchParams.get("all_models") === "true" ? recipeLibrary : {...recipeLibrary, recipes: []};
+      : url.searchParams.has("cached") ? {...recipeLibrary, recipes: []} : recipeLibrary;
     return new Response(JSON.stringify(body), {status: 200, headers: {"Content-Type": "application/json"}});
   });
   const snapshot = await loadLibraryView(new ApiClient(), new AbortController().signal);

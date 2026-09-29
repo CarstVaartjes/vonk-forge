@@ -241,6 +241,9 @@ def _filters(parser: argparse.ArgumentParser) -> None:
     ):
         parser.add_argument(f"--{name}", action="append", default=[])
     parser.add_argument("--updated-since")
+    parser.add_argument(
+        "--cached", action="store_true", help="Only what is already in the cache"
+    )
     parser.add_argument("--sort", choices=("updated", "name"), default="updated")
     parser.add_argument("--cursor")
     parser.add_argument(
@@ -391,12 +394,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "--technical", action="store_true", help="Include the canonical definition"
     )
     _add_output(detail)
-    node_profile = fleet_actions.add_parser(
-        "node-profile", help="Show one Spark's identity, labels, and lifecycle"
-    )
-    _selector(node_profile, "spark", help="Exact Spark ID or friendly name")
-    _selection_controls(node_profile)
-    _add_output(node_profile)
     rename = fleet_actions.add_parser("rename", help="Change a Spark's friendly name")
     _selector(rename, "spark", help="Exact Spark selector or friendly name")
     rename.add_argument("new_name")
@@ -585,7 +582,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _filters(recipe_library)
     recipe_library.add_argument("--model", action="append", default=[])
-    recipe_library.add_argument("--all-models", action="store_true")
     recipe_library.add_argument(
         "--ready",
         action="store_true",
@@ -706,9 +702,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "list", help="List stable numbered profiles"
     )
     _add_output(profile_list)
-    profile_name = profile_actions.add_parser("name", help="Name the selected profile")
-    profile_name.add_argument("name")
-    _profile_edit_flags(profile_name)
     profile_add = profile_actions.add_parser(
         "add", help="Assign a recipe to Sparks and autosave"
     )
@@ -735,6 +728,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     profile_configure = profile_actions.add_parser(
         "configure", help="Edit saved metadata without loading"
     )
+    profile_configure.add_argument("--name")
     profile_configure.add_argument("--description")
     profile_configure.add_argument("--retention", choices=("keep-cached", "exact"))
     profile_configure.add_argument("--favorite", choices=("true", "false"))
@@ -762,7 +756,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     profile_load.set_defaults(outcome_context="mutation", requires_profile=True)
     profile_load.add_argument(
-        "--dry-run", action="store_true", help="Review the plan without applying it"
+        "--review",
+        dest="dry_run",
+        action="store_true",
+        help="Review the plan without applying it",
     )
     profile_load.add_argument(
         "--yes", action="store_true", help="Confirm without asking"
@@ -842,6 +839,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(key_list)
     key_revoke = key_actions.add_parser("revoke", help="Revoke a client key by name")
     key_revoke.add_argument("name")
+    key_revoke.add_argument("--yes", action="store_true", help="Confirm without asking")
     _add_output(key_revoke)
 
     run = commands.add_parser(
@@ -2089,9 +2087,9 @@ def _overview(
     if noun == "fleet":
         return client.request("GET", "/api/fleet")
     if noun == "model":
-        return client.request("GET", "/api/model/library", query={"local": True})
+        return client.request("GET", "/api/model/library", query={"cached": True})
     if noun == "recipe":
-        return client.request("GET", "/api/recipe/library")
+        return client.request("GET", "/api/recipe/library", query={"cached": True})
     return client.request("GET", f"/api/profile/{_profile_number(args)}")
 
 
@@ -2360,20 +2358,6 @@ def _fleet(
         return accepted
     if action is None:
         return _overview(client, "fleet", args)
-    if action == "node-profile":
-        deadline = time.monotonic() + args.timeout_seconds
-        node_id = _resolve_spark_selectors(client, [args.selector], deadline=deadline)[
-            0
-        ]
-        result = client.request(
-            "GET",
-            f"/api/fleet/{_quoted(node_id)}",
-            timeout_seconds=_selection_remaining(deadline),
-        )
-        _selection_remaining(deadline)
-        if result.get("id") != node_id:
-            raise ValueError("fleet detail response does not match the selected Spark")
-        return result
     if action == "detail":
         selector = _fleet_selector(args)
         query = _query(technical=args.technical) or None
@@ -2547,10 +2531,10 @@ def _library_query(args: argparse.Namespace, *, recipe: bool) -> dict[str, objec
             "cursor",
         )
     }
+    values["cached"] = args.cached or None
     if recipe:
         values.update(
             model=getattr(args, "model", []),
-            all_models=args.all_models,
             ready=getattr(args, "ready", None),
             fits_fleet=getattr(args, "fits_fleet", None),
             sparks=getattr(args, "sparks", []),
@@ -3040,18 +3024,23 @@ def _profile_authoring(
         args.document_output = True
         return definition
     assignments = cast(list[dict[str, object]], definition.get("assignments", []))
-    if action == "name":
-        definition["name"] = args.name
-    elif action == "configure":
+    if action == "configure":
         if (
             not any(
                 value is not None
-                for value in (args.description, args.retention, args.favorite)
+                for value in (
+                    args.name,
+                    args.description,
+                    args.retention,
+                    args.favorite,
+                )
             )
             and not args.label
             and not args.remove_label
         ):
             raise ValueError("profile configure requires at least one metadata change")
+        if args.name is not None:
+            definition["name"] = args.name
         if args.description is not None:
             definition["description"] = args.description
         if args.retention is not None:
@@ -3174,7 +3163,6 @@ def _recipe_rows(
     seen_selectors: set[str] = set()
     while True:
         query: dict[str, object] = {
-            "all_models": True,
             "limit": 512,
             "sort": "name",
             "assess": False,
@@ -3396,7 +3384,7 @@ def _profile(
                 )
 
         return _poll_path(client, path, result, args, validate=same_application)
-    if action in {"name", "add", "remove", "configure", "export", "import"}:
+    if action in {"add", "remove", "configure", "export", "import"}:
         return _profile_authoring(args, client)
     if action == "cancel":
         if not args.yes:
@@ -3475,7 +3463,7 @@ def _profile(
     if action == "load":
         if args.dry_run:
             if args.yes or args.detach:
-                raise ValueError("--dry-run cannot be combined with --yes or --detach")
+                raise ValueError("--review cannot be combined with --yes or --detach")
             return client.request("POST", f"/api/profile/{number}/preview")
         interactive = (
             not (
@@ -3721,6 +3709,9 @@ def _key(args: argparse.Namespace, client: ControllerClient) -> dict[str, object
     if action in (None, "list"):
         return client.request("GET", "/api/key")
     if action == "revoke":
+        _confirm_action(
+            args, f"Revoke key {args.name}? Apps using it stop working immediately."
+        )
         return client.request("POST", f"/api/key/{_quoted(args.name)}/revoke", {})
     payload: dict[str, object] = {"name": args.name, "models": args.models}
     if args.expires is not None:

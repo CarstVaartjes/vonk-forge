@@ -103,7 +103,7 @@ def install_library_routes(
         search: Annotated[str | None, Query(max_length=256)] = None,
         updated_since: Annotated[datetime | None, Query()] = None,
         sort: Annotated[Literal["updated", "name"], Query()] = "updated",
-        local: Annotated[bool, Query()] = False,
+        cached: Annotated[bool, Query()] = False,
         _actor: Any = authenticated,
     ) -> ModelLibraryResponse:
         try:
@@ -119,7 +119,7 @@ def install_library_routes(
                 search=search,
                 updated_since=updated_since,
                 sort=sort,
-                local_only=local,
+                cached=cached,
             )
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise _error(error) from None
@@ -149,7 +149,7 @@ def install_library_routes(
         limit: Annotated[int, Query(ge=1, le=512)] = 100,
         cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_LENGTH)] = None,
         model: Annotated[list[str] | None, Query(max_length=64)] = None,
-        all_models: Annotated[bool, Query()] = False,
+        cached: Annotated[bool, Query()] = False,
         ready: Annotated[bool | None, Query()] = None,
         fits_fleet: Annotated[bool | None, Query()] = None,
         assess: Annotated[bool, Query()] = True,
@@ -167,7 +167,7 @@ def install_library_routes(
                 limit=limit,
                 cursor=cursor,
                 model_selectors=model or [],
-                all_models=all_models,
+                cached=cached,
                 ready=ready,
                 fits_fleet=fits_fleet,
                 assess=assess,

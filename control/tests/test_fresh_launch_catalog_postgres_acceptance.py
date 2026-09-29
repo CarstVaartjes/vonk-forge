@@ -245,7 +245,7 @@ def _library_recipes(api: TestClient) -> list[Any]:
         params: dict[str, Any] = {"limit": limit}
         if cursor is not None:
             params["cursor"] = cursor
-        response = api.get("/api/recipe/library", params={**params, "all_models": True})
+        response = api.get("/api/recipe/library", params={**params})
         assert response.status_code == 200, response.text
         page = RecipeLibraryResponse.model_validate_json(response.content)
         recipes.extend(page.recipes)

@@ -574,3 +574,65 @@ def test_activity_omits_unsupplied_profile_cancellation_deadline(capsys):
     output = capsys.readouterr().out
     assert "Cancellation: cancelled (operator)" in output
     assert "Cancellation deadline" not in output
+
+
+def _recipe(selector, *, readiness, cache, fit="ready", reasons=()):
+    return {
+        "selector": selector,
+        "node_count": 1,
+        "identity": {"title": selector, "publisher": "p", "slug": "s"},
+        "local": {"controller": "not_cached", "running_on": []},
+        "resources": {"disk_bytes": 0, "memory_bytes": None},
+        "usage": [],
+        "assessment": {
+            "cache": {"state": cache, "reasons": list(reasons)},
+            "fleet_fit": {"state": fit, "reasons": []},
+            "readiness": {"state": readiness, "reasons": list(reasons)},
+        },
+    }
+
+
+def test_a_recipe_that_only_needs_its_download_is_not_called_blocked(capsys):
+    # Break caught: "blocked" for every recipe on an idle fleet hides that the
+    # only step missing is a download.
+    missing = [{"code": "library.cache_missing", "detail": "model missing"}]
+    other = [{"code": "library.insufficient_nodes", "detail": "needs 2 Sparks"}]
+    render_payload(
+        {
+            "recipes": [
+                _recipe(
+                    "p/download", readiness="blocked", cache="blocked", reasons=missing
+                ),
+                _recipe("p/too-big", readiness="blocked", cache="ready", reasons=other),
+            ],
+            "next_cursor": None,
+        },
+        "recipe",
+        action="library",
+    )
+    rows = {
+        line.split()[0]: line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("p/")
+    }
+    assert "needs download" in rows["p/download"] and "not cached" in rows["p/download"]
+    assert "needs download" not in rows["p/too-big"] and "blocked" in rows["p/too-big"]
+
+
+def test_an_empty_library_page_names_the_filters_that_emptied_it(capsys):
+    render_payload(
+        {
+            "recipes": [],
+            "next_cursor": None,
+            "filters": {"cached": True, "usage": ["code"]},
+        },
+        "recipe",
+        action="library",
+    )
+    output = capsys.readouterr().out
+    assert "--cached" in output and "--usage code" in output
+    render_payload(
+        {"recipes": [], "next_cursor": None, "filters": {}}, "recipe", action="library"
+    )
+    output = capsys.readouterr().out
+    assert "--" not in output.split("Next:")[0]

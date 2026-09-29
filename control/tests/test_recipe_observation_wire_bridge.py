@@ -86,19 +86,6 @@ class _UnusedJobs:
     def get(self, job_id: str) -> object:
         raise KeyError(job_id)
 
-    def list(self, *, limit: int = 100) -> list[object]:
-        return []
-
-    def list_page(
-        self,
-        *,
-        limit: int = 100,
-        cursor: str | None = None,
-        status: str | None = None,
-        target: str | None = None,
-    ) -> tuple[list[object], str | None, int]:
-        return [], None, 0
-
 
 def _singleton_recovery_process_tick(database_url: str, now_value: str) -> None:
     """Reconstruct the Controller worker in a new process against PostgreSQL."""

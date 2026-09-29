@@ -344,7 +344,7 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     first_result = apply(original, "1" * 40)
     assert first_result.state == "current"
     assert first_result.imported_count == 1
-    first = library.recipe_library(all_models=True).recipes[0]
+    first = library.recipe_library().recipes[0]
 
     changed = deepcopy(original.document)
     _document_section(changed, "metadata")["title"] = "Accepted recipe successor"

@@ -211,8 +211,7 @@ class LibraryFilterValues(_StrictModel):
     search: Text256 | None = None
     updated_since: Text64 | None = None
     sort: Literal["updated", "name"] | None = None
-    local_only: bool | None = None
-    all_models: bool | None = None
+    cached: bool | None = None
     ready: bool | None = None
     fits_fleet: bool | None = None
 

@@ -93,3 +93,16 @@ test("binds artifact result URLs to a canonical output name and digest", () => {
     "Unsafe artifact result digest",
   );
 });
+
+test("a failed call carries the Controller's request ID on the error", async () => {
+  // Break caught: the X-Request-ID response header is dropped, so an operator
+  // cannot quote the failed call to support.
+  const id = "6f1c2f1e-0f3a-4c53-9a53-1b1a7d2f9a10";
+  vi.stubGlobal("fetch", async () => new Response(JSON.stringify({detail: "no such Spark"}), {
+    status: 404,
+    headers: {"Content-Type": "application/json", "X-Request-ID": id},
+  }));
+  const failure = await new ApiClient().fleetNode("missing").then(() => null, error => error);
+  expect(failure).toMatchObject({status: 404, requestId: id});
+  expect(String(failure.message)).toContain(id);
+});

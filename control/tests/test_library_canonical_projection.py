@@ -190,13 +190,11 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert model_page is not None
     assert len(models) == expected_model_count
     assert {model.identity.content_sha256 for model in models} == set(expected_models)
-    recipe_page = projection.recipe_library(limit=100, all_models=True)
+    recipe_page = projection.recipe_library(limit=100)
     recipe_items = list(recipe_page.recipes)
     recipe_cursor = recipe_page.next_cursor
     while recipe_cursor is not None:
-        next_page = projection.recipe_library(
-            limit=100, cursor=recipe_cursor, all_models=True
-        )
+        next_page = projection.recipe_library(limit=100, cursor=recipe_cursor)
         recipe_items.extend(next_page.recipes)
         recipe_cursor = next_page.next_cursor
     recipe_page = recipe_page.model_copy(update={"recipes": recipe_items})
@@ -205,13 +203,11 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     for sort in ("name", "updated"):
         first_page = projection.recipe_library(
             limit=1,
-            all_models=True,
             sort=sort,
         )
         assert first_page.next_cursor is not None
         second_page = projection.recipe_library(
             limit=1,
-            all_models=True,
             sort=sort,
             cursor=first_page.next_cursor,
         )
@@ -249,7 +245,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     } | set(model_page.facets.alignment)
     assert "abliterated" in recipe_page.facets.alignment
     abliterated = projection.recipe_library(
-        limit=100, all_models=True, alignment=["abliterated"]
+        limit=100, alignment=["abliterated"]
     ).recipes
     assert abliterated
     assert {item.alignment for item in abliterated} == {"abliterated"}
@@ -263,9 +259,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
         recipe_page.facets.sparks
     )
     sparks = max(recipe_page.facets.sparks)
-    by_sparks = projection.recipe_library(
-        limit=100, all_models=True, sparks=[sparks]
-    ).recipes
+    by_sparks = projection.recipe_library(limit=100, sparks=[sparks]).recipes
     assert by_sparks
     assert {item.node_count for item in by_sparks} == {sparks}
 
@@ -276,19 +270,19 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     one = {
         item.identity.recipe_id
         for item in projection.recipe_library(
-            limit=100, all_models=False, model_selectors=[first]
+            limit=100, model_selectors=[first]
         ).recipes
     }
     two = {
         item.identity.recipe_id
         for item in projection.recipe_library(
-            limit=100, all_models=False, model_selectors=[second]
+            limit=100, model_selectors=[second]
         ).recipes
     }
     both = {
         item.identity.recipe_id
         for item in projection.recipe_library(
-            limit=100, all_models=False, model_selectors=[first, second]
+            limit=100, model_selectors=[first, second]
         ).recipes
     }
     assert both == one | two
@@ -331,7 +325,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert library_model_schema["properties"]["local"]["$ref"].endswith(
         "LibraryLocalState"
     )
-    recipe_response = client.get("/api/recipe/library", params={"all_models": True})
+    recipe_response = client.get("/api/recipe/library", params={})
     assert recipe_response.status_code == 200
     assert len(recipe_response.content) <= MAX_CONTROL_DOCUMENT_BYTES
     recipe_payload = recipe_response.json()
@@ -340,7 +334,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     while recipe_cursor is not None:
         recipe_response = client.get(
             "/api/recipe/library",
-            params={"all_models": True, "cursor": recipe_cursor},
+            params={"cursor": recipe_cursor},
         )
         assert recipe_response.status_code == 200
         assert len(recipe_response.content) <= MAX_CONTROL_DOCUMENT_BYTES
@@ -602,12 +596,12 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
         clock=lambda: now,
         runtime_archive_available=lambda _digest, _size: False,
     )
-    models = projection.models(local_only=True).models
+    models = projection.models(cached=True).models
     assert {item.identity.content_sha256 for item in models} == {old_digest}
     old = next(item for item in models if item.identity.content_sha256 == old_digest)
     assert old.local.controller == "cached"
     assert old.local.running_on == [node_id]
-    recipes = projection.recipe_library().recipes
+    recipes = projection.recipe_library(cached=True).recipes
     assert len(recipes) == 1
     assert recipes[0].identity.content_sha256 == recipe_digest
     assert recipes[0].local.controller == "not_cached"
@@ -642,10 +636,7 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
     # Five rows at two per page cross two page boundaries; the largest
     # accepted limit still returns everything in one page.
     assert len(projection.models(limit=_MAX_PAGE_RECIPES).models) == 5
-    assert (
-        len(projection.recipe_library(limit=_MAX_PAGE_RECIPES, all_models=True).recipes)
-        == 5
-    )
+    assert len(projection.recipe_library(limit=_MAX_PAGE_RECIPES).recipes) == 5
     model_pages = []
     cursor = None
     while True:
@@ -657,7 +648,7 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
     recipe_pages = []
     cursor = None
     while True:
-        page = projection.recipe_library(limit=2, cursor=cursor, all_models=True)
+        page = projection.recipe_library(limit=2, cursor=cursor)
         recipe_pages.extend(page.recipes)
         if page.next_cursor is None:
             break
@@ -688,7 +679,7 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
         )
     # One document this Controller cannot read never takes the listing down.
     assert len(projection.models(limit=_MAX_PAGE_RECIPES).models) == 4
-    assert len(projection.recipe_library(limit=1, all_models=True).recipes) == 1
+    assert len(projection.recipe_library(limit=1).recipes) == 1
 
 
 @pytest.mark.parametrize("total_bytes,expected_status", [(0, 200), (-1, 503)])
@@ -761,9 +752,7 @@ def test_library_cursor_refuses_a_changed_accepted_catalog(tmp_path: Path, kind:
     def read(cursor: str | None = None):
         if kind == "model":
             return projection.models(limit=1, sort="name", cursor=cursor)
-        return projection.recipe_library(
-            limit=1, sort="name", cursor=cursor, all_models=True
-        )
+        return projection.recipe_library(limit=1, sort="name", cursor=cursor)
 
     first = read()
     assert first.next_cursor is not None
@@ -898,7 +887,6 @@ def test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit(
     with TestClient(app) as client:
         while True:
             params: dict[str, str | int | bool] = {
-                "all_models": True,
                 "limit": 512,
                 "sort": "name",
             }
@@ -921,7 +909,6 @@ def test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit(
                 next_page = client.get(
                     "/api/recipe/library",
                     params={
-                        "all_models": True,
                         "limit": 512,
                         "sort": "name",
                         "cursor": next_cursor,
@@ -958,7 +945,6 @@ def test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit(
                 changed_limit = client.get(
                     "/api/recipe/library",
                     params={
-                        "all_models": True,
                         "limit": 511,
                         "sort": "name",
                         "cursor": next_cursor,
@@ -1041,7 +1027,7 @@ def test_library_item_at_one_byte_over_wire_budget_is_refused(
     )
 
     with TestClient(app) as client:
-        fitting = client.get("/api/recipe/library", params={"all_models": True})
+        fitting = client.get("/api/recipe/library", params={})
         assert fitting.status_code == 200, fitting.text
         exact_wire_bytes = len(fitting.content)
         assert exact_wire_bytes <= MAX_CONTROL_DOCUMENT_BYTES
@@ -1053,7 +1039,7 @@ def test_library_item_at_one_byte_over_wire_budget_is_refused(
             "vonk_control.library_projection.MAX_CONTROL_DOCUMENT_BYTES",
             exact_wire_bytes - 1,
         )
-        over_budget = client.get("/api/recipe/library", params={"all_models": True})
+        over_budget = client.get("/api/recipe/library", params={})
 
     assert over_budget.status_code == 422
     detail = over_budget.json()["detail"]
@@ -1091,9 +1077,7 @@ def test_recipe_library_refuses_one_item_larger_than_wire_budget_actionably(
     )
 
     with TestClient(app) as client:
-        response = client.get(
-            "/api/recipe/library", params={"all_models": True, "limit": 10}
-        )
+        response = client.get("/api/recipe/library", params={"limit": 10})
     assert response.status_code == 422
     detail = response.json()["detail"]
     assert isinstance(detail, str)

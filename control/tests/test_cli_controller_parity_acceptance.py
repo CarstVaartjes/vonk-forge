@@ -301,7 +301,7 @@ def _app() -> FastAPI:
     @app.get("/api/recipe/library")
     def recipe_library(request: Request) -> dict[str, Any]:
         _auth(request)
-        return library.recipe_library(all_models=True).model_dump(mode="json")
+        return library.recipe_library().model_dump(mode="json")
 
     @app.get("/api/fleet")
     def fleet(request: Request) -> dict[str, Any]:

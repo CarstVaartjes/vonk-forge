@@ -208,19 +208,6 @@ class Jobs:
     def get(self, job_id: str) -> object:
         raise KeyError
 
-    def list(self, *, limit: int = 100) -> list[object]:
-        return []
-
-    def list_page(
-        self,
-        *,
-        limit: int = 100,
-        cursor: str | None = None,
-        status: str | None = None,
-        target: str | None = None,
-    ) -> tuple[list[object], str | None, int]:
-        raise AssertionError
-
 
 class Clock:
     def __init__(self) -> None:

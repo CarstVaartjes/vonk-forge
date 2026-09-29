@@ -287,17 +287,11 @@ def test_runnable_job_age_excludes_intentional_deferrals() -> None:
 
 def test_metrics_endpoint_is_separately_authenticated() -> None:
     class Jobs:
-        def list(self, *, limit: int = 100):
-            return []
-
         def get(self, job_id: str):
             raise KeyError
 
         def enqueue(self, *_args, **_kwargs):
             raise AssertionError
-
-        def list_page(self, **_kwargs):
-            return [], None, 0
 
     metrics = MetricsRegistry()
     app = create_app(
@@ -317,17 +311,11 @@ def test_metrics_endpoint_is_separately_authenticated() -> None:
 
 def test_metrics_endpoint_projects_typed_fleet_snapshot() -> None:
     class Jobs:
-        def list(self, *, limit: int = 100):
-            return []
-
         def get(self, job_id: str):
             raise KeyError
 
         def enqueue(self, *_args, **_kwargs):
             raise AssertionError
-
-        def list_page(self, **_kwargs):
-            return [], None, 0
 
     refresh_fleet_metrics = getattr(control_api, "refresh_fleet_metrics", None)
     assert callable(refresh_fleet_metrics)

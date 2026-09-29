@@ -111,7 +111,7 @@ flowchart LR
 - [Recipe library package channel](operations/recipe-library-packages.md)
 
 Use each command's documented review and confirmation options. For example,
-`profile load --dry-run` reviews a fleet load, while `update --apply` installs
+`profile load --review` reviews a fleet load, while `update --apply` installs
 a signed CLI update. Controller mutations do not have a universal `--apply`
 flag. Credentials and private keys never belong in Git, recipes, command
 arguments, or captured diagnostics.

@@ -32,7 +32,7 @@ def _get_kwargs(
     search: None | str | Unset = UNSET,
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListModelLibrarySort | Unset = 'updated',
-    local: bool | Unset = False,
+    cached: bool | Unset = False,
 
 ) -> dict[str, Any]:
 
@@ -138,7 +138,7 @@ def _get_kwargs(
 
     params["sort"] = json_sort
 
-    params["local"] = local
+    params["cached"] = cached
 
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
@@ -213,7 +213,7 @@ def sync_detailed(
     search: None | str | Unset = UNSET,
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListModelLibrarySort | Unset = 'updated',
-    local: bool | Unset = False,
+    cached: bool | Unset = False,
 
 ) -> Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]:
     """ Model Library
@@ -230,7 +230,7 @@ def sync_detailed(
         search (None | str | Unset):
         updated_since (datetime.datetime | None | Unset):
         sort (ListModelLibrarySort | Unset):  Default: 'updated'.
-        local (bool | Unset):  Default: False.
+        cached (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -253,7 +253,7 @@ alignment=alignment,
 search=search,
 updated_since=updated_since,
 sort=sort,
-local=local,
+cached=cached,
 
     )
 
@@ -277,7 +277,7 @@ def sync(
     search: None | str | Unset = UNSET,
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListModelLibrarySort | Unset = 'updated',
-    local: bool | Unset = False,
+    cached: bool | Unset = False,
 
 ) -> BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem | None:
     """ Model Library
@@ -294,7 +294,7 @@ def sync(
         search (None | str | Unset):
         updated_since (datetime.datetime | None | Unset):
         sort (ListModelLibrarySort | Unset):  Default: 'updated'.
-        local (bool | Unset):  Default: False.
+        cached (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -318,7 +318,7 @@ alignment=alignment,
 search=search,
 updated_since=updated_since,
 sort=sort,
-local=local,
+cached=cached,
 
     ).parsed
 
@@ -336,7 +336,7 @@ async def asyncio_detailed(
     search: None | str | Unset = UNSET,
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListModelLibrarySort | Unset = 'updated',
-    local: bool | Unset = False,
+    cached: bool | Unset = False,
 
 ) -> Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]:
     """ Model Library
@@ -353,7 +353,7 @@ async def asyncio_detailed(
         search (None | str | Unset):
         updated_since (datetime.datetime | None | Unset):
         sort (ListModelLibrarySort | Unset):  Default: 'updated'.
-        local (bool | Unset):  Default: False.
+        cached (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -376,7 +376,7 @@ alignment=alignment,
 search=search,
 updated_since=updated_since,
 sort=sort,
-local=local,
+cached=cached,
 
     )
 
@@ -400,7 +400,7 @@ async def asyncio(
     search: None | str | Unset = UNSET,
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListModelLibrarySort | Unset = 'updated',
-    local: bool | Unset = False,
+    cached: bool | Unset = False,
 
 ) -> BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem | None:
     """ Model Library
@@ -417,7 +417,7 @@ async def asyncio(
         search (None | str | Unset):
         updated_since (datetime.datetime | None | Unset):
         sort (ListModelLibrarySort | Unset):  Default: 'updated'.
-        local (bool | Unset):  Default: False.
+        cached (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -441,6 +441,6 @@ alignment=alignment,
 search=search,
 updated_since=updated_since,
 sort=sort,
-local=local,
+cached=cached,
 
     )).parsed

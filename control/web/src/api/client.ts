@@ -55,9 +55,18 @@ function csrfToken(): string | undefined {
   return cookie?.slice(cookie.indexOf("=") + 1);
 }
 
+const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+/** The Controller's correlation ID for a response, when it sent a well-formed one. */
+function requestIdOf(source: Response | XMLHttpRequest): string | undefined {
+  const value = source instanceof Response ? source.headers.get("x-request-id") : source.getResponseHeader("x-request-id");
+  return value !== null && REQUEST_ID.test(value) ? value : undefined;
+}
+
+/** A failed Control API call. Its message ends with the request ID so support can find the call. */
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
+  constructor(readonly status: number, message: string, readonly requestId?: string) {
+    super(requestId ? `${message} (request ID ${requestId})` : message);
     this.name = "ApiError";
   }
 }
@@ -102,7 +111,7 @@ function resultData<T>(result: {data?: T; error?: unknown; response: Response}):
     const detail = typeof result.error === "object" && result.error !== null && "detail" in result.error
       ? formatApiDetail(result.error.detail)
       : "request failed";
-    throw new ApiError(result.response.status, `Control API returned ${result.response.status}: ${detail}`);
+    throw new ApiError(result.response.status, `Control API returned ${result.response.status}: ${detail}`, requestIdOf(result.response));
   }
   return result.data;
 }
@@ -160,9 +169,9 @@ export class ApiClient implements ControlApi {
         const body = problem as {code?: unknown; detail?: unknown};
         const code = typeof body.code === "string" ? body.code.slice(0, 128) : `HTTP ${response.status}`;
         const detail = typeof body.detail === "string" ? body.detail.slice(0, 256) : "request failed";
-        throw new ApiError(response.status, `${code}: ${detail}`);
+        throw new ApiError(response.status, `${code}: ${detail}`, requestIdOf(response));
       }
-      throw new ApiError(response.status, `Control API returned ${response.status}`);
+      throw new ApiError(response.status, `Control API returned ${response.status}`, requestIdOf(response));
     }
     return response.json() as Promise<T>;
   }
@@ -181,7 +190,7 @@ export class ApiClient implements ControlApi {
     if (csrf) headers.set("X-CSRF-Token", csrf);
     const response = await fetch("/api/auth/logout", {method: "POST", headers, credentials: "same-origin"});
     this.requireAuthentication(response);
-    if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`);
+    if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`, requestIdOf(response));
   }
 
   async downloadCliToken(): Promise<CliTokenDownload> {
@@ -196,7 +205,7 @@ export class ApiClient implements ControlApi {
       const detail = typeof problem === "object" && problem !== null && "detail" in problem
         ? formatApiDetail(problem.detail)
         : "request failed";
-      throw new ApiError(response.status, `Control API returned ${response.status}: ${detail}`);
+      throw new ApiError(response.status, `Control API returned ${response.status}: ${detail}`, requestIdOf(response));
     }
     const content = await response.blob();
     if (content.size === 0) throw new ApiError(response.status, "Control API returned an empty CLI token");
@@ -377,7 +386,7 @@ export class ApiClient implements ControlApi {
 
   async recipeLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<RecipeLibrary> {
     return resultData(await this.generated.GET("/api/recipe/library", {
-      params: {query: {cursor, limit: 100, all_models: true, sort, updated_since: updatedSince}},
+      params: {query: {cursor, limit: 100, sort, updated_since: updatedSince}},
       signal,
     }));
   }
@@ -519,7 +528,7 @@ export class ApiClient implements ControlApi {
         catch (error) { reject(error); return; }
         if (request.status < 200 || request.status >= 300) {
           const response = request.response as {detail?: unknown} | null;
-          reject(new ApiError(request.status, response?.detail === undefined ? `Control API returned ${request.status}` : formatApiDetail(response.detail)));
+          reject(new ApiError(request.status, response?.detail === undefined ? `Control API returned ${request.status}` : formatApiDetail(response.detail), requestIdOf(request)));
           return;
         }
         resolve(request.response as ArtifactJob);

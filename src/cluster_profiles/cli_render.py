@@ -501,7 +501,7 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
             "IMAGE CACHE" if noun == "recipe" else "NAS CACHE",
             "RUNNING ON",
         ),
-        [(name, local.get("controller"), _words(local.get("running_on")))],
+        [(name, _cache_word(local.get("controller")), _words(local.get("running_on")))],
     )
     selector = item.get("selector")
     print(f"USE {_text(selector)}")
@@ -518,7 +518,7 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
                 ("readiness", "Readiness"),
             ):
                 check = _object(assessment.get(key), key)
-                _field(label, check.get("state"))
+                _field(label, _check_word(key, check, assessment))
                 for reason in _records(check, "reasons"):
                     explanation = (
                         f"{_text(reason.get('code'))}: {_text(reason.get('detail'))}"
@@ -567,11 +567,43 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
 _ACTIVE_PREPARATION = {"queued", "running", "pending", "preparing"}
 
 
+def _cache_word(value: object) -> str:
+    return _text(value).replace("_", " ")
+
+
+def _needs_download(assessment: Mapping[str, object]) -> bool:
+    """True when the only thing missing is the cache, not a real blocker."""
+    readiness = _optional(assessment.get("readiness"), "readiness")
+    cache = _optional(assessment.get("cache"), "cache")
+    fit = _optional(assessment.get("fleet_fit"), "fleet_fit")
+    reasons = _records(readiness, "reasons")
+    return (
+        readiness.get("state") == "blocked"
+        and cache.get("state") == "blocked"
+        and fit.get("state") != "blocked"
+        and bool(reasons)
+        and all(reason.get("code") == "library.cache_missing" for reason in reasons)
+    )
+
+
+def _check_word(
+    key: str, check: Mapping[str, object], assessment: Mapping[str, object]
+) -> object:
+    """Name an assessment check; a missing download is not a blocker."""
+    if key == "cache" and check.get("state") == "blocked":
+        reasons = _records(check, "reasons")
+        if reasons and all(r.get("code") == "library.cache_missing" for r in reasons):
+            return "not cached"
+    if key == "readiness" and _needs_download(assessment):
+        return "needs download"
+    return check.get("state")
+
+
 def _library_row(item: Mapping[str, object], noun: str) -> list[object]:
     local = _object(item.get("local"), "local")
     resources = _object(item.get("resources"), "resources")
     preparation = _optional(local.get("preparation"), "preparation")
-    cache = _text(local.get("controller"))
+    cache = _cache_word(local.get("controller"))
     if preparation.get("state") in _ACTIVE_PREPARATION:
         cache = progress_line({"progress": preparation}).replace(" | ", ": ")
     running = local.get("running_on")
@@ -587,8 +619,45 @@ def _library_row(item: Mapping[str, object], noun: str) -> list[object]:
         assessment = _optional(item.get("assessment"), "assessment")
         readiness = _optional(assessment.get("readiness"), "readiness")
         row.insert(1, item.get("node_count"))
-        row.append(readiness.get("state") if readiness else "not assessed")
+        row.append(
+            _check_word("readiness", readiness, assessment)
+            if readiness
+            else "not assessed"
+        )
     return row
+
+
+_LIBRARY_FILTER_FLAGS = (
+    "cached",
+    "model",
+    "search",
+    "usage",
+    "family",
+    "version",
+    "quantization",
+    "publisher",
+    "alignment",
+    "sparks",
+    "updated_since",
+    "ready",
+    "fits_fleet",
+)
+
+
+def _applied_filters(payload: Mapping[str, object]) -> list[str]:
+    """The filters the Controller applied, as the flags that set them."""
+    filters = _optional(payload.get("filters"), "filters")
+    applied: list[str] = []
+    for key in _LIBRARY_FILTER_FLAGS:
+        value = filters.get(key)
+        flag = "--" + key.replace("_", "-")
+        if value is True:
+            applied.append(flag)
+        elif isinstance(value, list):
+            applied.extend(f"{flag} {_text(item)}" for item in value)
+        elif isinstance(value, str) and value:
+            applied.append(f"{flag} {value}")
+    return applied
 
 
 def _library(
@@ -607,8 +676,12 @@ def _library(
             f"updated {_time(library.get('updated_at'))}"
         )
     print(f"{noun.title()}s: {len(rows)}{more}")
+    applied = _applied_filters(payload)
     if not rows:
-        print(f"No {noun}s match these filters.")
+        if applied:
+            print(f"No {noun}s match {' '.join(applied)}.")
+        else:
+            print(f"The {noun} library is empty.")
     elif wide:
         for item in rows:
             print()
@@ -633,7 +706,12 @@ def _library(
     print()
     if isinstance(cursor, str):
         print(f"Next page: add --cursor {shlex.quote(cursor)} with the same filters.")
-    print(f"Next: vonkctl {noun} detail <{noun}>  (--wide shows every field here)")
+    if not rows and applied:
+        print(f"Next: vonkctl {noun} library  (no filters)")
+    elif not rows:
+        print("Next: vonkctl recipe sync-status  (when the catalog last synced)")
+    else:
+        print(f"Next: vonkctl {noun} detail <{noun}>  (--wide shows every field here)")
 
 
 def _profile(payload: Mapping[str, object]) -> None:
@@ -1482,20 +1560,6 @@ def render_payload(
     elif noun == "fleet":
         if action is None:
             _fleet_overview(payload, wide=wide)
-        elif action == "node-profile":
-            for key, label in (
-                ("display_name", "Spark"),
-                ("id", "ID"),
-                ("hostname", "Hostname"),
-                ("ip_address", "Address"),
-                ("lifecycle", "Lifecycle"),
-            ):
-                _field(label, payload.get(key))
-            labels = _object(payload.get("labels"), "labels")
-            if not labels:
-                print("Labels: none")
-            for key, value in labels.items():
-                _field("Label", f"{key}={_text(value)}")
         elif action == "rename":
             # The Controller answers a rename with the Spark's identity only.
             print(

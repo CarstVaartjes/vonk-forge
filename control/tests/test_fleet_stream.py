@@ -1058,12 +1058,6 @@ class Jobs:
     def get(self, job_id: str) -> Job:
         return Job(id=job_id)
 
-    def list(self, *, limit: int = 100) -> list[Job]:
-        return []
-
-    def list_page(self, **_kwargs) -> tuple[list[Job], str | None, int]:
-        return [], None, 0
-
 
 class ApiStream:
     def __init__(self) -> None:

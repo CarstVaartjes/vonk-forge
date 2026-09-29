@@ -994,7 +994,7 @@ def test_model_and_recipe_library_use_final_singular_routes_and_facets() -> None
 
     recipe = FakeClient({("GET", "/api/recipe/library"): {"recipes": []}})
     status, _ = run(
-        ("recipe", "library", "--all-models", "--model", "vision", "--json"),
+        ("recipe", "library", "--cached", "--model", "vision", "--json"),
         recipe,
     )
     assert status == 0
@@ -1003,7 +1003,7 @@ def test_model_and_recipe_library_use_final_singular_routes_and_facets() -> None
         "sort": "updated",
         "limit": 100,
         "model": ["vision"],
-        "all_models": True,
+        "cached": True,
     }
 
 
@@ -1830,7 +1830,7 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
             "GET",
             "/api/recipe/library",
             None,
-            {"all_models": True, "limit": 512, "sort": "name", "assess": False},
+            {"limit": 512, "sort": "name", "assess": False},
         ),
         ("GET", "/api/fleet", None, None),
         (

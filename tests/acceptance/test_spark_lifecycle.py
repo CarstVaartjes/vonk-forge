@@ -2084,9 +2084,7 @@ class SparkLifecycle:
                     "synthetic canary catalog sync is incomplete: "
                     + json.dumps(summary, sort_keys=True)[:1024]
                 )
-            _, listed_payload = self.control.request(
-                "GET", "/api/recipe/library", query={"all_models": "true"}
-            )
+            _, listed_payload = self.control.request("GET", "/api/recipe/library")
             listed = require_object(listed_payload, "synthetic canary Library")
             recipes = listed.get("recipes")
             if not isinstance(recipes, list):

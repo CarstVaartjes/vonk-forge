@@ -164,13 +164,6 @@ class Jobs:
             raise KeyError(job_id)
         return self.job
 
-    def list(self, *, limit=100):
-        return []
-
-    def list_page(self, *, limit=100, cursor=None, status=None, target=None):
-        del limit, cursor, status, target
-        return [self.job], None, 1
-
 
 class ProjectedFleet:
     def read(self) -> FleetSnapshot:

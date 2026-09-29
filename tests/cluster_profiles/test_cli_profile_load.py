@@ -122,11 +122,11 @@ def test_noninteractive_load_cannot_approve_an_unseen_or_invalid_plan(options, c
     capsys.readouterr()
 
 
-def test_json_dry_run_returns_one_blocked_review_without_load(capsys):
+def test_json_review_returns_one_blocked_review_without_load(capsys):
     client = Client(blocked=True)
     assert (
         cli.main(
-            ("--profile", "2", "profile", "load", "--dry-run", "--json"),
+            ("--profile", "2", "profile", "load", "--review", "--json"),
             control_client=client,
         )
         == 2

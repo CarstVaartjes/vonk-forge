@@ -84,7 +84,7 @@ def test_name_change_preserves_complete_authoring_definition(capsys):
     client = ProfileClient()
     assert (
         cli.main(
-            ("--profile", "2", "profile", "name", "New name", "--json"),
+            ("--profile", "2", "profile", "configure", "--name", "New name", "--json"),
             control_client=client,
         )
         == 0
@@ -223,7 +223,7 @@ def test_malformed_saved_assignment_is_not_discarded_or_replaced(capsys):
     client.definition["assignments"][0]["spark_ids"] = "not-an-array"
     assert (
         cli.main(
-            ("--profile", "2", "profile", "name", "Renamed", "--json"),
+            ("--profile", "2", "profile", "configure", "--name", "Renamed", "--json"),
             control_client=client,
         )
         == 2
