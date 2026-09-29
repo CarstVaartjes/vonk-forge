@@ -7913,7 +7913,7 @@ class ModelCacheService:
         artifact_sha256: str,
         artifact_path: str,
     ) -> tuple[Path, int, str]:
-        """Verify the requested object's bytes in a complete managed cache set.
+        """Verify the requested object's bytes in the managed cache.
 
         This is the Controller-to-agent serving seam.  The caller receives a
         content-addressed path and must stream it from the returned file
@@ -7930,7 +7930,6 @@ class ModelCacheService:
                 "model_cache.artifact_missing", "verified cache artifact was not found"
             )
         manifest = self._manifest_for_set(set_digest)
-        self._require_managed_cache_coverage(manifest)
         spec = next(
             (
                 value
@@ -7943,8 +7942,17 @@ class ModelCacheService:
             raise ModelCacheNotFound(
                 "model_cache.artifact_missing", "verified cache artifact was not found"
             )
+        # Only this object is served, so only this object is checked. Whole-set
+        # coverage is proven when the assignment is created; repeating it here
+        # cost one receipt read and open per file in the set on every range
+        # request, which on an NFS cache dominated the transfer rate.
         path = self._object_path(spec.sha256)
-        if path.is_symlink() or not path.is_file() or not self._verify_file(path, spec):
+        if (
+            not self._object_is_available(spec.sha256, spec.expected_bytes)
+            or path.is_symlink()
+            or not path.is_file()
+            or not self._verify_file(path, spec)
+        ):
             raise ModelCacheConflict(
                 "model_cache.artifact_unverified",
                 "cache artifact is no longer verified",
