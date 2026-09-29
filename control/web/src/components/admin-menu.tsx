@@ -1,5 +1,8 @@
 import {useEffect, useId, useRef, useState} from "react";
 import type {KeyboardEvent, MouseEvent as ReactMouseEvent} from "react";
+import {useToast} from "./toast";
+
+const DOCS_URL = "https://github.com/CarstVaartjes/vonk-forge/blob/main/docs/README.md";
 
 type AdminMenuProps = {
   onDownloadCliToken(): Promise<{expiresAt: string}>;
@@ -23,7 +26,8 @@ export function AdminMenu({
   subject,
 }: AdminMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [cliTokenState, setCliTokenState] = useState<"idle" | "downloading" | "downloaded" | "error">("idle");
+  const [downloading, setDownloading] = useState(false);
+  const toast = useToast();
   const menuId = useId();
   const menu = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -61,12 +65,14 @@ export function AdminMenu({
   }
 
   async function downloadCliToken(): Promise<void> {
-    setCliTokenState("downloading");
+    setDownloading(true);
     try {
       await onDownloadCliToken();
-      setCliTokenState("downloaded");
+      toast.success("CLI token downloaded. Keep the file private.");
     } catch {
-      setCliTokenState("error");
+      toast.error("The CLI token could not be downloaded. Try again.");
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -90,9 +96,7 @@ export function AdminMenu({
       <span className="operator-disclosure-indicator" aria-hidden="true">⌄</span>
     </button>
     {menuOpen && <div ref={menu} id={menuId} role="group" aria-label="Operator actions" className="admin-menu-panel" onKeyDown={handleMenuKeyDown}>
-      <button type="button" className="secondary-button" disabled={navigationLocked || cliTokenState === "downloading"} onClick={() => void downloadCliToken()}>{cliTokenState === "downloading" ? "Preparing CLI token…" : "Download CLI token"}</button>
-      {cliTokenState === "downloaded" && <p className="admin-menu-status" role="status">CLI token downloaded. Keep the file private.</p>}
-      {cliTokenState === "error" && <p className="admin-menu-status is-error" role="alert">The CLI token could not be downloaded. Try again.</p>}
+      <button type="button" className="secondary-button" disabled={navigationLocked || downloading} onClick={() => void downloadCliToken()}>{downloading ? "Preparing CLI token…" : "Download CLI token"}</button>
       {([["/keys", "keys", "API keys"], ["/activity", "activity", "Open Activity"]] as const).map(([href, route, label]) => <a key={route} href={href} className="secondary-button" aria-disabled={navigationLocked || undefined} tabIndex={navigationLocked ? -1 : undefined} onClick={event => {
         if (navigationLocked) {
           event.preventDefault();
@@ -101,6 +105,7 @@ export function AdminMenu({
         setMenuOpen(false);
         onNavigate(event, route);
       }}>{label}</a>)}
+      <a href={DOCS_URL} className="secondary-button" target="_blank" rel="noreferrer">Documentation<span className="sr-only"> (opens in a new tab)</span></a>
       <button type="button" className="logout" aria-disabled={loggingOut || navigationLocked || undefined} disabled={loggingOut || navigationLocked} onClick={onLogout}>{loggingOut ? "Signing out…" : "Logout"}</button>
       {logoutError && <p role="alert">{logoutError}</p>}
     </div>}

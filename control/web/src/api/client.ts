@@ -269,6 +269,10 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.POST("/api/key", {body: {name, models, expires: expires || null}}));
   }
 
+  async rollGatewayKey(name: string): Promise<GatewayKeyCreated> {
+    return resultData(await this.generated.POST("/api/key/{name}/roll", {params: {path: {name}}}));
+  }
+
   async revokeGatewayKey(name: string): Promise<GatewayKeyRevoked> {
     return resultData(await this.generated.POST("/api/key/{name}/revoke", {params: {path: {name}}}));
   }

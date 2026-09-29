@@ -79,6 +79,7 @@ MUTATION_ROLES = {
     ),
     ("POST", "/api/key"): frozenset({"administrator"}),
     ("POST", "/api/key/{name}/revoke"): frozenset({"administrator"}),
+    ("POST", "/api/key/{name}/roll"): frozenset({"administrator"}),
     ("POST", "/api/recipe/runs/{run_id}/artifact-jobs"): frozenset(
         {"administrator", "operator"}
     ),

@@ -2,11 +2,12 @@ import {useEffect, useState} from "react";
 import type {ControlApi, EnrollmentGrantResponse, FleetLogResponse, VisualFleetNode} from "../api/types";
 import {safeErrorText} from "../lib/error-display";
 import {nodeDisplayName, nodeStatus} from "../lib/fleet";
-import {ConfirmPanel} from "./confirm-panel";
+import {ConfirmDialog} from "./confirm-dialog";
 import {EnrollmentGrant} from "./enrollment-grant";
 import {InstallationReconcile} from "./installation-reconcile";
 import {StatusPill} from "./status-pill";
 import {Time} from "./time";
+import {useToast} from "./toast";
 
 type Action = "remove" | "re-enroll" | null;
 type Tab = "overview" | "settings" | "logs";
@@ -25,6 +26,7 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -33,21 +35,26 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
     return () => controller.abort();
   }, [api, id]);
 
-  async function run(work: () => Promise<void>, fallback: string) {
-    setBusy(true); setError(null);
-    try { await work(); } catch (cause) { setError(failure(cause, fallback)); } finally { setBusy(false); }
+  async function run(work: () => Promise<string>, fallback: string) {
+    setBusy(true);
+    try { toast.success(await work()); } catch (cause) { toast.error(failure(cause, fallback)); } finally { setBusy(false); setAction(null); }
   }
   const rename = () => run(async () => {
     const identity = await api.renameFleetNode(id, name.trim());
     setNode(current => current && {...current, display_name: identity.display_name});
+    return `Spark renamed to ${identity.display_name}.`;
   }, "Could not rename this Spark");
-  const remove = () => run(async () => { await api.removeFleetNode(id); onClose(); }, "Could not remove this Spark");
+  const remove = () => run(async () => { await api.removeFleetNode(id); onClose(); return "Spark removed."; }, "Could not remove this Spark");
   const reenroll = () => run(async () => {
     const response = await api.reenrollFleetNode(id, crypto.randomUUID());
     if (!response.grant) throw new Error("Controller did not return an enrollment grant");
-    setGrant(response.grant); setAction(null);
+    setGrant(response.grant);
+    return "Re-enrollment grant created.";
   }, "Could not create a re-enrollment grant");
-  const loadLogs = () => run(async () => setLogs(await api.fleetLogs(id)), "Could not read recent logs");
+  async function loadLogs() {
+    setBusy(true); setError(null);
+    try { setLogs(await api.fleetLogs(id)); } catch (cause) { setError(failure(cause, "Could not read recent logs")); } finally { setBusy(false); }
+  }
   function openTab(next: Tab) {
     setTab(next);
     if (next === "logs" && !logs && !busy) void loadLogs();
@@ -72,7 +79,7 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
         {node.installed.some(item => !item.complete) && <ul className="spark-warnings" aria-label="Incomplete installations">{node.installed.filter(item => !item.complete).map(item => <li key={item.installation_id}><StatusPill tone="warning">{item.group_state}</StatusPill> {item.title} · {item.present_ranks.length} of {item.expected_rank_count} ranks <InstallationReconcile api={api} installationId={item.installation_id}/></li>)}</ul>}
       </>}
       {tab === "settings" && <>
-        <form className="confirm-panel" onSubmit={event => { event.preventDefault(); if (name.trim()) void rename(); }}>
+        <form className="settings-form" onSubmit={event => { event.preventDefault(); if (name.trim()) void rename(); }}>
           <label>Spark name<input required maxLength={80} value={name} onChange={event => setName(event.currentTarget.value)}/></label>
           <div className="button-row"><button type="submit" className="button" disabled={busy || !name.trim() || name.trim() === node.display_name}>Save name</button></div>
           <p>CLI: <code>vonkctl fleet rename {id} &lt;name&gt;</code></p>
@@ -83,8 +90,8 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
             <button type="button" className="button secondary" onClick={() => setAction("re-enroll")}>Re-enroll</button>
             <button type="button" className="button danger" onClick={() => setAction("remove")}>Remove</button>
           </div>
-          {action === "re-enroll" && <ConfirmPanel title="Re-enroll this Spark?" consequence="Its current agent credentials are replaced. The Spark keeps its name and recipes but must run the new installer command to reconnect." confirmLabel="Create re-enrollment grant" command={`vonkctl fleet re-enroll ${id} --yes`} busy={busy} onConfirm={() => void reenroll()} onCancel={() => setAction(null)}/>}
-          {action === "remove" && <ConfirmPanel title="Remove this Spark?" consequence="It leaves the fleet and its agent credentials are revoked. Enrolling it again needs a new grant. This cannot be undone." confirmLabel="Remove Spark" typeName={node.display_name} command={`vonkctl fleet remove ${id} --yes`} busy={busy} onConfirm={() => void remove()} onCancel={() => setAction(null)}/>}
+          {action === "re-enroll" && <ConfirmDialog title="Re-enroll this Spark?" consequence="Its current agent credentials are replaced. The Spark keeps its name and recipes but must run the new installer command to reconnect." confirmLabel="Create re-enrollment grant" command={`vonkctl fleet re-enroll ${id} --yes`} busy={busy} onConfirm={() => void reenroll()} onCancel={() => setAction(null)}/>}
+          {action === "remove" && <ConfirmDialog title="Remove this Spark?" consequence="It leaves the fleet and its agent credentials are revoked. Enrolling it again needs a new grant. This cannot be undone." confirmLabel="Remove Spark" typeName={node.display_name} command={`vonkctl fleet remove ${id} --yes`} busy={busy} onConfirm={() => void remove()} onCancel={() => setAction(null)}/>}
           {grant && <EnrollmentGrant api={api} grant={grant}/>}
         </section>
       </>}

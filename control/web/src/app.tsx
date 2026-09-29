@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import {useOptionalAuth} from "./auth";
 import type {ControlApi} from "./api/types";
 import {AppShell} from "./components/app-shell";
+import {ToastProvider} from "./components/toast";
 import type {AppRoute} from "./components/app-shell";
 import {ActivityPage} from "./pages/activity";
 import {FleetPage} from "./pages/fleet-simplified";
@@ -110,7 +111,7 @@ export function App({api}: {api: ControlApi}) {
     <div className="button-row"><a className="button" href="/fleet" onClick={event => navigate(event, "fleet")}>Go to Fleet</a><a className="button secondary" href="/library" onClick={event => navigate(event, "library")}>Go to Library</a></div>
   </section>;
 
-  return <><AppShell
+  return <ToastProvider><AppShell
     activeRoute={page}
     navigationKey={pathname}
     navigationLocked={navigationLocked}
@@ -123,5 +124,5 @@ export function App({api}: {api: ControlApi}) {
       role: "Administrator",
       subject: auth.session.subject,
     } : undefined}
-  >{content}</AppShell></>;
+  >{content}</AppShell></ToastProvider>;
 }

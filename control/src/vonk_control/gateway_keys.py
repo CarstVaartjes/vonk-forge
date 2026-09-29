@@ -16,6 +16,7 @@ import re
 import secrets
 import tempfile
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -47,6 +48,7 @@ _MAX_PAGES = 100
 _KEY_ROUTES = ["openai_routes"]
 _KEY_PATH = "/api/key"
 _REVOKE_PATH = "/api/key/{name}/revoke"
+_ROLL_PATH = "/api/key/{name}/roll"
 
 
 class GatewayKeyError(RuntimeError):
@@ -99,6 +101,21 @@ class GatewayKeyRevoked(StrictJSONModel):
 
 def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _remaining(expires: object) -> str | None:
+    """LiteLLM's `duration` for the time left until an ISO `expires` stamp."""
+    text = _text(expires)
+    if text is None:
+        return None
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    seconds = int((moment - datetime.now(UTC)).total_seconds())
+    return f"{max(seconds, 1)}s"
 
 
 def _view(item: dict[str, Any]) -> GatewayKeyView | None:
@@ -229,6 +246,25 @@ class GatewayKeyService:
             raise GatewayKeyError(f"LiteLLM refused to revoke the key (HTTP {code})")
         return GatewayKeyRevoked(name=name)
 
+    def roll(self, name: str) -> GatewayKeyCreated:
+        """Replace one key's secret, keeping its name and model list.
+
+        LiteLLM cannot rotate a secret in place, so the old key is deleted and
+        a new one is created under the same name. The old secret stops working
+        immediately; an unexpired key keeps its remaining lifetime.
+        """
+        current = next(
+            (item for item in self._raw_keys() if item.get("key_alias") == name), None
+        )
+        if current is None:
+            raise KeyError(name)
+        view = _view(current)
+        models = view.models if view is not None else []
+        self.revoke(name)
+        return self.create(
+            name, models=models, expires=_remaining(current.get("expires"))
+        )
+
     def ensure_default(self, path: Path = DEFAULT_KEY_FILE) -> bool:
         """Keep a working `default` key whose secret is in `path`.
 
@@ -287,6 +323,7 @@ def install_gateway_key_routes(
     _ADMIN_OPERATION_IDS[("get", _KEY_PATH)] = "listGatewayKeys"
     _ADMIN_OPERATION_IDS[("post", _KEY_PATH)] = "createGatewayKey"
     _ADMIN_OPERATION_IDS[("post", _REVOKE_PATH)] = "revokeGatewayKey"
+    _ADMIN_OPERATION_IDS[("post", _ROLL_PATH)] = "rollGatewayKey"
 
     def available() -> GatewayKeyService:
         if service is None:
@@ -345,6 +382,26 @@ def install_gateway_key_routes(
         authorize(actor, _REVOKE_PATH)
         try:
             return available().revoke(name)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail=f"no gateway key named {name}"
+            ) from None
+        except GatewayKeyError as error:
+            raise unavailable(error) from None
+
+    @app.post(
+        _ROLL_PATH,
+        response_model=GatewayKeyCreated,
+        responses=bounded_error_responses(401, 403, 404, 503),
+        operation_id="rollGatewayKey",
+    )
+    def roll_gateway_key(
+        name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
+        actor: Actor = actor_dependency,
+    ) -> GatewayKeyCreated:
+        authorize(actor, _ROLL_PATH)
+        try:
+            return available().roll(name)
         except KeyError:
             raise HTTPException(
                 status_code=404, detail=f"no gateway key named {name}"

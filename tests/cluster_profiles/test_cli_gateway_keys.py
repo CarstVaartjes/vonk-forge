@@ -27,6 +27,8 @@ class KeyClient:
             }
         if path.endswith("/revoke"):
             return {"name": "laptop"}
+        if path.endswith("/roll"):
+            return {"name": "laptop", "models": [], "key": SECRET}
         assert payload is not None
         return {
             "name": payload["name"],
@@ -86,3 +88,13 @@ def test_key_list_and_revoke(capsys):
     assert cli.main(["key", "revoke", "laptop", "--yes"], control_client=client) == 0
     assert "Revoked key laptop." in capsys.readouterr().out
     assert client.calls[-1] == ("POST", "/api/key/laptop/revoke", {})
+
+
+def test_key_roll_confirms_and_prints_the_new_key_once(capsys):
+    client = KeyClient()
+    assert cli.main(["key", "roll", "laptop", "--no-input"], control_client=client) != 0
+    assert not any(call[0] == "POST" for call in client.calls)
+    capsys.readouterr()
+    assert cli.main(["key", "roll", "laptop", "--yes"], control_client=client) == 0
+    assert capsys.readouterr().out.count(SECRET) == 1
+    assert client.calls[-1] == ("POST", "/api/key/laptop/roll", {})

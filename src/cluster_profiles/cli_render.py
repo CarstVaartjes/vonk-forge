@@ -815,7 +815,7 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
 
 
 def _gateway_keys(payload: Mapping[str, object], action: object) -> None:
-    if action == "create":
+    if action in ("create", "roll"):
         _field("Key", payload.get("name"))
         _field("Models", _words(payload.get("models") or ["all"]))
         _field("Expires", payload.get("expires_at") or "never")

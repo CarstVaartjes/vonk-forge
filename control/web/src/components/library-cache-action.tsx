@@ -190,7 +190,7 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
       {busy || state === "preparing" ? "Downloading…" : state === "failed" ? "Retry download" : "Download model"}
     </button>
     {(busy || state === "preparing") && <span role="status">{phase || "queued"}</span>}
-    {busy && operationId && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." cancel={key => api.cancelModelOperation(operationId, key)}/>}
+    {busy && operationId && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." command={`vonkctl model cancel ${operationId}`} cancel={key => api.cancelModelOperation(operationId, key)}/>}
     {error && <span className="library-cache-error" role="alert">{error}</span>}
   </div>;
 }

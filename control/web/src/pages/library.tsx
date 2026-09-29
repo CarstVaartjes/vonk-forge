@@ -2,6 +2,8 @@ import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
 import type {ControlApi, LibrarySort, LibraryViewRecipe, LibraryViewRecipeDetail, LibraryViewSnapshot, ModelLibrary, RecipeDetail, RecipeLibrary, VisualFleetSnapshot} from "../api/types";
 import {CatalogSyncStatusLine} from "../components/catalog-sync-status";
+import {PageHeader} from "../components/page-header";
+import {SkeletonRows} from "../components/skeleton";
 import {LibraryBrowser} from "../components/library-browser";
 import type {LibrarySubview} from "../components/library-browser";
 import {LibraryNodeNamesProvider} from "../components/library-node-names";
@@ -171,11 +173,12 @@ export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path
   const names = nodeNames;
   const observedDetail = useMemo(() => withObservedRuns(detail, fleet), [detail, fleet]);
   return <div className="library-page">
-    <header className="library-command-header"><div className="library-command-title"><h1 ref={heading} tabIndex={-1}>Library</h1><p>Choose a Model. Pair it with an exact Recipe, then run it on your Sparks.</p>{snapshot?.library && <p className="library-release">Recipe library v{snapshot.library.version} · updated {new Date(snapshot.library.updated_at).toLocaleDateString()}</p>}<CatalogSyncStatusLine api={api}/></div></header>
+    <PageHeader title="Library" description="Choose a Model. Pair it with an exact Recipe, then run it on your Sparks." headingRef={heading} actions={<button type="button" className="button" onClick={() => { setAttempt(value => value + 1); setFleetAttempt(value => value + 1); }}>Refresh library</button>}>{snapshot?.library && <p className="library-release">Recipe library v{snapshot.library.version} · updated {new Date(snapshot.library.updated_at).toLocaleDateString()}</p>}<CatalogSyncStatusLine api={api}/></PageHeader>
     {preferredNodeId && <aside className="library-spark-context" aria-label={`Managing Models on ${names[preferredNodeId] ?? preferredNodeId}`}><strong>{names[preferredNodeId] ?? preferredNodeId}</strong><span>Choose a compatible Recipe for this Spark.</span><a className="button secondary" href="/library" onClick={event => onNavigate(event, "/library")}>Exit Spark workspace</a></aside>}
     <nav className="library-subnav" aria-label="Library sections">{(["models", "recipes", "profiles"] as const).map(item => <a key={item} className={view === item ? "is-active" : undefined} aria-current={view === item ? "page" : undefined} href={tabPath(path, item)} onClick={event => onNavigate(event, tabPath(path, item))}>{item[0]!.toUpperCase() + item.slice(1)}</a>)}</nav>
     {error && <div className="library-error" role="alert"><span>{error}</span><button type="button" className="button secondary" onClick={() => setAttempt(value => value + 1)}>Retry Library</button></div>}
     {fleetError && <div className="library-error" role="status"><span>{fleetError}</span><button type="button" className="button secondary" onClick={() => setFleetAttempt(value => value + 1)}>Retry Sparks</button></div>}
+    {!snapshot && !error && <SkeletonRows columns={3} label="Loading Library"/>}
     {snapshot && <LibraryNodeNamesProvider names={names}><LibraryBrowser api={api} detail={observedDetail} detailError={detailError} detailLoading={detailLoading} fleet={fleet} onBusyChange={onBusyChange} onNavigate={contextualNavigate} onNavigatePath={onNavigatePath} onQueryChange={updateQuery} onRefresh={refresh} onRetryDetail={() => setDetailAttempt(value => value + 1)} path={path} query={query} route={route} snapshot={snapshot} subview={view}/></LibraryNodeNamesProvider>}
   </div>;
 }
