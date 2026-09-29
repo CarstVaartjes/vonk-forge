@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 import functools
 import inspect
+import json
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, overload
 
@@ -205,8 +208,11 @@ __all__ = [
     "ControllerAPIRoute",
     "StrictJSONModel",
     "apply_optional_none_policy",
+    "read_stored_document",
+    "read_stored_model",
     "route_endpoint",
     "serialize_json_value",
+    "warn_unreadable_once",
 ]
 
 
@@ -224,3 +230,89 @@ def stored_document_detail(error: Exception) -> str | None:
     issue = issues[0] if issues else {}
     location = ".".join(str(part) for part in issue.get("loc", ()))[:140] or "<root>"
     return f"stored document is invalid at {location} ({issue.get('type', 'invalid')})"
+
+
+_LOGGED_UNREADABLE: set[str] = set()
+_LOGGER = logging.getLogger(__name__)
+
+
+def warn_unreadable_once(kind: str, record_id: object) -> None:
+    """Log a stored record that cannot be read, once per process per record."""
+
+    key = f"{kind}:{record_id}"
+    if key in _LOGGED_UNREADABLE:
+        return
+    if len(_LOGGED_UNREADABLE) < 4096:
+        _LOGGED_UNREADABLE.add(key)
+    _LOGGER.warning("skipping unreadable stored %s %s", kind, record_id)
+
+
+def _drop_field(document: object, location: Sequence[object]) -> None:
+    """Remove the key a pydantic error location names, if it is in the document.
+
+    Union member names appear in a location but not in the JSON, so a segment
+    that does not exist is skipped rather than followed.
+    """
+
+    node: Any = document
+    for part in location[:-1]:
+        if isinstance(node, dict):
+            node = node.get(part)
+        elif isinstance(node, list) and isinstance(part, int) and part < len(node):
+            node = node[part]
+    if isinstance(node, dict):
+        node.pop(location[-1], None)
+
+
+def read_stored_document[T](validate: Callable[[object], T], document: object) -> T:
+    """Validate a persisted document, ignoring fields a newer contract retired.
+
+    Wire and request models stay strict; a document written by an older build
+    may carry fields that were since removed, and that must never make history
+    unreadable. Any other defect still raises the original error.
+    """
+
+    document = copy.deepcopy(document)
+    for _ in range(64):
+        try:
+            return validate(document)
+        except ValidationError as error:
+            issues = error.errors()
+            if not issues or any(i["type"] != "extra_forbidden" for i in issues):
+                raise
+            for issue in issues:
+                _drop_field(document, issue["loc"])
+    return validate(document)
+
+
+def read_stored_model[T: BaseModel](
+    model: type[T], document: object, *, from_json: bool = False, **options: Any
+) -> T:
+    """Read a persisted document into ``model``, tolerating retired fields.
+
+    Same result as ``model.model_validate`` (or ``model_validate_json`` with
+    ``from_json``) for a current document, and a fast path that adds no cost
+    to it. Only ``extra_forbidden`` defects are repaired, by dropping the
+    retired field; every other defect raises the original error.
+    """
+
+    def validate(value: object) -> T:
+        if from_json:
+            payload = value if isinstance(value, (str, bytes, bytearray)) else None
+            if payload is None:
+                payload = json.dumps(value, allow_nan=False)
+            return model.model_validate_json(payload, **options)
+        return model.model_validate(value, **options)
+
+    try:
+        return validate(document)
+    except ValidationError as error:
+        issues = error.errors()
+        if not issues or any(i["type"] != "extra_forbidden" for i in issues):
+            raise
+    parsed = (
+        json.loads(document)
+        if isinstance(document, (str, bytes, bytearray))
+        else document
+    )
+    return read_stored_document(validate, parsed)

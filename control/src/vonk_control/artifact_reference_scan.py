@@ -49,6 +49,7 @@ from .runtime_image_preparation import (
     RuntimeImagePreparationError,
     read_runtime_image_reference_intent,
 )
+from .strict_json import read_stored_model
 
 _ACTIVE_PROFILE_APPLICATIONS = ("queued", "running", "waiting-for-operator")
 _ACTIVE_RUN_SWITCH_JOBS = ("queued", "running", "partial", "waiting-for-operator")
@@ -876,8 +877,8 @@ def runtime_image_reference_reasons(
 
 def _profile_plan(value: object) -> FleetProfilePreview:
     try:
-        return FleetProfilePreview.model_validate_json(
-            canonical_message(value), strict=True
+        return read_stored_model(
+            FleetProfilePreview, canonical_message(value), strict=True, from_json=True
         )
     except (TypeError, ValueError, ValidationError) as error:
         raise ArtifactLifecycleError(
@@ -889,8 +890,11 @@ def _profile_plan(value: object) -> FleetProfilePreview:
 
 def _run_switch_plan(payload: Mapping[str, object]) -> RunSwitchPlan:
     try:
-        return RunSwitchPlan.model_validate_json(
-            canonical_message(payload.get("plan")), strict=True
+        return read_stored_model(
+            RunSwitchPlan,
+            canonical_message(payload.get("plan")),
+            strict=True,
+            from_json=True,
         )
     except (TypeError, ValueError, ValidationError) as error:
         raise ArtifactLifecycleError(
@@ -908,8 +912,11 @@ def _run_switch_runtime_image_intent(
     if operation.result is None:
         return None
     try:
-        result = RunSwitchOperationResult.model_validate_json(
-            canonical_message(operation.result), strict=True
+        result = read_stored_model(
+            RunSwitchOperationResult,
+            canonical_message(operation.result),
+            strict=True,
+            from_json=True,
         )
     except (TypeError, ValueError, ValidationError) as error:
         raise ArtifactLifecycleError(

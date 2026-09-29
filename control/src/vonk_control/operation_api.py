@@ -79,7 +79,7 @@ from .operation_contract import (
 )
 from .operation_progress import aggregate_progress, project_progress
 from .route_runtime import verify_active_route_bundle
-from .strict_json import StrictJSONModel
+from .strict_json import StrictJSONModel, read_stored_model, warn_unreadable_once
 
 COMMIT_PATTERN = r"^[0-9a-f]{40}$"
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
@@ -122,7 +122,7 @@ def _stored_activation_marker(value: object) -> ActivationMarker:
     except (TypeError, ValueError) as error:
         raise RuntimeError("durable activation marker is invalid") from error
     try:
-        return ActivationMarker.model_validate_json(document)
+        return read_stored_model(ActivationMarker, document, from_json=True)
     except ValidationError as error:
         raise RuntimeError("durable activation marker is invalid") from error
 
@@ -768,6 +768,7 @@ class _StandaloneJobActivityProjection:
             ):
                 raise ValueError("stored job status reason is malformed")
         except (AttributeError, TypeError, ValueError, ValidationError):
+            warn_unreadable_once("job", job.id)
             return self._unreadable_item(job, activity_id, request_id)
         return {
             "id": activity_id,
@@ -801,12 +802,7 @@ class _StandaloneJobActivityProjection:
             "created_at": _aware(job.created_at).isoformat(),
             "updated_at": _aware(job.updated_at).isoformat(),
             "supported_actions": [],
-            "failure": {
-                "error_code": "operation_history_unreadable",
-                "summary": "Stored job history is malformed",
-                "retryable": False,
-            },
-            "status_reason": "Stored job history is malformed.",
+            "status_reason": "Stored job history is unreadable.",
         }
 
 
@@ -1002,7 +998,7 @@ def _progress_projection(
     if value is None:
         return None
     projected = project_progress(
-        JobOperationProgress.model_validate(value, strict=True)
+        read_stored_model(JobOperationProgress, value, strict=True)
     )
     if state in {
         "succeeded",
@@ -1064,8 +1060,8 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
             return None
         kind = _required_text(item["kind"], "operation kind is invalid")
         if kind.startswith("model-cache.") or kind == "recipe.cache.update.v2":
-            return AvailabilityOperationFailure.model_validate(value)
-        return OperationFailureEvidence.model_validate(value, strict=True)
+            return read_stored_model(AvailabilityOperationFailure, value)
+        return read_stored_model(OperationFailureEvidence, value, strict=True)
     kind = _required_text(item["kind"], "operation kind is invalid")
     state = _required_text(item["state"], "operation state is invalid")
     if kind in {operation.value for operation in ProtocolAgentOperation}:
@@ -1112,7 +1108,7 @@ def _evidence_download_projection(
     if not isinstance(stored, Mapping):
         raise BoundedJSONError(detail)
     try:
-        return OperationEvidenceDownload.model_validate(stored, strict=True)
+        return read_stored_model(OperationEvidenceDownload, stored, strict=True)
     except ValidationError as error:
         raise BoundedJSONError(detail) from error
 
@@ -1160,8 +1156,11 @@ def operation_detail_response(
     raw_cancellation = item.get("cancellation")
     if raw_cancellation is not None:
         try:
-            cancellation = FleetProfileApplicationCancellationView.model_validate_json(
-                canonical_message(raw_cancellation), strict=True
+            cancellation = read_stored_model(
+                FleetProfileApplicationCancellationView,
+                canonical_message(raw_cancellation),
+                strict=True,
+                from_json=True,
             )
         except (TypeError, ValueError, ValidationError) as error:
             raise BoundedJSONError(
@@ -1171,7 +1170,7 @@ def operation_detail_response(
     raw_owner = item.get("owner")
     if isinstance(raw_owner, Mapping):
         try:
-            owner = OperationOwnerReference.model_validate(raw_owner)
+            owner = read_stored_model(OperationOwnerReference, raw_owner)
         except ValidationError:
             # Keep one damaged historical owner visible without turning the
             # rest of the canonical page into an unavailable response.
@@ -1748,7 +1747,7 @@ class _DurableOperationProjection:
                     state=operation.state,
                 )
                 aggregate_members.append(
-                    OperationMemberProgress.model_validate(document)
+                    read_stored_model(OperationMemberProgress, document)
                 )
             aggregate = (
                 aggregate_progress(aggregate_members) if aggregate_members else None

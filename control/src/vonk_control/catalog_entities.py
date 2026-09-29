@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
@@ -23,6 +24,7 @@ from vonk_forge_contracts.resolver import validate_recipe_models
 
 from .auth import CursorCodec
 from .catalog_revision_contract import (
+    CatalogRevisionContractError,
     read_catalog_document,
     read_catalog_projection,
     write_catalog_projection,
@@ -33,6 +35,8 @@ from .models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class CatalogError(RuntimeError):
@@ -106,11 +110,21 @@ class CatalogEntityService:
             for revision in revisions:
                 # Validate stored data before deriving anything; corruption
                 # must not be repaired into an apparently valid projection.
-                projected = read_catalog_projection(revision).model_dump(
-                    mode="json",
-                    exclude_none=True,
-                )
-                recipe = read_catalog_document(revision)
+                try:
+                    projected = read_catalog_projection(revision).model_dump(
+                        mode="json",
+                        exclude_none=True,
+                    )
+                    recipe = read_catalog_document(revision)
+                except CatalogRevisionContractError as error:
+                    # Written under another contract; the next sync replaces
+                    # it. One such row must not stop the rest of the catalog.
+                    _LOGGER.warning(
+                        "skipping build policy refresh for revision %s: %s",
+                        revision.id,
+                        error,
+                    )
+                    continue
                 assert isinstance(recipe, RecipeDefinition)
                 policy = _build_projection(recipe)
                 if all(projected.get(key) == value for key, value in policy.items()):

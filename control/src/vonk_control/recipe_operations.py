@@ -163,6 +163,7 @@ from .run_admission import (
     require_admissible as require_run_admissible,
 )
 from .source_policy import SourcePolicyReport
+from .strict_json import read_stored_model
 
 # Longest rendered blocker reason kept in an install refusal.  Each reason names
 # the check and then the cause, so the bound has to preserve both ends.
@@ -2401,8 +2402,8 @@ class RecipeOperationService:
             raise RecipeOperationConflict("recovery Start rank set is invalid")
         start_payload = start_phases[0][0][1]
         try:
-            accepted_start = RecipeStartPayload.model_validate_json(
-                canonical_message(start_payload)
+            accepted_start = read_stored_model(
+                RecipeStartPayload, canonical_message(start_payload), from_json=True
             )
         except (TypeError, ValueError) as error:
             raise RecipeOperationConflict(
@@ -3947,11 +3948,15 @@ class RecipeOperationService:
         owner_id = _required_string(job.payload, "owner_id")
         if job.kind == "recipe.build.cleanup.v1":
             if succeeded:
-                RecipeBuildCleanupEvidence.model_validate_json(
-                    canonical_message(evidence)
+                read_stored_model(
+                    RecipeBuildCleanupEvidence,
+                    canonical_message(evidence),
+                    from_json=True,
                 )
-                expected = RecipeBuildCleanupRequest.model_validate_json(
-                    canonical_message(operation.payload)
+                expected = read_stored_model(
+                    RecipeBuildCleanupRequest,
+                    canonical_message(operation.payload),
+                    from_json=True,
                 )
                 if expected.build_id != owner_id:
                     raise RecipeOperationConflict(
@@ -3978,8 +3983,10 @@ class RecipeOperationService:
                         "recipe build cleanup authority changed"
                     )
                 cancellation = build_cancellation(original_job)
-                requested = RecipeOperationCancellationResult.model_validate_json(
-                    canonical_message(job.payload["build_cancellation"])
+                requested = read_stored_model(
+                    RecipeOperationCancellationResult,
+                    canonical_message(job.payload["build_cancellation"]),
+                    from_json=True,
                 )
                 if (
                     cancellation is None
@@ -4154,8 +4161,10 @@ class RecipeOperationService:
                 else None
             )
             try:
-                expected = RecipeReconcilePayload.model_validate_json(
-                    canonical_message(operation.payload)
+                expected = read_stored_model(
+                    RecipeReconcilePayload,
+                    canonical_message(operation.payload),
+                    from_json=True,
                 )
             except (TypeError, ValueError) as error:
                 raise RecipeOperationConflict(
@@ -5524,8 +5533,8 @@ class RecipeOperationService:
             if operation_id == operation.id and node_id == operation.node_id
         ]
         try:
-            operation_payload = RecipeStopPayload.model_validate_json(
-                canonical_message(operation.payload)
+            operation_payload = read_stored_model(
+                RecipeStopPayload, canonical_message(operation.payload), from_json=True
             )
         except (TypeError, ValueError) as error:
             raise RecipeOperationConflict(
@@ -5722,8 +5731,11 @@ class RecipeOperationService:
         try:
             from .run_switch_contract import RunSwitchPlan
 
-            run_switch_plan = RunSwitchPlan.model_validate_json(
-                canonical_message(profile_operation.payload.get("plan")), strict=True
+            run_switch_plan = read_stored_model(
+                RunSwitchPlan,
+                canonical_message(profile_operation.payload.get("plan")),
+                strict=True,
+                from_json=True,
             )
             stop_impacts = [
                 item for item in run_switch_plan.stops if item.run_id == run.id
@@ -5801,8 +5813,10 @@ class RecipeOperationService:
                     "artifact JobRun escaped its immutable run membership"
                 )
             try:
-                request = RecipeJobRunRequest.model_validate_json(
-                    canonical_message(source_operation.payload)
+                request = read_stored_model(
+                    RecipeJobRunRequest,
+                    canonical_message(source_operation.payload),
+                    from_json=True,
                 )
                 stop = stop_payload_from_job_run(
                     request,
@@ -7281,9 +7295,11 @@ def _start_endpoint(
     """
 
     try:
-        result = RecipeStartResult.model_validate_json(canonical_message(evidence))
-        start = RecipeStartPayload.model_validate_json(
-            canonical_message(operation.payload)
+        result = read_stored_model(
+            RecipeStartResult, canonical_message(evidence), from_json=True
+        )
+        start = read_stored_model(
+            RecipeStartPayload, canonical_message(operation.payload), from_json=True
         )
     except (TypeError, ValueError) as error:
         raise RecipeOperationConflict("start result is invalid") from error

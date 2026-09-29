@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
 from .bounded_json import integer, require_integer, require_mapping, text
 from .model_cache_contract import ModelCacheOperationPhase, ModelCacheOperationProgress
 from .operation_progress import STALE_AFTER_SECONDS, observe_progress, project_progress
+from .strict_json import read_stored_model
 
 PHASES = {
     "queued": "queued",
@@ -48,12 +49,13 @@ def _member_progress(
         OperationProgress.model_fields.keys()
         & OperationMemberProgress.model_fields.keys()
     )
-    return OperationMemberProgress.model_validate(
+    return read_stored_model(
+        OperationMemberProgress,
         {
             **measurement.model_dump(mode="json", include=shared_fields),
             "member_id": identity.member_id,
             "state": identity.state,
-        }
+        },
     )
 
 
@@ -65,7 +67,7 @@ def cache_progress(
     members: list[OperationMemberProgress] | None = None,
 ) -> dict[str, object]:
     old = (
-        ModelCacheOperationProgress.model_validate(previous)
+        read_stored_model(ModelCacheOperationProgress, previous)
         if previous is not None
         else None
     )
@@ -114,14 +116,14 @@ def cache_progress(
             )
         sample = _sample(prior_data, data, now)
         sampled_members.append(
-            _member_progress(OperationProgress.model_validate(sample), member)
+            _member_progress(read_stored_model(OperationProgress, sample), member)
         )
     sampled["members"] = [
         member.model_dump(mode="json", exclude_none=True) for member in sampled_members
     ]
     value["measurement"] = sampled
     return json.loads(
-        canonical_message(ModelCacheOperationProgress.model_validate(value))
+        canonical_message(read_stored_model(ModelCacheOperationProgress, value))
     )
 
 
@@ -132,7 +134,7 @@ def cache_phase(
     *,
     waiting: bool = False,
 ) -> dict[str, object]:
-    current = ModelCacheOperationProgress.model_validate(value)
+    current = read_stored_model(ModelCacheOperationProgress, value)
     document = current.model_dump(mode="json", exclude={"measurement"})
     document["phase"] = phase
     members = [
@@ -150,14 +152,14 @@ def cache_phase(
             now,
         )
     return json.loads(
-        canonical_message(ModelCacheOperationProgress.model_validate(result))
+        canonical_message(read_stored_model(ModelCacheOperationProgress, result))
     )
 
 
 def project_cache_progress(
     value: Mapping[str, object], now: datetime | None = None
 ) -> dict[str, object]:
-    parsed = ModelCacheOperationProgress.model_validate(value)
+    parsed = read_stored_model(ModelCacheOperationProgress, value)
     measurement = project_progress(parsed.measurement, now)
     members = []
     for member in measurement.members:
@@ -165,7 +167,7 @@ def project_cache_progress(
             mode="json", exclude={"member_id", "state"}, exclude_none=True
         )
         raw["total_bytes_known"] = member.total_bytes is not None
-        projected = project_progress(OperationProgress.model_validate(raw), now)
+        projected = project_progress(read_stored_model(OperationProgress, raw), now)
         members.append(_member_progress(projected, member))
     return json.loads(
         canonical_message(measurement.model_copy(update={"members": members}))

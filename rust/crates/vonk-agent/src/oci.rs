@@ -45,8 +45,6 @@ pub enum OciError {
     Io(#[from] std::io::Error),
     #[error("managed workload metadata is invalid")]
     Json(#[from] serde_json::Error),
-    #[error("managed service run predates run-generation observation")]
-    NoRunGeneration,
     #[error("local disk or memory capacity changed after admission")]
     Capacity,
     #[error("installation reconciliation is waiting for its current local owner")]
@@ -97,7 +95,6 @@ impl OciError {
             Self::Artifact => "artifact",
             Self::Io(_) => "storage",
             Self::Json(_) => "metadata",
-            Self::NoRunGeneration => "no-run-generation",
             Self::Capacity => "capacity",
             Self::ReconciliationBusy => "reconciliation-busy",
             Self::Install { source, .. } | Self::Start { source, .. } => source.safe_category(),
@@ -1275,20 +1272,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         // Stopped run directories intentionally outlive their lifecycle. A
         // missing lifecycle or run generation is historical; malformed
         // metadata is returned to the caller as this run's isolated failure.
-        let Some((spec, installation_id, placement, run_generation)) =
+        let Some((spec, installation_id, placement, Some(run_generation))) =
             self.load_run_lifecycle(run_id)?
         else {
             return Ok(None);
-        };
-        let Some(run_generation) = run_generation else {
-            // A one-shot job never carries a generation. A service run
-            // without one was started before generations were reported and
-            // can never be observed; the caller retires it if unowned.
-            return if spec.job.is_none() {
-                Err(OciError::NoRunGeneration)
-            } else {
-                Ok(None)
-            };
         };
         let retained = self.prepare_retained_start(&spec, &installation_id, run_id, &placement)?;
         let mut arguments = vec![
@@ -3000,25 +2987,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(lifecycle["run_generation"], 7);
-    }
-
-    #[test]
-    fn service_run_without_generation_is_unobservable_not_historical() {
-        let data = tempdir().unwrap();
-        let (installation_id, installation, plan) = persisted_installation(data.path());
-        authorize_installation(&installation, &plan.identity.recipe_revision_sha256);
-        let run_id = Uuid::new_v4().to_string();
-        let runner = NoProcess;
-        let runtime = runtime(data.path(), &runner);
-        runtime
-            .prepare_start(&plan, &installation_id, &run_id, &plan.runtime.placement)
-            .unwrap();
-
-        let results = runtime.recipe_run_inspection_results().unwrap();
-        assert!(matches!(
-            results.as_slice(),
-            [Err((id, super::OciError::NoRunGeneration))] if *id == run_id
-        ));
     }
 
     #[test]

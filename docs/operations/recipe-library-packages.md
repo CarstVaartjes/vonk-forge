@@ -38,9 +38,10 @@ applies. Package cache files are written with an fsync and atomic rename, and
 the release signature material is kept beside the cached index, so a restart
 re-verifies and imports the previous generation offline. A failed candidate is
 recorded as a failed sync run and never becomes the active catalog. The
-`/api/catalog/managed-recipes/sync` and
-`/api/catalog/managed-recipes/sync-status` routes are the Controller's
-authenticated sync API. When the automatic sync cannot read the release at all,
+sync runs by itself: again after a Controller upgrade (even for the same
+commit), on every interval while the last run left problems, and a run that
+makes no progress for ten minutes is replaced. The
+`GET /api/catalog/managed-recipes/sync-status` route reports it. When the automatic sync cannot read the release at all,
 sync-status still reports the last applied run and adds `last_error` (code,
 detail, `occurred_at`) until a later sync succeeds; the sync retries after 30
 seconds, doubling up to the sync interval.

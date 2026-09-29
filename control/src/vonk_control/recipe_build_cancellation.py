@@ -28,7 +28,7 @@ from .recipe_lifecycle_contract import (
 )
 from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan
 from .runtime_image_preparation import RuntimeImageReceipt
-from .strict_json import StrictJSONModel
+from .strict_json import StrictJSONModel, read_stored_model
 
 
 class RecipeBuildIntent(StrictJSONModel):
@@ -42,8 +42,10 @@ def read_build_intent(job: Job) -> RecipeBuildIntent:
     try:
         if job.kind != "recipe.build.v1":
             raise ValueError("build intent requires a build job")
-        return RecipeBuildIntent.model_validate_json(
-            canonical_message(job.payload["build_intent"])
+        return read_stored_model(
+            RecipeBuildIntent,
+            canonical_message(job.payload["build_intent"]),
+            from_json=True,
         )
     except (KeyError, TypeError, ValueError) as error:
         raise BuildConsumerError(
@@ -309,11 +311,13 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
 def _profile_consumer(
     session: Session, application: FleetProfileApplication, build: RecipeBuild
 ) -> bool:
-    review = FleetProfilePreview.model_validate_json(
-        canonical_message(application.plan)
+    review = read_stored_model(
+        FleetProfilePreview, canonical_message(application.plan), from_json=True
     )
-    progress = FleetProfileApplicationProgress.model_validate_json(
-        canonical_message(application.progress)
+    progress = read_stored_model(
+        FleetProfileApplicationProgress,
+        canonical_message(application.progress),
+        from_json=True,
     )
     if (
         review.profile_id != application.profile_id
@@ -356,11 +360,13 @@ def _profile_consumer(
             )
             if child is None:
                 return True
-            child_plan = RunSwitchPlan.model_validate_json(
-                canonical_message(child.payload["plan"])
+            child_plan = read_stored_model(
+                RunSwitchPlan, canonical_message(child.payload["plan"]), from_json=True
             )
-            child_progress = RunSwitchOperationResult.model_validate_json(
-                canonical_message(child.result)
+            child_progress = read_stored_model(
+                RunSwitchOperationResult,
+                canonical_message(child.result),
+                from_json=True,
             )
             if (
                 child.kind != "recipe.run-switch.v2"
@@ -380,9 +386,11 @@ def _profile_consumer(
 
 
 def _run_switch_consumer(session: Session, parent: Job, build: RecipeBuild) -> bool:
-    plan = RunSwitchPlan.model_validate_json(canonical_message(parent.payload["plan"]))
-    progress = RunSwitchOperationResult.model_validate_json(
-        canonical_message(parent.result)
+    plan = read_stored_model(
+        RunSwitchPlan, canonical_message(parent.payload["plan"]), from_json=True
+    )
+    progress = read_stored_model(
+        RunSwitchOperationResult, canonical_message(parent.result), from_json=True
     )
     if progress.cancellation is not None:
         return False
@@ -431,7 +439,9 @@ def _availability_consumer(parent: Job, build: RecipeBuild) -> bool:
         raise ValueError("availability build consumer identity changed")
     image = payload.get("image_result")
     if image is not None:
-        receipt = RuntimeImageReceipt.model_validate_json(canonical_message(image))
+        receipt = read_stored_model(
+            RuntimeImageReceipt, canonical_message(image), from_json=True
+        )
         if receipt.build_input_sha256 != build.build_input_sha256:
             raise ValueError("availability receipt identity changed")
         return False

@@ -29,7 +29,7 @@ from .models import (
     RunNode,
 )
 from .recipe_stop_payloads import stop_payload_from_job_run
-from .strict_json import StrictJSONModel
+from .strict_json import StrictJSONModel, read_stored_model
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _NODE_ID = re.compile(r"^spk_[0-9a-f]{32}$")
@@ -251,8 +251,11 @@ def validate_profile_stop_owner(
         reviewed = FleetProfileService._reviewed_profile_plan(
             application, session=session
         )
-        run_switch_plan = RunSwitchPlan.model_validate_json(
-            canonical_message(profile_operation.payload.get("plan")), strict=True
+        run_switch_plan = read_stored_model(
+            RunSwitchPlan,
+            canonical_message(profile_operation.payload.get("plan")),
+            strict=True,
+            from_json=True,
         )
     except (TypeError, ValueError) as error:
         raise ProfileStopAuthorityError(
@@ -493,8 +496,10 @@ def validate_profile_jobrun_stop_target(
     ):
         raise ProfileStopAuthorityError("source JobRun identity is inconsistent")
     try:
-        request = RecipeJobRunRequest.model_validate_json(
-            canonical_message(source_operation.payload)
+        request = read_stored_model(
+            RecipeJobRunRequest,
+            canonical_message(source_operation.payload),
+            from_json=True,
         )
         expected = stop_payload_from_job_run(request, cancel_pending_start=True)
     except (TypeError, ValueError) as error:
