@@ -57,7 +57,109 @@ const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 // remaining validity window of the 90-second acceptance certificate.
 const ROTATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
-const DISTRIBUTION_CONCURRENCY: usize = 16;
+/// Objects fetched at once. One TCP stream can fill a 2.5 GbE link, so a few
+/// sequential files keep the NAS disk reading in order without contending
+/// for its CPU and seeks the way many small transfers do.
+const DISTRIBUTION_CONCURRENCY: usize = 4;
+/// Bytes requested per HTTP range. Large enough that authorization and
+/// request latency vanish next to the transfer, small enough that a retry or a
+/// restart repeats little.
+const DISTRIBUTION_RANGE_BYTES: u64 = 64 * 1024 * 1024;
+/// Written bytes after which their writeback starts and their pages are
+/// released, so a hundreds-of-gigabytes model never builds a huge dirty backlog
+/// or fills the page cache of a shared-memory machine.
+const WRITE_BEHIND_BYTES: u64 = 256 * 1024 * 1024;
+
+/// The last byte of the range that continues a transfer at `offset`.
+fn range_end(offset: u64, total: u64) -> u64 {
+    total
+        .saturating_sub(1)
+        .min(offset.saturating_add(DISTRIBUTION_RANGE_BYTES - 1))
+}
+
+/// Ask the filesystem to reserve the object's remaining space up front, keeping
+/// the file's length at what was written (resume reads that length). This
+/// avoids fragmentation, and a full disk shows before hours of transfer. A
+/// filesystem that cannot reserve is left to allocate as it goes.
+#[cfg(target_os = "linux")]
+fn preallocate(file: &tokio::fs::File, offset: u64, total: u64) {
+    if total > offset {
+        let _ = rustix::fs::fallocate(
+            file,
+            rustix::fs::FallocateFlags::KEEP_SIZE,
+            offset,
+            total - offset,
+        );
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn preallocate(_file: &tokio::fs::File, _offset: u64, _total: u64) {}
+
+/// Starts writeback of what was written and releases its pages every
+/// [`WRITE_BEHIND_BYTES`]. At most one flush runs while the transfer continues.
+struct WriteBehind {
+    window: u64,
+    started: u64,
+    pending: Option<tokio::task::JoinHandle<std::io::Result<()>>>,
+}
+
+impl WriteBehind {
+    fn new(offset: u64) -> Self {
+        Self::with_window(offset, WRITE_BEHIND_BYTES)
+    }
+
+    fn with_window(offset: u64, window: u64) -> Self {
+        Self {
+            window,
+            started: offset,
+            pending: None,
+        }
+    }
+
+    async fn written(
+        &mut self,
+        output: &mut BufWriter<tokio::fs::File>,
+        offset: u64,
+    ) -> Result<(), ClientError> {
+        if offset - self.started < self.window {
+            return Ok(());
+        }
+        self.finish().await?;
+        output.flush().await?;
+        let file = output.get_ref().try_clone().await?.into_std().await;
+        let (from, length) = (self.started, offset - self.started);
+        self.started = offset;
+        self.pending = Some(tokio::task::spawn_blocking(move || {
+            file.sync_data()?;
+            release_pages(&file, from, length);
+            Ok(())
+        }));
+        Ok(())
+    }
+
+    async fn finish(&mut self) -> Result<(), ClientError> {
+        if let Some(pending) = self.pending.take() {
+            pending
+                .await
+                .map_err(|error| std::io::Error::other(error.to_string()))??;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn release_pages(file: &fs::File, offset: u64, length: u64) {
+    let _ = rustix::fs::fadvise(
+        file,
+        offset,
+        std::num::NonZeroU64::new(length),
+        rustix::fs::Advice::DontNeed,
+    );
+}
+
+#[cfg(not(target_os = "linux"))]
+fn release_pages(_file: &fs::File, _offset: u64, _length: u64) {}
 /// Release the page cache for a completed distribution object.
 ///
 /// Best effort on purpose: the object is transferred, verified and receipted,
@@ -430,6 +532,10 @@ impl AgentHttpClient {
             .https_only(true)
             .tls_certs_only([ca])
             .identity(identity)
+            // Bulk transfers are a few long streams. Separate HTTP/1.1
+            // connections each get their own TCP window and TLS worker, where
+            // HTTP/2 would multiplex them behind one flow-control window.
+            .http1_only()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(75))
             .build()?;
@@ -1222,14 +1328,14 @@ impl AgentHttpClient {
         // write. Coalesce them so Tokio does not dispatch a blocking file
         // operation for every received chunk. Keep this writer across range
         // retries; a process restart resumes from the actual partial length.
+        preallocate(&output, offset, expected_bytes);
         let mut output = BufWriter::with_capacity(1024 * 1024, output);
+        let mut write_behind = WriteBehind::new(offset);
         progress(offset, "copying");
         let mut last_progress = tokio::time::Instant::now();
         let mut retries = 0_u32;
         while offset < expected_bytes {
-            let end = expected_bytes
-                .saturating_sub(1)
-                .min(offset.saturating_add(8 * 1024 * 1024 - 1));
+            let end = range_end(offset, expected_bytes);
             let mut url = self.endpoint(&format!("/agent/distribution/objects/{sha256}"))?;
             url.query_pairs_mut()
                 .append_pair("plan_digest", plan_digest);
@@ -1268,6 +1374,7 @@ impl AgentHttpClient {
                     // This writer survives network retries, so resume from
                     // its accepted bytes even within an interrupted range.
                     offset += chunk.len() as u64;
+                    write_behind.written(&mut output, offset).await?;
                     if last_progress.elapsed() >= Duration::from_millis(200) {
                         progress(offset, "copying");
                         last_progress = tokio::time::Instant::now();
@@ -1290,6 +1397,7 @@ impl AgentHttpClient {
             }
         }
         progress(offset, "copying");
+        write_behind.finish().await?;
         output.flush().await?;
         output.get_ref().sync_all().await?;
         let output = output.into_inner();
@@ -1382,10 +1490,9 @@ impl AgentHttpClient {
             .open(destination)
             .await?;
         let mut offset = existing;
+        preallocate(&output, offset, expected_bytes);
         while offset < expected_bytes {
-            let end = expected_bytes
-                .saturating_sub(1)
-                .min(offset.saturating_add(8 * 1024 * 1024 - 1));
+            let end = range_end(offset, expected_bytes);
             let mut url = self.endpoint(&format!("{endpoint}/{sha256}"))?;
             if let Some(plan_digest) = plan_digest {
                 url.query_pairs_mut()
@@ -2246,9 +2353,10 @@ mod tests {
     const TEST_NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
     use super::{
-        AgentHttpClient, AgentResult, ClientError, ControllerError, ExactRecipeRunObservation,
-        MAX_REJECTION_CONTEXT_CHARS, clamp_inventory_request, controller_rejection_digest,
-        is_rotation_conflict, partial_path, valid_reported_hostname,
+        AgentHttpClient, AgentResult, ClientError, ControllerError, DISTRIBUTION_CONCURRENCY,
+        ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS, WriteBehind,
+        clamp_inventory_request, controller_rejection_digest, is_rotation_conflict,
+        open_trusted_partial, partial_path, preallocate, range_end, valid_reported_hostname,
     };
     use crate::{
         oci::OciRuntime,
@@ -3104,6 +3212,53 @@ mod tests {
             authenticated_test_client(&format!("http://{address}/"), &node_id),
             server,
         )
+    }
+
+    #[test]
+    fn transfers_plan_four_files_in_sixty_four_mebibyte_ranges() {
+        const MIB: u64 = 1024 * 1024;
+        assert_eq!(DISTRIBUTION_CONCURRENCY, 4);
+        // A large object is walked in whole 64 MiB windows...
+        assert_eq!(range_end(0, 1024 * MIB), 64 * MIB - 1);
+        assert_eq!(range_end(64 * MIB, 1024 * MIB), 128 * MIB - 1);
+        // ...a resumed offset continues from where the partial ended...
+        assert_eq!(range_end(100 * MIB, 1024 * MIB), 164 * MIB - 1);
+        // ...and the last window stops at the final byte.
+        assert_eq!(range_end(64 * MIB, 70 * MIB), 70 * MIB - 1);
+        assert_eq!(range_end(0, 5), 4);
+    }
+
+    #[tokio::test]
+    async fn write_path_reserves_space_without_changing_the_length_and_writes_exact_bytes() {
+        use tokio::io::{AsyncWriteExt, BufWriter};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("object.partial");
+        let payload: Vec<u8> = (0..5 * 1024 * 1024_u32).map(|value| value as u8).collect();
+        let file = open_trusted_partial(&path).await.unwrap();
+        preallocate(&file, 0, payload.len() as u64);
+        // Resume reads the partial's length as the bytes already received, so
+        // reserving space must not make it look complete.
+        assert_eq!(file.metadata().await.unwrap().len(), 0);
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::MetadataExt;
+            // tmpfs and the CI filesystems reserve blocks; skip nothing on Linux.
+            assert!(file.metadata().await.unwrap().blocks() * 512 >= payload.len() as u64);
+        }
+
+        // A one-MiB window forces several background flushes during the write.
+        let mut output = BufWriter::with_capacity(64 * 1024, file);
+        let mut write_behind = WriteBehind::with_window(0, 1024 * 1024);
+        let mut written = 0_u64;
+        for chunk in payload.chunks(256 * 1024) {
+            output.write_all(chunk).await.unwrap();
+            written += chunk.len() as u64;
+            write_behind.written(&mut output, written).await.unwrap();
+        }
+        write_behind.finish().await.unwrap();
+        output.flush().await.unwrap();
+        output.get_ref().sync_all().await.unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), payload);
     }
 
     #[tokio::test]

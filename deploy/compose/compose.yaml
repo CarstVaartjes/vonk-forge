@@ -76,6 +76,7 @@ services:
     volumes:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
+      - model-cache:/state/model-cache
       - route-publications:/routes
       - litellm-supervisor-state:/supervisor
       - normalized-private-keys:/normalized
@@ -119,6 +120,7 @@ services:
       - litellm-supervisor-state:/supervisor:ro
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
+      - model-cache:/state/model-cache
     tmpfs: [/tmp]
     # The cache worker fetches pinned models and OCI images from public
     # providers. Keep its outbound network separate from ingress and do not
@@ -281,6 +283,11 @@ services:
       - runtime-assets:/run/vonk-runtime-assets:ro
       - caddy-data:/data
       - caddy-config:/config
+      # Caddy serves model and image bytes itself, but only after the
+      # Controller authorizes the request and names the file. Same layout as
+      # the Controller's /state, read-only, and only the two object stores.
+      - agent-artifacts:/srv/state/agent-artifacts:ro
+      - model-cache:/srv/state/model-cache:ro
     tmpfs: [/tmp]
     entrypoint:
       - /bin/sh
@@ -393,6 +400,7 @@ volumes:
   postgres-data: {}
   control-state: {}
   agent-artifacts: {}
+  model-cache: {}
   caddy-data: {}
   caddy-config: {}
   litellm-supervisor-state: {}

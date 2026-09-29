@@ -237,6 +237,7 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
         name: tmp_path / name.replace("_", "-")
         for name in (
             "agent_artifacts",
+            "model_cache",
             "routes",
             "supervisor",
             "state",
@@ -257,12 +258,14 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
         (10001, 10001),
         (10001, 10001),
         (10001, 10001),
+        (10001, 10001),
         (10002, 10001),
         (-1, 10001),
     ]
     expected_paths = (
         roots["state"],
         roots["agent_artifacts"],
+        roots["model_cache"],
         roots["routes"],
         roots["routes"] / "generations",
         roots["supervisor"],
@@ -274,6 +277,7 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
     } == {
         "state": 0o750,
         "agent-artifacts": 0o750,
+        "model-cache": 0o750,
         "routes": 0o750,
         "routes/generations": 0o750,
         "supervisor": 0o750,
@@ -288,6 +292,7 @@ def test_shared_volume_preparation_rejects_symlinked_component(tmp_path: Path) -
     routes.symlink_to(outside, target_is_directory=True)
     paths = SharedRuntimePaths(
         agent_artifacts=tmp_path / "agent-artifacts",
+        model_cache=tmp_path / "model-cache",
         routes=routes,
         supervisor=tmp_path / "supervisor",
         state=tmp_path / "state",

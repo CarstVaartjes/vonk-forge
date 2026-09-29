@@ -40,6 +40,33 @@
 	import edge_headers
 }
 
+(stored_file_from_controller) {
+	# The Controller authorizes a model or image download and names the
+	# stored file; Caddy serves it, with native Range support, from the
+	# read-only object stores. The name comes only from the Controller's
+	# reply, never from the request, and must be one of the two content
+	# addressed layouts: anything else, including any traversal, is a
+	# 404. The reply, and so X-Vonk-File, never reaches the agent.
+	@stored_file header X-Vonk-File *
+	handle_response @stored_file {
+		rewrite * /{rp.header.X-Vonk-File}
+		@object_store path_regexp ^/(model-cache/objects/[0-9a-f]{2}/[0-9a-f]{64}|agent-artifacts/(image-cache/)?[0-9a-f]{64})$
+		handle @object_store {
+			root * /srv/state
+			# The Controller vouched for this exact object at its range,
+			# and the agent checks the ETag it names, so the file server
+			# must not substitute its own validator.
+			request_header -If-Range
+			header >ETag {rp.header.Etag}
+			header >Cache-Control {rp.header.Cache-Control}
+			header >Content-Type {rp.header.Content-Type}
+			header >-X-Vonk-File
+			file_server
+		}
+		respond 404
+	}
+}
+
 (control_proxy) {
 	reverse_proxy control-api:8000 {
 		# PostgreSQL migrations can keep the API socket closed briefly after a
@@ -282,6 +309,8 @@ https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} 
 			header_up X-Vonk-Agent-Verified "1"
 			header_up X-Vonk-Agent-Proxy-Auth "{$VONK_AGENT_PROXY_AUTH}"
 			header_up X-Vonk-Agent-Source {http.request.remote.host}
+
+			import stored_file_from_controller
 		}
 	}
 	respond 404

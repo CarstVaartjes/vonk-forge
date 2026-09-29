@@ -43,6 +43,24 @@ of eight concurrent files across active cache operations. Each file of at least
 allows, for up to 32 simultaneous data requests. There is no per-connection
 speed limit.
 
+## Transfer to Sparks
+
+The Controller authorizes each Spark request (assignment, node, expiry, range)
+and names the stored file; Caddy then serves the bytes and the range from a
+read-only mount of the model and image stores. The Controller never reads them
+on this path. Each Spark fetches four files at once, in 64 MiB ranges over
+HTTP/1.1, and preallocates and flushes what it writes so a large model neither
+fragments the disk nor fills the page cache.
+
+To measure a transfer from a Spark, run
+`sudo scripts/measure-transfer PLAN_DIGEST OBJECT_SHA256 [NAS_IPERF_HOST]`
+while the plan's object is assigned. About 280 MB/s is the ceiling on 2.5 GbE.
+
+On Btrfs the Controller marks the model and image directories no-copy-on-write
+(which also disables compression) when it starts. Only files created later
+inherit this; existing files keep their attributes and are not rewritten.
+Other filesystems ignore it.
+
 ## Remove and cancel
 
 Inspect the Controller-owned impact before accepting removal:

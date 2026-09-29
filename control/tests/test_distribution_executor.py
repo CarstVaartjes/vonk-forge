@@ -1202,7 +1202,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                 headers=agent_headers(node, serial),
             )
             assert payload_response.status_code == 200
-            assert len(payload_response.content) == item["bytes"]
+            assert payload_response.headers["x-vonk-file"].endswith(item["sha256"])
     view = executor.get(copy_child.operation_id)
     assert view.state == "succeeded"
     assert {member["node_id"] for member in view.result["members"]} == set(nodes)

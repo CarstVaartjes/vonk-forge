@@ -30,7 +30,6 @@ from pydantic import (
 )
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from starlette.responses import StreamingResponse
 from vonk_agent_protocol import (
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     AgentClaim,
@@ -130,7 +129,12 @@ _MAX_ENROLLMENT_BODY_BYTES = 64 * 1024
 _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES = 2 * 1024
 _MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 MAX_RECIPE_IMAGE_BYTES = 16 * 1024**4
-_MAX_RANGE_BYTES = 8 * 1024 * 1024
+# The largest single range an agent may request. The agent asks for exactly
+# this size; the edge serves the range itself.
+_MAX_RANGE_BYTES = 64 * 1024 * 1024
+# Where stored objects are mounted in the edge, as seen from the Controller.
+_SERVED_ROOT = Path("/state")
+_SERVED_FILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,255}\Z")
 # A distribution refusal is returned as the agent's ``x-vonk-error-code`` so the
 # denying check is attributable.  The vocabulary is internal, but the header is
 # a wire surface, so it is validated before being reflected.
@@ -174,6 +178,7 @@ class AgentApiServices:
     max_artifact_bytes: int = _MAX_ARTIFACT_BYTES
     max_recipe_image_bytes: int = MAX_RECIPE_IMAGE_BYTES
     max_range_bytes: int = _MAX_RANGE_BYTES
+    served_root: Path = _SERVED_ROOT
     host_runtime_authority: HostRuntimeAuthorityService | None = None
     fabric_policy: ManagementAddressPolicy | None = None
     bootstrap: EnrollmentBootstrapConfig | None = None
@@ -678,9 +683,10 @@ def _unlink_if_present(path: Path) -> None:
         pass
 
 
-def _open_owned_artifact(
+def _owned_artifact(
     services: AgentApiServices, identity: AgentIdentity, digest: str
-) -> tuple[int, int, int, bool]:
+) -> tuple[Path, int]:
+    """Return the stored artifact this node's live operation names, and its size."""
     if _DIGEST.fullmatch(digest) is None:
         raise HTTPException(status_code=404, detail="artifact not found")
     with services.sessions() as session:
@@ -705,36 +711,44 @@ def _open_owned_artifact(
     maximum = (
         services.max_recipe_image_bytes if recipe_image else services.max_artifact_bytes
     )
-    root_flags = (
-        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    )
-    file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    directory = services.artifact_root
+    if recipe_image:
+        directory = directory / IMAGE_CACHE_DIRECTORY
+    path = directory / digest
     try:
-        root_fd = os.open(os.fspath(services.artifact_root), root_flags)
-        try:
-            if recipe_image:
-                image_fd = os.open(IMAGE_CACHE_DIRECTORY, root_flags, dir_fd=root_fd)
-                try:
-                    descriptor = os.open(digest, file_flags, dir_fd=image_fd)
-                finally:
-                    os.close(image_fd)
-            else:
-                descriptor = os.open(digest, file_flags, dir_fd=root_fd)
-        finally:
-            os.close(root_fd)
+        # No-follow keeps a planted link from naming anything else.
+        metadata = os.stat(path, follow_symlinks=False)
     except OSError:
         raise HTTPException(status_code=404, detail="artifact not found") from None
+    if not stat.S_ISREG(metadata.st_mode):
+        raise HTTPException(status_code=404, detail="artifact not available")
+    if metadata.st_size > maximum:
+        raise HTTPException(status_code=413, detail="artifact not available")
+    return path, metadata.st_size
+
+
+def _served_from_edge(services: AgentApiServices, path: Path, etag: str) -> Response:
+    """Authorize-only answer: the edge reads the named file and serves the range.
+
+    The file name comes from Controller storage, never from the request, and it
+    must sit under the fixed root the edge mounts read-only. The edge replaces
+    this response with the file; the header never reaches an agent.
+    """
     try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > maximum:
-            raise HTTPException(
-                status_code=404 if not stat.S_ISREG(metadata.st_mode) else 413,
-                detail="artifact not available",
-            )
-        return descriptor, metadata.st_size, maximum, recipe_image
-    except Exception:
-        os.close(descriptor)
-        raise
+        relative = path.relative_to(services.served_root).as_posix()
+    except ValueError:
+        relative = ""
+    if _SERVED_FILE.fullmatch(relative) is None or ".." in relative.split("/"):
+        raise HTTPException(status_code=503, detail="object is unavailable")
+    return Response(
+        status_code=status.HTTP_200_OK,
+        headers={
+            "X-Vonk-File": relative,
+            "ETag": etag,
+            "Cache-Control": "no-store",
+            "Content-Type": "application/octet-stream",
+        },
+    )
 
 
 def _range(value: str | None, total: int, maximum: int) -> tuple[int, int] | None:
@@ -752,20 +766,6 @@ def _range(value: str | None, total: int, maximum: int) -> tuple[int, int] | Non
     if start > end or start >= total or end >= total or end - start + 1 > maximum:
         raise HTTPException(status_code=416, detail="range is invalid")
     return start, end
-
-
-def _read_chunks(descriptor: int, start: int, length: int):
-    try:
-        os.lseek(descriptor, start, os.SEEK_SET)
-        remaining = length
-        while remaining:
-            chunk = os.read(descriptor, min(1024 * 1024, remaining))
-            if not chunk:
-                break
-            remaining -= len(chunk)
-            yield chunk
-    finally:
-        os.close(descriptor)
 
 
 def install_agent_routes(
@@ -1641,44 +1641,13 @@ def install_agent_routes(
         openapi_extra={"x-vonk-streaming-transport": True},
     )
     def artifact(sha256: str, request: Request) -> Response:
+        """Authorize one owned artifact; the edge serves its bytes and range."""
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        descriptor, size, _maximum, _recipe_image = _open_owned_artifact(
-            required, identity, sha256
-        )
-        try:
-            requested = _range(
-                request.headers.get("range"), size, required.max_range_bytes
-            )
-        except Exception:
-            os.close(descriptor)
-            raise
-        if requested is None:
-            start, end, code = 0, size - 1, status.HTTP_200_OK
-        else:
-            start, end, code = (
-                requested[0],
-                requested[1],
-                status.HTTP_206_PARTIAL_CONTENT,
-            )
-        length = end - start + 1
-        headers = {
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(length),
-            "ETag": f'"sha256:{sha256}"',
-        }
-        if code == status.HTTP_206_PARTIAL_CONTENT:
-            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-        # Content-addressed objects are verified where they enter the store
-        # (build output, source publication). Serving reads only the requested
-        # range: re-hashing the whole object per range request is quadratic.
-        return StreamingResponse(
-            _read_chunks(descriptor, start, length),
-            status_code=code,
-            headers=headers,
-            media_type="application/octet-stream",
-        )
+        path, size = _owned_artifact(required, identity, sha256)
+        _range(request.headers.get("range"), size, required.max_range_bytes)
+        return _served_from_edge(required, path, f'"sha256:{sha256}"')
 
     def _distribution_error(error: DistributionError) -> HTTPException:
         # Name the refusing check on the wire.  Without it the generic 403
@@ -1734,7 +1703,7 @@ def install_agent_routes(
         openapi_extra={"x-vonk-streaming-transport": True},
     )
     def distribution_object(sha256: str, request: Request) -> Response:
-        """Stream one assigned immutable object with safe single-range resume."""
+        """Authorize one assigned immutable object; the edge serves its range."""
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
@@ -1753,63 +1722,19 @@ def install_agent_routes(
             )
         except DistributionError as error:
             raise _distribution_error(error) from None
+        # Only the name and size were needed; the edge opens the file itself.
+        opened.stream.close()
         etag = f'"sha256:{object_spec.sha256}"'
-        if_range = request.headers.get("if-range")
-        requested_range = request.headers.get("range")
-        # A mismatched If-Range deliberately degrades to a complete response,
-        # allowing a client with an old checkpoint to safely restart.
-        if requested_range is not None and if_range not in {
+        # The edge answers the client's range from the file, so a checkpoint
+        # from another object must be refused here rather than served.
+        if request.headers.get("if-range") not in {
             None,
             etag,
             f"sha256:{object_spec.sha256}",
         }:
-            requested_range = None
-        try:
-            selected = _range(requested_range, opened.size, required.max_range_bytes)
-        except HTTPException:
-            opened.stream.close()
-            raise
-        if selected is None:
-            start, length, code = 0, opened.size, status.HTTP_200_OK
-        else:
-            start, end = selected
-            length, code = end - start + 1, status.HTTP_206_PARTIAL_CONTENT
-        if start:
-            opened.stream.seek(start)
-
-        def chunks():
-            remaining = length
-            try:
-                while remaining:
-                    # Each synchronous yield crosses Starlette's thread pool.
-                    # MiB blocks keep bulk model copies efficient while
-                    # bounding memory and honoring the exact selected range.
-                    chunk = opened.stream.read(min(1024 * 1024, remaining))
-                    if not chunk:
-                        raise RuntimeError(
-                            "stored object was truncated during transfer"
-                        )
-                    remaining -= len(chunk)
-                    yield chunk
-            finally:
-                opened.stream.close()
-
-        headers = {
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "no-store",
-            "Content-Length": str(length),
-            "ETag": etag,
-        }
-        if code == status.HTTP_206_PARTIAL_CONTENT:
-            headers["Content-Range"] = (
-                f"bytes {start}-{start + length - 1}/{opened.size}"
-            )
-        return StreamingResponse(
-            chunks(),
-            status_code=code,
-            headers=headers,
-            media_type="application/octet-stream",
-        )
+            raise HTTPException(status_code=412, detail="object checkpoint changed")
+        _range(request.headers.get("range"), opened.size, required.max_range_bytes)
+        return _served_from_edge(required, opened.path, etag)
 
     app.include_router(agent)
 

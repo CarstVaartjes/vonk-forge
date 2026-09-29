@@ -103,10 +103,25 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
         "/agent/distribution/objects/" + model_digest + "?plan_digest=" + "a" * 64,
         headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=2-7"},
     )
-    assert response.status_code == 206
-    assert response.content == b"del pa"
+    # An authorized request is answered with the file the edge serves; the
+    # range itself is answered by the edge from that file.
+    assert response.status_code == 200
+    assert response.content == b""
+    assert response.headers["x-vonk-file"] == (
+        (source.root / model_digest).relative_to("/").as_posix()
+    )
     assert response.headers["etag"] == f'"sha256:{model_digest}"'
-    assert response.headers["content-range"] == "bytes 2-7/13"
+    assert (
+        client.get(
+            "/agent/distribution/objects/" + model_digest + "?plan_digest=" + "a" * 64,
+            headers={
+                **agent_headers(NODE_A, "serial-a"),
+                "Range": "bytes=2-7",
+                "If-Range": '"sha256:' + "0" * 64 + '"',
+            },
+        ).status_code
+        == 412
+    )
     assert (
         client.get(
             "/agent/distribution/objects/" + model_digest + "?plan_digest=" + "a" * 64,
@@ -119,7 +134,7 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
         "/agent/distribution/objects/" + model_digest + "?plan_digest=" + "a" * 64,
         headers=agent_headers(NODE_B, "serial-b"),
     )
-    assert second.status_code == 200 and second.content == b"model payload"
+    assert second.status_code == 200 and "x-vonk-file" in second.headers
 
 
 def test_distribution_rejects_unassigned_wrong_node_and_corrupt_object(
@@ -257,8 +272,10 @@ def test_separate_api_process_serves_worker_registered_model_files(
                     "If-Range": f'"sha256:{item.sha256}"',
                 },
             )
-            assert response.status_code == 206
-            assert response.content == (tmp_path / item.sha256).read_bytes()
+            assert response.status_code == 200
+            assert response.headers["x-vonk-file"] == (
+                (tmp_path / item.sha256).relative_to("/").as_posix()
+            )
 
 
 def test_distribution_binds_opaque_cache_and_image_identities(agent_system) -> None:
