@@ -1327,8 +1327,8 @@ def test_named_assignment_keeps_authoring_name_without_inventing_an_endpoint(
     assert assignment.alias == ("studio-chat" if desired_state == "running" else None)
 
 
-def test_preview_reports_an_unreadable_pending_plan_without_a_scope() -> None:
-    """Without a readable scope the preview blocks instead of guessing one."""
+def test_preview_skips_an_unreadable_pending_plan_without_a_scope() -> None:
+    """A record that cannot be read at all never blocks new profile work."""
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -1351,9 +1351,8 @@ def test_preview_reports_an_unreadable_pending_plan_without_a_scope() -> None:
 
     preview = service.preview(idle.id)
 
-    assert preview.allowed is False
-    assert any(
-        reason.code == "profile.pending_record_unreadable" for reason in preview.reasons
+    assert all(
+        reason.code != "profile.pending_record_unreadable" for reason in preview.reasons
     )
 
 
@@ -1518,11 +1517,44 @@ def test_activity_projection_keeps_valid_records_when_one_is_unreadable() -> Non
     assert items[valid.id]["failure"] is None
     assert items[valid.id]["node_ids"] == [_node_id(1)]
     unreadable = items[damaged_id]
-    failure = unreadable["failure"]
-    assert isinstance(failure, dict)
-    assert failure["error_code"] == "fleet_profile_application_unreadable"
+    assert unreadable.get("failure") is None
+    assert unreadable["status_reason"] == (
+        "Stored profile application record is unreadable."
+    )
     assert unreadable["supported_actions"] == []
     assert unreadable["result"] is None
+
+
+def test_activity_lists_a_record_with_retired_fields_and_new_work_proceeds() -> None:
+    """Fields a newer Controller retired never make stored history unreadable."""
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    old = service.load(profile.number, request_key=_uuid(991), actor="admin")
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, old.id)
+        assert row is not None
+        row.progress = {**row.progress, "retired_field": {"nested": 1}}
+        row.plan = {**row.plan, "retired_plan_field": True}
+
+    items = {
+        item["id"]: item
+        for item in service.operation_provider()
+        .list_operations(OperationQuery(after=None, limit=10, state=None, node_id=None))
+        .items
+    }
+
+    assert items[old.id]["kind"] == "fleet-profile.apply"
+    assert items[old.id]["node_ids"] == [_node_id(1)]
+    assert items[old.id].get("status_reason") is None
+    idle = service.create(
+        FleetProfileInput(name="All idle", assignments=[]), actor="admin"
+    )
+    assert service.preview(idle.id).allowed is True
 
 
 def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:

@@ -37,6 +37,7 @@ from .recipe_stop_payloads import (
     stop_payload_from_job_run,
     stop_payload_from_start,
 )
+from .strict_json import read_stored_model
 
 
 class RuntimePlanAuthorityError(ValueError):
@@ -390,8 +391,8 @@ def _validate_recovery_start_generation(
     try:
         for phase_index, phase in enumerate(phases):
             for node_id, raw_payload in phase:
-                start = RecipeStartPayload.model_validate_json(
-                    canonical_message(raw_payload)
+                start = read_stored_model(
+                    RecipeStartPayload, canonical_message(raw_payload), from_json=True
                 )
                 if (
                     start.run_generation != current_generation
@@ -594,7 +595,9 @@ def _parse_start(value: object) -> RecipeStartPayload:
     try:
         if not isinstance(value, Mapping):
             raise TypeError("Start payload is not an object")
-        return RecipeStartPayload.model_validate_json(canonical_message(value))
+        return read_stored_model(
+            RecipeStartPayload, canonical_message(value), from_json=True
+        )
     except (TypeError, ValueError) as error:
         raise RuntimePlanAuthorityError("durable Start plan is invalid") from error
 
@@ -603,7 +606,9 @@ def _parse_job_run(value: object) -> RecipeJobRunRequest:
     try:
         if not isinstance(value, Mapping):
             raise TypeError("JobRun payload is not an object")
-        return RecipeJobRunRequest.model_validate_json(canonical_message(value))
+        return read_stored_model(
+            RecipeJobRunRequest, canonical_message(value), from_json=True
+        )
     except (TypeError, ValueError) as error:
         raise RuntimePlanAuthorityError("durable JobRun plan is invalid") from error
 
@@ -612,7 +617,9 @@ def _parse_stop(value: object) -> RecipeStopPayload:
     try:
         if not isinstance(value, Mapping):
             raise TypeError("Stop payload is not an object")
-        return RecipeStopPayload.model_validate_json(canonical_message(value))
+        return read_stored_model(
+            RecipeStopPayload, canonical_message(value), from_json=True
+        )
     except (TypeError, ValueError) as error:
         raise RuntimePlanAuthorityError("durable Stop plan is invalid") from error
 

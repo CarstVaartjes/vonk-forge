@@ -120,7 +120,7 @@ from .models import (
 )
 from .operation_contract import AvailabilityOperationFailure
 from .runtime_init import RuntimeSecretError, read_runtime_secret
-from .strict_json import serialize_json_value
+from .strict_json import read_stored_model, serialize_json_value
 
 SCHEMA_VERSION = 2
 SOURCE_POLICY = "nas-first"
@@ -579,7 +579,7 @@ def _operation_cancellation(
     if raw is None:
         return None
     try:
-        return ModelCacheCancellation.model_validate(raw).model_dump(mode="json")
+        return read_stored_model(ModelCacheCancellation, raw).model_dump(mode="json")
     except (TypeError, ValueError, ValidationError) as error:
         raise ModelCacheStorageError(
             "model_cache.payload_invalid",
@@ -593,8 +593,10 @@ def _validated_operation_progress(
     """Read one persisted operation progress document through its wire model."""
 
     try:
-        return ModelCacheOperationProgress.model_validate_json(
-            canonical_message(operation.progress)
+        return read_stored_model(
+            ModelCacheOperationProgress,
+            canonical_message(operation.progress),
+            from_json=True,
         )
     except (TypeError, ValueError, ValidationError) as error:
         raise ModelCacheStorageError(
@@ -708,7 +710,8 @@ def _cache_failure(
         "check_access_and_resume": ["check_access_and_resume"],
         "inspect": ["inspect"],
     }
-    return AvailabilityOperationFailure.model_validate(
+    return read_stored_model(
+        AvailabilityOperationFailure,
         {
             "code": semantic_codes.get(code, code),
             "detail": redact_text(detail)[:512],
@@ -721,7 +724,7 @@ def _cache_failure(
             "shortfall_bytes": shortfall_bytes,
             "artifact_key": artifact_key,
             "log_excerpt": redact_text(detail)[:1024],
-        }
+        },
     ).model_dump(mode="json")
 
 
@@ -4080,7 +4083,7 @@ class ModelCacheService:
 
     @staticmethod
     def _transfer_totals(payload: Mapping[str, object]) -> tuple[int | None, int]:
-        transfer = ModelCacheTransfer.model_validate(payload["transfer"])
+        transfer = read_stored_model(ModelCacheTransfer, payload["transfer"])
         return transfer.total_bytes, sum(
             entry.received_bytes for entry in transfer.artifacts.values()
         )
@@ -4391,8 +4394,9 @@ class ModelCacheService:
                 )
             is_repair = operation.kind == "repair"
             checkpoint = (
-                ModelCacheRepairCheckpoint.model_validate(
-                    _validated_operation_payload(operation)["repair_checkpoint"]
+                read_stored_model(
+                    ModelCacheRepairCheckpoint,
+                    _validated_operation_payload(operation)["repair_checkpoint"],
                 )
                 if force and is_repair
                 else None
@@ -4416,8 +4420,8 @@ class ModelCacheService:
                 )
                 assert operation is not None
                 payload = _validated_operation_payload(operation)
-                checkpoint = ModelCacheRepairCheckpoint.model_validate(
-                    payload["repair_checkpoint"]
+                checkpoint = read_stored_model(
+                    ModelCacheRepairCheckpoint, payload["repair_checkpoint"]
                 )
                 payload["repair_checkpoint"] = ModelCacheRepairCheckpoint(
                     transfer_id=checkpoint.transfer_id,
@@ -4514,8 +4518,9 @@ class ModelCacheService:
             with self._session() as session:
                 operation = session.get(ModelCacheOperation, operation_id)
                 assert operation is not None
-                checkpoint = ModelCacheRepairCheckpoint.model_validate(
-                    _validated_operation_payload(operation)["repair_checkpoint"]
+                checkpoint = read_stored_model(
+                    ModelCacheRepairCheckpoint,
+                    _validated_operation_payload(operation)["repair_checkpoint"],
                 )
                 partial_owner = "repair-" + checkpoint.transfer_id
         part = self._partial_path(partial_owner, spec.sha256)
@@ -6863,7 +6868,7 @@ class ModelCacheService:
         return (
             None
             if raw is None
-            else AvailabilityOperationFailure.model_validate(raw).model_dump(
+            else read_stored_model(AvailabilityOperationFailure, raw).model_dump(
                 mode="json"
             )
         )
@@ -8680,7 +8685,7 @@ class ModelCacheService:
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return None
         try:
-            receipt = ModelCacheObjectReceipt.model_validate(document)
+            receipt = read_stored_model(ModelCacheObjectReceipt, document)
         except ValidationError:
             return None
         if receipt.sha256 != digest or receipt.expected_bytes != expected_bytes:

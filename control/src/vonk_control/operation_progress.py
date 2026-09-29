@@ -13,6 +13,7 @@ from math import exp
 from vonk_agent_protocol import OperationMemberProgress, OperationProgress
 
 from .bounded_json import BoundedJSONError, integer
+from .strict_json import read_stored_model
 
 TRANSFER_PHASES = frozenset(
     {
@@ -137,9 +138,9 @@ def observe_progress(
                     / smoothed,
                 ),
             )
-    return project_progress(OperationProgress.model_validate(result), now).model_dump(
-        mode="json", exclude_none=True
-    )
+    return project_progress(
+        read_stored_model(OperationProgress, result), now
+    ).model_dump(mode="json", exclude_none=True)
 
 
 def project_progress(

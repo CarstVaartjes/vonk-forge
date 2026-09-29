@@ -16,7 +16,7 @@ from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts.model import ModelReference
 
 from .operation_contract import AvailabilityOperationFailure, OperationProgress
-from .strict_json import StrictJSONModel
+from .strict_json import StrictJSONModel, read_stored_model
 
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 ARTIFACT_KEY_PATTERN = r"^[a-z][a-z0-9_.:-]{0,255}$"
@@ -266,11 +266,11 @@ def parse_model_cache_payload(
     try:
         raw = canonical_message(value)
         if kind == "download":
-            parsed = ModelCacheDownloadPayload.model_validate_json(raw)
+            parsed = read_stored_model(ModelCacheDownloadPayload, raw, from_json=True)
         elif kind == "repair":
-            parsed = ModelCacheRepairPayload.model_validate_json(raw)
+            parsed = read_stored_model(ModelCacheRepairPayload, raw, from_json=True)
         elif kind == "remove":
-            parsed = ModelCacheRemovalPayload.model_validate_json(raw)
+            parsed = read_stored_model(ModelCacheRemovalPayload, raw, from_json=True)
         else:
             raise ValueError(f"unknown model cache operation kind: {kind}")
         return parsed
@@ -501,9 +501,9 @@ def parse_model_cache_result(kind: str, value: object) -> ModelCacheOperationRes
     """Validate the current result against the operation that produced it."""
     raw = canonical_message(value)
     if kind in {"download", "repair"}:
-        return ModelCacheDownloadResult.model_validate_json(raw)
+        return read_stored_model(ModelCacheDownloadResult, raw, from_json=True)
     if kind == "remove":
-        return ModelCacheRemovalResult.model_validate_json(raw)
+        return read_stored_model(ModelCacheRemovalResult, raw, from_json=True)
     raise ValueError(f"unknown model cache operation kind: {kind}")
 
 

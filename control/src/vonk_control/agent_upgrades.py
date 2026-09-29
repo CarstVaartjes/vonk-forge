@@ -27,6 +27,7 @@ from .agent_jobs import (
 from .agent_package_source import load_package_source
 from .bounded_json import require_integer
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
+from .strict_json import read_stored_model
 
 _PACKAGE_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -556,8 +557,10 @@ class AgentUpgradeService:
             ):
                 raise ValueError("stored agent upgrade operation is invalid")
             for operation in stored_operations:
-                payload = AgentUpgradePayload.model_validate(operation.payload)
-                source = AgentPackageSource.model_validate(sources[operation.node_id])
+                payload = read_stored_model(AgentUpgradePayload, operation.payload)
+                source = read_stored_model(
+                    AgentPackageSource, sources[operation.node_id]
+                )
                 if (
                     operation.kind != "agent.upgrade.v1"
                     or operation.node_id not in order
@@ -910,9 +913,11 @@ class AgentUpgradeService:
         raw_receipt = evidence.get("activation_receipt")
         if raw_receipt is None:
             return False
-        receipt = PackageActivationReceipt.model_validate(raw_receipt)
+        receipt = read_stored_model(PackageActivationReceipt, raw_receipt)
         if receipt.phase != "acknowledged" or not matches_receipt(
-            receipt, AgentUpgradePayload.model_validate(operation.payload), node.node_id
+            receipt,
+            read_stored_model(AgentUpgradePayload, operation.payload),
+            node.node_id,
         ):
             return False
         return bool(
@@ -943,7 +948,7 @@ class AgentUpgradeService:
         )
         if stored_source is None:
             raise AgentUpgradeConflict("stored rollback sources are invalid")
-        source = AgentPackageSource.model_validate(stored_source)
+        source = read_stored_model(AgentPackageSource, stored_source)
         node = session.get(AgentNode, node_id)
         if (
             node is None

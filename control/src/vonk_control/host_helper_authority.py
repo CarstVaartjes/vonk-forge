@@ -58,6 +58,7 @@ from .models import (
 )
 from .models import AgentOperation as StoredAgentOperation
 from .package_activation import matches_receipt
+from .strict_json import read_stored_model
 
 
 def _aware(value: datetime) -> datetime:
@@ -388,7 +389,7 @@ class HostRuntimeAuthorityService:
                 or lease_deadline <= now
             ):
                 raise HostHelperAuthorityError("agent upgrade authority is stale")
-            payload = AgentUpgradePayload.model_validate(operation.payload)
+            payload = read_stored_model(AgentUpgradePayload, operation.payload)
             if (
                 payload.rollback.activation_deadline
                 <= int(now.timestamp()) + expires_in_seconds
@@ -442,7 +443,7 @@ class HostRuntimeAuthorityService:
             )
             matching = []
             for operation in operations:
-                payload = AgentUpgradePayload.model_validate(operation.payload)
+                payload = read_stored_model(AgentUpgradePayload, operation.payload)
                 if matches_receipt(receipt, payload, node_id):
                     matching.append(payload)
             if len(matching) != 1:
@@ -582,8 +583,8 @@ class HostRuntimeAuthorityService:
                 try:
                     payload_bytes = canonical_message(operation.payload)
                     if operation.kind == "recipe.reconcile":
-                        payload = RecipeReconcilePayload.model_validate_json(
-                            payload_bytes
+                        payload = read_stored_model(
+                            RecipeReconcilePayload, payload_bytes, from_json=True
                         )
                         if not isinstance(
                             reconciliation_identity, RecipeReconciliationIdentity
@@ -612,8 +613,8 @@ class HostRuntimeAuthorityService:
                                 "ordinary uninstall has reconciliation identity"
                             )
                         authorized = {
-                            RecipeUninstallPayload.model_validate_json(
-                                payload_bytes
+                            read_stored_model(
+                                RecipeUninstallPayload, payload_bytes, from_json=True
                             ).installation_id
                         }
                 except (TypeError, ValueError) as error:
