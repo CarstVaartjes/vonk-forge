@@ -44,11 +44,11 @@ test("provides browser-equivalent local storage semantics", () => {
   expect(localStorage.key(0)).toBeNull();
 });
 
-test("keeps Fleet and Library as the two primary operating views", () => {
+test("shows Fleet, Library and Activity as the primary views", () => {
   render(<AppShell activeRoute="fleet" onNavigate={() => undefined}>{null}</AppShell>);
   expect(screen.getByRole("link", {name: "Fleet"})).toBeVisible();
   expect(screen.getByRole("link", {name: "Library"})).toBeVisible();
-  expect(screen.queryByRole("link", {name: "Activity"})).not.toBeInTheDocument();
+  expect(screen.getByRole("link", {name: "Activity"})).toBeVisible();
   expect(screen.queryByText("Agents")).not.toBeInTheDocument();
   expect(screen.queryByText("Catalog")).not.toBeInTheDocument();
   expect(screen.queryByText("Packages")).not.toBeInTheDocument();
@@ -109,12 +109,12 @@ test("renders a focused recovery page for unsupported URLs", async () => {
   expect(document.title).toBe("Fleet · Vonk Forge");
 });
 
-test("supports Activity as a secondary administrative route", async () => {
+test("supports Activity as a primary route", async () => {
   history.replaceState(null, "", "/activity");
   render(<App api={apiFixture}/>);
 
   expect(await screen.findByRole("heading", {name: "Activity"})).toBeVisible();
-  expect(screen.queryByRole("link", {name: "Activity"})).not.toBeInTheDocument();
+  expect(screen.getByRole("link", {name: "Activity"})).toHaveAttribute("aria-current", "page");
   expect(location.pathname).toBe("/activity");
 });
 
@@ -144,7 +144,8 @@ test("keeps administrative actions behind the account menu", async () => {
 
   await user.click(screen.getByRole("button", {name: /admin@example.test/i}));
   const actions = screen.getByRole("group", {name: "Operator actions"});
-  expect(within(actions).getByRole("link", {name: "Open Activity"})).toHaveAttribute("href", "/activity");
+  expect(within(actions).queryByRole("link", {name: /activity/i})).toBeNull();
+  expect(within(screen.getByRole("navigation", {name: "Primary"})).getByRole("link", {name: "Activity"})).toHaveAttribute("href", "/activity");
   expect(within(actions).getByRole("link", {name: "API keys"})).toHaveAttribute("href", "/keys");
   expect(within(screen.getByRole("navigation", {name: "Primary"})).queryByRole("link", {name: /keys/i})).toBeNull();
 });
@@ -168,7 +169,7 @@ test("makes shell routes visibly and keyboard disabled while navigation is locke
   const user = userEvent.setup();
   render(<AppShell activeRoute="library" navigationLocked onNavigate={onNavigate}>{null}</AppShell>);
 
-  for (const name of ["Fleet", "Library"]) {
+  for (const name of ["Fleet", "Library", "Activity"]) {
     const link = screen.getByRole("link", {name});
     expect(link).toHaveAttribute("aria-disabled", "true");
     expect(link).toHaveAttribute("tabindex", "-1");

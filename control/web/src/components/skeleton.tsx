@@ -12,3 +12,11 @@ export function SkeletonRows({columns, rows = 4, label}: {columns: number; rows?
     </tbody></table></div>
   </section>;
 }
+
+/** Placeholder lines for a detail pane while it loads. Announced once as busy. */
+export function SkeletonBlock({lines = 4, label}: {lines?: number; label: string}) {
+  return <div className="skeleton-block" aria-busy="true">
+    <p className="sr-only" role="status">{label}</p>
+    {Array.from({length: lines}, (_, line) => <Skeleton key={line} width={line === 0 ? "45%" : line % 2 ? "90%" : "70%"}/>)}
+  </div>;
+}

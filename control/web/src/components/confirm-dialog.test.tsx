@@ -40,3 +40,12 @@ test("irreversible actions wait for the name to be typed and show the CLI equiva
   await user.click(screen.getByRole("button", {name: "Do it"}));
   expect(onConfirm).toHaveBeenCalledOnce();
 });
+
+test("the rest of the page is inert while the dialog is open and live again after", async () => {
+  const user = userEvent.setup();
+  const {container} = render(<Harness/>);
+  await user.click(screen.getByRole("button", {name: "Open"}));
+  expect(container.inert).toBe(true);
+  await user.keyboard("{Escape}");
+  expect(container.inert).toBe(false);
+});
