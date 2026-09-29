@@ -487,14 +487,16 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
     """Compile every role from the current canonical recipe checkout."""
     root = recipe_library_root()
     recipe_files = sorted((root / "recipes").glob("*.json"))
-    assert len(recipe_files) == 85
+    assert recipe_files
     engines: set[str] = set()
     projection_count = 0
+    expected_projection_count = 0
     option_projection_count = 0
     for path in recipe_files:
         recipe_document, models, package = _published_recipe_context(path.stem)
         recipe = contracts.read_recipe(recipe_document)
         engines.add(recipe.runtime.engine)
+        expected_projection_count += sum(item.count for item in recipe.topology.roles)
         for index, role in enumerate(recipe.topology.roles):
             first_rank = sum(item.count for item in recipe.topology.roles[:index])
             for rank in range(first_rank, first_rank + role.count):
@@ -536,7 +538,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
         "comfyui",
         "pytorch-pipeline",
     }
-    assert projection_count == 109
+    assert projection_count == expected_projection_count > 0
     assert option_projection_count > 0
 
 

@@ -439,16 +439,22 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
 ) -> None:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     recipe_document = copy.deepcopy(index["recipes"][0]["document"])
-    selected_model = RecipeDefinition.model_validate(recipe_document).models[0].model
-    model_document = copy.deepcopy(
-        next(
-            entry["document"]
-            for entry in index["catalog_entities"]
-            if entry["content_sha256"] == selected_model.content_sha256
-            and entry["document"]["identity"]["publisher"] == selected_model.publisher
-            and entry["document"]["identity"]["slug"] == selected_model.slug
+    selected_models = [
+        selection.model
+        for selection in RecipeDefinition.model_validate(recipe_document).models
+    ]
+    model_documents = [
+        copy.deepcopy(
+            next(
+                entry["document"]
+                for entry in index["catalog_entities"]
+                if entry["content_sha256"] == selected.content_sha256
+                and entry["document"]["identity"]["publisher"] == selected.publisher
+                and entry["document"]["identity"]["slug"] == selected.slug
+            )
         )
-    )
+        for selected in selected_models
+    ]
     engine = create_engine(f"sqlite:///{tmp_path / 'local-state.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -457,8 +463,12 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
         clock=lambda: datetime(2026, 9, 6, tzinfo=UTC),
         cursors=TokenCodec(b"d" * 32).cursor_codec(),
     )
-    model_revision = entities.create_draft(model_document, actor="test")
-    entities.resolve(model_revision.id, actor="test")
+    model_revisions = [
+        entities.create_draft(document, actor="test") for document in model_documents
+    ]
+    for revision in model_revisions:
+        entities.resolve(revision.id, actor="test")
+    model_revision = model_revisions[0]
     recipe_revision = entities.create_draft(recipe_document, actor="test")
     entities.resolve(recipe_revision.id, actor="test")
 

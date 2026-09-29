@@ -109,3 +109,24 @@ def test_recipe_cannot_override_or_repeat_platform_telemetry(value: str) -> None
         effective_environment("vllm", (("VLLM_NO_USAGE_STATS", value),))
     with pytest.raises(HarnessCompileError, match="telemetry|platform-owned"):
         compile_environment("vllm", (("VLLM_NO_USAGE_STATS", value),))
+
+
+@pytest.mark.parametrize(
+    "slug",
+    (
+        "vllm",
+        "sglang",
+        "tensorrt-llm",
+        "llama-cpp",
+        "ds4",
+        "tensorfold",
+        "diffusers",
+        "comfyui",
+        "pytorch-pipeline",
+    ),
+)
+def test_do_not_track_is_a_platform_default_for_every_engine(slug: str) -> None:
+    assert ("DO_NOT_TRACK", "1") in telemetry_contract(slug).environment
+    assert dict(effective_environment(slug, ()))["DO_NOT_TRACK"] == "1"
+    with pytest.raises(HarnessCompileError, match="platform-owned"):
+        environment(slug, (("DO_NOT_TRACK", "1"),))
