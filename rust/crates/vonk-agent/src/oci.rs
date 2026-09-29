@@ -3169,8 +3169,9 @@ mod tests {
             let first_runtime = runtime(data.path(), &runner);
             // The first attempt really copies the verified distribution objects
             // and persists the installation receipt. Its acknowledgement is lost.
+            // The host's free space is irrelevant to this setup step.
             first_runtime
-                .install_with_space_check(&plan, &installation_id, &recipe_digest, 16)
+                .install_unlocked(&plan, &installation_id, &recipe_digest)
                 .unwrap();
             assert_eq!(
                 fs::read(installation.join("models/primary/config.json")).unwrap(),
