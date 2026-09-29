@@ -38,12 +38,16 @@ function recordedOperations(): OperationDetail[] {
   ];
 }
 
+// Standalone jobs (agent upgrades and the like) are listed as operations with a "job:" id.
+function jobActivity(id: string, kind: string, state: string, createdAt: string): OperationDetail {
+  return canonicalOperation({id: `job:${id}`, kind, state, created_at: createdAt, node_ids: [], failure: null, progress: null, recovery: {actions: ["inspect"], uncertain: false}});
+}
+
+function operationsOf(...operations: OperationDetail[]) {
+  return vi.fn().mockResolvedValue({operations, total: operations.length, next_cursor: null});
+}
+
 function api(
-  loadJobs = vi.fn().mockResolvedValue({
-    jobs: [{id: "operation-1", kind: "recipe-install", state: "running", created_at: "2026-08-15T11:58:00Z"}],
-    next_cursor: null,
-    total: 1,
-  }),
   loadJob = vi.fn().mockResolvedValue({
     id: "operation-1",
     kind: "recipe-install",
@@ -60,16 +64,15 @@ function api(
     progress: {completed: 0, failed: 0, running: 1, total: 1},
   }),
   resumeJob = vi.fn().mockResolvedValue({id: "operation-1", state: "queued"}),
-  loadOperations = vi.fn().mockResolvedValue({operations: recordedOperations(), total: 3, next_cursor: null}),
-): Pick<ControlApi, "job" | "jobs" | "resumeJob" | "visualFleet" | "operations" | "operation"> {
+  loadOperations = operationsOf(...recordedOperations(), jobActivity("operation-1", "recipe-install", "running", "2026-08-15T11:58:00Z")),
+): Pick<ControlApi, "job" | "resumeJob" | "visualFleet" | "operations" | "operation"> {
   return {
     operations: loadOperations,
     operation: vi.fn(),
     job: loadJob,
-    jobs: loadJobs,
     resumeJob,
     visualFleet: vi.fn().mockResolvedValue(visualFleet),
-  } as unknown as Pick<ControlApi, "job" | "jobs" | "resumeJob" | "visualFleet" | "operations" | "operation">;
+  } as unknown as Pick<ControlApi, "job" | "resumeJob" | "visualFleet" | "operations" | "operation">;
 }
 
 afterEach(() => {
@@ -156,16 +159,13 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
 });
 
 test("keeps the timeline chronological unless attention-first sorting is selected", async () => {
-  const loadJobs = vi.fn().mockResolvedValue({
-    jobs: [
-      {id: "operation-unknown", kind: "recipe-install", state: "future-state", created_at: "2026-08-15T12:01:00Z"},
-      {id: "operation-recorded", kind: "recipe-install", state: "succeeded", created_at: "2026-08-15T12:02:00Z"},
-    ],
-    next_cursor: null,
-    total: 2,
-  });
+  const loadOperations = operationsOf(
+    ...recordedOperations(),
+    jobActivity("operation-unknown", "recipe-install", "future-state", "2026-08-15T12:01:00Z"),
+    jobActivity("operation-recorded", "recipe-install", "succeeded", "2026-08-15T12:02:00Z"),
+  );
   const user = userEvent.setup();
-  render(<ActivityPage api={api(loadJobs)} now={NOW}/>);
+  render(<ActivityPage api={api(undefined, undefined, loadOperations)} now={NOW}/>);
 
   const timeline = await screen.findByRole("list", {name: "Activity timeline"});
   expect(within(timeline).getAllByRole("heading").slice(0, 2).map(heading => heading.textContent)).toEqual(["Recipe Install · Completed", "Recipe Install · Future State"]);
@@ -211,7 +211,7 @@ test("loads truthful operation progress and resumes only an operator-waiting job
   const loadJob = vi.fn().mockResolvedValueOnce(waiting).mockResolvedValueOnce(queued);
   const resumeJob = vi.fn().mockResolvedValue({id: "operation-1", state: "queued"});
   const user = userEvent.setup();
-  render(<ActivityPage api={api(undefined, loadJob, resumeJob)} now={NOW}/>);
+  render(<ActivityPage api={api(loadJob, resumeJob)} now={NOW}/>);
 
   await screen.findByRole("heading", {name: "Recipe Install · Running"});
   await user.click(screen.getByText("View operation progress"));
@@ -239,11 +239,7 @@ test("explains an upgrade failure without guessing its missing failure stage", a
   const oldBinary = "d".repeat(64);
   const oldBuild = `sha256:${"e".repeat(64)}`;
   const nextAction = "Keep the rollout paused and inspect the Spark package-helper and dpkg recovery state before resuming. When ready, Resume queues the retry behind a new safety delay; it does not dispatch immediately. Do not advance to another Spark until this Spark reports the exact target identity.";
-  const loadJobs = vi.fn().mockResolvedValue({
-    jobs: [{id: "upgrade-1", kind: "agent-upgrade", state: "waiting-for-operator", created_at: "2026-08-15T11:58:00Z"}],
-    next_cursor: null,
-    total: 1,
-  });
+  const loadOperations = operationsOf(jobActivity("upgrade-1", "agent-upgrade", "waiting-for-operator", "2026-08-15T11:58:00Z"));
   const loadJob = vi.fn().mockResolvedValue({
     id: "upgrade-1",
     kind: "agent-upgrade",
@@ -276,7 +272,7 @@ test("explains an upgrade failure without guessing its missing failure stage", a
     },
   });
   const user = userEvent.setup();
-  render(<ActivityPage api={api(loadJobs, loadJob)} now={NOW}/>);
+  render(<ActivityPage api={api(loadJob, undefined, loadOperations)} now={NOW}/>);
 
   await screen.findByRole("heading", {name: "Agent Upgrade · Waiting for operator"});
   await user.click(screen.getByText("View operation progress"));
@@ -320,9 +316,9 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
     },
   };
   const loadJob = vi.fn().mockResolvedValue(detail);
-  const loadJobs = vi.fn().mockResolvedValue({jobs: [{id: "upgrade-1", kind: "agent-upgrade", state: "waiting-for-operator", created_at: "2026-08-15T11:58:00Z"}], next_cursor: null, total: 1});
+  const loadOperations = operationsOf(jobActivity("upgrade-1", "agent-upgrade", "waiting-for-operator", "2026-08-15T11:58:00Z"));
   const user = userEvent.setup();
-  render(<ActivityPage api={api(loadJobs, loadJob)} now={NOW}/>);
+  render(<ActivityPage api={api(loadJob, undefined, loadOperations)} now={NOW}/>);
 
   await screen.findByRole("heading", {name: "Agent Upgrade · Waiting for operator"});
   await user.click(screen.getByText("View operation progress"));
@@ -350,9 +346,9 @@ test("refreshes an automatic wait at its bounded observation interval", async ()
   };
   const recovered = {...detail, state: "succeeded", status_reason: null, progress: {completed: 1, failed: 0, running: 0, total: 1}};
   const loadJob = vi.fn().mockResolvedValueOnce(detail).mockResolvedValue(recovered);
-  const loadJobs = vi.fn().mockResolvedValue({jobs: [{id: "operation-1", kind: "recipe-run-switch", state: "waiting", created_at: "2026-08-15T11:59:00Z"}], next_cursor: null, total: 1});
+  const loadOperations = operationsOf(jobActivity("operation-1", "recipe-run-switch", "waiting", "2026-08-15T11:59:00Z"));
   const user = userEvent.setup();
-  render(<ActivityPage api={api(loadJobs, loadJob, undefined, noOperations())} now={NOW}/>);
+  render(<ActivityPage api={api(loadJob, undefined, loadOperations)} now={NOW}/>);
 
   expect(await screen.findByRole("heading", {name: "Recipe Run Switch · Waiting to recheck"})).toBeVisible();
   await user.click(screen.getByText("View operation progress"));
@@ -370,7 +366,7 @@ test("shows a retryable operation-detail failure without offering resume", async
     id: "operation-1", kind: "recipe-install", state: "failed", authority_revision: "a".repeat(64), targets: [], target_next_cursor: null, target_total: 0, current_attempt: 1, status_reason: "worker exited", operations: [], operation_next_cursor: null, operation_total: 0, progress: {completed: 0, failed: 0, running: 0, total: 0},
   });
   const user = userEvent.setup();
-  render(<ActivityPage api={api(undefined, loadJob)} now={NOW}/>);
+  render(<ActivityPage api={api(loadJob)} now={NOW}/>);
 
   await screen.findByRole("heading", {name: "Recipe Install · Running"});
   await user.click(screen.getByText("View operation progress"));
@@ -381,7 +377,7 @@ test("shows a retryable operation-detail failure without offering resume", async
   expect(loadJob).toHaveBeenCalledTimes(2);
 });
 
-test("keeps available jobs visible when operations loading fails and retries all sources", async () => {
+test("shows a retryable error when activity fails to load", async () => {
   let calls = 0;
   const loadOperations = vi.fn().mockImplementation(async () => {
     calls += 1;
@@ -389,43 +385,41 @@ test("keeps available jobs visible when operations loading fails and retries all
     return {operations: [], total: 0, next_cursor: null};
   });
   const user = userEvent.setup();
-  const noJobs = vi.fn().mockResolvedValue({jobs: [], next_cursor: null, total: 0});
-  render(<ActivityPage api={api(noJobs, undefined, undefined, loadOperations)} now={NOW}/>);
+  render(<ActivityPage api={api(undefined, undefined, loadOperations)} now={NOW}/>);
 
   expect(screen.getByText("Loading activity…")).toBeVisible();
-  expect(await screen.findByRole("alert")).toHaveTextContent("Operations could not be loaded (operation projection unavailable). Showing available activity only.");
-  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Loaded 0 of 0 jobs, plus operations are unavailable");
-  await user.click(screen.getByRole("button", {name: "Retry all sources"}));
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("operation projection unavailable");
+  expect(screen.queryByRole("region", {name: "Activity history coverage"})).not.toBeInTheDocument();
+  await user.click(within(alert).getByRole("button", {name: "Try again"}));
   await waitFor(() => expect(screen.getByText("No activity in the loaded window")).toBeVisible());
-  expect(screen.queryByText("Some activity could not be loaded")).not.toBeInTheDocument();
   expect(loadOperations).toHaveBeenCalledTimes(2);
 });
 
 test("clears dynamic filters that are no longer available after refresh", async () => {
-  const loadJobs = vi.fn()
-    .mockResolvedValueOnce({jobs: [{id: "operation-1", kind: "recipe-install", state: "running", created_at: "2026-08-15T11:58:00Z"}], next_cursor: null, total: 1})
-    .mockResolvedValueOnce({jobs: [], next_cursor: null, total: 0});
-  const loadOperations = noOperations();
+  const loadOperations = vi.fn()
+    .mockResolvedValueOnce({operations: [jobActivity("operation-1", "recipe-install", "running", "2026-08-15T11:58:00Z")], next_cursor: null, total: 1})
+    .mockResolvedValueOnce({operations: [], next_cursor: null, total: 0});
   const user = userEvent.setup();
-  render(<ActivityPage api={api(loadJobs, undefined, undefined, loadOperations)} now={NOW}/>);
+  render(<ActivityPage api={api(undefined, undefined, loadOperations)} now={NOW}/>);
   await screen.findByRole("heading", {name: "Recipe Install · Running"});
 
   await user.selectOptions(screen.getByLabelText("Operator"), "Vonk Forge");
   expect(screen.getByLabelText("Operator")).toHaveValue("Vonk Forge");
   await user.click(screen.getByRole("button", {name: "Refresh activity"}));
 
-  await waitFor(() => expect(loadJobs).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(loadOperations).toHaveBeenCalledTimes(2));
   await waitFor(() => expect(screen.getByLabelText("Operator")).toHaveValue(""));
   expect(screen.getByText("No activity in the loaded window")).toBeVisible();
 });
 
 test("resets pagination busy state when a new activity load supersedes load-more", async () => {
   const never = new Promise<never>(() => undefined);
-  const firstJobs = vi.fn()
-    .mockResolvedValueOnce({jobs: [{id: "operation-1", kind: "recipe-install", state: "running", created_at: "2026-08-15T11:58:00Z"}], next_cursor: "older", total: 2})
+  const firstOperations = vi.fn()
+    .mockResolvedValueOnce({operations: [jobActivity("operation-1", "recipe-install", "running", "2026-08-15T11:58:00Z")], next_cursor: "older", total: 2})
     .mockReturnValueOnce(never);
-  const firstApi = api(firstJobs, undefined, undefined, noOperations());
-  const secondApi = api(vi.fn().mockResolvedValue({jobs: [], next_cursor: null, total: 0}), undefined, undefined, noOperations());
+  const firstApi = api(undefined, undefined, firstOperations);
+  const secondApi = api(undefined, undefined, noOperations());
   const user = userEvent.setup();
   const view = render(<ActivityPage api={firstApi} now={NOW}/>);
   await screen.findByRole("heading", {name: "Recipe Install · Running"});
@@ -437,40 +431,38 @@ test("resets pagination busy state when a new activity load supersedes load-more
   expect(screen.getByRole("button", {name: "Refresh activity"})).toBeEnabled();
 });
 
-test("shows a full retryable error only when all primary activity sources fail", async () => {
+test("shows a full retryable error when operations fail to load", async () => {
   const user = userEvent.setup();
-  const loadJobs = vi.fn().mockRejectedValue(new Error("operations unavailable"));
-  const client = api(loadJobs);
-  vi.mocked(client.operations).mockRejectedValue(new Error("canonical operations unavailable"));
+  const client = api();
+  vi.mocked(client.operations).mockRejectedValue(new Error("operations unavailable"));
   render(<ActivityPage api={client} now={NOW}/>);
 
   const alert = await screen.findByRole("alert");
-  expect(alert).toHaveTextContent("Unable to load jobs or operations");
+  expect(alert).toHaveTextContent("Unable to load activity");
   expect(screen.queryByRole("region", {name: "Activity history coverage"})).not.toBeInTheDocument();
   await user.click(within(alert).getByRole("button", {name: "Try again"}));
-  expect(loadJobs).toHaveBeenCalledTimes(2);
   expect(client.operations).toHaveBeenCalledTimes(2);
 });
 
 test("discloses bounded API windows and loads older operations when a cursor is available", async () => {
-  const loadJobs = vi.fn()
-    .mockResolvedValueOnce({jobs: [{id: "operation-new", kind: "recipe-install", state: "running", created_at: "2026-08-15T11:58:00Z"}], next_cursor: "older-page", total: 2})
-    .mockResolvedValueOnce({jobs: [{id: "operation-old", kind: "recipe-stop", state: "succeeded", created_at: "2026-08-14T11:58:00Z"}], next_cursor: null, total: 2});
+  const loadOperations = vi.fn()
+    .mockResolvedValueOnce({operations: [jobActivity("operation-new", "recipe-install", "running", "2026-08-15T11:58:00Z")], next_cursor: "older-page", total: 2})
+    .mockResolvedValueOnce({operations: [jobActivity("operation-old", "recipe-stop", "succeeded", "2026-08-14T11:58:00Z")], next_cursor: null, total: 2});
   const user = userEvent.setup();
-  render(<ActivityPage api={api(loadJobs, undefined, undefined, noOperations())} now={NOW}/>);
+  render(<ActivityPage api={api(undefined, undefined, loadOperations)} now={NOW}/>);
 
   const coverage = await screen.findByRole("region", {name: "Activity history coverage"});
   expect(within(coverage).getByRole("status")).toHaveTextContent("Showing 1 loaded event. Load older activity below.");
-  const counts = within(coverage).getByText(/Loaded 1 of 2 jobs/);
+  const counts = within(coverage).getByText(/Loaded 1 of 2 operations/);
   expect(counts).not.toBeVisible();
   await user.click(within(coverage).getByText("History coverage"));
   expect(counts).toBeVisible();
-  expect(coverage).toHaveTextContent("Loaded 1 of 2 jobs, plus 0 of 0 operations");
+  expect(coverage).toHaveTextContent("Loaded 1 of 2 operations");
   await user.click(screen.getByRole("button", {name: "Load older operations"}));
 
   expect(await screen.findByRole("heading", {name: "Recipe Stop · Completed"})).toBeVisible();
-  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("2 of 2 jobs");
-  expect(loadJobs).toHaveBeenNthCalledWith(2, "older-page");
+  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Loaded 2 of 2 operations");
+  expect(loadOperations).toHaveBeenNthCalledWith(2, "older-page");
   expect(screen.queryByRole("button", {name: "Load older operations"})).not.toBeInTheDocument();
 });
 
@@ -487,9 +479,7 @@ function canonicalOperation(overrides: Partial<OperationDetail> = {}): Operation
 }
 
 function canonicalApi(operations: OperationDetail[]) {
-  const client = api(vi.fn().mockResolvedValue({jobs: [], total: 0, next_cursor: null}));
-  vi.mocked(client.operations).mockResolvedValue({operations, total: operations.length, next_cursor: null});
-  return client;
+  return api(undefined, undefined, operationsOf(...operations));
 }
 
 test("shows reason-only and long canonical agent evidence without dropping it", async () => {
@@ -553,25 +543,7 @@ test("canonical operations poll current detail while active", async () => {
   expect(await screen.findByRole("heading", {name: "Profile Load · Completed"})).toBeVisible();
 });
 
-test("shows available canonical failures when jobs fail", async () => {
-  const client = canonicalApi([canonicalOperation()]);
-  vi.mocked(client.jobs).mockRejectedValue(new Error("job storage unavailable"));
-  render(<ActivityPage api={client} now={NOW}/>);
-  expect(await screen.findByText("Profile load failed")).toBeVisible();
-  const alert = screen.getByRole("alert");
-  expect(alert).toHaveTextContent("Jobs could not be loaded");
-  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Jobs are unavailable, plus 1 of 1 operations");
-});
-
-test("keeps jobs visible when canonical operations fail", async () => {
-  const client = api();
-  vi.mocked(client.operations).mockRejectedValue(new Error("operation projection unavailable"));
-  render(<ActivityPage api={client} now={NOW}/>);
-  expect(await screen.findByRole("heading", {name: "Recipe Install · Running"})).toBeVisible();
-  expect(screen.getByRole("alert")).toHaveTextContent("Operations could not be loaded (operation projection unavailable)");
-});
-
-test("paginates jobs and canonical operations independently after a partial page error", async () => {
+test("paginates operations after a partial page error", async () => {
   const user = userEvent.setup();
   const first = canonicalOperation();
   const second = canonicalOperation({id: "older-operation", kind: "profile.load"});
@@ -580,17 +552,12 @@ test("paginates jobs and canonical operations independently after a partial page
     .mockResolvedValueOnce({operations: [first], next_cursor: "operations-next", total: 2})
     .mockRejectedValueOnce(new Error("cursor fetch failed"))
     .mockResolvedValueOnce({operations: [first, second], next_cursor: null, total: 2});
-  vi.mocked(client.jobs)
-    .mockResolvedValueOnce({jobs: [], next_cursor: "jobs-next", total: 1})
-    .mockResolvedValueOnce({jobs: [{id: first.id, kind: "agent-upgrade", state: "running", created_at: "2026-08-15T12:00:00Z"}], next_cursor: null, total: 1});
   render(<ActivityPage api={client} now={NOW}/>);
   await user.click(await screen.findByRole("button", {name: "Load older operations"}));
-  expect(await screen.findByRole("heading", {name: "Agent Upgrade · Running"})).toBeVisible();
-  expect(screen.getByRole("alert")).toHaveTextContent("Older operations could not be loaded");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Older operations could not be loaded");
   await user.click(screen.getByRole("button", {name: "Load older operations"}));
   expect((await screen.findAllByRole("heading", {name: "Profile Load · Failed"}))[0]).toBeVisible();
   expect(client.operations).toHaveBeenNthCalledWith(3, "operations-next");
-  expect(client.jobs).toHaveBeenCalledTimes(2);
   expect(screen.getAllByText("Profile load failed")).toHaveLength(2);
-  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("1 of 1 jobs, plus 2 of 2 operations");
+  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Loaded 2 of 2 operations");
 });

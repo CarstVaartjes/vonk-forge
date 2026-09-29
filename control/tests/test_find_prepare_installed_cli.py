@@ -136,7 +136,7 @@ def test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_op
         clock=lambda: _NOW,
     )
     api = create_app(
-        jobs=JobService(sessions, clock=lambda: _NOW, cursors=cursor_codec),
+        jobs=JobService(sessions, clock=lambda: _NOW),
         tokens=codec,
         library_projection=library,
         model_cache=cache,

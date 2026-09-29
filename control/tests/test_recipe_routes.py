@@ -1260,18 +1260,18 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         profile_endpoint_intent=profile_endpoint_intent,
     )
     assert projection.profile_endpoint is not None
-    endpoint = projection.endpoint("qwen", GATEWAY)
-    # Clients use the Controller's inference gateway; the Spark-local
-    # serving address is only a diagnostic.
-    assert endpoint["api_base"] == GATEWAY
-    assert endpoint["backend_api_base"] == "http://10.0.0.2:8000/v1"
-    assert endpoint["node_id"] == "spk_" + "1".zfill(32)
-
     profile_endpoint = projection.profile_endpoint(3, None, GATEWAY)
     assert profile_endpoint.assignments is not None
     assert profile_endpoint.assignments[0].state == "published"
     assert profile_endpoint.assignments[0].endpoint is not None
     assert profile_endpoint.assignments[0].endpoint.generation == 1
+    # Clients use the Controller's inference gateway; the Spark-local
+    # serving address is only a diagnostic.
+    assert profile_endpoint.assignments[0].endpoint.api_base == GATEWAY
+    assert (
+        profile_endpoint.assignments[0].endpoint.backend_api_base
+        == "http://10.0.0.2:8000/v1"
+    )
     with pytest.raises(KeyError, match="other-profile"):
         projection.profile_endpoint(3, "other-profile", GATEWAY)
 

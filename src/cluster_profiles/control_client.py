@@ -44,7 +44,6 @@ if TYPE_CHECKING:
     # which imports all of its models; that alone was most of every vonkctl
     # invocation's start-up time. Load them where a request needs them.
     from .generated_control.client import AuthenticatedClient
-    from .generated_control.models.endpoint_response import EndpointResponse
     from .generated_control.models.fleet_profile_endpoints_view import (
         FleetProfileEndpointsView,
     )
@@ -1539,11 +1538,6 @@ class ControlClient:
                 time.sleep(remaining)
                 raise ControlTimeout(job_id, result, sensitive_values=(self._token,))
             time.sleep(interval)
-
-    def endpoint(self, alias: str) -> EndpointResponse:
-        from .generated_control.api.default import get_published_endpoint
-
-        return self._call_generated(get_published_endpoint.sync_detailed, alias)  # type: ignore[return-value]
 
     def profile_endpoints(
         self, number: int, alias: str | None = None

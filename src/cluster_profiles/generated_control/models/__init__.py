@@ -227,8 +227,6 @@ from .job_progress import JobProgress
 from .job_resume_request import JobResumeRequest
 from .job_resume_request_disposition import JobResumeRequestDisposition
 from .job_resume_response import JobResumeResponse
-from .job_summary import JobSummary
-from .jobs_response import JobsResponse
 from .library_facet_values import LibraryFacetValues
 from .library_filter_values import LibraryFilterValues
 from .library_filter_values_sort_type_0 import LibraryFilterValuesSortType0
@@ -754,8 +752,6 @@ __all__ = (
     "JobResumeRequest",
     "JobResumeRequestDisposition",
     "JobResumeResponse",
-    "JobsResponse",
-    "JobSummary",
     "LibraryFacetValues",
     "LibraryFilterValues",
     "LibraryFilterValuesSortType0",
