@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from pydantic import ValidationError
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
@@ -659,15 +659,12 @@ class RecipeImageAvailabilityService:
         | None = None,
         model_cache: Any | None = None,
         max_parallel: int = 4,
-        max_parallel_builds: int = 1,
         builder_admission: Callable[[RecipeDefinition, Mapping[str, object]], None]
         | None = None,
         claim_lease_seconds: int = 120,
     ) -> None:
         if not 1 <= max_parallel <= 16:
             raise ValueError("availability parallelism is invalid")
-        if not 1 <= max_parallel_builds <= max_parallel:
-            raise ValueError("availability build parallelism is invalid")
         if not 10 <= claim_lease_seconds <= 3_600:
             raise ValueError("availability claim lease is invalid")
         self._sessions = sessions
@@ -679,7 +676,6 @@ class RecipeImageAvailabilityService:
         self._receipt_writer = receipt_writer
         self._model_cache = model_cache
         self._max_parallel = max_parallel
-        self._max_parallel_builds = max_parallel_builds
         self._builder_admission = builder_admission
         self._claim_lease_seconds = claim_lease_seconds
         self._identity_locks: dict[str, threading.Lock] = {}
@@ -3937,32 +3933,11 @@ class RecipeImageAvailabilityService:
             # The dispatch boundary.  A queued preparation whose recipe has
             # advanced to a newer active revision is cancelled here, before any
             # claim is handed to a builder executor, so a superseded operation
-            # can never occupy the build slot the current revision needs.  Only
+            # can never occupy the Spark the current revision needs.  Only
             # not-yet-started operations are eligible; a running attempt with a
             # live lease is left alone because the active revision may reuse its
             # shared build inputs.
             self._cancel_superseded_by_active_head(session, now=now)
-            if session.get_bind().dialect.name == "postgresql":
-                # Serialize count-then-claim across control workers so two
-                # simultaneous claims cannot both take the last build slot.
-                # The transaction-scoped lock ends with this short transaction;
-                # the active-slot count below then sees every earlier commit.
-                session.execute(
-                    text(
-                        "SELECT pg_advisory_xact_lock("
-                        "hashtextextended('recipe-image-availability-claim', 0))"
-                    )
-                )
-            active_rows = list(
-                session.scalars(
-                    select(Job)
-                    .where(
-                        Job.kind == OPERATION_KIND,
-                        Job.state == "running",
-                    )
-                    .with_for_update()
-                )
-            )
             candidate_ids = list(
                 session.scalars(
                     select(Job.id)
@@ -3974,29 +3949,6 @@ class RecipeImageAvailabilityService:
                     .limit(limit * 8)
                 )
             )
-            active_builds = 0
-            for active in active_rows:
-                active_payload = (
-                    active.payload if isinstance(active.payload, Mapping) else {}
-                )
-                if active.state != "running":
-                    continue
-                if isinstance(active_payload.get("image_result"), Mapping):
-                    continue
-                active_until = active_payload.get("claim_until")
-                if isinstance(active_until, str):
-                    try:
-                        parsed_until = datetime.fromisoformat(active_until)
-                        parsed_until = (
-                            parsed_until
-                            if parsed_until.tzinfo is not None
-                            else parsed_until.replace(tzinfo=UTC)
-                        )
-                        if now >= parsed_until:
-                            continue
-                    except ValueError:
-                        pass
-                active_builds += 1
             for operation_id in candidate_ids:
                 operation = session.scalar(
                     select(Job)
@@ -4028,9 +3980,6 @@ class RecipeImageAvailabilityService:
                                 continue
                         except ValueError:
                             pass
-                coordination_only = isinstance(payload.get("image_result"), Mapping)
-                if not coordination_only and active_builds >= self._max_parallel_builds:
-                    continue
                 operation.state = "running"
                 operation.current_attempt = int(operation.current_attempt) + 1
                 operation.updated_at = now
@@ -4051,8 +4000,6 @@ class RecipeImageAvailabilityService:
                         execution_attempt=operation.current_attempt,
                     )
                 )
-                if not coordination_only:
-                    active_builds += 1
                 if len(claims) >= limit:
                     break
         return tuple(claims)

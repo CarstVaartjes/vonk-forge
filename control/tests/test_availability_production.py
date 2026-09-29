@@ -571,6 +571,152 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
     production.close()
 
 
+def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-source-build.json")
+            .read_text()
+        )
+    )
+    node_id = "builder-node-000000000000000000000000000000"
+    engine = create_engine(f"sqlite:///{tmp_path / 'busy.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime.now(UTC)
+    busy_id = "00000000-0000-4000-8000-000000000801"
+    waiting_id = "00000000-0000-4000-8000-000000000802"
+
+    def availability_job(job_id: str, request_id: str, payload: dict) -> Job:
+        return Job(
+            id=job_id,
+            request_id=request_id,
+            kind="recipe.image.availability.v2",
+            state="running",
+            actor="operator",
+            authority_revision="revision-builder",
+            targets=["revision-builder"],
+            payload_digest="a" * 64,
+            payload={
+                "recipe_revision_id": "revision-builder",
+                "build_input_sha256": None,
+                **payload,
+            },
+            result=None,
+            current_attempt=1,
+            created_at=now,
+            updated_at=now,
+        )
+
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(node_id=node_id, state="active", architecture="linux-arm64")
+        )
+        session.add(
+            availability_job(
+                busy_id,
+                "00000000-0000-4000-8000-000000000803",
+                {
+                    "runtime": {"builder_node_id": node_id},
+                    "claim_until": (now + timedelta(hours=1)).isoformat(),
+                },
+            )
+        )
+        session.add(
+            availability_job(
+                waiting_id,
+                "00000000-0000-4000-8000-000000000804",
+                {
+                    "runtime": {
+                        "recipe_revision_id": "revision-builder",
+                        "input_intent_sha256": "a" * 64,
+                    },
+                    "claim_until": (now - timedelta(seconds=1)).isoformat(),
+                },
+            )
+        )
+
+    class Builds:
+        def resolve(self, revision_id: str):
+            return RecipeBuildResolution(
+                recipe_revision_id=revision_id,
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
+                source_bundle_sha256="c" * 64,
+                input_intent_sha256="a" * 64,
+                input_intent={},
+            )
+
+        def prepare_plan(self, _revision_id: str, candidate: str, **_kwargs):
+            return SimpleNamespace(
+                build_input_sha256="b" * 64,
+                builder_node_id=candidate,
+                build_id="00000000-0000-4000-8000-000000000805",
+            )
+
+        def persist_plan_in_session(self, _session, plan, **_kwargs):
+            return plan
+
+    class Operations:
+        def build(self, plan, **_kwargs):
+            return SimpleNamespace(
+                id=str(uuid.uuid4()),
+                state="succeeded",
+                owner_id="build-id",
+                result={
+                    "successful_nodes": [plan.builder_node_id],
+                    "failed_nodes": [],
+                    "node_evidence": {
+                        plan.builder_node_id: {
+                            "image_bytes": 1,
+                            "image_digest": "sha256:" + "d" * 64,
+                            "oci_layout_sha256": "e" * 64,
+                        }
+                    },
+                },
+            )
+
+    class Settings:
+        agent_artifact_root = tmp_path / "artifacts"
+
+    production = build_recipe_image_availability(
+        sessions,
+        settings=Settings(),
+        managed_catalog_sync=None,
+        recipe_builds=Builds(),
+        recipe_operations=Operations(),
+        clock=lambda: now,
+    )
+    assert production.service._builder is not None
+    (claim,) = production.service.claim_pending(limit=1)
+    assert claim.operation_id == waiting_id
+
+    def execute():
+        assert production.service._builder is not None
+        return production.service._builder(
+            recipe,
+            {
+                "recipe_revision_id": "revision-builder",
+                "input_intent_sha256": "a" * 64,
+            },
+            claim=claim,
+            build_input_sha256="",
+            force=False,
+            progress=lambda _progress: None,
+        )
+
+    with pytest.raises(RecipeImageAvailabilityError) as failure:
+        execute()
+    assert failure.value.retryable
+    assert failure.value.code == "recipe_image.build_capacity_wait"
+
+    with sessions.begin() as session:
+        busy = session.get(Job, busy_id)
+        assert busy is not None
+        busy.payload = dict(busy.payload) | {"image_result": {"done": True}}
+    assert execute()["builder_node_id"] == node_id
+    production.close()
+
+
 @pytest.mark.parametrize(
     (
         "failure_kind",
@@ -1100,8 +1246,6 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         recipe_builds=builds,
         recipe_operations=Operations(),
         clock=lambda: now,
-        # Both builds must run at once to contend for the same builder nodes.
-        max_parallel_builds=2,
     )
 
     claims = {

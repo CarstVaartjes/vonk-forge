@@ -342,7 +342,6 @@ def assemble_production_worker(
     agent_artifact_root: Path | None = None,
     recipe_image_artifact_root: Path | None = None,
     recipe_image_parallel_preparations: int = 4,
-    recipe_build_parallel_preparations: int = 2,
     compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]]
     | None = None,
     runtime_image_preparer: Callable[..., object] | None = None,
@@ -496,7 +495,6 @@ def assemble_production_worker(
             model_cache=model_cache,
             clock=clock,
             max_parallel=recipe_image_parallel_preparations,
-            max_parallel_builds=recipe_build_parallel_preparations,
             with_scheduler=True,
         )
         assert image_production.scheduler is not None
@@ -568,7 +566,6 @@ if __name__ == "__main__":
         DISTRIBUTED_START_TIMEOUT_SECONDS,
         MODEL_CACHE_PARALLEL_DOWNLOADS,
         MODEL_CACHE_RESERVE_BYTES,
-        RECIPE_BUILD_PARALLEL_PREPARATIONS,
         RECIPE_IMAGE_PARALLEL_PREPARATIONS,
         Settings,
     )
@@ -701,7 +698,6 @@ if __name__ == "__main__":
         agent_artifact_root=settings.agent_artifact_root,
         recipe_image_artifact_root=settings.agent_artifact_root,
         recipe_image_parallel_preparations=RECIPE_IMAGE_PARALLEL_PREPARATIONS,
-        recipe_build_parallel_preparations=RECIPE_BUILD_PARALLEL_PREPARATIONS,
         compiled_plan_provider=execution_plans.compile_installation,
         runtime_image_preparer=prepare_runtime_image_receipt,
         loop_heartbeat=WorkerHeartbeatRecorder(

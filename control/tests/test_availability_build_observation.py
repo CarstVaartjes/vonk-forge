@@ -122,7 +122,6 @@ def test_one_availability_slot_serves_two_parents_sharing_one_real_build(
         recipe_operations=operations,
         clock=lambda: clock[0],
         max_parallel=1,
-        max_parallel_builds=1,
         with_scheduler=True,
     )
     scheduler = production.scheduler

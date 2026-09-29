@@ -142,7 +142,6 @@ from .settings import (
     DISTRIBUTED_START_TIMEOUT_SECONDS,
     MODEL_CACHE_PARALLEL_DOWNLOADS,
     MODEL_CACHE_RESERVE_BYTES,
-    RECIPE_BUILD_PARALLEL_PREPARATIONS,
     RECIPE_IMAGE_PARALLEL_PREPARATIONS,
     RECIPE_LIBRARY_API_URL,
     RECIPE_LIBRARY_ASSET_URL,
@@ -1582,7 +1581,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         model_cache=model_cache,
         clock=clock,
         max_parallel=RECIPE_IMAGE_PARALLEL_PREPARATIONS,
-        max_parallel_builds=RECIPE_BUILD_PARALLEL_PREPARATIONS,
     )
 
     automatic_sync_task: asyncio.Task[None] | None = None

@@ -183,7 +183,6 @@ def build_recipe_image_availability(
     model_cache: Any | None = None,
     clock: Callable[[], datetime],
     max_parallel: int = 4,
-    max_parallel_builds: int = 1,
     with_scheduler: bool = False,
 ) -> RecipeImageAvailabilityProduction:
     """Compose canonical catalog resolution, OCI storage, and image execution.
@@ -554,16 +553,6 @@ def build_recipe_image_availability(
                         if candidate.architecture == "linux-arm64"
                     )
                     candidate_ids = tuple(candidate.node_id for candidate in candidates)
-                    active_jobs = tuple(
-                        session.scalars(
-                            select(Job).where(
-                                Job.state.in_({"queued", "running", "partial"}),
-                                Job.kind.in_(
-                                    {"recipe.build.v1", "recipe.image.availability.v2"}
-                                ),
-                            )
-                        )
-                    )
 
                     def work_for(node_id: str, jobs: tuple[Job, ...]) -> int:
                         return sum(
@@ -587,11 +576,7 @@ def build_recipe_image_availability(
                             )
                         )
 
-                    ordered_candidates = sorted(
-                        (work_for(candidate.node_id, active_jobs), candidate.node_id)
-                        for candidate in candidates
-                    )
-                    for _, candidate_id in ordered_candidates:
+                    for candidate_id in candidate_ids:
                         try:
                             acquire_admission_keys(
                                 session, (node_admission_key(candidate_id),)
@@ -618,10 +603,7 @@ def build_recipe_image_availability(
                                 )
                             )
                         )
-                        if current_jobs and work_for(candidate_id, current_jobs) > min(
-                            work_for(candidate.node_id, current_jobs)
-                            for candidate in candidates
-                        ):
+                        if work_for(candidate_id, current_jobs) > 0:
                             continue
                         selected_candidate = candidate_id
                         break
@@ -713,9 +695,7 @@ def build_recipe_image_availability(
                         )
                     )
                 )
-                if current_jobs and work_for(candidate_id, current_jobs) > min(
-                    work_for(other_id, current_jobs) for other_id in candidate_ids
-                ):
+                if work_for(candidate_id, current_jobs) > 0:
                     attempted_candidates.add(candidate_id)
                     selected_candidate = next(
                         (
@@ -723,11 +703,7 @@ def build_recipe_image_availability(
                             for other_id in candidate_ids
                             if other_id != candidate_id
                             and other_id not in attempted_candidates
-                            and work_for(other_id, current_jobs)
-                            == min(
-                                work_for(item_id, current_jobs)
-                                for item_id in candidate_ids
-                            )
+                            and work_for(other_id, current_jobs) == 0
                         ),
                         None,
                     )
@@ -957,7 +933,6 @@ def build_recipe_image_availability(
         receipt_writer=receipt_writer,
         model_cache=model_cache,
         max_parallel=max_parallel,
-        max_parallel_builds=max_parallel_builds,
     )
     scheduler = None
     if with_scheduler:
