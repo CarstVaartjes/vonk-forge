@@ -15,6 +15,7 @@ if TYPE_CHECKING:
   from ..models.agent_failure_result import AgentFailureResult
   from ..models.availability_operation_failure import AvailabilityOperationFailure
   from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
+  from ..models.operation_blocker import OperationBlocker
   from ..models.operation_evidence_download import OperationEvidenceDownload
   from ..models.operation_failure_evidence import OperationFailureEvidence
   from ..models.operation_owner_reference import OperationOwnerReference
@@ -39,9 +40,11 @@ class OperationDetailResponse:
             kind (str):
             node_ids (list[str]):
             state (str):
+            blockers (list[OperationBlocker] | Unset):
             cancellation (FleetProfileApplicationCancellationView | None | Unset):
             evidence_download (None | OperationEvidenceDownload | Unset):
             failure (AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset):
+            next_attempt_at (None | str | Unset):
             owner (None | OperationOwnerReference | Unset):
             parent_id (None | str | Unset):
             progress (None | OperationProgress | Unset):
@@ -56,9 +59,11 @@ class OperationDetailResponse:
     kind: str
     node_ids: list[str]
     state: str
+    blockers: list[OperationBlocker] | Unset = UNSET
     cancellation: FleetProfileApplicationCancellationView | None | Unset = UNSET
     evidence_download: None | OperationEvidenceDownload | Unset = UNSET
     failure: AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset = UNSET
+    next_attempt_at: None | str | Unset = UNSET
     owner: None | OperationOwnerReference | Unset = UNSET
     parent_id: None | str | Unset = UNSET
     progress: None | OperationProgress | Unset = UNSET
@@ -74,6 +79,7 @@ class OperationDetailResponse:
         from ..models.agent_failure_result import AgentFailureResult # noqa: PLC0415
         from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
         from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.operation_evidence_download import OperationEvidenceDownload # noqa: PLC0415
         from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         from ..models.operation_owner_reference import OperationOwnerReference # noqa: PLC0415
@@ -92,6 +98,15 @@ class OperationDetailResponse:
 
 
         state = self.state
+
+        blockers: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.blockers, Unset):
+            blockers = []
+            for blockers_item_data in self.blockers:
+                blockers_item = blockers_item_data.to_dict()
+                blockers.append(blockers_item)
+
+
 
         cancellation: dict[str, Any] | None | Unset
         if isinstance(self.cancellation, Unset):
@@ -120,6 +135,12 @@ class OperationDetailResponse:
             failure = self.failure.to_dict()
         else:
             failure = self.failure
+
+        next_attempt_at: None | str | Unset
+        if isinstance(self.next_attempt_at, Unset):
+            next_attempt_at = UNSET
+        else:
+            next_attempt_at = self.next_attempt_at
 
         owner: dict[str, Any] | None | Unset
         if isinstance(self.owner, Unset):
@@ -174,12 +195,16 @@ class OperationDetailResponse:
             "node_ids": node_ids,
             "state": state,
         })
+        if blockers is not UNSET:
+            field_dict["blockers"] = blockers
         if cancellation is not UNSET:
             field_dict["cancellation"] = cancellation
         if evidence_download is not UNSET:
             field_dict["evidence_download"] = evidence_download
         if failure is not UNSET:
             field_dict["failure"] = failure
+        if next_attempt_at is not UNSET:
+            field_dict["next_attempt_at"] = next_attempt_at
         if owner is not UNSET:
             field_dict["owner"] = owner
         if parent_id is not UNSET:
@@ -202,6 +227,7 @@ class OperationDetailResponse:
         from ..models.agent_failure_result import AgentFailureResult # noqa: PLC0415
         from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
         from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.operation_evidence_download import OperationEvidenceDownload # noqa: PLC0415
         from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         from ..models.operation_owner_reference import OperationOwnerReference # noqa: PLC0415
@@ -220,6 +246,18 @@ class OperationDetailResponse:
 
 
         state = d.pop("state")
+
+        _blockers = d.pop("blockers", UNSET)
+        blockers: list[OperationBlocker] | Unset = UNSET
+        if _blockers is not UNSET:
+            blockers = []
+            for blockers_item_data in _blockers:
+                blockers_item = OperationBlocker.from_dict(blockers_item_data)
+
+
+
+                blockers.append(blockers_item)
+
 
         def _parse_cancellation(data: object) -> FleetProfileApplicationCancellationView | None | Unset:
             if data is None:
@@ -299,6 +337,16 @@ class OperationDetailResponse:
             return cast(AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset, data)
 
         failure = _parse_failure(d.pop("failure", UNSET))
+
+
+        def _parse_next_attempt_at(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
 
 
         def _parse_owner(data: object) -> None | OperationOwnerReference | Unset:
@@ -398,9 +446,11 @@ class OperationDetailResponse:
             kind=kind,
             node_ids=node_ids,
             state=state,
+            blockers=blockers,
             cancellation=cancellation,
             evidence_download=evidence_download,
             failure=failure,
+            next_attempt_at=next_attempt_at,
             owner=owner,
             parent_id=parent_id,
             progress=progress,

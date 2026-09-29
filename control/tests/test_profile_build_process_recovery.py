@@ -325,15 +325,21 @@ def _worker_process(config: dict, crash: str) -> None:
             worker.tick()
             _complete_agent_work(sessions, lifecycle, root)
             application = profiles.application(config["application"])
-            if application.state in {"succeeded", "failed", "cancelled"}:
+            # The stored outcome: a failed application the Controller will
+            # retry is presented as queued, but this run ended in failure.
+            with sessions() as session:
+                stored = session.get(FleetProfileApplication, config["application"])
+                assert stored is not None
+                stored_state = stored.state
+            if stored_state in {"succeeded", "failed", "cancelled"}:
                 print(
                     json.dumps(
                         {
                             "application_id": application.id,
-                            "state": application.state,
+                            "state": stored_state,
                             **(
                                 {"reason": application.status_reason}
-                                if application.state != "succeeded"
+                                if stored_state != "succeeded"
                                 else {}
                             ),
                         }

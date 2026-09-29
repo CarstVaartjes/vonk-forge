@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -42,6 +43,7 @@ from .models import (
     Job,
     RecipeBuild,
 )
+from .operation_blockers import OperationBlocker, make_blocker
 from .recipe_availability_intent import RecipeBuildDependency
 from .recipe_build_cancellation import BuildConsumerError, lock_build_dependency
 from .recipe_builds import (
@@ -109,6 +111,7 @@ class RecipeImageAvailabilityScheduler:
         self._owner_id = owner_id or f"availability-{uuid.uuid4().hex}"
         self._futures: set[Future[None]] = set()
         self._update_future: Future[None] | None = None
+        self._last_busy_note = 0.0
         self._lock = threading.Lock()
         self._closed = False
 
@@ -137,6 +140,10 @@ class RecipeImageAvailabilityScheduler:
             self._futures = {future for future in self._futures if not future.done()}
             capacity = self._max_workers - len(self._futures)
             if capacity <= 0:
+                # Every worker is busy: queued work says so instead of looking idle.
+                if time.monotonic() - self._last_busy_note >= 5:
+                    self._last_busy_note = time.monotonic()
+                    self._service.note_waiting_for_worker(self._max_workers)
                 return submitted
             claims = self._service.claim_pending(
                 limit=capacity,
@@ -531,6 +538,8 @@ def build_recipe_image_availability(
         selected_candidate: str | None = None
         candidate_ids: tuple[str, ...] = ()
         attempted_candidates: set[str] = set()
+        # Why each Spark was passed over, so a wait names its causes.
+        skipped: dict[str, tuple[str, str]] = {}
         if not isinstance(builder_node_id, str):
             # Read the parent and choose a candidate in a short transaction.
             # The candidate is locked again only for final persistence, after
@@ -583,6 +592,10 @@ def build_recipe_image_availability(
                                 session, (node_admission_key(candidate_id),)
                             )
                         except AdmissionLockBusy:
+                            skipped[candidate_id] = (
+                                "recipe_image.builder_busy",
+                                "another change to this Spark is in progress",
+                            )
                             continue
                         locked = session.scalar(
                             select(AgentNode)
@@ -590,6 +603,10 @@ def build_recipe_image_availability(
                             .with_for_update(skip_locked=True)
                         )
                         if locked is None:
+                            skipped[candidate_id] = (
+                                "recipe_image.builder_busy",
+                                "another change to this Spark is in progress",
+                            )
                             continue
                         current_jobs = tuple(
                             session.scalars(
@@ -605,16 +622,15 @@ def build_recipe_image_availability(
                             )
                         )
                         if work_for(candidate_id, current_jobs) > 0:
+                            skipped[candidate_id] = (
+                                "recipe_image.builder_occupied",
+                                "already building or preparing another image",
+                            )
                             continue
                         selected_candidate = candidate_id
                         break
                     if selected_candidate is None:
-                        raise RecipeImageAvailabilityError(
-                            "recipe_image.build_capacity_wait",
-                            "no compatible Recipe builder is currently available",
-                            retryable=True,
-                            recovery_actions=("resume", "retry"),
-                        )
+                        raise _capacity_wait(skipped, candidate_ids)
         while selected_plan is None and selected_candidate is not None:
             candidate_id = selected_candidate
             try:
@@ -627,6 +643,7 @@ def build_recipe_image_availability(
             except Exception as error:
                 code = str(getattr(error, "code", ""))
                 if code in _BUILDER_ADMISSION_CODES:
+                    skipped[candidate_id] = (code, str(error)[:200])
                     attempted_candidates.add(candidate_id)
                     selected_candidate = next(
                         (
@@ -646,6 +663,10 @@ def build_recipe_image_availability(
                 try:
                     acquire_admission_keys(session, (node_admission_key(candidate_id),))
                 except AdmissionLockBusy:
+                    skipped[candidate_id] = (
+                        "recipe_image.builder_busy",
+                        "another change to this Spark is in progress",
+                    )
                     attempted_candidates.add(candidate_id)
                     selected_candidate = next(
                         (
@@ -675,6 +696,10 @@ def build_recipe_image_availability(
                     .with_for_update(skip_locked=True)
                 )
                 if locked is None:
+                    skipped[candidate_id] = (
+                        "recipe_image.builder_busy",
+                        "another change to this Spark is in progress",
+                    )
                     attempted_candidates.add(candidate_id)
                     selected_candidate = next(
                         (
@@ -697,6 +722,10 @@ def build_recipe_image_availability(
                     )
                 )
                 if work_for(candidate_id, current_jobs) > 0:
+                    skipped[candidate_id] = (
+                        "recipe_image.builder_occupied",
+                        "already building or preparing another image",
+                    )
                     attempted_candidates.add(candidate_id)
                     selected_candidate = next(
                         (
@@ -716,6 +745,7 @@ def build_recipe_image_availability(
                 except Exception as error:
                     code = str(getattr(error, "code", ""))
                     if code in _BUILDER_ADMISSION_CODES:
+                        skipped[candidate_id] = (code, str(error)[:200])
                         attempted_candidates.add(candidate_id)
                         selected_candidate = next(
                             (
@@ -765,12 +795,7 @@ def build_recipe_image_availability(
         if builder_node_id is None:
             # A resolved plan always carries the builder that produced it, so
             # without one the operation can only wait for capacity.
-            raise RecipeImageAvailabilityError(
-                "recipe_image.build_capacity_wait",
-                "no compatible Recipe builder is currently available",
-                retryable=True,
-                recovery_actions=("resume", "retry"),
-            )
+            raise _capacity_wait(skipped, candidate_ids)
         if selected_plan is None:
             try:
                 prepared = recipe_builds.prepare_plan(
@@ -996,6 +1021,42 @@ def _build_dependency_error(error: BuildConsumerError) -> RecipeImageAvailabilit
         str(error),
         retryable=error.retryable,
         recovery_actions=("retry",) if error.retryable else (),
+    )
+
+
+def _capacity_wait(
+    skipped: Mapping[str, tuple[str, str]], candidate_ids: tuple[str, ...]
+) -> RecipeImageAvailabilityError:
+    """A wait for a builder that names every Spark passed over and why."""
+
+    if not candidate_ids:
+        blockers: list[OperationBlocker] = [
+            make_blocker(
+                "recipe_image.no_builder",
+                "No active linux-arm64 Spark is enrolled to build this image.",
+                severity="error",
+            )
+        ]
+    else:
+        blockers = [
+            make_blocker(code, detail, node_ids=[node_id])
+            for node_id, (code, detail) in sorted(skipped.items())
+        ] or [
+            make_blocker(
+                "recipe_image.build_capacity_wait",
+                "No Spark could be selected to build this image yet.",
+            )
+        ]
+    detail = "no Spark can build this image right now: " + "; ".join(
+        f"{item.node_ids[0][:12] if item.node_ids else 'fleet'}: {item.code}"
+        for item in blockers[:6]
+    )
+    return RecipeImageAvailabilityError(
+        "recipe_image.build_capacity_wait",
+        detail[:512],
+        retryable=True,
+        recovery_actions=("resume", "retry"),
+        blockers=blockers,
     )
 
 

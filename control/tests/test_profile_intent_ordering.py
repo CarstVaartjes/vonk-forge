@@ -529,7 +529,7 @@ def test_pending_later_receipt_does_not_supersede_retry_until_accepted(
         child.status_reason = "temporary runtime dependency unavailable"
     assert profiles.tick()
     root = profiles.application(root.id)
-    assert root.state == "failed"
+    assert root.state == "queued"  # failed, and retried by the Controller itself
     # A later receipt is parked, so it must not block the earlier accepted
     # selection's retry before its own plan is revalidated and admitted.
     clock = [root.created_at + timedelta(seconds=1)]

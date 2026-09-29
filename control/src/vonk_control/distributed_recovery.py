@@ -18,6 +18,7 @@ from vonk_agent_protocol import RecipeStartPayload, canonical_message
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
+from .agent_jobs import release_owned_reservations_in_session
 from .distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
@@ -183,6 +184,19 @@ class DistributedRecoveryCoordinator:
                     run.updated_at = now
                     worked = True
                 if self._active_recovery(session, run.id):
+                    continue
+                if _superseded_absent_run(session, run, run_nodes, now):
+                    settle_absent_run_in_session(
+                        session,
+                        run,
+                        run_nodes,
+                        now,
+                        reason=(
+                            "the Spark reports this run gone and a newer workload "
+                            "intent owns it; its claims are released"
+                        ),
+                    )
+                    worked = True
                     continue
                 try:
                     run_plan = run_plan_document(run.plan)
@@ -483,6 +497,82 @@ def _proves_fresh_absence(run: RecipeRun, node: RunNode, now: datetime) -> bool:
     observed_at = _aware(node.observation_observed_at)
     age = _aware(now) - observed_at
     return timedelta(0) <= age < timedelta(seconds=ROUTE_EVIDENCE_MAX_AGE_SECONDS)
+
+
+def run_node_reports_absent(run: RecipeRun, node: RunNode, now: datetime) -> bool:
+    """The Spark's own current-generation report says this rank is not running."""
+
+    observed_at = node.observation_observed_at
+    if (
+        node.observed_run_generation != run.run_generation
+        or node.observation_process_running is not False
+        or not isinstance(observed_at, datetime)
+    ):
+        return False
+    # Stored timestamps can come back naive (SQLite); they are UTC either way.
+    stamp = observed_at if observed_at.tzinfo else observed_at.replace(tzinfo=UTC)
+    age = now.astimezone(UTC) - stamp
+    return timedelta(0) <= age < timedelta(seconds=ROUTE_EVIDENCE_MAX_AGE_SECONDS)
+
+
+def _superseded_absent_run(
+    session: Session, run: RecipeRun, run_nodes: Sequence[RunNode], now: datetime
+) -> bool:
+    """A newer workload intent owns these Sparks and every rank is reported gone.
+
+    Recovery restarts only a run that is still desired. Once a later intent has
+    taken the Sparks, an absent run has nothing left to recover: its claims are
+    released so the newer intent can be admitted.
+    """
+
+    if not run_nodes or not all(
+        run_node_reports_absent(run, node, now) for node in run_nodes
+    ):
+        return False
+    starts = tuple(
+        session.scalars(
+            select(Job.payload["workload_intent_ordinal"].as_integer()).where(
+                Job.kind == "recipe.start",
+                Job.payload["owner_kind"].as_string() == "run",
+                Job.payload["owner_id"].as_string() == run.id,
+                Job.state == "succeeded",
+            )
+        )
+    )
+    accepted = [ordinal for ordinal in starts if ordinal is not None]
+    if not accepted:
+        return False
+    ordinal = min(accepted)
+    current = tuple(
+        session.scalars(
+            select(AgentNode.workload_intent_ordinal).where(
+                AgentNode.node_id.in_([node.node_id for node in run_nodes])
+            )
+        )
+    )
+    return any(value > ordinal for value in current)
+
+
+def settle_absent_run_in_session(
+    session: Session,
+    run: RecipeRun,
+    run_nodes: Sequence[RunNode],
+    now: datetime,
+    *,
+    reason: str | None = None,
+) -> None:
+    """Record a run its Sparks report gone as stopped and release its claims."""
+
+    for node in run_nodes:
+        node.state = "stopped"
+        node.updated_at = now
+    run.state = "stopped"
+    run.route_state = "withdrawn"
+    run.route_error = reason
+    run.route_next_attempt_at = None
+    run.stopped_at = now
+    run.updated_at = now
+    release_owned_reservations_in_session(session, "run", run.id, now)
 
 
 def _schedule_singleton_recovery_wait(

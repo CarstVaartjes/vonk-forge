@@ -14,6 +14,7 @@ from .cache_removal_review import CacheRemovalReview
 from .logging import redact_text
 from .model_cache_contract import UUID_PATTERN, Digest
 from .operation_api import bounded_error_responses
+from .operation_blockers import OperationBlocker
 from .operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
@@ -123,6 +124,9 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
     failure: AvailabilityOperationFailure | None = None
     cancellation: RecipeOperationCancellationResult | None = None
     actions: list[RecipeImageAvailabilityAction] = Field(default_factory=list)
+    #: What a queued or blocked preparation is waiting for, as of its latest check.
+    blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+    next_attempt_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -303,6 +307,8 @@ def _view_document(
                     document.get("supported_actions", []), "supported actions"
                 )
             ],
+            "blockers": document.get("blockers") or [],
+            "next_attempt_at": document.get("next_attempt_at"),
             "created_at": str(document["created_at"]),
             "updated_at": str(document["updated_at"]),
         }

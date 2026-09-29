@@ -15,6 +15,7 @@ from typing import Literal, cast
 if TYPE_CHECKING:
   from ..models.evidence_context import EvidenceContext
   from ..models.failure_diagnostics import FailureDiagnostics
+  from ..models.operation_blocker import OperationBlocker
 
 
 
@@ -34,6 +35,7 @@ class FailureEvidenceBundle:
             diagnostics (FailureDiagnostics):
             error_code (str):
             summary (str):
+            blockers (list[OperationBlocker] | Unset):
             detail (None | str | Unset):
             schema_version (Literal[2] | Unset):  Default: 2.
      """
@@ -44,6 +46,7 @@ class FailureEvidenceBundle:
     diagnostics: FailureDiagnostics
     error_code: str
     summary: str
+    blockers: list[OperationBlocker] | Unset = UNSET
     detail: None | str | Unset = UNSET
     schema_version: Literal[2] | Unset = 2
 
@@ -54,6 +57,7 @@ class FailureEvidenceBundle:
     def to_dict(self) -> dict[str, Any]:
         from ..models.evidence_context import EvidenceContext # noqa: PLC0415
         from ..models.failure_diagnostics import FailureDiagnostics # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         collected_at = self.collected_at
 
         collector_errors = self.collector_errors
@@ -67,6 +71,15 @@ class FailureEvidenceBundle:
         error_code = self.error_code
 
         summary = self.summary
+
+        blockers: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.blockers, Unset):
+            blockers = []
+            for blockers_item_data in self.blockers:
+                blockers_item = blockers_item_data.to_dict()
+                blockers.append(blockers_item)
+
+
 
         detail: None | str | Unset
         if isinstance(self.detail, Unset):
@@ -87,6 +100,8 @@ class FailureEvidenceBundle:
             "error_code": error_code,
             "summary": summary,
         })
+        if blockers is not UNSET:
+            field_dict["blockers"] = blockers
         if detail is not UNSET:
             field_dict["detail"] = detail
         if schema_version is not UNSET:
@@ -100,6 +115,7 @@ class FailureEvidenceBundle:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.evidence_context import EvidenceContext # noqa: PLC0415
         from ..models.failure_diagnostics import FailureDiagnostics # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         d = dict(src_dict)
         collected_at = d.pop("collected_at")
 
@@ -119,6 +135,18 @@ class FailureEvidenceBundle:
         error_code = d.pop("error_code")
 
         summary = d.pop("summary")
+
+        _blockers = d.pop("blockers", UNSET)
+        blockers: list[OperationBlocker] | Unset = UNSET
+        if _blockers is not UNSET:
+            blockers = []
+            for blockers_item_data in _blockers:
+                blockers_item = OperationBlocker.from_dict(blockers_item_data)
+
+
+
+                blockers.append(blockers_item)
+
 
         def _parse_detail(data: object) -> None | str | Unset:
             if data is None:
@@ -141,6 +169,7 @@ class FailureEvidenceBundle:
             diagnostics=diagnostics,
             error_code=error_code,
             summary=summary,
+            blockers=blockers,
             detail=detail,
             schema_version=schema_version,
         )

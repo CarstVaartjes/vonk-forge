@@ -8,9 +8,10 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.fleet_profile_plan_step_kind import check_fleet_profile_plan_step_kind
+from ..models.fleet_profile_plan_step_kind import FleetProfilePlanStepKind
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 
 
@@ -26,13 +27,13 @@ class FleetProfilePlanStep:
     """
         Attributes:
             index (int):
-            kind (Literal['switch']):
+            kind (FleetProfilePlanStepKind):
             label (str):
             node_ids (list[str] | Unset):
      """
 
     index: int
-    kind: Literal['switch']
+    kind: FleetProfilePlanStepKind
     label: str
     node_ids: list[str] | Unset = UNSET
 
@@ -43,7 +44,7 @@ class FleetProfilePlanStep:
     def to_dict(self) -> dict[str, Any]:
         index = self.index
 
-        kind = self.kind
+        kind: str = self.kind
 
         label = self.label
 
@@ -73,9 +74,10 @@ class FleetProfilePlanStep:
         d = dict(src_dict)
         index = d.pop("index")
 
-        kind = cast(Literal['switch'] , d.pop("kind"))
-        if kind != 'switch':
-            raise ValueError(f"kind must match const 'switch', got '{kind}'")
+        kind = check_fleet_profile_plan_step_kind(d.pop("kind"))
+
+
+
 
         label = d.pop("label")
 

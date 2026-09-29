@@ -92,7 +92,8 @@ def _failed_profile(tmp_path: Path):
         child.state = "failed"
         child.status_reason = "temporary runtime dependency unavailable"
     assert service.tick()
-    assert service.application(application.id).state == "failed"
+    # The Controller retries this by itself, so it is waiting, not failed.
+    assert service.application(application.id).state == "queued"
     return sessions, lifecycle, service, profile, desired, application, child_id, nodes
 
 
@@ -121,7 +122,11 @@ def test_explicit_retry_preserves_failed_child_recovery_and_replay(
         )
     assert len(children) == 2
     assert first_child in {child.id for child in children}
-    assert service.application(first.id) == failed
+    # Superseded by its retry, the first receipt now stays failed; nothing else
+    # about it changed.
+    after = service.application(first.id)
+    assert after.state == "failed"
+    assert after.model_copy(update={"state": "queued"}) == failed
 
     second_child_id = next(child.id for child in children if child.id != first_child)
     with sessions.begin() as session:
@@ -509,3 +514,119 @@ def test_retry_of_a_failed_order_with_a_live_child_resumes_it(tmp_path: Path) ->
     with sessions() as session:
         rows = tuple(session.scalars(select(FleetProfileApplication)))
         assert len(rows) == 1
+
+
+def test_a_retrying_application_reports_waiting_with_its_blockers(
+    tmp_path: Path,
+) -> None:
+    from datetime import timedelta
+
+    from sqlalchemy import delete
+    from vonk_control.models import NodeInventorySnapshot
+
+    sessions, lifecycle, service, _profile, _desired, application, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    # Current Fleet conditions now block the retry: no Spark has fresh inventory.
+    with sessions.begin() as session:
+        session.execute(delete(NodeInventorySnapshot))
+    later = lifecycle._clock() + timedelta(seconds=120)
+    service._clock = lambda: later
+
+    for _ in range(4):
+        service.tick()
+
+    view = service.application(application.id)
+    assert view.state == "queued"  # it will retry by itself: waiting, not failed
+    assert view.blockers, "the real reasons are persisted on the application"
+    assert all(item.code and item.detail for item in view.blockers)
+    assert view.next_attempt_at is not None
+    assert "next attempt at" in (view.status_reason or "")
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None and row.state == "failed"  # stored; presented queued
+
+
+def test_load_with_a_missing_image_requests_preparation_and_continues_when_ready(
+    tmp_path: Path,
+) -> None:
+    from vonk_control.models import RecipeBuild
+    from vonk_control.operation_blockers import make_blocker
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    service = build_production_fleet_profile_service(
+        sessions, clock=lifecycle._clock, run_switch_operations=run_switch
+    )
+    requested: list[str] = []
+
+    def prepare(recipe_revision_id: str, *, actor: str):
+        requested.append(recipe_revision_id)
+        return [
+            make_blocker(
+                "recipe_image.preparing",
+                "Preparing the model and runtime image (prepare).",
+                severity="info",
+            )
+        ]
+
+    service.bind_preparation_starter(prepare)
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Fresh fleet",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "fresh-chat",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    # A fresh fleet: no runtime image has been built yet.
+    with sessions.begin() as session:
+        for build in session.scalars(select(RecipeBuild)):
+            build.state = "failed"
+
+    review = service.preview(profile.id)
+    assert not review.allowed
+    assert review.waits_for_preparation
+    assert [step.kind for step in review.preparation_steps] == ["prepare", "prepare"]
+
+    application = service.apply(profile.id, request_key=_uuid(901), actor="admin")
+
+    assert requested == [revision.id]  # the load asked for what it needs
+    assert application.state == "queued"  # waiting, not blocked or failed
+    assert {item.code for item in application.blockers} >= {"recipe_image.preparing"}
+
+    # The preparation finishes; the same application continues by itself.
+    with sessions.begin() as session:
+        for build in session.scalars(select(RecipeBuild)):
+            build.state = "succeeded"
+    now = [lifecycle._clock()]
+    service._clock = lambda: now[0]
+    for _ in range(6):
+        now[0] += timedelta(seconds=30)
+        service.tick()
+    assert service.application(application.id).state == "running"

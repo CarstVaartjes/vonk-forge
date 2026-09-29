@@ -60,7 +60,12 @@ from .distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )
-from .distributed_recovery import enforce_recovery_deadline, recovery_start_plan
+from .distributed_recovery import (
+    enforce_recovery_deadline,
+    recovery_start_plan,
+    run_node_reports_absent,
+    settle_absent_run_in_session,
+)
 from .install_admission import (
     InstallAdmissionBusy,
     InstallAdmissionService,
@@ -2318,6 +2323,23 @@ class RecipeOperationService:
                 )
                 run = session.get(RecipeRun, run_id)
                 assert run is not None
+                job = self._complete_absent_stop_in_session(
+                    session,
+                    run=run,
+                    admitted=admitted,
+                    actor=actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                    now=now,
+                )
+                if job is not None:
+                    if self._route_publications is not None:
+                        self._route_publications.withdraw_run_in_session(
+                            session, run_id, prepared=prepared
+                        )
+                    else:
+                        self._route_withdrawer(run_id)
+                    return self._view(job, session=session)
                 job = self._queue_stop_in_session(
                     session,
                     run=run,
@@ -2352,6 +2374,71 @@ class RecipeOperationService:
             ) from error
         self._agent_jobs.notify_available()
         return self.get(job.id)
+
+    def _complete_absent_stop_in_session(
+        self,
+        session: Session,
+        *,
+        run: RecipeRun,
+        admitted: StopPlan,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None,
+        now: datetime,
+    ) -> Job | None:
+        """Finish a Stop whose ranks every Spark already reports as not running.
+
+        There is nothing left to stop: the Sparks' own current report is the
+        proof, so the run is recorded stopped, its ports and memory are released
+        and the Stop succeeds without an agent round trip.
+        """
+
+        if admitted.missing_node_ids:
+            return None
+        nodes = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == run.id)
+                .order_by(RunNode.rank, RunNode.node_id)
+                .with_for_update(of=RunNode)
+            )
+        )
+        if not nodes or not all(
+            run_node_reports_absent(run, node, now) for node in nodes
+        ):
+            return None
+        ordinal = self._admit_workload_intent(
+            session,
+            kind="recipe.stop",
+            targets=sorted(node.node_id for node in nodes),
+            workload_intent_ordinal=workload_intent_ordinal,
+            now=now,
+        )
+        settle_absent_run_in_session(session, run, nodes, now)
+        payload: dict[str, object] = {
+            "schema_version": 1,
+            "owner_kind": "run",
+            "owner_id": run.id,
+            "plan_digest": admitted.plan_digest,
+            "workload_intent_ordinal": ordinal,
+        }
+        job = Job(
+            id=str(uuid.uuid4()),
+            request_id=request_id,
+            kind="recipe.stop",
+            state="succeeded",
+            actor=actor,
+            authority_revision=admitted.authority_digest.removeprefix("sha256:"),
+            targets=sorted(node.node_id for node in nodes),
+            payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+            payload=payload,
+            result=_validated_result("recipe.stop", {"stopped": True}),
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(job)
+        session.flush()
+        return job
 
     def queue_recovery_stop_in_session(
         self,
@@ -6661,6 +6748,66 @@ class RecipeOperationService:
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
+    @staticmethod
+    def _admit_workload_intent(
+        session: Session,
+        *,
+        kind: str,
+        targets: Sequence[str],
+        workload_intent_ordinal: int | None,
+        now: datetime,
+    ) -> int:
+        """Bind a request to the workload intent that owns its target Sparks.
+
+        A standalone request takes the next ordinal and fences older orders; a
+        child must carry its parent's exact, still-current ordinal.
+        """
+
+        try:
+            target_nodes = tuple(
+                lock_admission_rows(
+                    session,
+                    (
+                        AdmissionRowLock(
+                            "workload-target-nodes",
+                            AgentNode,
+                            select(AgentNode).where(AgentNode.node_id.in_(targets)),
+                        ),
+                    ),
+                ).get("workload-target-nodes", ())
+            )
+        except AdmissionLockBusy as error:
+            if kind == "recipe.install":
+                raise InstallAdmissionBusy("install.capacity_busy") from error
+            raise RunAdmissionBusy("run capacity writer is busy") from error
+        if tuple(node.node_id for node in target_nodes) != tuple(targets):
+            raise RecipeOperationConflict("workload intent target disappeared")
+        if workload_intent_ordinal is None:
+            next_ordinal = (
+                max(node.workload_intent_ordinal for node in target_nodes) + 1
+            )
+            for node in target_nodes:
+                node.workload_intent_ordinal = next_ordinal
+            try:
+                AgentJobService.request_superseded_workload_cancellation_in_session(
+                    session, targets, next_ordinal, now
+                )
+            except AdmissionLockBusy as error:
+                if kind == "recipe.install":
+                    raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise RunAdmissionBusy("run capacity writer is busy") from error
+            return next_ordinal
+        if (
+            type(workload_intent_ordinal) is not int
+            or workload_intent_ordinal < 1
+            or any(
+                node.workload_intent_ordinal != workload_intent_ordinal
+                for node in target_nodes
+            )
+        ):
+            raise RecipeOperationConflict("workload intent was superseded")
+        return workload_intent_ordinal
+
     def _queue_in_session(
         self,
         session: Session,
@@ -6741,49 +6888,13 @@ class RecipeOperationService:
         if kind in _WORKLOAD_INTENT_KINDS:
             # Only a standalone request admits a new intent. A child carries
             # its parent's exact ordinal and may not capture newer authority.
-            try:
-                target_nodes = tuple(
-                    lock_admission_rows(
-                        session,
-                        (
-                            AdmissionRowLock(
-                                "workload-target-nodes",
-                                AgentNode,
-                                select(AgentNode).where(AgentNode.node_id.in_(targets)),
-                            ),
-                        ),
-                    ).get("workload-target-nodes", ())
-                )
-            except AdmissionLockBusy as error:
-                if kind == "recipe.install":
-                    raise InstallAdmissionBusy("install.capacity_busy") from error
-                raise RunAdmissionBusy("run capacity writer is busy") from error
-            if tuple(node.node_id for node in target_nodes) != tuple(targets):
-                raise RecipeOperationConflict("workload intent target disappeared")
-            if workload_intent_ordinal is None:
-                next_ordinal = (
-                    max(node.workload_intent_ordinal for node in target_nodes) + 1
-                )
-                workload_intent_ordinal = next_ordinal
-                for node in target_nodes:
-                    node.workload_intent_ordinal = next_ordinal
-                try:
-                    AgentJobService.request_superseded_workload_cancellation_in_session(
-                        session, targets, next_ordinal, now
-                    )
-                except AdmissionLockBusy as error:
-                    if kind == "recipe.install":
-                        raise InstallAdmissionBusy("install.capacity_busy") from error
-                    raise RunAdmissionBusy("run capacity writer is busy") from error
-            elif (
-                type(workload_intent_ordinal) is not int
-                or workload_intent_ordinal < 1
-                or any(
-                    node.workload_intent_ordinal != workload_intent_ordinal
-                    for node in target_nodes
-                )
-            ):
-                raise RecipeOperationConflict("workload intent was superseded")
+            workload_intent_ordinal = self._admit_workload_intent(
+                session,
+                kind=kind,
+                targets=targets,
+                workload_intent_ordinal=workload_intent_ordinal,
+                now=now,
+            )
         job_payload: dict[str, object] = {
             "schema_version": 1,
             "owner_kind": owner_kind,

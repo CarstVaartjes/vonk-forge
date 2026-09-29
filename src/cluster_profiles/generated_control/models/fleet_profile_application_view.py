@@ -18,6 +18,7 @@ if TYPE_CHECKING:
   from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
   from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
   from ..models.fleet_profile_application_result import FleetProfileApplicationResult
+  from ..models.operation_blocker import OperationBlocker
 
 
 
@@ -46,7 +47,9 @@ class FleetProfileApplicationView:
             total_steps (int):
             updated_at (datetime.datetime):
             attempt (int | Unset):  Default: 1.
+            blockers (list[OperationBlocker] | Unset):
             cancellation (FleetProfileApplicationCancellationView | None | Unset):
+            next_attempt_at (datetime.datetime | None | Unset):
             retry_of_application_id (None | str | Unset):
      """
 
@@ -65,7 +68,9 @@ class FleetProfileApplicationView:
     total_steps: int
     updated_at: datetime.datetime
     attempt: int | Unset = 1
+    blockers: list[OperationBlocker] | Unset = UNSET
     cancellation: FleetProfileApplicationCancellationView | None | Unset = UNSET
+    next_attempt_at: datetime.datetime | None | Unset = UNSET
     retry_of_application_id: None | str | Unset = UNSET
 
 
@@ -76,6 +81,7 @@ class FleetProfileApplicationView:
         from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
         from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress # noqa: PLC0415
         from ..models.fleet_profile_application_result import FleetProfileApplicationResult # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         created_at = self.created_at.isoformat()
 
         current_operation_id: None | str
@@ -112,6 +118,15 @@ class FleetProfileApplicationView:
 
         attempt = self.attempt
 
+        blockers: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.blockers, Unset):
+            blockers = []
+            for blockers_item_data in self.blockers:
+                blockers_item = blockers_item_data.to_dict()
+                blockers.append(blockers_item)
+
+
+
         cancellation: dict[str, Any] | None | Unset
         if isinstance(self.cancellation, Unset):
             cancellation = UNSET
@@ -119,6 +134,14 @@ class FleetProfileApplicationView:
             cancellation = self.cancellation.to_dict()
         else:
             cancellation = self.cancellation
+
+        next_attempt_at: None | str | Unset
+        if isinstance(self.next_attempt_at, Unset):
+            next_attempt_at = UNSET
+        elif isinstance(self.next_attempt_at, datetime.datetime):
+            next_attempt_at = self.next_attempt_at.isoformat()
+        else:
+            next_attempt_at = self.next_attempt_at
 
         retry_of_application_id: None | str | Unset
         if isinstance(self.retry_of_application_id, Unset):
@@ -147,8 +170,12 @@ class FleetProfileApplicationView:
         })
         if attempt is not UNSET:
             field_dict["attempt"] = attempt
+        if blockers is not UNSET:
+            field_dict["blockers"] = blockers
         if cancellation is not UNSET:
             field_dict["cancellation"] = cancellation
+        if next_attempt_at is not UNSET:
+            field_dict["next_attempt_at"] = next_attempt_at
         if retry_of_application_id is not UNSET:
             field_dict["retry_of_application_id"] = retry_of_application_id
 
@@ -161,6 +188,7 @@ class FleetProfileApplicationView:
         from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
         from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress # noqa: PLC0415
         from ..models.fleet_profile_application_result import FleetProfileApplicationResult # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         d = dict(src_dict)
         created_at = datetime.datetime.fromisoformat(d.pop("created_at"))
 
@@ -232,6 +260,18 @@ class FleetProfileApplicationView:
 
         attempt = d.pop("attempt", UNSET)
 
+        _blockers = d.pop("blockers", UNSET)
+        blockers: list[OperationBlocker] | Unset = UNSET
+        if _blockers is not UNSET:
+            blockers = []
+            for blockers_item_data in _blockers:
+                blockers_item = OperationBlocker.from_dict(blockers_item_data)
+
+
+
+                blockers.append(blockers_item)
+
+
         def _parse_cancellation(data: object) -> FleetProfileApplicationCancellationView | None | Unset:
             if data is None:
                 return data
@@ -250,6 +290,26 @@ class FleetProfileApplicationView:
             return cast(FleetProfileApplicationCancellationView | None | Unset, data)
 
         cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
+
+
+        def _parse_next_attempt_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                next_attempt_at_type_0 = datetime.datetime.fromisoformat(data)
+
+
+
+                return next_attempt_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
 
 
         def _parse_retry_of_application_id(data: object) -> None | str | Unset:
@@ -278,7 +338,9 @@ class FleetProfileApplicationView:
             total_steps=total_steps,
             updated_at=updated_at,
             attempt=attempt,
+            blockers=blockers,
             cancellation=cancellation,
+            next_attempt_at=next_attempt_at,
             retry_of_application_id=retry_of_application_id,
         )
 

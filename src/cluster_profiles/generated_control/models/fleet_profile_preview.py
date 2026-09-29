@@ -57,8 +57,10 @@ class FleetProfilePreview:
             scope (FleetProfileScopePreview):
             steps (list[FleetProfilePlanStep]):
             summary (FleetProfilePlanSummary):
+            preparation_steps (list[FleetProfilePlanStep] | Unset):
             preparations (list[FleetProfileAssignmentPreparation] | Unset):
             schema_version (Literal[2] | Unset):  Default: 2.
+            waits_for_preparation (bool | Unset):  Default: False.
      """
 
     admission_decisions: list[FleetProfileAdmissionDecision]
@@ -79,8 +81,10 @@ class FleetProfilePreview:
     scope: FleetProfileScopePreview
     steps: list[FleetProfilePlanStep]
     summary: FleetProfilePlanSummary
+    preparation_steps: list[FleetProfilePlanStep] | Unset = UNSET
     preparations: list[FleetProfileAssignmentPreparation] | Unset = UNSET
     schema_version: Literal[2] | Unset = 2
+    waits_for_preparation: bool | Unset = False
 
 
 
@@ -175,6 +179,15 @@ class FleetProfilePreview:
 
         summary = self.summary.to_dict()
 
+        preparation_steps: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.preparation_steps, Unset):
+            preparation_steps = []
+            for preparation_steps_item_data in self.preparation_steps:
+                preparation_steps_item = preparation_steps_item_data.to_dict()
+                preparation_steps.append(preparation_steps_item)
+
+
+
         preparations: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.preparations, Unset):
             preparations = []
@@ -185,6 +198,8 @@ class FleetProfilePreview:
 
 
         schema_version = self.schema_version
+
+        waits_for_preparation = self.waits_for_preparation
 
 
         field_dict: dict[str, Any] = {}
@@ -209,10 +224,14 @@ class FleetProfilePreview:
             "steps": steps,
             "summary": summary,
         })
+        if preparation_steps is not UNSET:
+            field_dict["preparation_steps"] = preparation_steps
         if preparations is not UNSET:
             field_dict["preparations"] = preparations
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
+        if waits_for_preparation is not UNSET:
+            field_dict["waits_for_preparation"] = waits_for_preparation
 
         return field_dict
 
@@ -359,6 +378,18 @@ class FleetProfilePreview:
 
 
 
+        _preparation_steps = d.pop("preparation_steps", UNSET)
+        preparation_steps: list[FleetProfilePlanStep] | Unset = UNSET
+        if _preparation_steps is not UNSET:
+            preparation_steps = []
+            for preparation_steps_item_data in _preparation_steps:
+                preparation_steps_item = FleetProfilePlanStep.from_dict(preparation_steps_item_data)
+
+
+
+                preparation_steps.append(preparation_steps_item)
+
+
         _preparations = d.pop("preparations", UNSET)
         preparations: list[FleetProfileAssignmentPreparation] | Unset = UNSET
         if _preparations is not UNSET:
@@ -374,6 +405,8 @@ class FleetProfilePreview:
         schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
+
+        waits_for_preparation = d.pop("waits_for_preparation", UNSET)
 
         fleet_profile_preview = cls(
             admission_decisions=admission_decisions,
@@ -394,8 +427,10 @@ class FleetProfilePreview:
             scope=scope,
             steps=steps,
             summary=summary,
+            preparation_steps=preparation_steps,
             preparations=preparations,
             schema_version=schema_version,
+            waits_for_preparation=waits_for_preparation,
         )
 
         return fleet_profile_preview
