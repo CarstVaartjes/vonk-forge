@@ -145,6 +145,17 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
     ),
 }
 
+# DO_NOT_TRACK is the engine-independent opt-out convention; the platform sets
+# it for every runtime so recipes never carry it.
+_ENGINE_TELEMETRY = {
+    _slug: EngineTelemetryContract(
+        _contract.adapter,
+        _contract.path,
+        (*_contract.environment, ("DO_NOT_TRACK", "1")),
+    )
+    for _slug, _contract in _ENGINE_TELEMETRY.items()
+}
+
 # These names are paths rather than recipe tuning knobs. They are injected by
 # the platform; a recipe cannot repeat them, move them, or introduce a second
 # writable root.
