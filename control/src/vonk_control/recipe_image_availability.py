@@ -89,6 +89,13 @@ from .models import (
     RecipeBuild,
     RuntimeImageAuthorization,
 )
+from .operation_blockers import (
+    OperationBlocker,
+    bound_blockers,
+    dump_blockers,
+    make_blocker,
+    read_blockers,
+)
 from .operation_contract import (
     AvailabilityOperationFailure,
     normalize_operation_progress,
@@ -136,6 +143,7 @@ if TYPE_CHECKING:
     from .recipe_update_batches import RecipeUpdateClaim
 
 _LOGGER = logging.getLogger(__name__)
+_PREPARATION_RETRY_QUIET = timedelta(minutes=15)
 SCHEMA_VERSION = 2
 OPERATION_KIND = "recipe.image.availability.v2"
 REMOVE_OPERATION_KIND = RECIPE_CACHE_REMOVE_KIND
@@ -248,9 +256,11 @@ class RecipeImageAvailabilityError(RuntimeError):
         required_bytes: int | None = None,
         free_bytes: int | None = None,
         shortfall_bytes: int | None = None,
+        blockers: Sequence[OperationBlocker] = (),
     ) -> None:
         self.code = code
         self.detail = detail
+        self.blockers = tuple(blockers)
         self.retryable = retryable
         self.retry_after_seconds = retry_after_seconds
         self.retry_time = retry_time
@@ -396,6 +406,8 @@ class RecipeImageAvailabilityView:
     image_state: str | None = None
     image_failure: Mapping[str, object] | None = None
     cancellation: RecipeOperationCancellationResult | None = None
+    blockers: tuple[OperationBlocker, ...] = ()
+    next_attempt_at: str | None = None
 
     def document(self) -> dict[str, object]:
         return {
@@ -422,6 +434,8 @@ class RecipeImageAvailabilityView:
                 else self.cancellation.model_dump(mode="json", exclude_none=True)
             ),
             "supported_actions": list(self.supported_actions),
+            "blockers": [item.model_dump(mode="json") for item in self.blockers],
+            "next_attempt_at": self.next_attempt_at,
             "children": ([] if self.model_child is None else [dict(self.model_child)]),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -3213,6 +3227,67 @@ class RecipeImageAvailabilityService:
         )
         return self._start_request(intent, actor=actor, request_id=request_id)
 
+    def ensure_preparation(
+        self, recipe_revision_id: str, *, actor: str
+    ) -> tuple[OperationBlocker, ...]:
+        """Start, or find, the preparation a load asks for; say what it waits on.
+
+        One deterministic request identity per revision keeps repeated asks on
+        the same durable operation. A preparation that ended for good is asked
+        again only after a quiet period, so a hopeless one cannot spin.
+        """
+
+        namespace = uuid.NAMESPACE_URL
+        request_id = str(
+            uuid.uuid5(
+                namespace, f"vonk-forge:profile-preparation:{recipe_revision_id}"
+            )
+        )
+        for _ in range(16):
+            view = self.start(recipe_revision_id, actor=actor, request_id=request_id)
+            if view.state not in {"failed", "cancelled"}:
+                break
+            updated = datetime.fromisoformat(view.updated_at)
+            updated = updated if updated.tzinfo else updated.replace(tzinfo=UTC)
+            retry_at = updated + _PREPARATION_RETRY_QUIET
+            now = self._clock()
+            now = now if now.tzinfo else now.replace(tzinfo=UTC)
+            if now < retry_at:
+                failure = view.failure or {}
+                return (
+                    make_blocker(
+                        str(failure.get("code") or "recipe_image.preparation_failed"),
+                        f"Preparing this recipe failed: "
+                        f"{failure.get('detail') or view.state}. "
+                        f"The Controller asks again after {retry_at.isoformat()}.",
+                        severity="error",
+                    ),
+                )
+            request_id = str(
+                uuid.uuid5(
+                    namespace,
+                    f"vonk-forge:profile-preparation:{recipe_revision_id}:{view.id}",
+                )
+            )
+        else:
+            return (
+                make_blocker(
+                    "recipe_image.preparation_failed",
+                    "Preparing this recipe kept failing; inspect its operations.",
+                    severity="error",
+                ),
+            )
+        if view.state == "succeeded":
+            return ()
+        return view.blockers or (
+            make_blocker(
+                "recipe_image.preparing",
+                "Preparing the model and runtime image "
+                f"({view.progress.get('phase', 'prepare')}).",
+                severity="info",
+            ),
+        )
+
     def _refresh_authority(
         self, recipe_revision_id: str, *, force: bool
     ) -> tuple[RecipeDefinition | Mapping[str, object], Mapping[str, object]]:
@@ -4439,6 +4514,8 @@ class RecipeImageAvailabilityService:
                 completed_payload = dict(operation.payload)
                 completed_payload.pop("failure", None)
                 completed_payload.pop("retry_after_at", None)
+                completed_payload.pop("blockers", None)
+                operation.status_reason = None
                 operation.payload = completed_payload | {
                     "stage": "available",
                     "claim_owner": None,
@@ -4628,11 +4705,23 @@ class RecipeImageAvailabilityService:
             now = self._clock()
             operation.state = "partial"
             operation.updated_at = now
-            operation.payload = dict(operation.payload) | {
+            payload = dict(operation.payload) | {
                 "claim_owner": None,
                 "claim_until": None,
                 "retry_after_at": _iso(now + timedelta(seconds=1)),
             }
+            self._record_blockers(
+                operation,
+                payload,
+                [
+                    make_blocker(
+                        "recipe_image.waiting_for_model",
+                        "Waiting for the model download to finish.",
+                        severity="info",
+                    )
+                ],
+            )
+            operation.payload = payload
 
     def _prepare_claimed_image(
         self,
@@ -4965,6 +5054,63 @@ class RecipeImageAvailabilityService:
             )
             operation.updated_at = self._clock()
 
+    @staticmethod
+    def _record_blockers(
+        operation: Job,
+        payload: dict[str, object],
+        blockers: Sequence[OperationBlocker],
+    ) -> None:
+        """Store the current wait reasons; log one line when they change."""
+
+        before = {
+            (item.code, tuple(item.node_ids))
+            for item in read_blockers(payload.get("blockers"))
+        }
+        stored = dump_blockers(blockers)
+        payload["blockers"] = stored
+        after = {(item.code, tuple(item.node_ids)) for item in bound_blockers(blockers)}
+        if before != after and stored:
+            _LOGGER.log(
+                logging.WARNING
+                if any(item["severity"] == "error" for item in stored)
+                else logging.INFO,
+                "recipe image preparation %s is waiting: %s",
+                operation.id,
+                "; ".join(f"{item['code']}: {item['detail']}" for item in stored[:4]),
+            )
+
+    def note_waiting_for_worker(self, busy: int) -> None:
+        """Say why queued preparations are not running: every worker is busy."""
+
+        with self._sessions.begin() as session:
+            for operation in session.scalars(
+                select(Job)
+                .where(
+                    Job.kind == OPERATION_KIND,
+                    Job.state == "queued",
+                    Job.current_attempt == 0,
+                )
+                .order_by(Job.created_at, Job.id)
+                .limit(16)
+                .with_for_update(skip_locked=True)
+            ):
+                payload = dict(operation.payload)
+                if payload.get("blockers"):
+                    continue
+                self._record_blockers(
+                    operation,
+                    payload,
+                    [
+                        make_blocker(
+                            "recipe_image.waiting_for_worker",
+                            f"All {busy} image preparation workers are busy; "
+                            "this starts when one is free.",
+                            severity="info",
+                        )
+                    ],
+                )
+                operation.payload = payload
+
     def _fail(
         self,
         claim: RecipeImageAvailabilityClaim,
@@ -5043,6 +5189,14 @@ class RecipeImageAvailabilityService:
                 return
             payload.pop("image_reference_intent", None)
             payload |= {"retry": retry, "failure": failure}
+            blockers = list(getattr(error, "blockers", ())) or [
+                make_blocker(
+                    str(code),
+                    str(detail),
+                    severity="warning" if bounded else "error",
+                )
+            ]
+            self._record_blockers(operation, payload, blockers)
             if bounded and (
                 str(code) in _INTEGRITY_FAILURE_CODES or is_redownload(str(code))
             ):
@@ -5081,6 +5235,7 @@ class RecipeImageAvailabilityService:
             payload["claim_until"] = None
             operation.payload = payload
             operation.state = "queued" if bounded else "failed"
+            operation.status_reason = str(detail)[:1024]
             operation.updated_at = self._clock()
             operation.current_attempt = int(operation.current_attempt)
 
@@ -5167,6 +5322,13 @@ class RecipeImageAvailabilityService:
         )
         raw_model_digest = payload.get("model_digest")
         raw_build_input_sha256 = payload.get("build_input_sha256")
+        raw_retry_at = payload.get("retry_after_at")
+        next_attempt_at = (
+            raw_retry_at
+            if operation.state in {"queued", "partial"}
+            and isinstance(raw_retry_at, str)
+            else None
+        )
         return RecipeImageAvailabilityView(
             id=operation.id,
             request_id=operation.request_id,
@@ -5199,6 +5361,12 @@ class RecipeImageAvailabilityService:
             updated_at=_iso(operation.updated_at),
             model_child=(None if model_child is None else dict(model_child)),
             cancellation=self._stored_cancellation(operation),
+            blockers=tuple(
+                read_blockers(payload.get("blockers"))
+                if operation.state in {"queued", "partial", "failed"}
+                else ()
+            ),
+            next_attempt_at=next_attempt_at,
         )
 
 

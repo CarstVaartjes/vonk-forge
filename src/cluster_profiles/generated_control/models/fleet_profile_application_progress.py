@@ -19,6 +19,7 @@ if TYPE_CHECKING:
   from ..models.fleet_profile_child_progress import FleetProfileChildProgress
   from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
   from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
+  from ..models.operation_blocker import OperationBlocker
 
 
 
@@ -37,6 +38,7 @@ class FleetProfileApplicationProgress:
             admission_pending (bool | Unset):  Default: False.
             admission_retry_at (datetime.datetime | None | Unset):
             attempt (int | Unset):  Default: 1.
+            blockers (list[OperationBlocker] | Unset):
             cancellation (FleetProfileApplicationCancellationIntent | None | Unset):
             child_progress (FleetProfileChildProgress | None | Unset):
             child_source (Literal['switch-adapter'] | None | Unset):
@@ -56,6 +58,7 @@ class FleetProfileApplicationProgress:
     admission_pending: bool | Unset = False
     admission_retry_at: datetime.datetime | None | Unset = UNSET
     attempt: int | Unset = 1
+    blockers: list[OperationBlocker] | Unset = UNSET
     cancellation: FleetProfileApplicationCancellationIntent | None | Unset = UNSET
     child_progress: FleetProfileChildProgress | None | Unset = UNSET
     child_source: Literal['switch-adapter'] | None | Unset = UNSET
@@ -80,6 +83,7 @@ class FleetProfileApplicationProgress:
         from ..models.fleet_profile_child_progress import FleetProfileChildProgress # noqa: PLC0415
         from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration # noqa: PLC0415
         from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         admission_attempt = self.admission_attempt
 
         admission_pending = self.admission_pending
@@ -93,6 +97,15 @@ class FleetProfileApplicationProgress:
             admission_retry_at = self.admission_retry_at
 
         attempt = self.attempt
+
+        blockers: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.blockers, Unset):
+            blockers = []
+            for blockers_item_data in self.blockers:
+                blockers_item = blockers_item_data.to_dict()
+                blockers.append(blockers_item)
+
+
 
         cancellation: dict[str, Any] | None | Unset
         if isinstance(self.cancellation, Unset):
@@ -185,6 +198,8 @@ class FleetProfileApplicationProgress:
             field_dict["admission_retry_at"] = admission_retry_at
         if attempt is not UNSET:
             field_dict["attempt"] = attempt
+        if blockers is not UNSET:
+            field_dict["blockers"] = blockers
         if cancellation is not UNSET:
             field_dict["cancellation"] = cancellation
         if child_progress is not UNSET:
@@ -223,6 +238,7 @@ class FleetProfileApplicationProgress:
         from ..models.fleet_profile_child_progress import FleetProfileChildProgress # noqa: PLC0415
         from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration # noqa: PLC0415
         from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         d = dict(src_dict)
         admission_attempt = d.pop("admission_attempt", UNSET)
 
@@ -249,6 +265,18 @@ class FleetProfileApplicationProgress:
 
 
         attempt = d.pop("attempt", UNSET)
+
+        _blockers = d.pop("blockers", UNSET)
+        blockers: list[OperationBlocker] | Unset = UNSET
+        if _blockers is not UNSET:
+            blockers = []
+            for blockers_item_data in _blockers:
+                blockers_item = OperationBlocker.from_dict(blockers_item_data)
+
+
+
+                blockers.append(blockers_item)
+
 
         def _parse_cancellation(data: object) -> FleetProfileApplicationCancellationIntent | None | Unset:
             if data is None:
@@ -427,6 +455,7 @@ class FleetProfileApplicationProgress:
             admission_pending=admission_pending,
             admission_retry_at=admission_retry_at,
             attempt=attempt,
+            blockers=blockers,
             cancellation=cancellation,
             child_progress=child_progress,
             child_source=child_source,

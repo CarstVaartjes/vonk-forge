@@ -18,7 +18,7 @@ from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import String, case, cast, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts.recipe import RecipeTopology
 
@@ -114,6 +114,11 @@ from .models import (
     RunNode,
     RuntimeImageAuthorization,
     User,
+)
+from .operation_blockers import (
+    OperationBlocker,
+    bound_blockers,
+    make_blocker,
 )
 from .operation_contract import OperationFailureEvidence
 from .operation_progress import project_progress
@@ -258,8 +263,28 @@ def _profile_activity_state_expression():
             ),
             "cancelling",
         ),
+        # A failed application with a scheduled retry is presented as queued.
+        (
+            (FleetProfileApplication.state == "failed")
+            & FleetProfileApplication.progress["retry_due_at"].as_string().is_not(None),
+            "queued",
+        ),
         else_=FleetProfileApplication.state,
     )
+
+
+class PreparationStarter(Protocol):
+    """Start (or find) the durable preparation of one exact recipe revision.
+
+    The Controller prepares what a load needs by itself: the model download and
+    the runtime image build.  The starter is idempotent for one revision and
+    returns the reasons the preparation is not finished yet, so the load can
+    say what it is waiting for.
+    """
+
+    def __call__(
+        self, recipe_revision_id: str, *, actor: str
+    ) -> Sequence[OperationBlocker]: ...
 
 
 class _AssessmentProvider(Protocol):
@@ -611,7 +636,13 @@ def _require_recovery_preparation(
     assignment_id: str,
     expected: RolloutPreparation | None,
     observed: RolloutPreparation | None,
+    *,
+    first_binding: bool = False,
 ) -> None:
+    if expected is None and first_binding and observed is not None:
+        # The accepted load was still waiting for its preparation, so it never
+        # named an identity: the preparation it asked for is bound now.
+        return
     if expected is None:
         raise _FleetProfileRecoveryBindingConflict(
             "profile.recovery_identity_unavailable: The accepted artifact identity "
@@ -650,6 +681,89 @@ def _preview_blocker_codes(preview: FleetProfilePreview) -> list[str]:
     ]
 
 
+def _preview_blockers(preview: FleetProfilePreview) -> list[OperationBlocker]:
+    """The typed reasons a reviewed plan cannot be admitted yet, node ids included."""
+
+    blockers = [
+        make_blocker(reason.code, reason.detail, severity=reason.severity)
+        for reason in preview.reasons
+        if reason.severity != "info"
+    ]
+    for item in preview.assessments:
+        blockers.extend(
+            make_blocker(
+                reason.code,
+                reason.detail,
+                severity="error" if reason.severity == "blocker" else reason.severity,
+                node_ids=reason.node_ids,
+            )
+            for reason in item.assessment.blockers
+        )
+    return bound_blockers(blockers)
+
+
+#: Blockers only the Controller's own preparation (model download, runtime image
+#: build) resolves; a load that has just these waits instead of being refused.
+_PREPARATION_RESOLVABLE_CODES = frozenset(
+    {"profile.preparation_unavailable", "run-switch.recipe-build-unavailable"}
+)
+
+
+def _assignments_needing_preparation(
+    assignments: Sequence[FleetProfileAssignmentPreview],
+    prepared: set[str],
+    reasons: Sequence[FleetProfileReason],
+    assessments: Sequence[FleetProfileAssignmentAssessment],
+) -> list[FleetProfileAssignmentPreview]:
+    """Assignments that must place assets nobody has prepared yet.
+
+    Anything the fleet or the recipe cannot resolve by itself (a Spark that is
+    missing, an incomplete topology) never starts a preparation.
+    """
+
+    assessed_missing = {
+        item.assignment_id
+        for item in assessments
+        if any(
+            reason.code in _PREPARATION_RESOLVABLE_CODES
+            for reason in item.assessment.blockers
+        )
+    }
+    reason_missing = any(
+        reason.code in _PREPARATION_RESOLVABLE_CODES for reason in reasons
+    )
+    return [
+        assignment
+        for assignment in assignments
+        if "switch" in assignment.actions
+        and not any(reason.severity == "error" for reason in assignment.reasons)
+        and (
+            assignment.assignment_id in assessed_missing
+            or (reason_missing and assignment.assignment_id not in prepared)
+        )
+    ]
+
+
+def _progress_with_blockers(
+    progress: FleetProfileApplicationProgress,
+    blockers: Sequence[OperationBlocker],
+    **changes: object,
+) -> dict[str, object]:
+    """Canonical progress document carrying the application's current blockers."""
+
+    data = progress.model_dump(mode="json")
+    data["blockers"] = [
+        item.model_dump(mode="json") for item in bound_blockers(blockers)
+    ]
+    data.update(changes)
+    return read_stored_model(
+        FleetProfileApplicationProgress,
+        canonical_message(data),
+        strict=True,
+        from_json=True,
+    ).model_dump(mode="json")
+
+
 def _profile_preview_is_waitable(preview: FleetProfilePreview) -> bool:
     """Any blocker except a security boundary parks the intent for re-planning."""
     return not any(
@@ -684,6 +798,7 @@ def _require_recovery_preparations(
             assignment.assignment_id,
             expected.get(assignment.assignment_id),
             observed.get(assignment.assignment_id),
+            first_binding=not accepted.allowed,
         )
 
 
@@ -1713,7 +1828,10 @@ class RunSwitchFleetProfileAdapter:
         )
         if expected_preparation is not None or progress.retry_of_application_id:
             _require_recovery_preparation(
-                assignment.id, expected_preparation, plan.preparation
+                assignment.id,
+                expected_preparation,
+                plan.preparation,
+                first_binding=not accepted.allowed,
             )
         if not plan.allowed:
             raise RunSwitchOperationConflict(
@@ -2581,6 +2699,7 @@ class FleetProfileService:
         self._switch_adapter = switch_adapter
         self._cache_resolver = cache_resolver
         self._assessment_provider = assessment_provider
+        self._preparation_starter: PreparationStarter | None = None
         # Round-robin position of the bounded automatic-recovery scan, so rows
         # that stay ineligible cannot starve later due rows.
         self._recovery_cursor: str | None = None
@@ -3390,6 +3509,7 @@ class FleetProfileService:
         accepted_profile_definition: FleetProfileDefinition | None = None,
         allow_pending_cache_rebuild: bool = False,
         profile_application_id: str | None = None,
+        excluded_application_id: str | None = None,
     ) -> FleetProfilePreview:
         now = _aware(self._clock())
         with self._sessions() as session:
@@ -3472,6 +3592,7 @@ class FleetProfileService:
                 target_nodes,
                 installation_policy,
                 expected_images=recovery_images,
+                excluded_application_id=excluded_application_id,
             )
             adapter_switch_needed = control.switch_needed
             changed_nodes = control.changed_nodes
@@ -3775,6 +3896,39 @@ class FleetProfileService:
                 blockers=blocker_count,
             )
             effects = control.effects
+            preparation_steps: list[FleetProfilePlanStep] = []
+            if self._preparation_starter is not None:
+                for assignment_preview in _assignments_needing_preparation(
+                    assignment_previews,
+                    {item.assignment_id for item in assignment_preparations},
+                    reasons,
+                    assignment_assessments,
+                ):
+                    title = assignment_preview.recipe_title
+                    for label in (
+                        f"Download the model files for {title} (skipped when cached)",
+                        f"Build the runtime image for {title} (skipped when built)",
+                    ):
+                        preparation_steps.append(
+                            FleetProfilePlanStep(
+                                index=len(preparation_steps),
+                                kind="prepare",
+                                node_ids=list(assignment_preview.node_ids),
+                                label=label,
+                            )
+                        )
+            blocking_codes = {
+                reason.code for reason in reasons if reason.severity == "error"
+            } | {
+                reason.code
+                for item in assignment_assessments
+                for reason in item.assessment.blockers
+            }
+            waits_for_preparation = bool(
+                preparation_steps
+                and blocker_count > 0
+                and blocking_codes <= _PREPARATION_RESOLVABLE_CODES
+            )
             ordered_preparations = sorted(
                 assignment_preparations, key=lambda item: item.assignment_id
             )
@@ -3814,6 +3968,8 @@ class FleetProfileService:
                 ],
                 effects=effects,
                 steps=steps,
+                preparation_steps=preparation_steps,
+                waits_for_preparation=waits_for_preparation,
                 reasons=reasons,
             )
             return FleetProfilePreview(
@@ -4384,6 +4540,7 @@ class FleetProfileService:
         reason: str,
         *,
         retry_delay: timedelta | None = None,
+        blockers: Sequence[OperationBlocker] | None = None,
     ) -> FleetProfileApplicationView:
         """Record bounded retry state after a nonblocking admission refusal."""
 
@@ -4401,16 +4558,33 @@ class FleetProfileService:
             next_retry = now + (
                 _admission_retry_delay(attempt) if retry_delay is None else retry_delay
             )
-            progress_data = progress.model_dump(mode="json")
-            progress_data["admission_pending"] = True
-            progress_data["admission_attempt"] = attempt
-            progress_data["admission_retry_at"] = next_retry.isoformat()
-            row.progress = read_stored_model(
-                FleetProfileApplicationProgress,
-                canonical_message(progress_data),
-                strict=True,
-                from_json=True,
-            ).model_dump(mode="json")
+            current_blockers = (
+                list(blockers)
+                if blockers is not None
+                else [make_blocker("profile.admission_busy", reason)]
+            )
+            row.progress = _progress_with_blockers(
+                progress,
+                current_blockers,
+                admission_pending=True,
+                admission_attempt=attempt,
+                admission_retry_at=next_retry.isoformat(),
+            )
+            if {(item.code, tuple(item.node_ids)) for item in current_blockers} != {
+                (item.code, tuple(item.node_ids)) for item in progress.blockers
+            }:
+                _LOGGER.log(
+                    logging.WARNING
+                    if any(item.severity == "error" for item in current_blockers)
+                    else logging.INFO,
+                    "profile application %s is waiting to be admitted: %s; "
+                    "next attempt %s",
+                    application_id,
+                    "; ".join(
+                        f"{item.code}: {item.detail}" for item in current_blockers[:4]
+                    ),
+                    next_retry.isoformat(),
+                )
             # Admission retries itself at ``admission_retry_at``; no operator
             # action is required, so the row stays queued with its next due time.
             row.state = "queued"
@@ -4628,11 +4802,15 @@ class FleetProfileService:
                     operation_kind="fleet-profile.apply",
                     select_profile=True,
                 )
+                blockers = _preview_blockers(preview) + self._request_preparations(
+                    preview, actor=actor
+                )
                 return self._defer_pending_application(
                     pending.id,
                     "Waiting for current Fleet conditions: "
-                    + "; ".join(_preview_blocker_codes(preview)[:8])
+                    + "; ".join(item.code for item in blockers[:8])
                     + ".",
+                    blockers=blockers,
                 )
             pending = self._create_pending_application(
                 preview,
@@ -5497,6 +5675,89 @@ class FleetProfileService:
             for other in others
         )
 
+    def bind_preparation_starter(self, starter: PreparationStarter) -> None:
+        """Attach the Controller's preparation authority after startup wiring."""
+
+        self._preparation_starter = starter
+
+    def _request_preparations(
+        self, preview: FleetProfilePreview, *, actor: str
+    ) -> list[OperationBlocker]:
+        """Enqueue the model and image preparation a blocked load is missing.
+
+        A load asks for what it needs: an assignment that must place assets the
+        Controller has not prepared gets its preparation started here, and the
+        returned reasons say how far along it is. Nothing the fleet or recipe
+        cannot resolve by itself starts a preparation.
+        """
+
+        starter = self._preparation_starter
+        if starter is None:
+            return []
+        blockers: list[OperationBlocker] = []
+        for assignment in _assignments_needing_preparation(
+            preview.assignments,
+            {item.assignment_id for item in preview.preparations},
+            preview.reasons,
+            preview.assessments,
+        ):
+            try:
+                blockers.extend(starter(assignment.recipe_revision_id, actor=actor))
+            except Exception as error:  # noqa: BLE001 - a load never fails on this
+                blockers.append(
+                    make_blocker(
+                        "profile.preparation_not_started",
+                        f"Preparing {assignment.recipe_title} could not be "
+                        f"started yet: {error}",
+                        severity="warning",
+                    )
+                )
+        return blockers
+
+    def _park_for_retry(
+        self,
+        row: FleetProfileApplication,
+        progress: FleetProfileApplicationProgress,
+        blockers: Sequence[OperationBlocker],
+    ) -> None:
+        """Record why an application waits and when it will be checked again.
+
+        The application is not failed: it keeps its accepted intent and the
+        Controller retries it when conditions change. Its blockers replace the
+        previous list, and one log line names a change of reason (not every retry).
+        """
+
+        now = _aware(self._clock())
+        due = now + _cache_recovery_delay(progress.attempt)
+        blockers = bound_blockers(blockers)
+        row.progress = _progress_with_blockers(
+            progress,
+            blockers,
+            attempt=progress.attempt + 1,
+            retry_due_at=due.isoformat(),
+        )
+        lead = (
+            f"{blockers[0].code}: {blockers[0].detail}"
+            if blockers
+            else "current Fleet conditions"
+        )
+        row.status_reason = (
+            f"Waiting to retry ({lead}); next attempt at {due.isoformat()}"
+        )[:512]
+        row.updated_at = now
+        previous = {(item.code, tuple(item.node_ids)) for item in progress.blockers}
+        if previous != {(item.code, tuple(item.node_ids)) for item in blockers}:
+            _LOGGER.log(
+                logging.WARNING
+                if any(item.severity == "error" for item in blockers)
+                else logging.INFO,
+                "profile application %s is waiting: %s; next attempt %s",
+                row.id,
+                "; ".join(f"{item.code}: {item.detail}" for item in blockers[:4])
+                or "current Fleet conditions",
+                due.isoformat(),
+            )
+
     def retry(
         self,
         application_id: str,
@@ -5604,24 +5865,12 @@ class FleetProfileService:
                         FleetProfileApplication, application_id, with_for_update=True
                     )
                     if row is not None and self._retry_eligible(session, row):
-                        progress = _persisted_profile_progress(row)
-                        progress_data = progress.model_dump(mode="json")
-                        progress_data["attempt"] = progress.attempt + 1
-                        due = _aware(self._clock()) + _cache_recovery_delay(
-                            progress.attempt
+                        self._park_for_retry(
+                            row,
+                            _persisted_profile_progress(row),
+                            _preview_blockers(preview)
+                            + self._request_preparations(preview, actor=actor),
                         )
-                        progress_data["retry_due_at"] = due.isoformat()
-                        row.progress = read_stored_model(
-                            FleetProfileApplicationProgress,
-                            canonical_message(progress_data),
-                            strict=True,
-                            from_json=True,
-                        ).model_dump(mode="json")
-                        row.status_reason = (
-                            "Retrying after current Fleet conditions change; "
-                            f"next attempt at {due.isoformat()}"
-                        )
-                        row.updated_at = _aware(self._clock())
                         return self._application_view(row)
             raise FleetProfileConflict(
                 "Current Fleet state blocks application recovery"
@@ -5719,12 +5968,7 @@ class FleetProfileService:
                     statement = statement.where(boundary)
                 rows = tuple(session.scalars(statement.limit(limit)))
                 return OperationListPage(
-                    items=[
-                        self._operation_item(
-                            row, retry_available=self._retry_eligible(session, row)
-                        )
-                        for row in rows
-                    ],
+                    items=[self._activity_item(session, row) for row in rows],
                     next_cursor=None,
                     total=total,
                 )
@@ -5734,14 +5978,30 @@ class FleetProfileService:
                 row = session.get(FleetProfileApplication, operation_id)
                 if row is None:
                     raise KeyError(operation_id)
-                return self._operation_item(
-                    row, retry_available=self._retry_eligible(session, row)
-                )
+                return self._activity_item(session, row)
 
         return OperationProvider(
             family="fleet-profile",
             list_operations=list_operations,
             get_operation=get_operation,
+        )
+
+    def _activity_item(
+        self, session: Session, row: FleetProfileApplication
+    ) -> dict[str, object]:
+        """One Activity row, with retry facts read once in the row's session."""
+
+        try:
+            progress = _canonical_progress(row.progress)
+            retrying = row.state == "failed" and self._recovery_wanted(
+                session, row, progress
+            )
+        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+            retrying = False
+        return self._operation_item(
+            row,
+            retry_available=self._retry_eligible(session, row),
+            retrying=retrying,
         )
 
     @staticmethod
@@ -5777,7 +6037,11 @@ class FleetProfileService:
 
     @classmethod
     def _operation_item(
-        cls, row: FleetProfileApplication, *, retry_available: bool = False
+        cls,
+        row: FleetProfileApplication,
+        *,
+        retry_available: bool = False,
+        retrying: bool = False,
     ) -> dict[str, object]:
         """Project profile progress and its operator-visible failure into Activity.
 
@@ -5796,6 +6060,18 @@ class FleetProfileService:
             return cls._unreadable_operation_item(row)
         cancellation = _application_cancellation_view(row, plan, typed_progress)
         state = _profile_activity_state(row.state, typed_progress.cancellation)
+        if retrying and state == "failed":
+            # The Controller will retry this by itself: it is waiting, not failed.
+            state = "queued"
+        next_attempt = None
+        if state == "queued":
+            next_attempt = (
+                typed_progress.retry_due_at
+                if retrying
+                else typed_progress.admission_retry_at
+                if typed_progress.admission_pending
+                else None
+            )
         failure = None
         if state in {"failed", "waiting-for-operator"}:
             if not row.status_reason or not row.status_reason.strip():
@@ -5838,9 +6114,18 @@ class FleetProfileService:
             ),
             "status_reason": (
                 redact_text(row.status_reason)
-                if cancellation is not None and row.status_reason is not None
+                if (cancellation is not None or state == "queued")
+                and row.status_reason is not None
                 else None
             ),
+            "blockers": (
+                [item.model_dump(mode="json") for item in typed_progress.blockers]
+                if state in {"queued", "failed", "waiting-for-operator"}
+                else []
+            ),
+            "next_attempt_at": next_attempt.isoformat()
+            if next_attempt is not None
+            else None,
         }
 
     @staticmethod
@@ -6314,11 +6599,15 @@ class FleetProfileService:
                         FleetProfileApplication, application_id, with_for_update=True
                     )
                     if row is not None and self._retry_eligible(session, row):
-                        progress = _persisted_profile_progress(row)
-                        next_check = now + _cache_recovery_delay(progress.attempt)
-                        row.status_reason = (
-                            f"{error} Next cache check: {next_check.isoformat()}."
-                        )[:512]
+                        self._park_for_retry(
+                            row,
+                            _persisted_profile_progress(row),
+                            [
+                                make_blocker(
+                                    "profile.recovery_cache_pending", str(error)
+                                )
+                            ],
+                        )
                         recovery_deferred = True
                 # No replacement intent or unknown-output build was admitted.
                 # The existing backoff revisits this receipt after cache repair.
@@ -6333,21 +6622,16 @@ class FleetProfileService:
                         and not is_security_failure(error_code(error))
                         and self._retry_eligible(session, row)
                     ):
-                        progress = _persisted_profile_progress(row)
-                        progress_data = progress.model_dump(mode="json")
-                        progress_data["attempt"] = progress.attempt + 1
-                        due = now + _cache_recovery_delay(progress.attempt)
-                        progress_data["retry_due_at"] = due.isoformat()
-                        row.progress = read_stored_model(
-                            FleetProfileApplicationProgress,
-                            canonical_message(progress_data),
-                            strict=True,
-                            from_json=True,
-                        ).model_dump(mode="json")
-                        row.status_reason = (
-                            f"{error}; next attempt at {due.isoformat()}"
-                        )[:512]
-                        row.updated_at = now
+                        self._park_for_retry(
+                            row,
+                            _persisted_profile_progress(row),
+                            [
+                                make_blocker(
+                                    error_code(error) or "profile.retry_conflict",
+                                    str(error) or "The profile could not be retried",
+                                )
+                            ],
+                        )
                         recovery_deferred = True
             else:
                 return True
@@ -6627,6 +6911,94 @@ class FleetProfileService:
             current.updated_at = _aware(self._clock())
         return True
 
+    def _replan_blocked_application(
+        self, application_id: str, blocked: FleetProfilePreview, actor: str
+    ) -> FleetProfilePreview | None:
+        """Bind a waiting load to its plan once nothing blocks it any more.
+
+        Returns the admissible plan, now bound to the accepted intent, or
+        ``None`` while conditions still block it (the reasons are recorded and
+        the preparation it needs is requested again).
+        """
+
+        try:
+            with self._sessions() as session:
+                row = session.get(FleetProfileApplication, application_id)
+                if row is None:
+                    return None
+                intended = self._intended_profile(row, session=session)
+            fresh = self.preview(
+                blocked.profile_id,
+                execution_assignments=tuple(intended.assignments),
+                profile_name=blocked.profile_name,
+                profile_digest=intended.profile_digest,
+                accepted_intent=intended,
+                accepted_profile_revision=blocked.profile_revision,
+                accepted_profile_definition=blocked.profile_definition,
+                excluded_application_id=application_id,
+            )
+        except (FleetProfileConflict, KeyError) as error:
+            self._finish_pending_admission(
+                application_id,
+                state="failed",
+                reason=str(error) or "Profile admission could not be resumed",
+            )
+            return None
+        if not fresh.allowed:
+            if not _profile_preview_is_waitable(fresh):
+                self._finish_pending_admission(
+                    application_id,
+                    state="failed",
+                    reason="Fleet profile intent contains a security or contract blocker",
+                )
+                return None
+            blockers = _preview_blockers(fresh) + self._request_preparations(
+                fresh, actor=actor
+            )
+            self._defer_pending_application(
+                application_id,
+                "Waiting for current Fleet conditions: "
+                + "; ".join(item.code for item in blockers[:8])
+                + ".",
+                blockers=blockers,
+            )
+            return None
+        with self._sessions.begin() as session:
+            row = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
+            if row is None:
+                return None
+            progress = _persisted_profile_progress(row)
+            if not _owns_pending_admission(row, progress):
+                return None
+            pending_digest = _digest(
+                {
+                    "schema_version": 2,
+                    "reconciliation_digest": fresh.plan_digest,
+                    "retry_of_application_id": None,
+                    "request_key": row.request_key,
+                }
+            )
+            assert progress.intended_profile is not None
+            row.plan = fresh.model_copy(
+                update={"plan_digest": pending_digest}
+            ).model_dump(mode="json")
+            row.plan_digest = pending_digest
+            row.progress = _progress_with_blockers(
+                progress.model_copy(
+                    update={
+                        "intended_profile": progress.intended_profile.model_copy(
+                            update={"reviewed_plan_digest": fresh.plan_digest}
+                        ),
+                        "total_steps": len(fresh.steps),
+                    }
+                ),
+                [],
+            )
+            row.updated_at = _aware(self._clock())
+        return fresh
+
     def _observe_pending_admissions(self, now: datetime) -> bool:
         """Retry reviewed applications that could not acquire admission locks."""
 
@@ -6684,6 +7056,14 @@ class FleetProfileService:
         if candidate is None:
             return False
         application_id, request_key, actor, plan = candidate
+        if not plan.allowed:
+            # The accepted intent was blocked when it was reviewed: plan it
+            # again against current conditions (asking for the preparation it
+            # needs) instead of replaying a plan that could never be admitted.
+            replanned = self._replan_blocked_application(application_id, plan, actor)
+            if replanned is None:
+                return True
+            plan = replanned
         try:
             # The persisted plan is already bound to the execution request.
             # Admission consumes the original reviewed identity and binds it
@@ -6744,15 +7124,12 @@ class FleetProfileService:
             progress = _persisted_profile_progress(row)
             if not _owns_pending_admission(row, progress):
                 return
-            progress_data = progress.model_dump(mode="json")
-            progress_data["admission_pending"] = False
-            progress_data["admission_retry_at"] = None
-            row.progress = read_stored_model(
-                FleetProfileApplicationProgress,
-                canonical_message(progress_data),
-                strict=True,
-                from_json=True,
-            ).model_dump(mode="json")
+            row.progress = _progress_with_blockers(
+                progress,
+                progress.blockers,
+                admission_pending=False,
+                admission_retry_at=None,
+            )
             row.state = state
             row.status_reason = reason[:512]
             row.updated_at = now
@@ -7062,6 +7439,63 @@ class FleetProfileService:
         row.updated_at = now
         return True
 
+    def _recovery_wanted(
+        self,
+        session: Session,
+        row: FleetProfileApplication,
+        progress: FleetProfileApplicationProgress,
+    ) -> bool:
+        """Whether the Controller will retry this failed application by itself.
+
+        One owner for the question, shared by the recovery scan and by every
+        view: an application that will be retried is waiting, not failed.
+        """
+
+        adapter = self._switch_adapter
+        if (
+            adapter is None
+            or progress.intended_profile is None
+            or adapter.recovery_refused(row.id, session=session)
+        ):
+            return False
+        current_scope = tuple(
+            session.scalars(
+                select(AgentNode.node_id)
+                .where(AgentNode.revoked_at.is_(None))
+                .order_by(AgentNode.node_id)
+            )
+        )
+        return tuple(
+            progress.intended_profile.scope.node_ids
+        ) == current_scope and self._retry_eligible(session, row)
+
+    def _presented_state(
+        self, row: FleetProfileApplication, progress: FleetProfileApplicationProgress
+    ) -> tuple[FleetProfileOperationState, datetime | None]:
+        """The state to show, and when the next attempt is due.
+
+        A failed application the Controller will retry is ``queued`` with its
+        next attempt time; ``failed`` is reserved for applications that stay so.
+        """
+
+        state = _OPERATION_STATE_ADAPTER.validate_python(row.state, strict=True)
+        if progress.cancellation is not None:
+            return state, None
+        if state == "failed":
+            session = object_session(row)
+            try:
+                retrying = session is not None and self._recovery_wanted(
+                    session, row, progress
+                )
+            except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+                retrying = False
+            if retrying:
+                return "queued", progress.retry_due_at
+            return state, None
+        if state == "queued" and progress.admission_pending:
+            return state, progress.admission_retry_at
+        return state, None
+
     def _automatic_profile_recovery(self, now: datetime) -> tuple[str, str] | None:
         """Find one current profile intent that can safely be reconciled again."""
 
@@ -7114,24 +7548,11 @@ class FleetProfileService:
                     progress = _persisted_profile_progress(row)
                 except FleetProfileConflict:
                     continue
-                if progress.intended_profile is None or adapter.recovery_refused(
-                    row.id, session=session
-                ):
+                if not self._recovery_wanted(session, row, progress):
                     continue
                 if progress.retry_due_at is not None and _aware(
                     progress.retry_due_at
                 ) > _aware(now):
-                    continue
-                current_scope = tuple(
-                    session.scalars(
-                        select(AgentNode.node_id)
-                        .where(AgentNode.revoked_at.is_(None))
-                        .order_by(AgentNode.node_id)
-                    )
-                )
-                if tuple(
-                    progress.intended_profile.scope.node_ids
-                ) != current_scope or not self._retry_eligible(session, row):
                     continue
                 if now < _aware(row.updated_at) + _cache_recovery_delay(
                     progress.attempt
@@ -7908,13 +8329,14 @@ class FleetProfileService:
             progress.child_progress.operation = project_progress(
                 progress.child_progress.operation, _aware(self._clock())
             )
+        state, next_attempt_at = self._presented_state(row, progress)
         return FleetProfileApplicationView(
             id=row.id,
             request_key=row.request_key,
             profile_id=row.profile_id,
             profile_digest=row.profile_digest,
             plan_digest=row.plan_digest,
-            state=_OPERATION_STATE_ADAPTER.validate_python(row.state, strict=True),
+            state=state,
             attempt=_canonical_progress(row.progress).attempt,
             retry_of_application_id=_canonical_progress(
                 row.progress
@@ -7926,6 +8348,12 @@ class FleetProfileService:
             progress=progress,
             cancellation=_application_cancellation_view(row, plan, progress),
             result=_persisted_profile_result(row),
+            blockers=(
+                list(progress.blockers)
+                if state in {"queued", "failed", "waiting-for-operator"}
+                else []
+            ),
+            next_attempt_at=next_attempt_at,
             created_at=_aware(row.created_at),
             updated_at=_aware(row.updated_at),
         )

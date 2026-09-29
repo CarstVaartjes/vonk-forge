@@ -3370,6 +3370,51 @@ def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -
     assert "Next attempt" in (application.status_reason or "")
 
 
+def test_profile_load_with_missing_preparation_enqueues_it_and_waits() -> None:
+    """A load asks for the model and image it lacks instead of stopping there."""
+
+    from vonk_control.operation_blockers import make_blocker
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+
+    def _missing(_session, _assignment, _node_ids, **_kwargs):
+        raise ValueError("no successful immutable runtime image build is available")
+
+    requested: list[str] = []
+
+    def _starter(recipe_revision_id: str, *, actor: str):
+        requested.append(recipe_revision_id)
+        return [
+            make_blocker(
+                "recipe_image.preparing",
+                "Preparing the model and runtime image (prepare).",
+                severity="info",
+            )
+        ]
+
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, assessment_provider=_missing
+    )
+    service.bind_preparation_starter(_starter)
+    profile = service.create(_input(revision_id), actor="admin")
+
+    # The review lists what the Controller will prepare.
+    preview = service.preview(profile.id)
+    assert preview.allowed is False
+    assert [step.kind for step in preview.preparation_steps] == ["prepare", "prepare"]
+    assert "Download the model" in preview.preparation_steps[0].label
+    assert "Build the runtime image" in preview.preparation_steps[1].label
+
+    application = service.apply(profile.id, request_key=_uuid(42), actor="admin")
+
+    assert requested == [revision_id]
+    assert application.state == "queued"  # waiting for the preparation, not blocked
+    codes = {item.code for item in application.blockers}
+    assert "recipe_image.preparing" in codes
+    assert application.next_attempt_at is not None
+
+
 def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
     tmp_path: Path,
 ) -> None:

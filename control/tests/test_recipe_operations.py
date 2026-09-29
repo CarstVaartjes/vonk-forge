@@ -4069,7 +4069,7 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
         switch.tick()
     assert switch.get(first_switch).state == "failed"
     assert profiles.tick()
-    assert profiles.application(first.id).state == "failed"
+    assert profiles.application(first.id).state == "queued"
 
     # A new load has fresh authority but reuses completed node cleanup after restart.
     switch = run_switch()

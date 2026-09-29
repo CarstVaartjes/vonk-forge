@@ -273,7 +273,7 @@ def test_successful_install_child_does_not_hide_invalid_final_installation(
         planner.tick()
         service.tick()
     completed = service.application(application.id)
-    assert completed.state == "failed"
+    assert completed.state == "queued"
     assert "run-switch.installation-" in (completed.status_reason or "")
 
 

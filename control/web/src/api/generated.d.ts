@@ -2036,6 +2036,8 @@ export interface components {
         };
         /** FailureEvidenceBundle */
         FailureEvidenceBundle: {
+            /** Blockers */
+            blockers?: components["schemas"]["OperationBlocker"][];
             /** Collected At */
             collected_at: string;
             /** Collector Errors */
@@ -2336,6 +2338,8 @@ export interface components {
              * @default 1
              */
             attempt: number;
+            /** Blockers */
+            blockers?: components["schemas"]["OperationBlocker"][];
             cancellation?: components["schemas"]["FleetProfileApplicationCancellationIntent"] | null;
             child_progress?: components["schemas"]["FleetProfileChildProgress"] | null;
             /** Child Source */
@@ -2384,6 +2388,8 @@ export interface components {
              * @default 1
              */
             attempt: number;
+            /** Blockers */
+            blockers?: components["schemas"]["OperationBlocker"][];
             cancellation?: components["schemas"]["FleetProfileApplicationCancellationView"] | null;
             /**
              * Created At
@@ -2396,6 +2402,8 @@ export interface components {
             current_step: number;
             /** Id */
             id: string;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
             /** Plan Digest */
             plan_digest: string;
             /** Profile Digest */
@@ -2823,9 +2831,9 @@ export interface components {
             index: number;
             /**
              * Kind
-             * @constant
+             * @enum {string}
              */
-            kind: "switch";
+            kind: "switch" | "prepare";
             /** Label */
             label: string;
             /** Node Ids */
@@ -2896,6 +2904,8 @@ export interface components {
             plan_digest: string;
             /** Preparation Decisions */
             preparation_decisions: components["schemas"]["FleetProfilePreparationDecision"][];
+            /** Preparation Steps */
+            preparation_steps?: components["schemas"]["FleetProfilePlanStep"][];
             /** Preparations */
             preparations?: components["schemas"]["FleetProfileAssignmentPreparation"][];
             profile_definition: components["schemas"]["FleetProfileDefinition"] | null;
@@ -2921,6 +2931,11 @@ export interface components {
             /** Steps */
             steps: components["schemas"]["FleetProfilePlanStep"][];
             summary: components["schemas"]["FleetProfilePlanSummary"];
+            /**
+             * Waits For Preparation
+             * @default false
+             */
+            waits_for_preparation: boolean;
         };
         /** FleetProfileReason */
         FleetProfileReason: {
@@ -4446,6 +4461,26 @@ export interface components {
             profile_changed?: boolean | null;
         };
         /**
+         * OperationBlocker
+         * @description One reason an operation is waiting or blocked, with the Sparks it concerns.
+         */
+        OperationBlocker: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /**
+             * Node Ids
+             * @default []
+             */
+            node_ids: string[];
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warning" | "error";
+        };
+        /**
          * OperationCheckpoint
          * @description Restart-safe cursor identifying a durable operation unit.
          */
@@ -4463,6 +4498,8 @@ export interface components {
         OperationDetailResponse: {
             /** Attempt */
             attempt: number;
+            /** Blockers */
+            blockers?: components["schemas"]["OperationBlocker"][];
             cancellation?: components["schemas"]["FleetProfileApplicationCancellationView"] | null;
             /** Created At */
             created_at: string;
@@ -4473,6 +4510,8 @@ export interface components {
             id: string;
             /** Kind */
             kind: string;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
             /** Node Ids */
             node_ids: string[];
             owner?: components["schemas"]["OperationOwnerReference"] | null;
@@ -4956,6 +4995,8 @@ export interface components {
             actions?: components["schemas"]["RecipeImageAvailabilityAction"][];
             /** Attempt */
             attempt: number;
+            /** Blockers */
+            blockers?: components["schemas"]["OperationBlocker"][];
             cancellation?: components["schemas"]["RecipeOperationCancellationResult"] | null;
             /** Children */
             children?: components["schemas"]["RecipeImageAvailabilityChild"][];
@@ -4969,6 +5010,8 @@ export interface components {
              * @constant
              */
             kind: "recipe.image.availability.v2";
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
             progress: components["schemas"]["OperationProgress"];
             /** Recipe Content Sha256 */
             recipe_content_sha256: string;

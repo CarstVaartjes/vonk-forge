@@ -172,7 +172,7 @@ def test_postgres_profile_adopts_child_committed_before_parent_checkpoint(
         elif child_disposition == "running":
             assert resumed.progress.switch_adapter.active_operation_id == child_id
         else:
-            assert resumed.state == "failed"
+            assert resumed.state == "queued"  # failed; the Controller retries it
             assert resumed.status_reason is not None
             assert (
                 "owner or assignment"

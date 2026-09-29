@@ -67,6 +67,7 @@ from .models import (
     RoutePublication,
     RoutePublicationOwner,
 )
+from .operation_blockers import OperationBlocker, read_blockers
 from .operation_contract import (
     AvailabilityOperationFailure,
     OperationEvidenceDownload,
@@ -310,6 +311,10 @@ class OperationDetailResponse(StrictModel):
     #: records the refusing check here so an operator can tell "no work" apart
     #: from "work this node may not execute, and why".
     status_reason: str | None = Field(default=None, max_length=1024)
+    #: What a queued or blocked operation is waiting for, as of its latest check.
+    blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+    #: When the Controller will check again, for an operation that will retry.
+    next_attempt_at: str | None = Field(default=None, max_length=64)
 
     @model_serializer(mode="wrap")
     def _serialize_without_unset_evidence(self, handler):
@@ -321,9 +326,12 @@ class OperationDetailResponse(StrictModel):
             "recovery",
             "owner",
             "status_reason",
+            "next_attempt_at",
         ):
             if document.get(key) is None:
                 document.pop(key, None)
+        if not document.get("blockers"):
+            document.pop("blockers", None)
         return document
 
 
@@ -784,6 +792,16 @@ class _StandaloneJobActivityProjection:
             "updated_at": _aware(job.updated_at).isoformat(),
             "supported_actions": [],
             "status_reason": status_reason,
+            "blockers": (
+                job.payload.get("blockers")
+                if isinstance(job.payload, Mapping)
+                else None
+            ),
+            "next_attempt_at": (
+                job.payload.get("retry_after_at")
+                if isinstance(job.payload, Mapping) and job.state == "queued"
+                else None
+            ),
         }
 
     def _unreadable_item(
@@ -1205,6 +1223,10 @@ def operation_detail_response(
             or bool(isinstance(result, Mapping) and result.get("uncertain") is True),
         ),
         owner=owner,
+        blockers=read_blockers(item.get("blockers")),
+        next_attempt_at=_optional_text(
+            item.get("next_attempt_at"), "operation next attempt is invalid"
+        ),
     )
 
 

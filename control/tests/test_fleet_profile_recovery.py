@@ -87,7 +87,10 @@ def test_terminal_application_contract_rejects_contradictory_receipts(tmp_path):
     _sessions, _lifecycle, service, _profile, _desired, original, _child, _nodes = (
         _failed_profile(tmp_path)
     )
-    failed = service.application(original.id).model_dump(mode="json")
+    failed = {
+        **service.application(original.id).model_dump(mode="json"),
+        "state": "failed",
+    }
     for changes in (
         {"status_reason": None},
         {"attempt": 2},

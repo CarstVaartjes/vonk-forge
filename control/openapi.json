@@ -3165,6 +3165,14 @@
       "FailureEvidenceBundle": {
         "additionalProperties": false,
         "properties": {
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/OperationBlocker"
+            },
+            "maxItems": 16,
+            "title": "Blockers",
+            "type": "array"
+          },
           "collected_at": {
             "title": "Collected At",
             "type": "string"
@@ -4173,6 +4181,14 @@
             "title": "Attempt",
             "type": "integer"
           },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/OperationBlocker"
+            },
+            "maxItems": 16,
+            "title": "Blockers",
+            "type": "array"
+          },
           "cancellation": {
             "anyOf": [
               {
@@ -4341,6 +4357,14 @@
             "title": "Attempt",
             "type": "integer"
           },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/OperationBlocker"
+            },
+            "maxItems": 16,
+            "title": "Blockers",
+            "type": "array"
+          },
           "cancellation": {
             "anyOf": [
               {
@@ -4378,6 +4402,18 @@
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Id",
             "type": "string"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
           },
           "plan_digest": {
             "pattern": "^[0-9a-f]{64}$",
@@ -5631,7 +5667,10 @@
             "type": "integer"
           },
           "kind": {
-            "const": "switch",
+            "enum": [
+              "switch",
+              "prepare"
+            ],
             "title": "Kind",
             "type": "string"
           },
@@ -5860,6 +5899,14 @@
             "title": "Preparation Decisions",
             "type": "array"
           },
+          "preparation_steps": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfilePlanStep"
+            },
+            "maxItems": 128,
+            "title": "Preparation Steps",
+            "type": "array"
+          },
           "preparations": {
             "items": {
               "$ref": "#/components/schemas/FleetProfileAssignmentPreparation"
@@ -5941,6 +5988,11 @@
           },
           "summary": {
             "$ref": "#/components/schemas/FleetProfilePlanSummary"
+          },
+          "waits_for_preparation": {
+            "default": false,
+            "title": "Waits For Preparation",
+            "type": "boolean"
           }
         },
         "required": [
@@ -10777,6 +10829,48 @@
         "title": "NodeProfilePayload",
         "type": "object"
       },
+      "OperationBlocker": {
+        "description": "One reason an operation is waiting or blocked, with the Sparks it concerns.",
+        "properties": {
+          "code": {
+            "maxLength": 96,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "node_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "error"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "severity"
+        ],
+        "title": "OperationBlocker",
+        "type": "object"
+      },
       "OperationCheckpoint": {
         "additionalProperties": false,
         "description": "Restart-safe cursor identifying a durable operation unit.",
@@ -10832,6 +10926,14 @@
             "title": "Attempt",
             "type": "integer"
           },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/OperationBlocker"
+            },
+            "maxItems": 16,
+            "title": "Blockers",
+            "type": "array"
+          },
           "cancellation": {
             "anyOf": [
               {
@@ -10886,6 +10988,18 @@
             "minLength": 1,
             "title": "Kind",
             "type": "string"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
           },
           "node_ids": {
             "items": {
@@ -12596,6 +12710,14 @@
             "title": "Attempt",
             "type": "integer"
           },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/OperationBlocker"
+            },
+            "maxItems": 16,
+            "title": "Blockers",
+            "type": "array"
+          },
           "cancellation": {
             "anyOf": [
               {
@@ -12637,6 +12759,17 @@
             "const": "recipe.image.availability.v2",
             "title": "Kind",
             "type": "string"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
           },
           "progress": {
             "$ref": "#/components/schemas/OperationProgress"

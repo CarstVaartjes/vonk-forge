@@ -16,6 +16,7 @@ from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.availability_operation_failure import AvailabilityOperationFailure
+  from ..models.operation_blocker import OperationBlocker
   from ..models.operation_progress import OperationProgress
   from ..models.recipe_image_availability_action import RecipeImageAvailabilityAction
   from ..models.recipe_image_availability_child import RecipeImageAvailabilityChild
@@ -49,9 +50,11 @@ class RecipeImageAvailabilityResponse:
             state (RecipeImageAvailabilityResponseState):
             updated_at (str):
             actions (list[RecipeImageAvailabilityAction] | Unset):
+            blockers (list[OperationBlocker] | Unset):
             cancellation (None | RecipeOperationCancellationResult | Unset):
             children (list[RecipeImageAvailabilityChild] | Unset):
             failure (AvailabilityOperationFailure | None | Unset):
+            next_attempt_at (None | str | Unset):
             result (None | RecipeImageAvailabilityResult | Unset):
      """
 
@@ -67,9 +70,11 @@ class RecipeImageAvailabilityResponse:
     state: RecipeImageAvailabilityResponseState
     updated_at: str
     actions: list[RecipeImageAvailabilityAction] | Unset = UNSET
+    blockers: list[OperationBlocker] | Unset = UNSET
     cancellation: None | RecipeOperationCancellationResult | Unset = UNSET
     children: list[RecipeImageAvailabilityChild] | Unset = UNSET
     failure: AvailabilityOperationFailure | None | Unset = UNSET
+    next_attempt_at: None | str | Unset = UNSET
     result: None | RecipeImageAvailabilityResult | Unset = UNSET
 
 
@@ -78,6 +83,7 @@ class RecipeImageAvailabilityResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
         from ..models.recipe_image_availability_action import RecipeImageAvailabilityAction # noqa: PLC0415
         from ..models.recipe_image_availability_child import RecipeImageAvailabilityChild # noqa: PLC0415
@@ -124,6 +130,15 @@ class RecipeImageAvailabilityResponse:
 
 
 
+        blockers: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.blockers, Unset):
+            blockers = []
+            for blockers_item_data in self.blockers:
+                blockers_item = blockers_item_data.to_dict()
+                blockers.append(blockers_item)
+
+
+
         cancellation: dict[str, Any] | None | Unset
         if isinstance(self.cancellation, Unset):
             cancellation = UNSET
@@ -148,6 +163,12 @@ class RecipeImageAvailabilityResponse:
             failure = self.failure.to_dict()
         else:
             failure = self.failure
+
+        next_attempt_at: None | str | Unset
+        if isinstance(self.next_attempt_at, Unset):
+            next_attempt_at = UNSET
+        else:
+            next_attempt_at = self.next_attempt_at
 
         result: dict[str, Any] | None | Unset
         if isinstance(self.result, Unset):
@@ -175,12 +196,16 @@ class RecipeImageAvailabilityResponse:
         })
         if actions is not UNSET:
             field_dict["actions"] = actions
+        if blockers is not UNSET:
+            field_dict["blockers"] = blockers
         if cancellation is not UNSET:
             field_dict["cancellation"] = cancellation
         if children is not UNSET:
             field_dict["children"] = children
         if failure is not UNSET:
             field_dict["failure"] = failure
+        if next_attempt_at is not UNSET:
+            field_dict["next_attempt_at"] = next_attempt_at
         if result is not UNSET:
             field_dict["result"] = result
 
@@ -191,6 +216,7 @@ class RecipeImageAvailabilityResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
         from ..models.recipe_image_availability_action import RecipeImageAvailabilityAction # noqa: PLC0415
         from ..models.recipe_image_availability_child import RecipeImageAvailabilityChild # noqa: PLC0415
@@ -272,6 +298,18 @@ class RecipeImageAvailabilityResponse:
                 actions.append(actions_item)
 
 
+        _blockers = d.pop("blockers", UNSET)
+        blockers: list[OperationBlocker] | Unset = UNSET
+        if _blockers is not UNSET:
+            blockers = []
+            for blockers_item_data in _blockers:
+                blockers_item = OperationBlocker.from_dict(blockers_item_data)
+
+
+
+                blockers.append(blockers_item)
+
+
         def _parse_cancellation(data: object) -> None | RecipeOperationCancellationResult | Unset:
             if data is None:
                 return data
@@ -324,6 +362,16 @@ class RecipeImageAvailabilityResponse:
         failure = _parse_failure(d.pop("failure", UNSET))
 
 
+        def _parse_next_attempt_at(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
+
+
         def _parse_result(data: object) -> None | RecipeImageAvailabilityResult | Unset:
             if data is None:
                 return data
@@ -357,9 +405,11 @@ class RecipeImageAvailabilityResponse:
             state=state,
             updated_at=updated_at,
             actions=actions,
+            blockers=blockers,
             cancellation=cancellation,
             children=children,
             failure=failure,
+            next_attempt_at=next_attempt_at,
             result=result,
         )
 

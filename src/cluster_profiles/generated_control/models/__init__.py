@@ -164,6 +164,7 @@ from .fleet_profile_node import FleetProfileNode
 from .fleet_profile_pending_effect import FleetProfilePendingEffect
 from .fleet_profile_pending_effect_kind import FleetProfilePendingEffectKind
 from .fleet_profile_plan_step import FleetProfilePlanStep
+from .fleet_profile_plan_step_kind import FleetProfilePlanStepKind
 from .fleet_profile_plan_summary import FleetProfilePlanSummary
 from .fleet_profile_preparation_decision import FleetProfilePreparationDecision
 from .fleet_profile_preview import FleetProfilePreview
@@ -292,6 +293,8 @@ from .node_connection_online_state import NodeConnectionOnlineState
 from .node_distribution_assignment import NodeDistributionAssignment
 from .node_profile_change import NodeProfileChange
 from .node_profile_payload import NodeProfilePayload
+from .operation_blocker import OperationBlocker
+from .operation_blocker_severity import OperationBlockerSeverity
 from .operation_checkpoint import OperationCheckpoint
 from .operation_detail_response import OperationDetailResponse
 from .operation_evidence_download import OperationEvidenceDownload
@@ -689,6 +692,7 @@ __all__ = (
     "FleetProfilePendingEffect",
     "FleetProfilePendingEffectKind",
     "FleetProfilePlanStep",
+    "FleetProfilePlanStepKind",
     "FleetProfilePlanSummary",
     "FleetProfilePreparationDecision",
     "FleetProfilePreview",
@@ -817,6 +821,8 @@ __all__ = (
     "NodeDistributionAssignment",
     "NodeProfileChange",
     "NodeProfilePayload",
+    "OperationBlocker",
+    "OperationBlockerSeverity",
     "OperationCheckpoint",
     "OperationDetailResponse",
     "OperationEvidenceDownload",

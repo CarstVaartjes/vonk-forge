@@ -28,6 +28,7 @@ from .models import (
     Job,
     ModelCacheOperation,
 )
+from .operation_blockers import OperationBlocker, read_blockers
 from .operation_contract import OperationEvidenceDownload
 from .strict_json import StrictJSONModel, read_stored_model
 
@@ -116,6 +117,8 @@ class FailureEvidenceBundle(EvidenceModel):
     detail: str | None = Field(default=None, max_length=1024)
     diagnostics: FailureDiagnostics
     collector_errors: list[str] = Field(max_length=8)
+    #: What the operation was waiting for when it stopped, when it recorded that.
+    blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
 
 
 #: The attempt states whose own terminal failure receipt must stay readable.
@@ -308,7 +311,7 @@ def collect_failure(
             storage=[],
             preflight=[],
             collector_errors=["agent-observations-unavailable"]
-            if item.get("node_ids")
+            if item.get("node_ids") and item.get("agent_operation", True)
             else [],
         )
     error_code, detail = failure_code(result)
@@ -341,6 +344,12 @@ def collect_failure(
         detail=detail,
         diagnostics=diagnostics,
         collector_errors=errors,
+        blockers=[
+            blocker.model_copy(
+                update={"detail": safe_text(blocker.detail)[:512] or "-"}
+            )
+            for blocker in read_blockers(item.get("blockers"))
+        ],
     )
 
 
@@ -439,7 +448,7 @@ class FailureEvidenceService:
 
     def decorate(self, item: Mapping[str, object]) -> dict[str, object]:
         """Name the diagnostics download when this failed attempt has one."""
-        if item.get("state") not in FAILED_ATTEMPT_STATES:
+        if item.get("state") not in FAILED_ATTEMPT_STATES and not item.get("blockers"):
             return dict(item)
         operation_id = _required_text(item["id"], "operation id")
         attempt = require_integer(item["attempt"], "operation attempt")
@@ -516,6 +525,9 @@ class FailureEvidenceService:
                 if item["attempt"] != attempt:
                     return None
                 item["source"] = "controller"
+                # The Controller owns this record: no Spark operation ran, so
+                # there are no agent observations to be missing.
+                item["agent_operation"] = False
                 item["result"] = item["result"] or item["failure"]
                 return item
         return None

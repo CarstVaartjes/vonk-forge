@@ -708,6 +708,9 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
         execute()
     assert failure.value.retryable
     assert failure.value.code == "recipe_image.build_capacity_wait"
+    assert [item.code for item in failure.value.blockers] == [
+        "recipe_image.builder_occupied"
+    ]
 
     with sessions.begin() as session:
         busy = session.get(Job, busy_id)
@@ -1455,6 +1458,9 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     assert waiting.state == "queued"
     assert waiting.failure is not None
     assert waiting.failure["code"] == "recipe_image.build_capacity_wait"
+    # The wait names its cause and is exposed as a typed blocker, not silence.
+    assert [item.code for item in waiting.blockers] == ["recipe_image.no_builder"]
+    assert waiting.next_attempt_at is not None
     assert waiting.model_child is not None
 
     for _ in range(100):

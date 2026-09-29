@@ -1399,7 +1399,9 @@ class ModelCacheService:
             recipe_model_digests: list[str] = []
             if recipe_digest is not None or recipe_revision_id is not None:
                 recipe_document, _resolved_recipe_id, resolved_recipe_digest = (
-                    self._recipe_document(session, recipe_digest, recipe_revision_id)
+                    self._recipe_document(
+                        session, recipe_digest, recipe_revision_id, tolerant=True
+                    )
                 )
                 if (
                     recipe_digest is not None
@@ -1431,11 +1433,18 @@ class ModelCacheService:
                     "an exact model definition is required after recipe resolution",
                 )
             model_rows: dict[str, CatalogDocumentRevision] = {}
+            aliases: dict[str, str] = {}
             requested_model_digests = (
                 recipe_model_digests if recipe_document is not None else [model_digest]
             )
             for digest in requested_model_digests:
-                self._collect_model_definitions(session, digest, model_rows)
+                self._collect_model_definitions(
+                    session, digest, model_rows, aliases=aliases
+                )
+            # A model whose pinned revision is unreadable resolved to its newest
+            # readable revision; the manifest names what it actually contains.
+            model_digest = aliases.get(model_digest, model_digest)
+            requested_by_actual = {actual: asked for asked, actual in aliases.items()}
             specs: list[ArtifactSpec] = []
             model_ref: ModelReference | None = None
             for digest, row in sorted(model_rows.items()):
@@ -1446,7 +1455,9 @@ class ModelCacheService:
                         content_sha256=digest,
                     )
                 raw_artifacts = _canonical_model_artifacts(row)
-                selected_ids = _recipe_model_file_ids(recipe_document, digest)
+                selected_ids = _recipe_model_file_ids(
+                    recipe_document, requested_by_actual.get(digest, digest)
+                )
                 for raw in raw_artifacts:
                     if selected_ids is not None and raw["id"] not in selected_ids:
                         continue
@@ -3494,14 +3505,55 @@ class ModelCacheService:
         operation.updated_at = now
         operation.completed_at = now
 
+    @staticmethod
+    def _newest_readable_revision(
+        session: Session, row: CatalogDocumentRevision
+    ) -> CatalogDocumentRevision | None:
+        """Newest active revision of the same document this Controller can read.
+
+        A revision written under another contract, or since replaced, is not
+        usable but must not stop a manifest: the same recipe or model is
+        resolved from its newest readable revision instead.
+        """
+
+        for candidate in session.scalars(
+            select(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == row.kind,
+                CatalogDocumentRevision.document_id == row.document_id,
+                CatalogDocumentRevision.state == "active",
+            )
+            .order_by(
+                CatalogDocumentRevision.revision_number.desc(),
+                CatalogDocumentRevision.created_at.desc(),
+                CatalogDocumentRevision.id.desc(),
+            )
+            .limit(16)
+        ):
+            try:
+                read_catalog_document(candidate)
+            except CatalogRevisionContractError:
+                continue
+            return candidate
+        return None
+
     def _recipe_document(
         self,
         session: Session,
         digest: str | None,
         revision_id: str | None,
+        *,
+        tolerant: bool = False,
     ) -> tuple[RecipeDefinition, str, str]:
         if revision_id is not None:
             revision = session.get(CatalogDocumentRevision, revision_id)
+            if tolerant and revision is not None and revision.kind == "recipe":
+                try:
+                    if revision.state != "active":
+                        raise CatalogRevisionContractError("revision is not active")
+                    read_catalog_document(revision)
+                except CatalogRevisionContractError:
+                    revision = self._newest_readable_revision(session, revision)
         else:
             revision = session.scalar(
                 select(CatalogDocumentRevision).where(
@@ -3537,6 +3589,7 @@ class ModelCacheService:
         rows: dict[str, CatalogDocumentRevision],
         *,
         visiting: set[str] | None = None,
+        aliases: dict[str, str] | None = None,
     ) -> None:
         if not isinstance(digest, str) or not _is_hex(digest) or len(digest) != 64:
             raise ModelCacheResolutionError(
@@ -3569,6 +3622,26 @@ class ModelCacheService:
                 "model_cache.model_definition_missing",
                 "exact model definition is not resolved",
             )
+        if aliases is not None:
+            try:
+                read_catalog_document(row)
+            except CatalogRevisionContractError:
+                # Tolerant resolution: the same model's newest readable
+                # revision stands in, keyed by its own digest.
+                substitute = self._newest_readable_revision(session, row)
+                if substitute is not None and isinstance(
+                    substitute.content_digest, str
+                ):
+                    aliases[digest] = substitute.content_digest
+                    active.remove(digest)
+                    self._collect_model_definitions(
+                        session,
+                        substitute.content_digest,
+                        rows,
+                        visiting=active,
+                        aliases=aliases,
+                    )
+                    return
         try:
             definition = read_catalog_document(row)
             if not isinstance(definition, ModelDefinition):
@@ -3580,6 +3653,7 @@ class ModelCacheService:
                     dependency.content_sha256,
                     rows,
                     visiting=active,
+                    aliases=aliases,
                 )
         except (TypeError, ValueError) as error:
             raise ModelCacheResolutionError(

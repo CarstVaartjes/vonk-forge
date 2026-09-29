@@ -470,7 +470,7 @@ def test_failed_newer_load_stays_selected_instead_of_falling_back_to_success(
         assert selected["generation"] == 2
         assert selected["application_id"] == newer.id
         assert restarted.application(first.id).state == "succeeded"
-        assert restarted.application(newer.id).state == "failed"
+        assert restarted.application(newer.id).state == "queued"  # retried, not failed
         with restarted_sessions() as session:
             intent = restarted.endpoint_intent(session, profile.number)
         assert intent.application_id == newer.id

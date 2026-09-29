@@ -1515,6 +1515,10 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         clock=clock,
         max_parallel=RECIPE_IMAGE_PARALLEL_PREPARATIONS,
     )
+    # A load asks for the preparation it needs instead of stopping at its absence.
+    fleet_profiles.bind_preparation_starter(
+        recipe_image_production.service.ensure_preparation
+    )
 
     automatic_sync_task: asyncio.Task[None] | None = None
     automatic_sync_stop = asyncio.Event()

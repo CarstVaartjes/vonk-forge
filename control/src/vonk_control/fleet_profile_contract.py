@@ -12,6 +12,7 @@ from vonk_agent_protocol import OperationProgress
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .endpoint_contract import EndpointResponse
+from .operation_blockers import OperationBlocker
 from .preparation_contract import (
     CompatibilityIdentity,
     ModelArtifactIdentity,
@@ -121,7 +122,7 @@ FleetProfileAssignmentState = Literal[
     "not-placed", "placed", "installing", "installed", "running", "degraded"
 ]
 FleetProfileAction = Literal["switch", "keep"]
-FleetProfilePlanStepKind = Literal["switch"]
+FleetProfilePlanStepKind = Literal["switch", "prepare"]
 FleetProfileOperationKind = Literal["fleet-profile.apply"]
 FleetProfileEndpointState = Literal[
     "installed-only",
@@ -896,6 +897,8 @@ class FleetProfileApplicationProgress(_StrictModel):
     step_results: dict[str, FleetProfileStepResult] = Field(default_factory=dict)
     switch_adapter: FleetProfileSwitchAdapterState | None = None
     cancellation: FleetProfileApplicationCancellationIntent | None = None
+    #: What the application is waiting for, as of its latest check.
+    blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
 
     @model_validator(mode="after")
     def progress_is_consistent(self) -> FleetProfileApplicationProgress:
@@ -1023,6 +1026,13 @@ class FleetProfileReviewedDecision(_StrictModel):
     preparation_decisions: list[FleetProfilePreparationDecision] = Field(max_length=64)
     effects: FleetProfileEffects
     steps: list[FleetProfilePlanStep] = Field(max_length=1024)
+    #: What the Controller prepares by itself, in order, when this load is
+    #: accepted: the model download and the runtime image build.
+    preparation_steps: list[FleetProfilePlanStep] = Field(
+        default_factory=list, max_length=128
+    )
+    #: True when preparation is all that stands between this plan and admission.
+    waits_for_preparation: bool = False
     reasons: list[FleetProfileReason] = Field(max_length=128)
 
 
@@ -1068,6 +1078,11 @@ class FleetProfileApplicationView(_StrictModel):
     progress: FleetProfileApplicationProgress
     cancellation: FleetProfileApplicationCancellationView | None = None
     result: FleetProfileApplicationResult | None
+    #: What a queued or failed application is waiting for; empty once it runs.
+    blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+    #: When the Controller will check again; an application that will retry is
+    #: reported as ``queued`` with this time, never as ``failed``.
+    next_attempt_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
