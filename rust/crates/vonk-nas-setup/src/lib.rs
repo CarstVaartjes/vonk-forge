@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::net::{IpAddr, Ipv4Addr};
@@ -72,19 +72,7 @@ impl SecretGenerator for OsSecretGenerator {
 #[serde(deny_unknown_fields)]
 pub struct CanonicalTemplatePayload {
     schema_version: u8,
-    /// A fixed Compose file, written as is. A release that ships
-    /// `compose_variants` leaves this empty.
-    #[serde(default)]
     docker_compose_yaml: String,
-    /// Self-contained Compose files keyed by the sorted selected optional
-    /// profiles (`base`, `hermes`, `secure-remote`, `hermes+secure-remote`),
-    /// with `'@@NAME@@'` placeholders for install-time values.
-    #[serde(default)]
-    compose_variants: BTreeMap<String, String>,
-    /// Values a placeholder takes when its variable is unset or empty; a
-    /// placeholder without a default is required.
-    #[serde(default)]
-    compose_defaults: BTreeMap<String, String>,
     #[serde(default)]
     preflight: Vec<String>,
     #[serde(default)]
@@ -262,18 +250,7 @@ impl CanonicalTemplatePayload {
                 "unsupported schema version".to_owned(),
             ));
         }
-        let variants_valid = self.compose_variants.len() == 4
-            && ["base", "hermes", "secure-remote", "hermes+secure-remote"]
-                .iter()
-                .all(|key| {
-                    self.compose_variants
-                        .get(*key)
-                        .is_some_and(|text| !text.is_empty() && !text.contains('\0'))
-                });
-        if self.docker_compose_yaml.is_empty() == self.compose_variants.is_empty()
-            || self.docker_compose_yaml.contains('\0')
-            || (!self.compose_variants.is_empty() && !variants_valid)
-        {
+        if self.docker_compose_yaml.is_empty() || self.docker_compose_yaml.contains('\0') {
             return Err(SetupError::InvalidPayload(
                 "docker compose payload is empty or malformed".to_owned(),
             ));
@@ -998,15 +975,9 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
             None
         };
 
-        let compose = render_compose(
-            payload,
-            &environment,
-            !lab_mode && payload.install_modes.is_some(),
-            hermes_enabled == Some(true),
-        )?;
         write_new_file(
             &staging.join("docker-compose.yaml"),
-            compose.as_bytes(),
+            payload.docker_compose_yaml.as_bytes(),
             0o644,
         )?;
         let environment = render_owned_environment(&environment)?;
@@ -1889,12 +1860,6 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         None
     };
 
-    let compose = render_compose(
-        payload,
-        &environment,
-        !lab_mode && payload.install_modes.is_some(),
-        hermes_enabled == Some(true),
-    )?;
     let dropped = retain_known_environment(payload, &mut environment);
     let environment_document = render_owned_environment(&environment)?;
     for (name, value) in new_secrets {
@@ -1911,7 +1876,7 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     atomic_replace(&bundle.join(".env"), environment_document.as_bytes(), 0o600)?;
     atomic_replace(
         &bundle.join("docker-compose.yaml"),
-        compose.as_bytes(),
+        payload.docker_compose_yaml.as_bytes(),
         0o644,
     )?;
     remove_retired_runtime_configs(&secret_root)?;
@@ -1920,73 +1885,6 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         hermes_enabled,
         dropped_environment: dropped,
     })
-}
-
-/// The Compose file to write: the fixed one, or the variant for the chosen
-/// optional services with every install-time value written in. The result
-/// depends on no `.env`, no profile selection and no project-name variable.
-fn render_compose(
-    payload: &CanonicalTemplatePayload,
-    environment: &[(String, String)],
-    secure_remote: bool,
-    hermes: bool,
-) -> Result<String, SetupError> {
-    if payload.compose_variants.is_empty() {
-        return Ok(payload.docker_compose_yaml.clone());
-    }
-    let mut chosen = Vec::new();
-    if hermes {
-        chosen.push("hermes");
-    }
-    if secure_remote {
-        chosen.push("secure-remote");
-    }
-    let key = if chosen.is_empty() {
-        "base".to_owned()
-    } else {
-        chosen.join("+")
-    };
-    let template = payload
-        .compose_variants
-        .get(&key)
-        .ok_or_else(|| SetupError::InvalidPayload(format!("missing Compose variant {key}")))?;
-    let mut rendered = String::with_capacity(template.len());
-    let mut rest = template.as_str();
-    while let Some(start) = rest.find("'@@") {
-        rendered.push_str(&rest[..start]);
-        let after = &rest[start + 3..];
-        let end = after
-            .find("@@'")
-            .ok_or_else(|| SetupError::InvalidPayload("unterminated Compose placeholder".into()))?;
-        let name = &after[..end];
-        let variable = name.split('#').next().unwrap_or(name);
-        let value = environment_value(environment, variable)
-            .filter(|value| !value.is_empty())
-            .or_else(|| {
-                payload
-                    .compose_defaults
-                    .get(name)
-                    .map(String::as_str)
-                    .filter(|default| !default.is_empty())
-            });
-        let value = match value {
-            Some(value) => value,
-            // An optional value the operator never set renders empty.
-            None if payload.compose_defaults.contains_key(name) => "",
-            None => {
-                return Err(SetupError::InvalidPayload(format!(
-                    "Compose needs a value for {name}"
-                )));
-            }
-        };
-        // A JSON string is a valid double-quoted YAML scalar.
-        rendered.push_str(&serde_json::to_string(value).map_err(|error| {
-            SetupError::InvalidPayload(format!("Compose value for {name}: {error}"))
-        })?);
-        rest = &after[end + 3..];
-    }
-    rendered.push_str(rest);
-    Ok(rendered)
 }
 
 /// Keep only the `.env` keys this payload names and return the dropped ones,

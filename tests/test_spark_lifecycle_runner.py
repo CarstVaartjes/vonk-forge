@@ -531,27 +531,6 @@ def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:
     assert values["VONK_DIRECT_FABRIC_CIDRS"] == "198.19.42.0/24"
 
 
-def test_site_values_reach_the_self_contained_compose_file(tmp_path: Path) -> None:
-    lifecycle = _module()
-    (tmp_path / ".env").write_text("NAS_LAN_IP=127.0.0.1\n", encoding="utf-8")
-    (tmp_path / "docker-compose.yaml").write_text(
-        "services:\n  control-api:\n    environment:\n"
-        "      VONK_MANAGEMENT_CIDRS: ''\n      VONK_DIRECT_FABRIC_CIDRS: ''\n"
-        "  other:\n    image: x\n",
-        encoding="utf-8",
-    )
-
-    lifecycle._set_bundle_environment(
-        tmp_path, {"VONK_DIRECT_FABRIC_CIDRS": "198.19.42.0/24"}
-    )
-
-    compose = (tmp_path / "docker-compose.yaml").read_text(encoding="utf-8")
-    assert "VONK_DIRECT_FABRIC_CIDRS: 198.19.42.0/24" in compose
-    assert 'VONK_DIRECT_FABRIC_CIDRS="198.19.42.0/24"' in (tmp_path / ".env").read_text(
-        encoding="utf-8"
-    )
-
-
 def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
     tmp_path: Path,
 ) -> None:

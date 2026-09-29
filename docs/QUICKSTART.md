@@ -21,7 +21,7 @@ in `vonk-forge/`. The administrator username is `admin`; its generated password
 is saved in `vonk-forge/secrets/admin-password`.
 
 The Spark management network defaults to the NAS's own /24. To narrow it (for
-example to the Sparks' exact addresses), edit `VONK_MANAGEMENT_CIDRS` in `.env` and rerun the installer to apply it. Add LAN DNS records for `vonk-forge.local`, `enroll.vonk-forge.local`,
+example to the Sparks' exact addresses), edit `VONK_MANAGEMENT_CIDRS` in `.env`. Add LAN DNS records for `vonk-forge.local`, `enroll.vonk-forge.local`,
 `agents.vonk-forge.local`, and `registry.vonk-forge.local`, all pointing to the
 NAS address. On a small lab network, equivalent host-file entries can be used.
 
