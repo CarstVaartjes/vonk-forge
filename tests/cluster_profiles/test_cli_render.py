@@ -736,3 +736,48 @@ def test_review_lists_preparation_and_says_nothing_is_blocked(capsys):
     assert "Blocked" not in output
     assert "Prepare 0. Download the model files for Qwen" in output
     assert "Prepare 1. Build the runtime image for Qwen" in output
+
+
+def _cpu_spark(*, low_clock):
+    spark = _spark("atlas", 1)
+    spark["telemetry"] = {
+        "freshness": "live",
+        "sample": {
+            "cpu_frequency_avg_mhz": 2100,
+            "cpu_frequency_max_mhz": 3900,
+            "gpu_temperature_c": 84,
+        },
+    }
+    if low_clock:
+        spark["warnings"] = [
+            {
+                "code": "cpu.low-clock",
+                "detail": "CPU clock is low",
+                "severity": "warning",
+            }
+        ]
+    return spark
+
+
+def test_fleet_detail_shows_cpu_clock_with_temperature_and_throttle_hint(capsys):
+    render_payload(_cpu_spark(low_clock=False), "fleet", action="detail")
+    output = capsys.readouterr().out
+    assert "2.1 of 3.9 GHz" in output and "84" in output
+    assert "throttled?" not in output
+
+    render_payload(_cpu_spark(low_clock=True), "fleet", action="detail")
+    assert "throttled?" in capsys.readouterr().out
+
+    render_payload(_spark("atlas", 1), "fleet", action="detail")
+    assert "GHz" not in capsys.readouterr().out
+
+
+def test_fleet_overview_shows_cpu_clock_only_through_attention_and_wide(capsys):
+    payload = {"nodes": [_cpu_spark(low_clock=True)]}
+    render_payload(payload, "fleet")
+    output = capsys.readouterr().out
+    assert "GHz" not in output.split("Needs attention")[0]
+    assert "CPU clock is low" in output.split("Needs attention")[1]
+
+    render_payload(payload, "fleet", wide=True)
+    assert "2.1 of 3.9 GHz" in capsys.readouterr().out

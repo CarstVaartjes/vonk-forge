@@ -80,6 +80,10 @@ class TelemetrySampleInput:
     gpu_utilization_percent: float | None
     gpu_memory_total_bytes: int | None
     gpu_memory_free_bytes: int | None
+    gpu_temperature_c: int | None = None
+    cpu_frequency_avg_mhz: int | None = None
+    cpu_frequency_min_mhz: int | None = None
+    cpu_frequency_max_mhz: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.boot_id, uuid.UUID) or self.boot_id.int == 0:
@@ -110,6 +114,15 @@ class TelemetrySampleInput:
             label="GPU memory",
             free_label="GPU memory free",
         )
+        _finite_number(
+            self.gpu_temperature_c, label="GPU temperature", minimum=0, maximum=150
+        )
+        for label, value in (
+            ("average CPU frequency", self.cpu_frequency_avg_mhz),
+            ("minimum CPU frequency", self.cpu_frequency_min_mhz),
+            ("maximum CPU frequency", self.cpu_frequency_max_mhz),
+        ):
+            _finite_number(value, label=label, minimum=1, maximum=20_000)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +139,10 @@ class TelemetrySampleView:
     gpu_utilization_percent: float | None
     gpu_memory_total_bytes: int | None
     gpu_memory_free_bytes: int | None
+    gpu_temperature_c: int | None = None
+    cpu_frequency_avg_mhz: int | None = None
+    cpu_frequency_min_mhz: int | None = None
+    cpu_frequency_max_mhz: int | None = None
 
 
 def _canonical_sample(
@@ -149,6 +166,10 @@ _SAMPLE_FIELDS = (
     "gpu_utilization_percent",
     "gpu_memory_total_bytes",
     "gpu_memory_free_bytes",
+    "gpu_temperature_c",
+    "cpu_frequency_avg_mhz",
+    "cpu_frequency_min_mhz",
+    "cpu_frequency_max_mhz",
 )
 
 
@@ -309,6 +330,30 @@ class TelemetryRepository:
         ).all()
         return {row.node_id: _view(row) for row in rows}
 
+    def recent_in_session(
+        self,
+        session: Session,
+        node_ids: Sequence[str],
+        since: datetime,
+    ) -> dict[str, list[TelemetrySampleView]]:
+        """Read each node's samples observed at or after ``since``, oldest first."""
+
+        identities = tuple(dict.fromkeys(node_ids))
+        if not identities:
+            return {}
+        rows = session.scalars(
+            select(NodeTelemetrySample)
+            .where(
+                NodeTelemetrySample.node_id.in_(identities),
+                NodeTelemetrySample.observed_at >= since,
+            )
+            .order_by(NodeTelemetrySample.node_id, NodeTelemetrySample.observed_at)
+        ).all()
+        recent: dict[str, list[TelemetrySampleView]] = {}
+        for row in rows:
+            recent.setdefault(row.node_id, []).append(_view(row))
+        return recent
+
     def by_ids(self, sample_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:
         """Hydrate one bounded stream batch without per-event reads."""
 
@@ -324,3 +369,49 @@ class TelemetryRepository:
                 )
             ).all()
         return {row.id: _view(row) for row in rows}
+
+
+# Fixed rule for a CPU that runs well below its maximum clock while it is hot or
+# busy. It is a hint: only the platform can say why the clock is low.
+CPU_LOW_CLOCK_RATIO = 0.7
+CPU_LOW_CLOCK_MIN_TEMPERATURE_C = 80
+CPU_LOW_CLOCK_MIN_GPU_UTILIZATION_PERCENT = 50.0
+CPU_LOW_CLOCK_MIN_SECONDS = 60
+
+
+def cpu_clock_is_low(sample: TelemetrySampleView) -> bool:
+    """One sample: average clock under 70% of max, and hot or loaded."""
+
+    average = sample.cpu_frequency_avg_mhz
+    maximum = sample.cpu_frequency_max_mhz
+    if average is None or maximum is None or average >= maximum * CPU_LOW_CLOCK_RATIO:
+        return False
+    return (
+        sample.gpu_temperature_c is not None
+        and sample.gpu_temperature_c >= CPU_LOW_CLOCK_MIN_TEMPERATURE_C
+    ) or (
+        sample.gpu_utilization_percent is not None
+        and sample.gpu_utilization_percent >= CPU_LOW_CLOCK_MIN_GPU_UTILIZATION_PERCENT
+    )
+
+
+def sustained_low_cpu_clock(
+    recent: Sequence[TelemetrySampleView],
+) -> TelemetrySampleView | None:
+    """Return the newest sample when the clock stayed low for over a minute.
+
+    ``recent`` is oldest first. The unbroken low run ending at the newest sample
+    must span more than ``CPU_LOW_CLOCK_MIN_SECONDS``.
+    """
+
+    if not recent or not cpu_clock_is_low(recent[-1]):
+        return None
+    first = recent[-1]
+    for sample in reversed(recent):
+        if not cpu_clock_is_low(sample):
+            break
+        first = sample
+    span = recent[-1].observed_at - first.observed_at
+    if span <= timedelta(seconds=CPU_LOW_CLOCK_MIN_SECONDS):
+        return None
+    return recent[-1]

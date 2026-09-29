@@ -3331,6 +3331,12 @@ pub struct TelemetryRequest {
 #[serde(deny_unknown_fields)]
 pub struct TelemetrySample {
     pub boot_id: ::uuid::Uuid,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub cpu_frequency_avg_mhz: ::std::option::Option<u32>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub cpu_frequency_max_mhz: ::std::option::Option<u32>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub cpu_frequency_min_mhz: ::std::option::Option<u32>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub disk_free_bytes: ::std::option::Option<u64>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -3339,6 +3345,8 @@ pub struct TelemetrySample {
     pub gpu_memory_free_bytes: ::std::option::Option<u64>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub gpu_memory_total_bytes: ::std::option::Option<u64>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub gpu_temperature_c: ::std::option::Option<u32>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub gpu_utilization_percent: ::std::option::Option<f64>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -7610,6 +7618,12 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
         #[serde(deny_unknown_fields)]
         struct Raw {
             pub boot_id: ::uuid::Uuid,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub cpu_frequency_avg_mhz: ::std::option::Option<u32>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub cpu_frequency_max_mhz: ::std::option::Option<u32>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub cpu_frequency_min_mhz: ::std::option::Option<u32>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub disk_free_bytes: ::std::option::Option<u64>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -7618,6 +7632,8 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             pub gpu_memory_free_bytes: ::std::option::Option<u64>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub gpu_memory_total_bytes: ::std::option::Option<u64>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub gpu_temperature_c: ::std::option::Option<u32>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub gpu_utilization_percent: ::std::option::Option<f64>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -7634,10 +7650,14 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             boot_id: raw.boot_id,
+            cpu_frequency_avg_mhz: raw.cpu_frequency_avg_mhz,
+            cpu_frequency_max_mhz: raw.cpu_frequency_max_mhz,
+            cpu_frequency_min_mhz: raw.cpu_frequency_min_mhz,
             disk_free_bytes: raw.disk_free_bytes,
             disk_total_bytes: raw.disk_total_bytes,
             gpu_memory_free_bytes: raw.gpu_memory_free_bytes,
             gpu_memory_total_bytes: raw.gpu_memory_total_bytes,
+            gpu_temperature_c: raw.gpu_temperature_c,
             gpu_utilization_percent: raw.gpu_utilization_percent,
             memory_available_bytes: raw.memory_available_bytes,
             memory_total_bytes: raw.memory_total_bytes,

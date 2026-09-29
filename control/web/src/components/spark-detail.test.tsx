@@ -34,3 +34,16 @@ test("a Spark with a Controller warning is shown as needing attention with the r
   expect(await screen.findByText("needs attention")).toBeVisible();
   expect(screen.getByText(/Qwen is partly installed/)).toBeVisible();
 });
+
+test("the Overview shows the CPU clock next to the temperature", async () => {
+  const measured = {...node, telemetry: {freshness: "live", age_seconds: 1, sample: {cpu_frequency_avg_mhz: 2100, cpu_frequency_max_mhz: 3900, gpu_temperature_c: 84}}};
+  render(<SparkDetail api={{fleetNode: vi.fn().mockResolvedValue(measured)} as unknown as ControlApi} id="spk_1" onClose={vi.fn()}/>);
+  expect(await screen.findByText(/2\.1 of 3\.9 GHz/)).toBeVisible();
+  expect(screen.getByText(/84 °C/)).toBeVisible();
+});
+
+test("the Overview omits the CPU clock when the agent does not report it", async () => {
+  render(<SparkDetail api={{fleetNode: vi.fn().mockResolvedValue(node)} as unknown as ControlApi} id="spk_1" onClose={vi.fn()}/>);
+  await screen.findByText("Kitchen");
+  expect(screen.queryByText("CPU clock")).toBeNull();
+});
