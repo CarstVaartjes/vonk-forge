@@ -1,6 +1,8 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {ControlApi, RecipeImageAvailabilityResponse} from "../api/types";
+import {failureNotice} from "../lib/error-display";
 import {CancelOperation} from "./cancel-operation";
+import {useToast} from "./toast";
 import {WaitingFor} from "./waiting-for";
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
@@ -39,6 +41,7 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
   const [error, setError] = useState("");
   const [waiting, setWaiting] = useState<Pick<RecipeImageAvailabilityResponse, "blockers" | "next_attempt_at">>({});
   const abort = useRef<AbortController | undefined>(undefined);
+  const toast = useToast();
 
   useEffect(() => () => abort.current?.abort(), []);
 
@@ -49,8 +52,10 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
     setBusy(true);
     setError("");
     setPhase("queued");
+    const requestKey = crypto.randomUUID();
     try {
-      const accepted = await api.downloadRecipe(selector, crypto.randomUUID(), controller.signal);
+      const accepted = await api.downloadRecipe(selector, requestKey, controller.signal);
+      toast.info("Recipe download queued.");
       setPhase(progressLabel(accepted));
       setWaiting(accepted);
       setOperationId(accepted.id);
@@ -63,6 +68,7 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
         if (!("kind" in next) || next.kind !== "recipe.image.availability.v2" || next.id !== current.id) {
           setBusy(false);
           setError("Recipe download returned an unexpected operation shape");
+          toast.error(failureNotice("Recipe download returned an unexpected operation shape", requestKey));
           return;
         }
         current = next;
@@ -74,16 +80,21 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
       setBusy(false);
       if (current.state === "succeeded") {
         setPhase("");
+        toast.success("Recipe downloaded.");
         onDownloaded();
         return;
       }
-      setError(current.state === "cancelled" ? "Download cancelled. Partial files are kept; download again to resume." : failureText(current));
+      const failed = current.state === "cancelled" ? "Download cancelled. Partial files are kept; download again to resume." : failureText(current);
+      setError(failed);
+      if (current.state !== "cancelled") toast.error(failureNotice(failed, requestKey));
     } catch (value) {
       if (controller.signal.aborted) return;
       setBusy(false);
-      setError(value instanceof Error ? value.message.slice(0, 256) : "Recipe download failed");
+      const failed = value instanceof Error ? value.message.slice(0, 256) : "Recipe download failed";
+      setError(failed);
+      toast.error(failureNotice(failed, requestKey));
     }
-  }, [api, onDownloaded, selector]);
+  }, [api, onDownloaded, selector, toast]);
 
   const label = missingModels.length > 0
     ? `Download recipe and ${missingModels.length} missing model${missingModels.length === 1 ? "" : "s"}`

@@ -5,6 +5,7 @@ import {nodeDisplayName, nodeStatus} from "../lib/fleet";
 import {ConfirmDialog} from "./confirm-dialog";
 import {EnrollmentGrant} from "./enrollment-grant";
 import {InstallationReconcile} from "./installation-reconcile";
+import {SkeletonBlock} from "./skeleton";
 import {StatusPill} from "./status-pill";
 import {Time} from "./time";
 import {useToast} from "./toast";
@@ -64,7 +65,7 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
   const status = node ? nodeStatus(node, new Date()) : {status: "offline" as const, reasons: []};
   return <section className="spark-detail" aria-labelledby="spark-detail-heading">
     <header><h2 id="spark-detail-heading">{title}</h2><button type="button" className="button secondary" onClick={onClose}>Close</button></header>
-    {!node && !error && <p role="status">Reading Spark…</p>}
+    {!node && !error && <SkeletonBlock label="Reading Spark"/>}
     {node && <>
       <div role="tablist" aria-label="Spark sections" className="button-row">{TABS.map(([key, label]) => <button key={key} type="button" role="tab" id={`spark-tab-${key}`} aria-selected={tab === key} aria-controls="spark-tab-panel" className={tab === key ? "button" : "button secondary"} onClick={() => openTab(key)}>{label}</button>)}</div>
       <div role="tabpanel" id="spark-tab-panel" aria-labelledby={`spark-tab-${tab}`}>
@@ -95,7 +96,7 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
           {grant && <EnrollmentGrant api={api} grant={grant}/>}
         </section>
       </>}
-      {tab === "logs" && <div className="spark-logs">{!logs && !error && <p role="status">Reading recent logs…</p>}{logs && (logs.entries.length === 0 ? <p>No log lines retained for this Spark yet. Try again after it reports activity.</p> : <ol>{logs.entries.map(entry => <li key={entry.evidence_id}><Time value={entry.observed_at}/> <StatusPill tone={entry.level === "error" ? "danger" : entry.level === "warning" ? "warning" : "neutral"}>{entry.level}</StatusPill> <small>{entry.source}</small> {entry.message}</li>)}</ol>)}<p>CLI: <code>vonkctl fleet loginfo {id}</code></p></div>}
+      {tab === "logs" && <div className="spark-logs">{!logs && !error && <SkeletonBlock lines={3} label="Reading recent logs"/>}{logs && (logs.entries.length === 0 ? <p>No log lines retained for this Spark yet. Try again after it reports activity.</p> : <ol>{logs.entries.map(entry => <li key={entry.evidence_id}><Time value={entry.observed_at}/> <StatusPill tone={entry.level === "error" ? "danger" : entry.level === "warning" ? "warning" : "neutral"}>{entry.level}</StatusPill> <small>{entry.source}</small> {entry.message}</li>)}</ol>)}<p>CLI: <code>vonkctl fleet loginfo {id}</code></p></div>}
       </div>
     </>}
     {error && <p role="alert">{error}</p>}

@@ -1,7 +1,9 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {CacheRemovalReview, ControlApi, ModelCacheOperatorResponse} from "../api/types";
 
+import {failureNotice} from "../lib/error-display";
 import {CancelOperation} from "./cancel-operation";
+import {useToast} from "./toast";
 import {CacheRemovalProgress} from "./cache-removal-progress";
 import {
   CacheRemovalOutcomeUnknown,
@@ -60,6 +62,7 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
   const [operationId, setOperationId] = useState("");
   const [error, setError] = useState("");
   const abort = useRef<AbortController | undefined>(undefined);
+  const toast = useToast();
 
   useEffect(() => {
     setReview(null);
@@ -78,8 +81,10 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
     setError("");
     setPhase("queued");
     setOperationId("");
+    const requestKey = crypto.randomUUID();
     try {
-      let current = await api.prepareModelCache(selector, crypto.randomUUID(), controller.signal);
+      let current = await api.prepareModelCache(selector, requestKey, controller.signal);
+      toast.info("Model download queued.");
       setOperationId(current.operation_id ?? "");
       let attempts = 0;
       while (!TERMINAL_STATES.has(current.state) && current.operation_id && attempts < MAX_POLL_ATTEMPTS) {
@@ -93,16 +98,21 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
       setBusy(false);
       if (current.state === "succeeded") {
         setPhase("");
+        toast.success("Model downloaded.");
         onPrepared();
         return;
       }
-      setError(current.state === "cancelled" ? "Download cancelled. Partial files are kept; download again to resume." : failureText(current));
+      const failed = current.state === "cancelled" ? "Download cancelled. Partial files are kept; download again to resume." : failureText(current);
+      setError(failed);
+      if (current.state !== "cancelled") toast.error(failureNotice(failed, requestKey));
     } catch (value) {
       if (controller.signal.aborted) return;
       setBusy(false);
-      setError(value instanceof Error ? value.message.slice(0, 256) : "Cache preparation failed");
+      const failed = value instanceof Error ? value.message.slice(0, 256) : "Cache preparation failed";
+      setError(failed);
+      toast.error(failureNotice(failed, requestKey));
     }
-  }, [api, onPrepared, selector]);
+  }, [api, onPrepared, selector, toast]);
 
   const reviewRemoval = useCallback(async () => {
     abort.current?.abort();
@@ -144,9 +154,11 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
       setConfirming(false);
       setReview(null);
       if (result.state === "succeeded") {
+        toast.success("Model removed from the cache.");
         onPrepared();
         return;
       }
+      toast.info("Model removal queued.");
       setRemoval({intent, initial: result});
     } catch (value) {
       if (controller.signal.aborted) return;
@@ -156,10 +168,12 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
         setConfirming(false);
         setRemoval({intent, initial: null, initialError: value.message});
       } else {
-        setError(value instanceof Error ? value.message : "Cache removal failed; review again before retrying.");
+        const failed = value instanceof Error ? value.message : "Cache removal failed; review again before retrying.";
+        setError(failed);
+        toast.error(failureNotice(failed, intent.requestKey));
       }
     }
-  }, [api, modelContentSha256, onPrepared, review, selector]);
+  }, [api, modelContentSha256, onPrepared, review, selector, toast]);
 
   if (removal) return <CacheRemovalProgress api={api} intent={removal.intent} initial={removal.initial}
     initialError={removal.initialError}
