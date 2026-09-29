@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import errno
 import json
 import os
@@ -168,7 +169,16 @@ def run_interactive(
         except ProcessLookupError:
             pass
         if status is None:
-            child, _ = os.waitpid(pid, 0)
+            reap_deadline = time.monotonic() + 5
+            child = 0
+            while child != pid and time.monotonic() < reap_deadline:
+                child, _ = os.waitpid(pid, os.WNOHANG)
+                time.sleep(0.02)
+            if child != pid:
+                # A child that ignores SIGTERM must not hang the suite.
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(pid, signal.SIGKILL)
+                child, _ = os.waitpid(pid, 0)
             if child != pid:
                 raise AcceptanceError("interactive child could not be reaped")
         raise
