@@ -3341,6 +3341,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn distribution_skips_an_archive_the_builder_adopted_after_upload() {
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let archive_sha = assignment.oci_archive_sha256.clone();
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        objects.insert(hex_sha256(&archive), archive.clone());
+        // Manifest plus the model only: any archive request would hang the
+        // server join below, and the recorded targets are checked directly.
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects,
+            2,
+            DistributionFixtureMode::Good,
+        );
+        let root = tempfile::tempdir().unwrap();
+        let built = root.path().join("builds").join("op");
+        std::fs::create_dir_all(&built).unwrap();
+        let built = built.join("image.docker.tar");
+        std::fs::write(&built, &archive).unwrap();
+        crate::image_importer::ImageImporter {
+            data_root: root.path(),
+        }
+        .retain_verified_distribution_archive(
+            &archive_sha,
+            &format!("sha256:{image_digest}"),
+            archive.len() as u64,
+            &built,
+        )
+        .unwrap();
+        assert!(!built.exists(), "adoption moves the archive out of builds/");
+
+        let archive_root = root.path().join("oci-archives");
+        let assignment_root = root.path().join("distribution").join("plan");
+        std::fs::create_dir_all(&assignment_root).unwrap();
+        let evidence = client
+            .download_distribution(TEST_PLAN_DIGEST, &assignment_root, &archive_root)
+            .await
+            .unwrap();
+        let requests = server.join().unwrap();
+        assert!(
+            requests
+                .iter()
+                .all(|request| !String::from_utf8_lossy(request).contains(&archive_sha)),
+            "the builder downloaded the archive it just produced"
+        );
+        assert_eq!(std::fs::read(evidence.oci_archive_path).unwrap(), archive);
+    }
+
+    #[tokio::test]
     async fn distribution_acceptance_uses_authenticated_ranges_and_reuses_import_cache() {
         let model = b"small model object";
         let (archive, image_digest) = oci_archive_fixture();

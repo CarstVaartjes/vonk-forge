@@ -120,7 +120,9 @@ impl ImageImporter<'_> {
         {
             return Err(ImageImportError::Digest);
         }
-        validate_archive_metadata(archive, image_bytes, true)?;
+        // Build output is not yet private; the mode is set below and the
+        // destination is validated as private after the move.
+        validate_archive_metadata(archive, image_bytes, false)?;
         if !path_within_root(archive, self.data_root)? {
             return Err(ImageImportError::Digest);
         }
