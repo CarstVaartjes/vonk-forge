@@ -65,6 +65,12 @@ on:
 permissions:
   contents: read
 
+# A newer main push supersedes an older anchor; the scheduled main evaluation
+# still promotes the current tip. Manual dispatches never cancel one another.
+concurrency:
+  group: vonk-forge-installer-publication-source-${{ github.event_name == 'push' && 'main' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
   source:
     name: Bind changed publication and acceptance source
