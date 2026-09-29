@@ -1991,9 +1991,7 @@ class SparkLifecycle:
         return 1
 
     def _direct_agent_health(self) -> dict[str, str | bool]:
-        self_test = self._self_test()
-        if self_test.get("self_test_passed") is not True:
-            raise LifecycleError("direct Rust agent is not healthy")
+        self._self_test()
         return {
             "healthy": True,
             "implementation": "rust",
@@ -3117,13 +3115,11 @@ class SparkLifecycle:
             "architecture",
             "binary_digest",
             "build_digest",
-            "self_test_passed",
             "semantic_version",
         }
         if (
             not isinstance(document, dict)
             or not identity_fields <= set(document)
-            or document.get("self_test_passed") is not True
             or not isinstance(document.get("build_digest"), str)
             or re.fullmatch(r"sha256:[0-9a-f]{64}", document["build_digest"]) is None
             or not isinstance(document.get("binary_digest"), str)

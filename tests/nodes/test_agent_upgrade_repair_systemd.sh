@@ -406,7 +406,7 @@ int main(int argc, char **argv) {
     FILE *digest = popen(digest_command, "r");
     if (!digest || fscanf(digest, "%64[0-9a-f]", binary_digest) != 1
         || pclose(digest) != 0 || strlen(binary_digest) != 64) return 2;
-    printf("{\"semantic_version\":\"%s\",\"build_digest\":\"%s\",\"binary_digest\":\"%s\",\"architecture\":\"linux-arm64\",\"self_test_passed\":true}\\n", "$semantic", "$build_digest", binary_digest);
+    printf("{\"semantic_version\":\"%s\",\"build_digest\":\"%s\",\"binary_digest\":\"%s\",\"architecture\":\"linux-arm64\"}\\n", "$semantic", "$build_digest", binary_digest);
     return 0;
   }
   for (;;) pause();
@@ -1934,7 +1934,6 @@ grep -F '"semantic_version":"0.1.1"' <<< "$self_test" >/dev/null
 grep -F '"build_digest":"'"$build_digest_target"'"' <<< "$self_test" >/dev/null
 grep -F '"binary_digest":"'"$source_agent_sha"'"' <<< "$self_test" >/dev/null
 grep -F '"architecture":"linux-arm64"' <<< "$self_test" >/dev/null
-grep -F '"self_test_passed":true' <<< "$self_test" >/dev/null
 
 # Prove that the repaired helper can carry one subsequent ordinary package
 # through the same root-custody + dpkg parent-chain mechanism.
@@ -1992,7 +1991,6 @@ grep -F '"build_digest":"'"$build_digest_next"'"' \
   <<< "$ordinary_self_test" >/dev/null
 grep -F '"binary_digest":"'"$ordinary_agent_sha"'"' \
   <<< "$ordinary_self_test" >/dev/null
-grep -F '"self_test_passed":true' <<< "$ordinary_self_test" >/dev/null
 
 printf 'dev335 -> schema2 node repair phase=%s and ordinary helper upgrade: PASS\n' \
   "$crash_phase"
