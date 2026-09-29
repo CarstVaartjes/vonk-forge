@@ -317,10 +317,10 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
-        if !matches!(error, OciError::Json(_)) {
+        if !matches!(error, OciError::Json(_) | OciError::NoRunGeneration) {
             return false;
         }
-        self.retire_unowned_run(run_id, "unparseable managed metadata")
+        self.retire_unowned_run(run_id, "unobservable managed metadata")
             .await
     }
 
@@ -405,13 +405,13 @@ impl<R> RecipeExecutor<'_, R> {
                             error.preflight_code()
                         );
                     })?;
-                // A stopped process of a run this Controller never owned (for
-                // example after its database was rebuilt) is retired locally
-                // instead of being reported forever.
-                if !process_running
-                    && self
-                        .retire_unowned_run(&plan.run_id.to_string(), "not running")
-                        .await
+                // A run this Controller never owned (for example after its
+                // database was rebuilt) loses its local claim instead of being
+                // reported forever; the helper then reaps an unclaimed
+                // container, so the Controller's desired state wins.
+                if self
+                    .retire_unowned_run(&plan.run_id.to_string(), "unknown to the Controller")
+                    .await
                 {
                     return Err(RecipeObservationError::UnownedRun);
                 }
