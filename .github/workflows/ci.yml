@@ -675,6 +675,26 @@ jobs:
             echo "VERSION=$version"
             echo "BASELINE_VERSION=$baseline_version"
           } >> "$GITHUB_ENV"
+      - name: Run the systemd upgrade-recovery fixtures
+        # Runs before the lifecycle script, which leaves host state the
+        # fixtures refuse to start over. The release gate runs these too; without them here a fixture race or
+        # regression only surfaces on main.
+        run: |
+          set -euo pipefail
+          RUSTFLAGS='-C target-feature=+crt-static' \
+            cargo build --locked --release --package vonk-build-egress
+          build_egress=$(realpath target/release/vonk-build-egress)
+          sudo install -o root -g root -m 0755 "$build_egress" "$build_egress.root-owned"
+          sudo mv -f "$build_egress.root-owned" "$build_egress"
+          cargo_dir=$(dirname "$(command -v cargo)")
+          cargo_home=$(dirname "$cargo_dir")
+          for mode in full-cgroup dpkg-only post-remove; do
+            sudo env \
+              PATH="$cargo_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+              CARGO_HOME="$cargo_home" RUSTUP_HOME="$(rustup show home)" \
+              BUILD_EGRESS_BINARY="$build_egress" VERSION="$VERSION" \
+              CRASH_MODE="$mode" tests/nodes/test_agent_upgrade_recovery_systemd.sh
+          done
       - name: Run the native package lifecycle
         run: |
           set -euo pipefail
