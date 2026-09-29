@@ -5,12 +5,14 @@ import {AppShell} from "./components/app-shell";
 import type {AppRoute} from "./components/app-shell";
 import {ActivityPage} from "./pages/activity";
 import {FleetPage} from "./pages/fleet-simplified";
+import {KeysPage} from "./pages/keys";
 import {LibraryPage} from "./pages/library";
 
-const pages: AppRoute[] = ["fleet", "library", "activity"];
+const pages: AppRoute[] = ["fleet", "library", "keys", "activity"];
 function pageTitle(pathname: string): string {
   if (/^\/library\/recipes\//.test(pathname)) return "Recipe · Library · Vonk Forge";
   if (/^\/library(?:\/|$)/.test(pathname)) return "Library · Vonk Forge";
+  if (pathname === "/keys") return "Keys · Vonk Forge";
   if (pathname === "/activity") return "Activity · Vonk Forge";
   if (pathname === "/" || pathname === "/fleet") return "Fleet · Vonk Forge";
   return "Page not found · Vonk Forge";
@@ -99,6 +101,7 @@ export function App({api}: {api: ControlApi}) {
   const content = page ? {
     fleet: <FleetPage api={api} onBusyChange={setNavigationLocked}/>,
     library: <LibraryPage api={api} path={url} onNavigate={navigatePath} onNavigatePath={navigateUrl} onBusyChange={setNavigationBusy}/>,
+    keys: <KeysPage api={api}/>,
     activity: <ActivityPage api={api}/>,
   }[page] : <section className="fleet-empty route-not-found" aria-labelledby="not-found-heading">
     <p className="fleet-kicker">Unknown workspace</p>

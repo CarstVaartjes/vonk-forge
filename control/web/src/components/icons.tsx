@@ -14,6 +14,10 @@ export function LibraryIcon(props: IconProps) {
   return <Icon {...props}><path d="M5 4h5v16H5zM14 4h5v16h-5z"/><path d="M7.5 8h.01M16.5 8h.01M7.5 16h.01M16.5 16h.01"/></Icon>;
 }
 
+export function KeyIcon(props: IconProps) {
+  return <Icon {...props}><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M16 7l3 3"/></Icon>;
+}
+
 export function ActivityIcon(props: IconProps) {
   return <Icon {...props}><path d="M3 12h4l2.2-6 4.1 12 2.2-6H21"/></Icon>;
 }

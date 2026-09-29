@@ -34,7 +34,7 @@ test("Fleet creates a one-use grant and shows the exact Spark command, token, an
   vi.stubGlobal("crypto", {randomUUID: () => "12345678-1234-4234-8234-123456789abc"});
   const userClipboard = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {configurable: true, value: {writeText: userClipboard}});
-  render(<FleetPage api={{visualFleet: vi.fn(), enrollFleetNode} as unknown as ControlApi}/>);
+  render(<FleetPage api={{visualFleet: vi.fn(), enrollFleetNode, enrollmentStatus: vi.fn().mockResolvedValue({state: "pending"})} as unknown as ControlApi}/>);
 
   fireEvent.click(screen.getByRole("button", {name: "Enroll Spark"}));
   fireEvent.change(screen.getByLabelText("Spark name"), {target: {value: "Kitchen Spark"}});

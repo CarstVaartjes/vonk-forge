@@ -108,8 +108,8 @@ test("renders friendly timeline labels, honest time metadata, and hidden copyabl
   const timestamp = screen.getByText(/1 minute ago/i).closest("time");
   expect(timestamp).toHaveAttribute("datetime", "2026-08-15T11:59:00Z");
   expect(timestamp).toHaveAttribute("title");
-  expect(screen.getByText(/Mia Lab Spark/)).toBeVisible();
-  expect(screen.getByText(/Unnamed Spark/)).toBeVisible();
+  expect(screen.getAllByText(/Mia Lab Spark/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/Unnamed Spark/).length).toBeGreaterThan(0);
   expect(screen.getByText("1 historical target")).toBeVisible();
   expect(screen.queryByText("Unavailable object")).not.toBeInTheDocument();
 
@@ -462,7 +462,7 @@ test("discloses bounded API windows and loads older operations when a cursor is 
 
   expect(await screen.findByRole("heading", {name: "Recipe Stop · Completed"})).toBeVisible();
   expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Loaded 2 of 2 operations");
-  expect(loadOperations).toHaveBeenNthCalledWith(2, "older-page");
+  expect(loadOperations).toHaveBeenNthCalledWith(2, "older-page", undefined, expect.anything());
   expect(screen.queryByRole("button", {name: "Load older operations"})).not.toBeInTheDocument();
 });
 
@@ -557,7 +557,20 @@ test("paginates operations after a partial page error", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("Older operations could not be loaded");
   await user.click(screen.getByRole("button", {name: "Load older operations"}));
   expect((await screen.findAllByRole("heading", {name: "Profile Load · Failed"}))[0]).toBeVisible();
-  expect(client.operations).toHaveBeenNthCalledWith(3, "operations-next");
+  expect(client.operations).toHaveBeenNthCalledWith(3, "operations-next", undefined, expect.anything());
   expect(screen.getAllByText("Profile load failed")).toHaveLength(2);
   expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Loaded 2 of 2 operations");
+});
+
+test("server-side filters are sent to the operations API and kept in the URL", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  render(<ActivityPage api={client} now={NOW}/>);
+  await screen.findByRole("heading", {name: "Recipe Start · Completed"});
+  await user.selectOptions(screen.getByLabelText("Operation state"), "failed");
+  await user.selectOptions(screen.getByLabelText("Spark"), TARGET_ID);
+  await waitFor(() => expect(client.operations).toHaveBeenLastCalledWith(undefined, expect.anything(), {state: "failed", target: TARGET_ID, requestId: undefined}));
+  expect(location.search).toContain("state=failed");
+  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  await waitFor(() => expect(location.search).toBe(""));
 });

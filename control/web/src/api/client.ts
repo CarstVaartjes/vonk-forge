@@ -12,10 +12,22 @@ import type {
   FleetProfile,
   FleetProfileApplicationView,
   FleetProfileLoadInput,
+  CatalogSyncStatus,
+  ProfileDefinition,
+  ReconcilePlan,
+  ActivityFilters,
+  EnrollmentGrantStatus,
+  FleetActionResponse,
+  FleetLogResponse,
+  FleetNodeIdentity,
+  GatewayKeyCreated,
+  GatewayKeyList,
+  GatewayKeyRevoked,
   JobDetail,
   JobResumeResponse,
   OperationsResponse,
   OperationDetail,
+  VisualFleetNode,
   VisualFleetSnapshot,
   ArtifactJob,
   ArtifactJobCapabilities,
@@ -24,7 +36,6 @@ import type {
   ArtifactJobList,
   ArtifactTransferProgress,
   LibrarySort,
-  ModelDetail,
   ModelLibrary,
   ModelCacheOperatorResponse,
   CacheRemovalReview,
@@ -209,6 +220,50 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.POST("/api/fleet/enroll", {body: input, signal}));
   }
 
+  async fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode> {
+    return resultData(await this.generated.GET("/api/fleet/{selector}", {params: {path: {selector}}, signal}));
+  }
+
+  async renameFleetNode(selector: string, displayName: string): Promise<FleetNodeIdentity> {
+    return resultData(await this.generated.POST("/api/fleet/{selector}/rename", {params: {path: {selector}}, body: {display_name: displayName}}));
+  }
+
+  async removeFleetNode(selector: string): Promise<FleetActionResponse> {
+    return resultData(await this.generated.POST("/api/fleet/{selector}/remove", {params: {path: {selector}}}));
+  }
+
+  async reenrollFleetNode(selector: string, requestKey: string): Promise<FleetActionResponse> {
+    return resultData(await this.generated.POST("/api/fleet/{selector}/re-enroll", {params: {path: {selector}}, body: {request_key: requestKey}}));
+  }
+
+  async fleetLogs(selector: string, signal?: AbortSignal): Promise<FleetLogResponse> {
+    return resultData(await this.generated.GET("/api/fleet/{selector}/loginfo", {params: {path: {selector}, query: {lines: 100}}, signal}));
+  }
+
+  async upgradeFleet(all: boolean, selectors: string[], requestKey: string): Promise<FleetActionResponse> {
+    return resultData(await this.generated.POST("/api/fleet/upgrade", {body: {all, selectors: selectors.length ? selectors : null, request_key: requestKey}}));
+  }
+
+  async enrollmentStatus(grantId: string, signal?: AbortSignal): Promise<EnrollmentGrantStatus> {
+    return resultData(await this.generated.GET("/api/fleet/enrollments/{grant_id}", {params: {path: {grant_id: grantId}}, signal}));
+  }
+
+  async revokeEnrollment(grantId: string): Promise<EnrollmentGrantStatus> {
+    return resultData(await this.generated.POST("/api/fleet/enrollments/{grant_id}/revoke", {params: {path: {grant_id: grantId}}}));
+  }
+
+  async gatewayKeys(signal?: AbortSignal): Promise<GatewayKeyList> {
+    return resultData(await this.generated.GET("/api/key", {signal}));
+  }
+
+  async createGatewayKey(name: string, models: string[], expires?: string): Promise<GatewayKeyCreated> {
+    return resultData(await this.generated.POST("/api/key", {body: {name, models, expires: expires || null}}));
+  }
+
+  async revokeGatewayKey(name: string): Promise<GatewayKeyRevoked> {
+    return resultData(await this.generated.POST("/api/key/{name}/revoke", {params: {path: {name}}}));
+  }
+
   async profiles(signal?: AbortSignal): Promise<FleetProfileList> {
     return resultData(await this.generated.GET("/api/profile", {signal}));
   }
@@ -264,16 +319,58 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async modelLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<ModelLibrary> {
-    return resultData(await this.generated.GET("/api/model/library", {
-      params: {query: {cursor, limit: 100, sort, updated_since: updatedSince}},
+  async catalogSyncStatus(signal?: AbortSignal): Promise<CatalogSyncStatus | null> {
+    // 404 means the sync has never run, which is a state, not a failure.
+    const result = await this.generated.GET("/api/catalog/managed-recipes/sync-status", {signal});
+    if (result.response.status === 404) return null;
+    return resultData(result);
+  }
+
+  async cancelModelOperation(operationId: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
+    return resultData(await this.generated.POST("/api/model/operations/{operation_id}/cancel", {
+      params: {path: {operation_id: operationId}},
+      body: {request_key: requestKey, reason: "operator requested cancellation"},
       signal,
     }));
   }
 
-  async modelDetail(selector: string, signal?: AbortSignal): Promise<ModelDetail> {
-    return resultData(await this.generated.GET("/api/model/{selector}", {
-      params: {path: {selector}},
+  async cancelRecipeOperation(operationId: string, requestKey: string, signal?: AbortSignal): Promise<RecipeCacheOperation> {
+    return resultData(await this.generated.POST("/api/recipe/operations/{operation_id}/cancel", {
+      params: {path: {operation_id: operationId}},
+      body: {request_key: requestKey, reason: "operator requested cancellation"},
+      signal,
+    }));
+  }
+
+  async previewInstallationReconcile(installationId: string, signal?: AbortSignal): Promise<ReconcilePlan> {
+    return resultData(await this.generated.POST("/api/recipe/installations/{installation_id}/reconcile/preview", {
+      params: {path: {installation_id: installationId}}, signal,
+    }));
+  }
+
+  async reconcileInstallation(installationId: string, requestKey: string, signal?: AbortSignal): Promise<unknown> {
+    return resultData(await this.generated.POST("/api/recipe/installations/{installation_id}/reconcile", {
+      params: {path: {installation_id: installationId}}, body: {request_key: requestKey}, signal,
+    }));
+  }
+
+  async profileDefinition(number: number, signal?: AbortSignal): Promise<ProfileDefinition> {
+    return resultData(await this.generated.GET("/api/profile/{number}/definition", {
+      params: {path: {number}}, signal,
+    }));
+  }
+
+  async cancelProfileApplication(applicationId: string, profileNumber: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+    return resultData(await this.generated.POST("/api/profile/applications/{application_id}/cancel", {
+      params: {path: {application_id: applicationId}},
+      body: {profile_number: profileNumber, request_key: requestKey},
+      signal,
+    }));
+  }
+
+  async modelLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<ModelLibrary> {
+    return resultData(await this.generated.GET("/api/model/library", {
+      params: {query: {cursor, limit: 100, sort, updated_since: updatedSince}},
       signal,
     }));
   }
@@ -288,13 +385,6 @@ export class ApiClient implements ControlApi {
   async recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail> {
     return resultData(await this.generated.GET("/api/recipe/{selector}", {
       params: {path: {selector}},
-      signal,
-    }));
-  }
-
-  async libraryJobProgress(jobId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/jobs/{job_id}", {
-      params: {path: {job_id: jobId}, query: {}},
       signal,
     }));
   }
@@ -471,9 +561,9 @@ export class ApiClient implements ControlApi {
     return `/api/artifact-jobs/${encodedJobId}/results/${encodedName}/${sha256}`;
   }
 
-  async operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse> {
+  async operations(cursor?: string, signal?: AbortSignal, filters: ActivityFilters = {}): Promise<OperationsResponse> {
     return resultData(await this.generated.GET("/api/operations", {
-      params: {query: {cursor, limit: 20}}, signal,
+      params: {query: {cursor, limit: 20, state: filters.state, node_id: filters.target, request_id: filters.requestId}}, signal,
     }));
   }
 

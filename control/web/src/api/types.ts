@@ -8,14 +8,24 @@ export type FleetTelemetryState = components["schemas"]["TelemetryState"];
 export type VisualFleetNode = components["schemas"]["FleetNode"];
 export type VisualFleetSnapshot = components["schemas"]["FleetSnapshot"];
 export type EnrollmentGrantResponse = components["schemas"]["EnrollmentGrantResponse"];
+export type FleetActionResponse = components["schemas"]["FleetActionResponse"];
+export type FleetNodeIdentity = components["schemas"]["FleetNodeIdentity"];
+export type FleetLogResponse = components["schemas"]["FleetLogResponse"];
+export type EnrollmentGrantStatus = components["schemas"]["EnrollmentGrantStatus"];
+export type GatewayKeyList = components["schemas"]["GatewayKeyList"];
+export type GatewayKeyCreated = components["schemas"]["GatewayKeyCreated"];
+export type GatewayKeyRevoked = components["schemas"]["GatewayKeyRevoked"];
 export type JobDetail = components["schemas"]["JobDetailResponse"];
 export type JobResumeResponse = components["schemas"]["JobResumeResponse"];
 export type OperationDetail = components["schemas"]["OperationDetailResponse"];
+export type CatalogSyncStatus = components["schemas"]["ManagedCatalogSyncResponse"];
+export type ProfileDefinition = components["schemas"]["FleetProfileDefinitionView"];
+export type ReconcilePlan = components["schemas"]["RunSwitchPlan"];
+export type ActivityFilters = {state?: string; target?: string; requestId?: string};
 export type OperationsResponse = components["schemas"]["OperationsResponse"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
 export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
 export type ModelLibrary = components["schemas"]["ModelLibraryResponse"];
-export type ModelDetail = components["schemas"]["ModelDetailResponse"];
 export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
 export type CacheRemovalReview = components["schemas"]["CacheRemovalReview"];
@@ -112,14 +122,11 @@ export type FleetSnapshotEvent = components["schemas"]["FleetSnapshotEvent"];
 export type FleetTelemetryEvent = components["schemas"]["FleetTelemetryEvent"];
 export type FleetChangeEvent = components["schemas"]["FleetChangeEvent"];
 export type FleetStreamEvent = components["schemas"]["FleetStreamEvent"];
-export interface CatalogApi {
-}
 export interface LibraryApi {
+  catalogSyncStatus(signal?: AbortSignal): Promise<CatalogSyncStatus | null>;
   modelLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<ModelLibrary>;
-  modelDetail(selector: string, signal?: AbortSignal): Promise<ModelDetail>;
   recipeLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<RecipeLibrary>;
   recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail>;
-  libraryJobProgress(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
   artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList>;
   artifactJobByRequestId(requestId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities>;
@@ -141,6 +148,10 @@ export interface LibraryApi {
   recipeCacheRequest(requestKey: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
   updateRecipes(all: boolean, selectors: string[], requestKey: string, signal?: AbortSignal): Promise<RecipeUpdateResponse>;
   recipeCacheOperation(operationId: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
+  cancelModelOperation(operationId: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
+  cancelRecipeOperation(operationId: string, requestKey: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
+  previewInstallationReconcile(installationId: string, signal?: AbortSignal): Promise<ReconcilePlan>;
+  reconcileInstallation(installationId: string, requestKey: string, signal?: AbortSignal): Promise<unknown>;
 }
 export interface ControlApi extends LibraryApi {
   downloadCliToken(): Promise<CliTokenDownload>;
@@ -152,9 +163,22 @@ export interface ControlApi extends LibraryApi {
   profileApplicationByRequest(number: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   profileEndpoints(number: number, signal?: AbortSignal): Promise<FleetProfileEndpoints>;
+  profileDefinition(number: number, signal?: AbortSignal): Promise<ProfileDefinition>;
+  cancelProfileApplication(applicationId: string, profileNumber: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   enrollFleetNode(input: {name: string; request_key: string}, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
-  operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse>;
+  fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode>;
+  renameFleetNode(selector: string, displayName: string): Promise<FleetNodeIdentity>;
+  removeFleetNode(selector: string): Promise<FleetActionResponse>;
+  reenrollFleetNode(selector: string, requestKey: string): Promise<FleetActionResponse>;
+  fleetLogs(selector: string, signal?: AbortSignal): Promise<FleetLogResponse>;
+  upgradeFleet(all: boolean, selectors: string[], requestKey: string): Promise<FleetActionResponse>;
+  enrollmentStatus(grantId: string, signal?: AbortSignal): Promise<EnrollmentGrantStatus>;
+  revokeEnrollment(grantId: string): Promise<EnrollmentGrantStatus>;
+  gatewayKeys(signal?: AbortSignal): Promise<GatewayKeyList>;
+  createGatewayKey(name: string, models: string[], expires?: string): Promise<GatewayKeyCreated>;
+  revokeGatewayKey(name: string): Promise<GatewayKeyRevoked>;
+  operations(cursor?: string, signal?: AbortSignal, filters?: ActivityFilters): Promise<OperationsResponse>;
   operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;
   resumeJob(jobId: string): Promise<JobResumeResponse>;

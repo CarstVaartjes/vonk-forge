@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {CacheRemovalReview, ControlApi, ModelCacheOperatorResponse} from "../api/types";
 
+import {CancelOperation} from "./cancel-operation";
 import {CacheRemovalProgress} from "./cache-removal-progress";
 import {
   CacheRemovalOutcomeUnknown,
@@ -56,6 +57,7 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
   } | null>(null);
   const [review, setReview] = useState<CacheRemovalReview | null>(null);
   const [phase, setPhase] = useState("");
+  const [operationId, setOperationId] = useState("");
   const [error, setError] = useState("");
   const abort = useRef<AbortController | undefined>(undefined);
 
@@ -75,8 +77,10 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
     setBusy(true);
     setError("");
     setPhase("queued");
+    setOperationId("");
     try {
       let current = await api.prepareModelCache(selector, crypto.randomUUID(), controller.signal);
+      setOperationId(current.operation_id ?? "");
       let attempts = 0;
       while (!TERMINAL_STATES.has(current.state) && current.operation_id && attempts < MAX_POLL_ATTEMPTS) {
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
@@ -92,7 +96,7 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
         onPrepared();
         return;
       }
-      setError(failureText(current));
+      setError(current.state === "cancelled" ? "Download cancelled. Partial files are kept; download again to resume." : failureText(current));
     } catch (value) {
       if (controller.signal.aborted) return;
       setBusy(false);
@@ -186,6 +190,7 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
       {busy || state === "preparing" ? "Downloading…" : state === "failed" ? "Retry download" : "Download model"}
     </button>
     {(busy || state === "preparing") && <span role="status">{phase || "queued"}</span>}
+    {busy && operationId && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." cancel={key => api.cancelModelOperation(operationId, key)}/>}
     {error && <span className="library-cache-error" role="alert">{error}</span>}
   </div>;
 }

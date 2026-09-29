@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {ControlApi, RecipeImageAvailabilityResponse} from "../api/types";
+import {CancelOperation} from "./cancel-operation";
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 const POLL_INTERVAL_MS = 1_000;
@@ -33,6 +34,7 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
 }) {
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState("");
+  const [operationId, setOperationId] = useState("");
   const [error, setError] = useState("");
   const abort = useRef<AbortController | undefined>(undefined);
 
@@ -48,6 +50,7 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
     try {
       const accepted = await api.downloadRecipe(selector, crypto.randomUUID(), controller.signal);
       setPhase(progressLabel(accepted));
+      setOperationId(accepted.id);
       let current = accepted;
       let attempts = 0;
       while (!TERMINAL_STATES.has(current.state) && attempts < MAX_POLL_ATTEMPTS) {
@@ -70,7 +73,7 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
         onDownloaded();
         return;
       }
-      setError(failureText(current));
+      setError(current.state === "cancelled" ? "Download cancelled. Partial files are kept; download again to resume." : failureText(current));
     } catch (value) {
       if (controller.signal.aborted) return;
       setBusy(false);
@@ -88,6 +91,7 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
     </button>
     {missingModels.length > 0 && <span className="library-cache-missing">Also caches {missingModels.join(", ")}</span>}
     {(busy || phase) && <span role="status">{phase}</span>}
+    {busy && operationId && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." cancel={key => api.cancelRecipeOperation(operationId, key)}/>}
     {error && <span className="library-cache-error" role="alert">{error}</span>}
   </div>;
 }
