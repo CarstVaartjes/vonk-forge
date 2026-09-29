@@ -286,6 +286,35 @@ def test_non_schema_two_receipt_is_discarded_by_scans_and_re_derived(
     assert storage.read_receipt(receipt.oci_archive_sha256) == restored
 
 
+def test_receipt_with_retired_schema_two_fields_is_own_stale_and_replaced(
+    tmp_path: Path,
+) -> None:
+    """Schema 2 dropped these fields without a version bump; they are ours."""
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    receipt = _prepare(storage=storage, transport=TinyTransport())
+    receipt_path = storage.root / f"{receipt.oci_archive_sha256}.receipt.json"
+    value = json.loads(receipt_path.read_text(encoding="utf-8")) | {
+        "platform_manifest_digest": receipt.image_digest,
+        "local_image_reference": None,
+    }
+    receipt_path.write_text(json.dumps(value), encoding="utf-8")
+    assert (
+        storage.find_verified(
+            BUILT_IMAGE_DIGEST,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is None
+    )
+    # A scan discards it once instead of warning on every lookup.
+    assert not receipt_path.exists()
+    receipt_path.write_text(json.dumps(value), encoding="utf-8")
+    # Preparation replaces it in place instead of refusing a "newer" receipt.
+    restored = _prepare(storage=storage, transport=TinyTransport())
+    assert storage.read_receipt(receipt.oci_archive_sha256) == restored
+
+
 @pytest.mark.parametrize(
     "change",
     [

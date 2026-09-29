@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -25,6 +26,7 @@ from .agent_jobs import AgentJobService
 from .bounded_json import sequence
 from .distribution import DistributionError, DistributionService
 from .distribution_assignment import NodeDistributionAssignment
+from .logging import redact_text
 from .model_cache import ModelCacheNotFound
 from .model_cache_contract import ModelCacheDownloadResult
 from .models import (
@@ -55,6 +57,8 @@ from .runtime_image_preparation import (
     prefixed_image_digest,
 )
 from .strict_json import read_stored_model
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1258,6 +1262,16 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                         ),
                     )
                 del self._runtime_image_futures[key]
+                error = future.exception()
+                if error is not None:
+                    # The tick decides retry or failure; record every cause here
+                    # so no background failure is ever silent.
+                    _LOGGER.warning(
+                        "runtime image preparation for run/switch phase %s failed: %s: %s",
+                        request_key,
+                        getattr(error, "code", type(error).__name__),
+                        redact_text(getattr(error, "detail", error)),
+                    )
                 runtime_result = future.result()
             else:
                 runtime_result = self._prepare_runtime_image(

@@ -7289,9 +7289,12 @@ class RunSwitchOperationService:
                 )
                 return True
             except RuntimeImagePreparationError as error:
-                if error.code == _RUNTIME_IMAGE_OWNER_CHANGED:
-                    return False
-                if error.retryable and error.code.startswith("artifact."):
+                # A publication that no longer finds its owner is re-checked,
+                # visibly: a cancelled or superseded owner settles on the next
+                # tick, a current one prepares again (reusing the archive).
+                if error.code == _RUNTIME_IMAGE_OWNER_CHANGED or (
+                    error.retryable and error.code.startswith("artifact.")
+                ):
                     return self._hold_capacity_writer(
                         operation_id,
                         phase_index,
@@ -7369,6 +7372,7 @@ class RunSwitchOperationService:
                 RunAdmissionBusy.code,
                 RecipeBuildAdmissionBusy.code,
                 RunSwitchPostStopEvidencePending.code,
+                _RUNTIME_IMAGE_OWNER_CHANGED,
             ) or (
                 isinstance(retry_reason, str) and retry_reason.startswith("artifact.")
             ):
@@ -8911,6 +8915,56 @@ def _phase_request_key(
     )
 
 
+def _lock_phase_owner(
+    session: Session, request_key: str, phase_index: int, item_index: int
+) -> Job | None:
+    """Lock the RunSwitch whose phase ``request_key`` names, or return None.
+
+    A phase runs under its operation's own request key or, after a retry or
+    re-plan, under the current generation's ``_phase_request_key``. Both name
+    the same owner; a key from an earlier generation names none. Only the
+    matched row is locked (``NOWAIT``; the caller maps a busy lock and checks
+    the owner's state and checkpoint itself).
+    """
+
+    def locked(condition: Any) -> Job | None:
+        return session.scalar(
+            select(Job)
+            .where(condition)
+            .with_for_update(nowait=True)
+            .execution_options(populate_existing=True)
+        )
+
+    def current_key(job: Job) -> bool:
+        generation = (job.result or {}).get("phase_retry_generation")
+        return (
+            type(generation) is int
+            and generation > 0
+            and request_key
+            == _phase_request_key(job.request_id, phase_index, item_index, generation)
+        )
+
+    job = locked(Job.request_id == request_key)
+    if job is not None:
+        return job
+    # A derived key cannot be inverted; only an active operation can own it.
+    owner = next(
+        (
+            job
+            for job in session.scalars(
+                select(Job).where(
+                    Job.kind == "recipe.run-switch.v2",
+                    Job.state.in_(("queued", "running", "waiting")),
+                )
+            )
+            if current_key(job)
+        ),
+        None,
+    )
+    job = locked(Job.id == owner.id) if owner is not None else None
+    return job if job is not None and current_key(job) else None
+
+
 def _progress_member_entries(value: object) -> list[Mapping[str, object]]:
     if isinstance(value, Mapping):
         entries: list[Mapping[str, object]] = []
@@ -8979,12 +9033,7 @@ def _lock_current_build_parent(
                 .execution_options(populate_existing=True)
             )
         )
-        job = session.scalar(
-            select(Job)
-            .where(Job.request_id == request_key)
-            .with_for_update(nowait=True)
-            .execution_options(populate_existing=True)
-        )
+        job = _lock_phase_owner(session, request_key, phase_index, item_index)
     except DBAPIError as error:
         if getattr(error.orig, "sqlstate", None) != "55P03":
             raise
@@ -9802,12 +9851,7 @@ def _persist_run_switch_runtime_image_reference(
             ) from error
 
         try:
-            job = session.scalar(
-                select(Job)
-                .where(Job.request_id == request_key)
-                .with_for_update(nowait=True)
-                .execution_options(populate_existing=True)
-            )
+            job = _lock_phase_owner(session, request_key, phase.index, item_index)
         except DBAPIError as error:
             state = getattr(error.orig, "sqlstate", None) or getattr(
                 error.orig, "pgcode", None
