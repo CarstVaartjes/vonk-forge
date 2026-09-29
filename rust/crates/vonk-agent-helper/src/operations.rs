@@ -918,7 +918,55 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
+        // A single argument is a run id alone: the Controller-side truth for a
+        // run whose local metadata is unreadable, checked by container name.
+        if let [run_id] = request.arguments.as_slice() {
+            return self.runtime_run_container_running(run_id);
+        }
         self.runtime_run_inspect(&request.arguments, false)
+    }
+
+    /// Whether the exact managed container `vonk-<run_id>` is running.
+    /// Provably absent or stopped is `false`; a foreign container under the
+    /// name or an unproven answer is an error, never a claim of absence.
+    fn runtime_run_container_running(&self, run_id: &str) -> Result<bool, OperationError> {
+        if uuid::Uuid::parse_str(run_id)
+            .map(|parsed| parsed.to_string() != run_id)
+            .unwrap_or(true)
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        let name = format!("vonk-{run_id}");
+        let existing = self.run_docker(&[
+            "container".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "{{.Id}}\t{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
+            name.clone(),
+        ])?;
+        if !existing.success {
+            return if self.prove_container_absent(&name, &existing)? {
+                Ok(false)
+            } else {
+                Err(OperationError::CommandFailed)
+            };
+        }
+        let fields = std::str::from_utf8(&existing.stdout)
+            .ok()
+            .map(str::trim)
+            .map(|text| text.split('\t').collect::<Vec<_>>())
+            .unwrap_or_default();
+        let [container_id, running, managed, label_run_id] = fields.as_slice() else {
+            return Err(OperationError::InvalidArtifact);
+        };
+        if !lower_hex(container_id, 64) || *managed != "true" || *label_run_id != run_id {
+            return Err(OperationError::InvalidArtifact);
+        }
+        match *running {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(OperationError::InvalidArtifact),
+        }
     }
 
     fn install_package(
@@ -5591,6 +5639,78 @@ mod tests {
             .unwrap();
         assert_eq!(stored.highest_generation, identity.run_generation);
         assert!(!stored.cancelled);
+    }
+
+    struct NameOnlyRunner {
+        inspect: CommandOutput,
+        listing: CommandOutput,
+    }
+
+    impl CommandRunner for NameOnlyRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            assert_eq!(executable, Path::new("/usr/bin/docker"));
+            match arguments.get(1).map(String::as_str) {
+                Some("inspect") => Ok(self.inspect.clone()),
+                Some("ls") => Ok(self.listing.clone()),
+                _ => Err("unexpected command".to_owned()),
+            }
+        }
+    }
+
+    fn docker_output(success: bool, stdout: &str, exit_code: i32) -> CommandOutput {
+        CommandOutput {
+            success,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: Vec::new(),
+            exit_code: Some(exit_code),
+        }
+    }
+
+    #[test]
+    fn name_only_run_check_reports_absent_stopped_running_and_refuses_the_rest() {
+        let run_id = "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c";
+        let id = "a".repeat(64);
+        let check = |inspect: CommandOutput, listing: CommandOutput, run: &str| {
+            let temp = tempfile::tempdir().unwrap();
+            let roots = ManagedRoots::under(temp.path());
+            OperationExecutor::new(roots, &[0; 32], NameOnlyRunner { inspect, listing }, None)
+                .unwrap()
+                .runtime_run_container_running(run)
+        };
+        // Removed by hand: docker cannot inspect it and no listing has it.
+        assert!(matches!(
+            check(
+                docker_output(false, "", 1),
+                docker_output(true, "", 0),
+                run_id
+            ),
+            Ok(false)
+        ));
+        // A failed listing never proves absence.
+        assert!(
+            check(
+                docker_output(false, "", 1),
+                docker_output(false, "", 1),
+                run_id
+            )
+            .is_err()
+        );
+        let line = |running: &str, managed: &str, label: &str| {
+            docker_output(true, &format!("{id}\t{running}\t{managed}\t{label}\n"), 0)
+        };
+        let none = docker_output(true, "", 0);
+        assert!(matches!(
+            check(line("true", "true", run_id), none.clone(), run_id),
+            Ok(true)
+        ));
+        assert!(matches!(
+            check(line("false", "true", run_id), none.clone(), run_id),
+            Ok(false)
+        ));
+        // A foreign container under the name, or a non-canonical id, is refused.
+        assert!(check(line("false", "false", run_id), none.clone(), run_id).is_err());
+        assert!(check(line("false", "true", "other"), none.clone(), run_id).is_err());
+        assert!(check(none.clone(), none, "AB69F1BA-1FA2-4283-BDF1-A6D2ED59549C").is_err());
     }
 
     #[test]

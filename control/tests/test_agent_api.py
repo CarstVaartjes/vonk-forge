@@ -2215,6 +2215,18 @@ def test_recipe_run_disposition_names_only_runs_the_controller_never_owned(
     assert unowned.headers["x-vonk-recipe-run-disposition"] == "unowned"
     assert known.status_code == 204
     assert "x-vonk-recipe-run-disposition" not in known.headers
+    # A stopped run has no generation an agent could report against.
+    assert "x-vonk-recipe-run-generation" not in known.headers
+
+    with services.sessions.begin() as session:
+        run = session.get(RecipeRun, known_run_id)
+        assert run is not None
+        run.state = "running"
+        run.run_generation = 4
+    running = disposition(known_run_id, agent_headers(NODE_A, "serial-a"))
+    assert running.status_code == 204
+    assert "x-vonk-recipe-run-disposition" not in running.headers
+    assert running.headers["x-vonk-recipe-run-generation"] == "4"
     assert malformed.status_code == 422
     assert anonymous.status_code == 401
 
