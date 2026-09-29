@@ -1208,6 +1208,21 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 "Controller did not confirm the built OCI image upload",
                             );
                         }
+                        // The Controller now holds these exact bytes. Move the
+                        // build output into the digest-named distribution cache
+                        // so this Spark does not download what it produced. The
+                        // move also takes it out of the build directory. Best
+                        // effort: distribution re-verifies the digest, and a
+                        // missing or bad file simply downloads normally.
+                        let _ = (ImageImporter {
+                            data_root: self.runtime.data_root,
+                        })
+                        .retain_verified_distribution_archive(
+                            &evidence.oci_layout_sha256,
+                            &evidence.image_digest,
+                            evidence.image_bytes,
+                            &builder.layout_path(request.build_id),
+                        );
                         ExecutionResult {
                             state: "succeeded",
                             body: serde_json::to_value(evidence).unwrap_or_else(

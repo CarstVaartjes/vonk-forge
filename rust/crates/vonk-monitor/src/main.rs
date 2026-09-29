@@ -106,6 +106,7 @@ fn next_tick_after(
 fn telemetry_paths(config: &AgentConfig) -> TelemetryPaths {
     TelemetryPaths {
         meminfo: PathBuf::from("/proc/meminfo"),
+        cpu_root: PathBuf::from("/sys/devices/system/cpu"),
         store: config.data_dir.clone(),
     }
 }

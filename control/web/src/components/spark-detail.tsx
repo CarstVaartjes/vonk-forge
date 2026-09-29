@@ -1,7 +1,7 @@
 import {useEffect, useState} from "react";
 import type {ControlApi, EnrollmentGrantResponse, FleetLogResponse, VisualFleetNode} from "../api/types";
 import {safeErrorText} from "../lib/error-display";
-import {nodeDisplayName, nodeRecipeUpdates, nodeStatus} from "../lib/fleet";
+import {nodeCpuClock, nodeDisplayName, nodeRecipeUpdates, nodeStatus} from "../lib/fleet";
 import {ConfirmDialog} from "./confirm-dialog";
 import {EnrollmentGrant} from "./enrollment-grant";
 import {InstallationReconcile} from "./installation-reconcile";
@@ -62,6 +62,7 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
   }
 
   const title = node ? nodeDisplayName(node) : id;
+  const cpu = node ? nodeCpuClock(node) : null;
   const status = node ? nodeStatus(node, new Date()) : {status: "offline" as const, reasons: []};
   return <section className="spark-detail" aria-labelledby="spark-detail-heading">
     <header><h2 id="spark-detail-heading">{title}</h2><button type="button" className="button secondary" onClick={onClose}>Close</button></header>
@@ -74,6 +75,7 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
           <div><dt>Status</dt><dd><StatusPill tone={status.status === "online" ? "healthy" : status.status === "offline" ? "danger" : "warning"}>{status.status}</StatusPill></dd></div>
           <div><dt>Last seen</dt><dd><Time value={node.connection.last_seen_at}/></dd></div>
           <div><dt>Host</dt><dd>{node.hostname}{node.ip_address ? ` · ${node.ip_address}` : ""}</dd></div>
+          {cpu && <div><dt>CPU clock</dt><dd>{cpu.clock}{cpu.temperature ? ` · ${cpu.temperature}` : ""}{cpu.lowClock && <> <StatusPill tone="warning">low under load</StatusPill></>}</dd></div>}
           <div><dt>Recipes</dt><dd>{node.loaded.filter(item => item.healthy).length} running · {node.installed.filter(item => item.complete).length} installed</dd></div>
         </dl>
         {status.reasons.length > 0 && <ul className="spark-warnings" aria-label="Needs attention">{status.reasons.map((reason, index) => <li key={index}><StatusPill tone="warning">{status.status === "offline" ? "offline" : "attention"}</StatusPill> {reason}</li>)}</ul>}

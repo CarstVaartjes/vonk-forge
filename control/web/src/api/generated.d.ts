@@ -4776,7 +4776,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "run.degraded" | "recipe.update_available";
+            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "run.degraded" | "recipe.update_available" | "cpu.low-clock";
             /** Detail */
             detail: string;
             /**
@@ -7387,6 +7387,12 @@ export interface components {
         TelemetryPoint: {
             /** Boot Id */
             boot_id: string;
+            /** Cpu Frequency Avg Mhz */
+            cpu_frequency_avg_mhz?: number | null;
+            /** Cpu Frequency Max Mhz */
+            cpu_frequency_max_mhz?: number | null;
+            /** Cpu Frequency Min Mhz */
+            cpu_frequency_min_mhz?: number | null;
             /** Disk Free Bytes */
             disk_free_bytes?: number | null;
             /** Disk Total Bytes */
@@ -7395,6 +7401,8 @@ export interface components {
             gpu_memory_free_bytes?: number | null;
             /** Gpu Memory Total Bytes */
             gpu_memory_total_bytes?: number | null;
+            /** Gpu Temperature C */
+            gpu_temperature_c?: number | null;
             /** Gpu Utilization Percent */
             gpu_utilization_percent?: number | null;
             /** Id */

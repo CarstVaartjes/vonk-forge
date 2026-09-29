@@ -11858,7 +11858,8 @@
               "telemetry.stale",
               "install.partial",
               "run.degraded",
-              "recipe.update_available"
+              "recipe.update_available",
+              "cpu.low-clock"
             ],
             "title": "Code",
             "type": "string"
@@ -20320,6 +20321,45 @@
             "title": "Boot Id",
             "type": "string"
           },
+          "cpu_frequency_avg_mhz": {
+            "anyOf": [
+              {
+                "maximum": 20000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Frequency Avg Mhz"
+          },
+          "cpu_frequency_max_mhz": {
+            "anyOf": [
+              {
+                "maximum": 20000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Frequency Max Mhz"
+          },
+          "cpu_frequency_min_mhz": {
+            "anyOf": [
+              {
+                "maximum": 20000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Frequency Min Mhz"
+          },
           "disk_free_bytes": {
             "anyOf": [
               {
@@ -20371,6 +20411,19 @@
               }
             ],
             "title": "Gpu Memory Total Bytes"
+          },
+          "gpu_temperature_c": {
+            "anyOf": [
+              {
+                "maximum": 150.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Temperature C"
           },
           "gpu_utilization_percent": {
             "anyOf": [

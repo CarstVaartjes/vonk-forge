@@ -146,3 +146,17 @@ export function nodeMemory(node: VisualFleetNode): {usedPercent: number; totalBy
 export function nodeDiskFreeBytes(node: VisualFleetNode): number | null {
   return node.inventory?.disk_free_bytes ?? node.telemetry?.sample.disk_free_bytes ?? null;
 }
+
+/** Average current CPU clock against the hardware maximum, with the temperature it runs at. */
+export function nodeCpuClock(node: VisualFleetNode): {clock: string; temperature: string | null; lowClock: boolean} | null {
+  const sample = node.telemetry?.sample;
+  const current = sample?.cpu_frequency_avg_mhz;
+  if (!sample || node.telemetry?.freshness === "stale" || typeof current !== "number") return null;
+  const maximum = sample.cpu_frequency_max_mhz;
+  const ghz = (mhz: number) => (mhz / 1000).toFixed(1);
+  return {
+    clock: typeof maximum === "number" ? `${ghz(current)} of ${ghz(maximum)} GHz` : `${ghz(current)} GHz`,
+    temperature: typeof sample.gpu_temperature_c === "number" ? `${sample.gpu_temperature_c} °C` : null,
+    lowClock: node.warnings.some(warning => warning.code === "cpu.low-clock"),
+  };
+}

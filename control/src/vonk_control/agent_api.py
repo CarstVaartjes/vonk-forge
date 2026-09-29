@@ -1061,6 +1061,10 @@ def install_agent_routes(
                         gpu_utilization_percent=sample.gpu_utilization_percent,
                         gpu_memory_total_bytes=sample.gpu_memory_total_bytes,
                         gpu_memory_free_bytes=sample.gpu_memory_free_bytes,
+                        gpu_temperature_c=sample.gpu_temperature_c,
+                        cpu_frequency_avg_mhz=sample.cpu_frequency_avg_mhz,
+                        cpu_frequency_min_mhz=sample.cpu_frequency_min_mhz,
+                        cpu_frequency_max_mhz=sample.cpu_frequency_max_mhz,
                     )
                     for sample in body.samples
                 ),
