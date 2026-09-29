@@ -69,6 +69,10 @@ jobs:
           scripts/dev-image-metadata "$GITHUB_REF" "$GITHUB_SHA" \
             >> "$GITHUB_OUTPUT"
 
+      - name: Name the dependency layer day
+        id: dependency_day
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
       - name: Install uv and build protocol wheel
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -184,6 +188,7 @@ jobs:
               labels: |
                 org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
                 org.opencontainers.image.revision=${{ github.sha }}
+              build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
               cache-from: type=gha,scope=vonk-forge-api
               cache-to: type=gha,mode=max,scope=vonk-forge-api
 
@@ -203,6 +208,7 @@ jobs:
               labels: |
                 org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
                 org.opencontainers.image.revision=${{ github.sha }}
+              build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
               cache-from: type=gha,scope=vonk-forge-worker
               cache-to: type=gha,mode=max,scope=vonk-forge-worker
 

@@ -504,6 +504,9 @@ jobs:
         run: cargo build --locked --release --package vonk-nas-setup --bin vonk-nas-setup
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Name the dependency layer day
+        id: dependency_day
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
       - name: Build the Controller API image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -512,6 +515,7 @@ jobs:
           target: api
           load: true
           tags: ${{ env.IMAGE_PREFIX }}-api:${{ env.IMAGE_TAG }}
+          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
           cache-from: type=gha,scope=ci-test-vonk-forge-api
       - name: Build the Controller worker image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -521,6 +525,7 @@ jobs:
           target: worker
           load: true
           tags: ${{ env.IMAGE_PREFIX }}-worker:${{ env.IMAGE_TAG }}
+          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
           cache-from: type=gha,scope=ci-test-vonk-forge-worker
       - name: Build the LiteLLM image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -823,6 +828,9 @@ jobs:
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Name the dependency layer day
+        id: dependency_day
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
       - name: Build the Controller image once
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -831,8 +839,10 @@ jobs:
           target: api
           load: true
           tags: ${{ env.VONK_TEST_CONTROLLER_IMAGE }}
+          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
           cache-from: type=gha,scope=ci-test-vonk-forge-api
-          cache-to: type=gha,mode=max,scope=ci-test-vonk-forge-api
+          # Only main writes the shared cache; pull requests read it.
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=ci-test-vonk-forge-api' || '' }}
       - name: Build the worker image once
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -841,8 +851,10 @@ jobs:
           target: worker
           load: true
           tags: ${{ env.VONK_TEST_WORKER_IMAGE }}
+          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
           cache-from: type=gha,scope=ci-test-vonk-forge-worker
-          cache-to: type=gha,mode=max,scope=ci-test-vonk-forge-worker
+          # Only main writes the shared cache; pull requests read it.
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=ci-test-vonk-forge-worker' || '' }}
       - name: Check the built images
         run: scripts/test images
       - name: Scan the Controller image for fixable vulnerabilities

@@ -75,18 +75,13 @@ RUN npm run build
 
 FROM ${PYTHON_IMAGE} AS build
 WORKDIR /build
-COPY pyproject.toml /vonk-cluster-profiles/
-COPY src/cluster_profiles /vonk-cluster-profiles/src/cluster_profiles
-COPY tools/hatch_build.py /vonk-cluster-profiles/tools/hatch_build.py
-COPY schemas/install-release-manifest.schema.json /vonk-cluster-profiles/schemas/install-release-manifest.schema.json
-COPY install/installer-release-public.pem /vonk-cluster-profiles/install/installer-release-public.pem
+# Layers are ordered from least to most frequently changing so an ordinary
+# source change rebuilds only the last two steps: the pinned public-contracts
+# wheel first (it depends only on the lock files), then the third-party
+# dependencies (they depend only on pyproject.toml), then our own source.
 COPY control/pyproject.toml ./
 COPY control/uv.lock ./uv.lock
 COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
-COPY control/src ./src
-COPY control/alembic.ini ./alembic.ini
-COPY control/migrations ./migrations
-COPY --from=web /web/dist ./src/vonk_control/web
 # The repository image build runs scripts/build-control-wheel before invoking
 # Docker so this local dependency exists and has the digest pinned in uv.lock.
 COPY inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl /wheels/
@@ -102,7 +97,32 @@ RUN apt-get update \
     && python -c 'import hashlib, pathlib, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256(pathlib.Path("/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl").read_bytes()).hexdigest()' \
     && test "$(sha256sum /wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && rm -rf /public-contracts /var/lib/apt/lists/*
-RUN python -m pip install --no-cache-dir --prefix=/install \
+# Third-party dependencies resolve to the newest allowed release, so this layer
+# is only reused within one UTC day: CI passes the date, and a fix released
+# upstream reaches the next day's image even when pyproject.toml is unchanged.
+# Our own vonk-* packages are installed from local files below. These are
+# transitive dependencies of the image, not requested ones, so the REQUESTED
+# markers that -r adds are removed to keep the layer identical to a one-step
+# install.
+ARG DEPENDENCY_DAY=undated
+COPY pyproject.toml /vonk-cluster-profiles/
+RUN echo "dependency day: ${DEPENDENCY_DAY}" \
+    && python -c 'import pathlib, tomllib; print("\n".join(d for path in ("pyproject.toml", "/vonk-cluster-profiles/pyproject.toml") for d in tomllib.loads(pathlib.Path(path).read_text())["project"]["dependencies"] if not d.lower().startswith("vonk-")))' > /tmp/third-party.txt \
+    && python -m pip install --no-cache-dir --prefix=/install -r /tmp/third-party.txt \
+    && find /install -name REQUESTED -delete \
+    && find /install -name RECORD -exec sed -i '/\.dist-info\/REQUESTED,/d' {} +
+COPY src/cluster_profiles /vonk-cluster-profiles/src/cluster_profiles
+COPY tools/hatch_build.py /vonk-cluster-profiles/tools/hatch_build.py
+COPY schemas/install-release-manifest.schema.json /vonk-cluster-profiles/schemas/install-release-manifest.schema.json
+COPY install/installer-release-public.pem /vonk-cluster-profiles/install/installer-release-public.pem
+COPY control/src ./src
+COPY control/alembic.ini ./alembic.ini
+COPY control/migrations ./migrations
+COPY --from=web /web/dist ./src/vonk_control/web
+# pip only sees packages already in /install when that directory is on the
+# path, so the dependency layer above is reused instead of downloaded again.
+RUN PYTHONPATH="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib", vars={"base": "/install", "platbase": "/install"}))')" \
+    python -m pip install --no-cache-dir --prefix=/install \
     /wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl \
     /wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl \
     /vonk-cluster-profiles .
