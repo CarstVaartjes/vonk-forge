@@ -105,11 +105,10 @@ Cancellation of a known invalidated order is an informational no-op. It does not
 fail the replacement or accept an old result as current success. Unrelated
 workloads and shared immutable caches remain outside the cleanup scope.
 
-Retirement fences an exhausted order. The run becomes lost and, like every run
-that is no longer active, holds no ports or memory (see below). Uncertain disk
-reservations are retained: the Controller follows the ordinary exact uninstall
-path, retries classified temporary cleanup failures, and releases disk only
-after cleanup succeeds. An open launch budget refuses retirement. A denied or invalid
+Retirement fences an exhausted order but retains uncertain runtime and disk
+reservations. The Controller follows the ordinary exact stop/uninstall path,
+retries classified temporary cleanup failures, and releases capacity only after
+cleanup succeeds. An open launch budget refuses retirement. A denied or invalid
 cleanup remains an explicit blocker with capacity retained.
 
 ## Missing cache recovery
@@ -140,12 +139,14 @@ described in [CLI updates](../operators/cli-updates.md).
 
 ## Run capacity ownership
 
-Ports, the multi-Spark rendezvous port and memory are held only by a run the
-Controller considers active: planned, starting, running (including one under
-recovery) or stopping. The recovery coordinator releases, on every tick, the
-claims of any run in another state (failed, stopped, lost, or missing), so such
-a run can never block a load. Whatever it may still occupy on a Spark is what
-that Spark's next inventory reports. A run whose stored plan the Controller can
+Ports, the multi-Spark rendezvous port and memory are held only by a run a
+plan can still stop: planned, starting, running (including one under recovery),
+stopping, or lost. A load that needs such a run's Sparks plans its exact Stop,
+which releases the claims (a lost run planned for a Stop is not an
+unreconciled-rank blocker). The recovery coordinator releases, on every tick,
+the claims of any other run (failed, stopped, or missing), so such a run can
+never block a load. Whatever it may still occupy on a Spark is what that
+Spark's next inventory reports. A run whose stored plan the Controller can
 no longer read (an older contract), or whose Sparks a newer workload intent now
 owns, is settled as failed with its reason instead of being recovered.
 
@@ -154,8 +155,8 @@ owns, is settled as failed with its reason instead of being recovered.
 A retained run whose managed metadata cannot be read (an older agent's format,
 a retired field, no run generation) is settled from its run id and the
 Controller alone. The agent asks for the run's disposition. The Controller
-names every run it does not want (never owned, or no longer active) unowned,
-and the agent retires that run's lifecycle claim. A known running run comes back with its accepted
+names every run it does not want (never owned, failed, or stopped) unowned, and
+the agent retires that run's lifecycle claim. A known running run comes back with its accepted
 generation; when the root helper proves the exact `vonk-<run_id>` container is
 absent or stopped, the agent reports that absence at that generation and the
 Controller recovers the run through its normal singleton recovery. A running

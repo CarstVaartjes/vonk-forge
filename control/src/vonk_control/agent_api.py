@@ -88,7 +88,7 @@ from .inventory_repository import (
     InventorySnapshotInput,
 )
 from .models import (
-    ACTIVE_RUN_STATES,
+    STOPPABLE_RUN_STATES,
     AgentCertificate,
     AgentNode,
     AgentOperation,
@@ -1213,11 +1213,11 @@ def install_agent_routes(
     def recipe_run_disposition(run_id: str, request: Request) -> Response:
         """Say whether this Controller still wants one local run.
 
-        Only an active run (planned, starting, running, stopping) is wanted.
-        Any other run, including one this Controller never owned (for example
-        after its database was rebuilt) or one it failed, stopped or lost, is
-        named ``unowned``: it holds no capacity here, so the agent retires its
-        local lifecycle instead of keeping it forever.
+        Only a run the Controller can still stop is wanted (planned, starting,
+        running, stopping, lost). Any other run, including one this Controller
+        never owned (for example after its database was rebuilt) or one it
+        failed or stopped, is named ``unowned``: it holds no capacity here, so
+        the agent retires its local lifecycle instead of keeping it forever.
         """
 
         helper_identity(request)
@@ -1225,7 +1225,7 @@ def install_agent_routes(
             raise HTTPException(status_code=422, detail="recipe run id is invalid")
         with _require_services(services).sessions() as session:
             run = session.get(RecipeRun, run_id)
-            wanted = run is not None and run.state in ACTIVE_RUN_STATES
+            wanted = run is not None and run.state in STOPPABLE_RUN_STATES
             generation = (
                 run.run_generation
                 if run is not None and run.state == "running"

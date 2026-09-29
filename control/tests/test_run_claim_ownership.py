@@ -71,9 +71,44 @@ def test_old_contract_run_does_not_block_a_new_load_on_postgres(
     )
 
 
+def test_a_lost_run_is_stopped_by_the_new_load_not_a_blocker(tmp_path: Path) -> None:
+    sessions, profiles, profile, recovery, run_id = _load_over(
+        tmp_path, state="lost", plan_readable=True
+    )
+
+    recovery.tick()
+
+    assert _claims(sessions, run_id), "the planned Stop releases them"
+    review = profiles.preview(profile.id)
+    assert review.allowed, _codes(review)
+    assert [stop.run_id for d in review.admission_decisions for stop in d.stops] == [
+        run_id
+    ]
+
+
 def _old_contract_run_does_not_block_a_new_load(
     tmp_path: Path, state: str, *, engine=None
 ) -> None:
+    sessions, profiles, profile, recovery, run_id = _load_over(
+        tmp_path, state=state, plan_readable=False, engine=engine
+    )
+    blocked = profiles.preview(profile.id)
+    assert not blocked.allowed, "the stale claims block the load"
+
+    recovery.tick()
+
+    assert _claims(sessions, run_id) == set()
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == "failed"
+    review = profiles.preview(profile.id)
+    assert not _codes(review) & _CLAIM_BLOCKERS
+    assert review.allowed, _codes(review)
+
+
+def _load_over(tmp_path: Path, *, state: str, plan_readable: bool, engine=None):
+    """A 2-Spark run in ``state`` with no agent observation, and a new load."""
+
     sessions, service, queue, mapping, build, nodes = setup_services(
         tmp_path, nodes=2, distributed_lifecycle=True, engine=engine
     )
@@ -86,20 +121,17 @@ def _old_contract_run_does_not_block_a_new_load(
     held = _claims(sessions, run_id)
     assert {kind for kind, _ in held} >= {"port", "unified-memory"}
     assert {key for kind, key in held if kind == "port"} >= {"29500"}
-    # The live state: an older contract's plan, not running per the
-    # Controller (or "running" with a plan it can no longer read), and no
-    # agent observation at all.
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None
-        run.plan = {"kind": "old"}
+        if not plan_readable:
+            run.plan = {"kind": "old"}  # written under an older contract
         run.state = state
         for node in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
             node.observed_run_generation = None
             node.observation_process_running = None
             node.observation_observed_at = None
             node.observation_endpoint_ready = None
-
     run_switch = RunSwitchOperationService(
         sessions,
         lifecycle=service,
@@ -127,20 +159,10 @@ def _old_contract_run_does_not_block_a_new_load(
         ),
         actor="admin",
     )
-    blocked = profiles.preview(profile.id)
-    assert _codes(blocked) & _CLAIM_BLOCKERS, "the stale claims block the load"
-
-    DistributedRecoveryCoordinator(
+    recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
-    ).tick()
-
-    assert _claims(sessions, run_id) == set()
-    with sessions() as session:
-        run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state != "running"
-    review = profiles.preview(profile.id)
-    assert not _codes(review) & _CLAIM_BLOCKERS
-    assert review.allowed, _codes(review)
+    )
+    return sessions, profiles, profile, recovery, run_id
 
 
 def _selector(sessions) -> str:

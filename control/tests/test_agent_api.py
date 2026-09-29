@@ -2178,9 +2178,9 @@ def test_bootstrap_requires_the_host_helper_authority(
 def test_recipe_run_disposition_names_every_run_the_controller_does_not_want(
     agent_system,
 ) -> None:
-    # Only an active run is wanted. A run this Controller never owned, and a
-    # run it knows but failed, stopped or lost, are both named unowned so the
-    # agent retires its local claim instead of keeping it forever.
+    # Only a run the Controller can still stop is wanted. A run it never
+    # owned, and a run it knows but failed or stopped, are both named unowned
+    # so the agent retires its local claim instead of keeping it forever.
     client, services, _, clock = agent_system
     known_run_id = "70000000-0000-4000-8000-000000000071"
     with services.sessions.begin() as session:
@@ -2219,12 +2219,12 @@ def test_recipe_run_disposition_names_every_run_the_controller_does_not_want(
     never_owned = disposition("e85c4710-e437-4d12-8191-499596aa2a4c")
     assert never_owned.status_code == 204
     assert never_owned.headers["x-vonk-recipe-run-disposition"] == "unowned"
-    for state in ("failed", "stopped", "lost"):
+    for state in ("failed", "stopped"):
         not_wanted = in_state(state)
         assert not_wanted.status_code == 204
         assert not_wanted.headers["x-vonk-recipe-run-disposition"] == "unowned"
         assert "x-vonk-recipe-run-generation" not in not_wanted.headers
-    for state in ("planned", "starting", "stopping"):
+    for state in ("planned", "starting", "stopping", "lost"):
         wanted = in_state(state)
         assert "x-vonk-recipe-run-disposition" not in wanted.headers
         assert "x-vonk-recipe-run-generation" not in wanted.headers

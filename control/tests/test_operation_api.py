@@ -902,10 +902,8 @@ def test_resume_action_disappearing_after_preflight_is_refused(
         assert stored.retry_disposition_attempt is None
 
 
-def test_durable_retire_marks_the_run_lost_and_releases_its_capacity(
-    tmp_path,
-) -> None:
-    """A lost run holds no capacity; the Spark's inventory reports what remains."""
+def test_durable_retire_retains_uncertain_run_capacity(tmp_path) -> None:
+    """Ending an exhausted order does not prove its remote effect stopped."""
 
     clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
     sessions, jobs, services, operation, job_id = _parked_stop_services(
@@ -969,7 +967,8 @@ def test_durable_retire_marks_the_run_lost_and_releases_its_capacity(
         assert parent.status_reason == stored.status_reason
         assert run.state == "lost"
         assert run.route_state == "withdrawn"
-        assert reservation.state == "released"
+        assert reservation.state == "active"
+        assert reservation.released_at is None
 
 
 def test_durable_retire_refuses_live_current_attempt_without_transition(
@@ -2053,6 +2052,77 @@ def _retire_parked(services, job_id: str) -> None:
     retire = services.retire_job
     assert retire is not None
     retire(job_id)
+
+
+def test_durable_retire_fails_the_order_but_retains_uncertain_capacity(
+    tmp_path,
+) -> None:
+    """The retry budget says nothing about an abandoned container's liveness."""
+
+    clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    sessions, jobs, services, operation, job_id = _parked_stop_services(
+        tmp_path, clock=clock
+    )
+    owner_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        parent = session.get(Job, job_id)
+        assert parent is not None
+        parent.payload = {
+            **parent.payload,
+            "owner_kind": "run",
+            "owner_id": owner_id,
+        }
+        session.add(
+            RecipeRun(
+                id=owner_id,
+                installation_id=str(uuid.uuid4()),
+                mapping_id=str(uuid.uuid4()),
+                mapping_generation=1,
+                alias="retire-me",
+                plan_digest=COMMIT,
+                plan={},
+                state="starting",
+                route_state="withdrawn",
+                actor="operator",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+        session.add(
+            ResourceReservation(
+                node_id=PARKED_NODE_ID,
+                kind="unified-memory",
+                resource_key=COMMIT,
+                amount_bytes=1024,
+                owner_kind="run",
+                owner_id=owner_id,
+                state="active",
+                plan_digest=COMMIT,
+                created_at=clock.now,
+            )
+        )
+    _park_repeatedly(sessions, jobs, services, operation)
+
+    _retire_parked(services, job_id)
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        parent = session.get(Job, job_id)
+        run = session.get(RecipeRun, owner_id)
+        reservation = session.scalar(
+            select(ResourceReservation).where(ResourceReservation.owner_id == owner_id)
+        )
+        assert stored is not None and parent is not None
+        assert run is not None and reservation is not None
+        assert stored.state == "failed"
+        assert stored.retry_disposition is None and stored.retry_due_at is None
+        assert "operator retired" in (stored.status_reason or "")
+        assert parent.state == "failed"
+        assert parent.status_reason == stored.status_reason
+        assert run.state == "lost"
+        assert run.route_state == "withdrawn"
+        assert reservation.state == "active"
+        assert reservation.released_at is None
 
 
 def test_durable_retire_ends_a_parked_operation_without_a_budget_gate(

@@ -67,6 +67,7 @@ from .model_cache import ModelCacheService
 from .model_cache_contract import ModelCacheDownloadPreviewResponse
 from .models import (
     ACTIVE_RUN_STATES,
+    STOPPABLE_RUN_STATES,
     AgentNode,
     CatalogDocumentRevision,
     ClusterMapping,
@@ -469,7 +470,6 @@ class _ResourceFits:
         return self.requires_early_stop("run-switch.insufficient-disk")
 
 
-_STOPPABLE_RUN_STATES = ACTIVE_RUN_STATES | {"lost"}
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _OPERATION_KINDS = frozenset(
     {"recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"}
@@ -2462,7 +2462,7 @@ class RunSwitchOperationService:
                         plan_digest=stop_digest,
                     )
                 ]
-                if stop_digest is not None and run.state in _STOPPABLE_RUN_STATES
+                if stop_digest is not None and run.state in STOPPABLE_RUN_STATES
                 else []
             )
             # Stopping a live run must remain possible when catalog/cache
@@ -2489,7 +2489,7 @@ class RunSwitchOperationService:
                         node_ids=profile_stop_scope.missing_node_ids,
                     )
                 )
-            if run.state not in _STOPPABLE_RUN_STATES:
+            if run.state not in STOPPABLE_RUN_STATES:
                 blockers.append(
                     _as_reason(
                         "run-switch.run-not-active",
@@ -5093,7 +5093,7 @@ class RunSwitchOperationService:
                     RecipeRun.id.in_(
                         select(RunNode.run_id).where(RunNode.node_id.in_(node_ids))
                     ),
-                    RecipeRun.state.in_(_STOPPABLE_RUN_STATES),
+                    RecipeRun.state.in_(STOPPABLE_RUN_STATES),
                 )
                 .order_by(RecipeRun.created_at, RecipeRun.id)
             )

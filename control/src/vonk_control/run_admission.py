@@ -363,6 +363,8 @@ class RunAdmissionService:
                     ),
                     RunNode.state != "stopped",
                     RecipeRun.state == "lost",
+                    # A reviewed plan that stops the lost run reconciles it.
+                    RecipeRun.id.not_in(tuple(released_run_ids)),
                 )
                 .order_by(RunNode.node_id, RecipeRun.id)
             ):

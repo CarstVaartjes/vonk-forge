@@ -1915,9 +1915,12 @@ class InstallationNode(Base):
     )
 
 
-#: The run states that own capacity and a Spark lifecycle. Every other run
-#: state holds no ports or memory and is not wanted on any Spark.
 ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
+#: The run states that own capacity and a Spark lifecycle: any load that needs
+#: such a run's Sparks plans its exact Stop, which releases the claims. A run in
+#: any other state can never be stopped by a plan, so it holds no ports or
+#: memory and is not wanted on any Spark.
+STOPPABLE_RUN_STATES = ACTIVE_RUN_STATES | {"lost"}
 
 
 class RecipeRun(Base):

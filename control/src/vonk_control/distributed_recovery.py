@@ -25,7 +25,7 @@ from .distributed_lifecycle import (
 )
 from .litellm import LiteLlmGeneration
 from .models import (
-    ACTIVE_RUN_STATES,
+    STOPPABLE_RUN_STATES,
     AgentNode,
     AgentOperation,
     AgentPresence,
@@ -371,18 +371,18 @@ class DistributedRecoveryCoordinator:
         released by the ownership rule below.
         """
 
-        unsettled = (*ACTIVE_RUN_STATES, "lost")
         unreadable = []
         for run in session.scalars(
-            select(RecipeRun).where(RecipeRun.state.in_(unsettled))
+            select(RecipeRun).where(RecipeRun.state.in_(STOPPABLE_RUN_STATES))
         ):
             try:
                 run_plan_document(run.plan)
             except RecipeExecutionContractError:
                 unreadable.append(run.id)
+        settled = False
         for run_id in unreadable:
             run = session.get(RecipeRun, run_id, with_for_update=True)
-            if run is None or run.state not in unsettled:
+            if run is None or run.state not in STOPPABLE_RUN_STATES:
                 continue
             if run.route_state != "withdrawn":
                 self._routes.withdraw_run_in_session(session, run.id)
@@ -392,7 +392,8 @@ class DistributedRecoveryCoordinator:
                 "settled and its capacity released",
                 now,
             )
-        return bool(unreadable)
+            settled = True
+        return settled
 
     @staticmethod
     def _active_recovery(session: Session, run_id: str) -> bool:
@@ -578,11 +579,12 @@ def _settle_unrecoverable(run: RecipeRun, reason: str, now: datetime) -> None:
 def release_inactive_run_claims_in_session(session: Session, now: datetime) -> bool:
     """The one ownership rule for run capacity.
 
-    Ports, rendezvous ports and memory are held only by a run the Controller
-    considers active (planned, starting, running, or stopping). Any other run
-    (failed, stopped, lost, or gone) holds nothing: whatever it may still
-    occupy physically is what the Spark's next inventory reports, never a
-    permanent reservation that blocks admission.
+    Ports, rendezvous ports and memory are held only by a run a plan can still
+    stop (planned, starting, running, stopping, lost): a load that needs its
+    Sparks plans that Stop, which releases the claims. Any other run (failed,
+    stopped, or missing) can never be stopped by a plan, so it holds nothing:
+    whatever it may still occupy physically is what the Spark's next
+    inventory reports, never a reservation that blocks admission forever.
     """
 
     claims = session.scalars(
@@ -591,7 +593,7 @@ def release_inactive_run_claims_in_session(session: Session, now: datetime) -> b
         .where(
             ResourceReservation.owner_kind == "run",
             ResourceReservation.state == "active",
-            or_(RecipeRun.id.is_(None), RecipeRun.state.not_in(ACTIVE_RUN_STATES)),
+            or_(RecipeRun.id.is_(None), RecipeRun.state.not_in(STOPPABLE_RUN_STATES)),
         )
         .with_for_update(of=ResourceReservation)
     ).all()

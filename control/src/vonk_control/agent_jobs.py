@@ -695,13 +695,12 @@ def retire_exhausted_operations_in_session(
 def _release_retired_owner_in_session(
     session: Session, job: Job, reason: str, now: datetime
 ) -> None:
-    """Retain uncertain installation effects for the exact cleanup lifecycle.
+    """Retain uncertain effects for the normal exact cleanup lifecycle.
 
     The owner binding is read from the job's own payload, so this stays the
-    same authority the operation was admitted under. A retired run is no
-    longer active, so it holds no capacity: whatever it still occupies is
-    what the Spark's inventory reports. Only an already uninstalled
-    installation has evidence to release its capacity.
+    same authority the operation was admitted under. Retirement proves only
+    that the order ended; even failed owners can still have physical effects.
+    Only an already stopped/uninstalled owner has evidence to release capacity.
     """
 
     payload = job.payload if isinstance(job.payload, Mapping) else {}
@@ -715,7 +714,10 @@ def _release_retired_owner_in_session(
                 run.route_state = "withdrawn"
                 run.route_error = reason[:512]
                 run.updated_at = now
-            release_owned_reservations_in_session(session, owner_kind, owner_id, now)
+            elif run is not None:
+                release_owned_reservations_in_session(
+                    session, owner_kind, owner_id, now
+                )
         elif owner_kind == "installation":
             installation = session.get(
                 RecipeInstallation, owner_id, with_for_update=True
