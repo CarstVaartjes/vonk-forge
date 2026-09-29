@@ -1210,7 +1210,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             max_workers=1, thread_name_prefix="runtime-image-preparation"
         )
         self._runtime_image_futures: dict[
-            tuple[str, int, int], Future[Mapping[str, object] | None]
+            tuple[str, int, int], tuple[Future[Mapping[str, object] | None], str]
         ] = {}
 
     def close(self) -> None:
@@ -1235,17 +1235,20 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             # present.  Target-copy only consumes the persisted evidence.
             if self._async_runtime_image_preparation:
                 key = (request_key, phase.index, item_index)
-                future = self._runtime_image_futures.get(key)
-                if future is None:
-                    self._runtime_image_futures[key] = self._runtime_image_pool.submit(
-                        self._prepare_runtime_image,
-                        plan,
-                        phase,
-                        item_index=item_index,
-                        actor=actor,
-                        request_key=request_key,
-                        progress=progress,
-                        wait_for_busy_owner=True,
+                submitted = self._runtime_image_futures.get(key)
+                if submitted is None:
+                    self._runtime_image_futures[key] = (
+                        self._runtime_image_pool.submit(
+                            self._prepare_runtime_image,
+                            plan,
+                            phase,
+                            item_index=item_index,
+                            actor=actor,
+                            request_key=request_key,
+                            progress=progress,
+                            wait_for_busy_owner=True,
+                        ),
+                        self._clock().isoformat(),
                     )
                     return PhaseExecution(
                         waiting=True,
@@ -1254,11 +1257,15 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                             "the durable checkpoint will be resumed after a restart."
                         ),
                     )
+                future, started_at = submitted
                 if not future.done():
+                    # Bounded by the transport's subprocess timeout; the start
+                    # time makes a slow or stuck preparation visible.
                     return PhaseExecution(
                         waiting=True,
                         status_reason=(
-                            "Runtime image preparation is still running in the background."
+                            "Runtime image preparation is still running in the "
+                            f"background (started {started_at})."
                         ),
                     )
                 del self._runtime_image_futures[key]

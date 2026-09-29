@@ -1418,6 +1418,7 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
     executor._async_runtime_image_preparation = True
     executor._runtime_image_pool = ThreadPoolExecutor(max_workers=1)
     executor._runtime_image_futures = {}
+    executor._clock = lambda: datetime(2026, 9, 30, 12, tzinfo=UTC)
 
     def prepare(
         _plan,
@@ -1464,6 +1465,7 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
         )
         assert observed.waiting
         assert "still running" in (observed.status_reason or "")
+        assert "started 2026-09-30T12:00:00+00:00" in (observed.status_reason or "")
     finally:
         release.set()
         executor.close()

@@ -21,12 +21,18 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from sqlalchemy import select, update
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
-from vonk_control.models import Job, NodeArtifact, RecipeBuild
+from vonk_control.models import (
+    CatalogDocumentRevision,
+    Job,
+    NodeArtifact,
+    RecipeBuild,
+)
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
     SparkGroup,
@@ -69,8 +75,13 @@ class _ColdInspector(CompleteArtifactInspector):
 class _WorkerArtifactExecutor:
     """The worker's composite executor for the image; adapters elsewhere."""
 
-    def __init__(self, composite: CompositeDistributionPhaseExecutor) -> None:
+    def __init__(
+        self,
+        composite: CompositeDistributionPhaseExecutor,
+        copy_failures: list[BaseException],
+    ) -> None:
         self.composite = composite
+        self.copy_failures = copy_failures
 
     def execute(self, plan, phase, **kwargs) -> PhaseExecution:
         if phase.subphase == "runtime-image":
@@ -92,6 +103,8 @@ class _WorkerArtifactExecutor:
                     },
                 }
             )
+        if self.copy_failures:
+            raise self.copy_failures.pop(0)
         return PhaseExecution(result=_target_copy_evidence(plan, phase))
 
     def get(self, operation_id: str):
@@ -151,6 +164,7 @@ def _background_image_switch(
     inspect_seconds: int = 0,
     failures: list[BaseException] | None = None,
     old_receipt: str | None = None,
+    copy_failures: list[BaseException] | None = None,
     engine=None,
 ):
     sessions, lifecycle, _queue, _mapping, build_id, nodes = setup_services(
@@ -186,6 +200,7 @@ def _background_image_switch(
         with pytest.raises(RuntimeImagePreparationError):
             storage.read_receipt(layout_digest)
     pending_failures = list(failures or ())
+    pending_copy_failures = list(copy_failures or ())
     inspections: list[str] = []
 
     class Transport:
@@ -246,7 +261,9 @@ def _background_image_switch(
             lifecycle=lifecycle,
             clock=clock,
             artifacts=_ColdInspector(missing_spark_bytes=1024),
-            artifact_phase_executor=_WorkerArtifactExecutor(worker.composite),
+            artifact_phase_executor=_WorkerArtifactExecutor(
+                worker.composite, pending_copy_failures
+            ),
             memory_floor_bytes=50,
         )
 
@@ -309,7 +326,10 @@ def _background_image_switch(
                 pending = session.get(Job, checkpoint.pending_job_id)
                 if pending is not None and pending.state in {"queued", "running"}:
                     _finish(sessions, checkpoint, clock.now)
-        wait(tuple(worker.composite._runtime_image_futures.values()), timeout=10)
+        wait(
+            [future for future, _ in worker.composite._runtime_image_futures.values()],
+            timeout=10,
+        )
 
     def restart() -> None:
         worker.composite.close()
@@ -360,7 +380,9 @@ def _past_image(view) -> bool:
     return view.progress.subphase not in {"model-download", "runtime-image"}
 
 
-def _assert_replan_reaches_the_next_phase(tmp_path: Path, engine=None) -> None:
+def _assert_replan_reaches_the_next_phase(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, engine=None
+) -> None:
     switch = _background_image_switch(
         tmp_path,
         node_count=2,
@@ -368,9 +390,19 @@ def _assert_replan_reaches_the_next_phase(tmp_path: Path, engine=None) -> None:
         engine=engine,
     )
     try:
-        _drive_until(switch, _past_image)
+        with caplog.at_level(logging.INFO):
+            _drive_until(switch, _past_image)
     finally:
         switch.worker.composite.close()
+    # The production signature was one of these per ~7 s cycle, forever: the
+    # consumed failure left the switch running without a blocker, the next
+    # tick resubmitted, and the blocker reappeared.
+    preparing = [
+        record
+        for record in caplog.records
+        if "is waiting: run-switch.runtime-image-preparing" in record.getMessage()
+    ]
+    assert len(preparing) == 2
     view = switch.view()
     assert view.result is not None
     assert view.result.phase_retry_generation == 1
@@ -384,7 +416,7 @@ def _assert_replan_reaches_the_next_phase(tmp_path: Path, engine=None) -> None:
 
 
 def test_background_image_after_a_replan_reaches_the_next_phase(
-    tmp_path: Path,
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A phase retry generation must not orphan the background publication.
 
@@ -395,15 +427,15 @@ def test_background_image_after_a_replan_reaches_the_next_phase(
     with only "running in the background" to show for it.
     """
 
-    _assert_replan_reaches_the_next_phase(tmp_path)
+    _assert_replan_reaches_the_next_phase(tmp_path, caplog)
 
 
 def test_background_image_after_a_replan_reaches_the_next_phase_on_postgres(
-    tmp_path: Path, postgres_engine
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, postgres_engine
 ) -> None:
     """The same, with the production database's NOWAIT row locks."""
 
-    _assert_replan_reaches_the_next_phase(tmp_path, postgres_engine)
+    _assert_replan_reaches_the_next_phase(tmp_path, caplog, postgres_engine)
 
 
 def test_background_image_failure_is_logged_and_shown_as_the_retry_reason(
@@ -466,6 +498,79 @@ def test_preparation_longer_than_the_preflight_window_replaces_an_old_receipt(
     # The old document was treated as absent and replaced by a current one.
     receipt = switch.storage.read_receipt(switch.layout_digest)
     assert receipt.oci_archive_sha256 == switch.layout_digest
+
+
+def test_a_replan_after_publication_republishes_the_image_reference(
+    tmp_path: Path,
+) -> None:
+    """A later phase's re-plan must not strand the earlier plan's reference.
+
+    The image phase publishes a reference intent bound to its plan. When the
+    target copy then fails and re-plans, the next generation publishes for
+    the new plan and replaces that intent instead of failing the load.
+    """
+
+    switch = _background_image_switch(
+        tmp_path, copy_failures=[RuntimeError("target copy failed")]
+    )
+    try:
+        _drive_until(
+            switch,
+            lambda view: view.result.phase_retry_generation == 1 and _past_image(view),
+        )
+    finally:
+        switch.worker.composite.close()
+    view = switch.view()
+    assert view.state != "failed", view.status_reason
+    assert view.result.phase_retry_generation == 1
+    assert view.progress.subphase == "runtime-plan", view.status_reason
+    intent = view.result.runtime_image_reference_intent
+    assert intent is not None
+    with switch.sessions() as session:
+        job = session.get(Job, switch.operation_id)
+        assert job is not None
+        assert intent.plan_digest == job.payload["plan_digest"]
+
+
+def test_unreadable_model_revision_fails_preparation_visibly(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An old-format catalog Model is a stored, logged retry reason.
+
+    This is the path a compile failure takes; it never produces the silent
+    "running in the background" loop that an unowned publication did.
+    """
+
+    switch = _background_image_switch(tmp_path)
+    table = cast(Any, CatalogDocumentRevision.__table__)
+    with switch.sessions() as session:
+        models = [
+            (row.id, row.document)
+            for row in session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "model"
+                )
+            )
+        ]
+        # Catalog revisions are immutable through the ORM; an older Controller
+        # left documents the current Model contract cannot read.
+        for revision_id, document in models:
+            session.execute(
+                update(table)
+                .where(table.c.id == revision_id)
+                .values(document={"schema_version": 1, "id": document.get("id")})
+            )
+        session.commit()
+    try:
+        with caplog.at_level(logging.INFO):
+            _drive_until(switch, lambda view: view.result.retry_reason is not None)
+    finally:
+        switch.worker.composite.close()
+    view = switch.view()
+    assert view.progress.subphase == "runtime-image"
+    assert "canonical model projection is invalid" in (view.result.retry_reason or "")
+    assert "failed: RecipeRuntimeSpecError: canonical model projection" in caplog.text
+    assert "is waiting: run-switch.phase-retry: RecipeRuntimeSpecError" in caplog.text
 
 
 def test_waiting_load_resumes_after_a_worker_restart(tmp_path: Path) -> None:

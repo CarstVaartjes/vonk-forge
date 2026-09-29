@@ -10049,14 +10049,17 @@ def _persist_run_switch_runtime_image_reference(
                 raise identity_invalid(
                     "stored RunSwitch image reference is invalid"
                 ) from error
-            if parsed_prior != intent:
+            if parsed_prior == intent:
+                return
+            # A re-plan leaves the earlier plan's reference behind; this plan's
+            # phase now owns the image. Within one plan it never changes.
+            if parsed_prior.plan_digest == intent.plan_digest:
                 raise identity_invalid(
                     "RunSwitch image reference changed during publication"
                 )
-        else:
-            current["runtime_image_reference_intent"] = intent.model_dump(mode="json")
-            job.result = _persisted_result(current)
-            job.updated_at = now
+        current["runtime_image_reference_intent"] = intent.model_dump(mode="json")
+        job.result = _persisted_result(current)
+        job.updated_at = now
 
 
 def _reject_invalid_operation(job: Job, reason: str, now: datetime) -> None:
