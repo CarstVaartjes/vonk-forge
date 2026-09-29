@@ -4,7 +4,7 @@ set -eu
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 export UV_CACHE_DIR=${UV_CACHE_DIR:-/private/tmp/vonk-forge-hook-uv-cache}
-protocol_wheel=inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl
+protocol_wheel=inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl
 generated_protocol_wheel=false
 cleanup_generated_wheel() {
     if [ "$generated_protocol_wheel" = true ]; then

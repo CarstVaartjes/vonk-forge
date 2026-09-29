@@ -54,6 +54,8 @@ impl FileSystemProvider for SystemFileSystemProvider {
 #[derive(Debug, Clone)]
 pub struct TelemetryPaths {
     pub meminfo: PathBuf,
+    /// `/sys/devices/system/cpu`: per-CPU `cpufreq` clocks live below it.
+    pub cpu_root: PathBuf,
     pub store: PathBuf,
 }
 
@@ -102,7 +104,8 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             .run(
                 Program::NvidiaSmi,
                 &[
-                    "--query-gpu=name,utilization.gpu,memory.total,memory.free".to_owned(),
+                    "--query-gpu=name,utilization.gpu,memory.total,memory.free,temperature.gpu"
+                        .to_owned(),
                     "--format=csv,noheader,nounits".to_owned(),
                 ],
                 Duration::from_secs(10),
@@ -110,6 +113,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             .ok()
             .filter(|output| output.success && output.stdout.len() <= SOURCE_TEXT_LIMIT as usize)
             .and_then(|output| parse_first_accelerator(&output.stdout));
+        let cpu_frequency = read_cpu_frequency(&self.paths.cpu_root);
         // GB10 exposes one physical unified pool. Keep that capacity in the
         // memory fields so consumers cannot sum RAM and VRAM twice.
         let dedicated = accelerator
@@ -123,9 +127,13 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             memory_available_bytes: memory.map(|value| value.1),
             disk_total_bytes: disk.map(|value| value.total_bytes),
             disk_free_bytes: disk.map(|value| value.free_bytes),
-            gpu_utilization_percent: accelerator.and_then(|value| value.utilization),
+            gpu_utilization_percent: accelerator.as_ref().and_then(|value| value.utilization),
             gpu_memory_total_bytes: dedicated.map(|value| value.0),
             gpu_memory_free_bytes: dedicated.map(|value| value.1),
+            gpu_temperature_c: accelerator.as_ref().and_then(|value| value.temperature_c),
+            cpu_frequency_avg_mhz: cpu_frequency.map(|value| value.avg_mhz),
+            cpu_frequency_min_mhz: cpu_frequency.map(|value| value.min_mhz),
+            cpu_frequency_max_mhz: cpu_frequency.and_then(|value| value.max_mhz),
         }
     }
 }
@@ -206,8 +214,62 @@ fn parse_memory(value: &str) -> Option<(u64, u64)> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CpuFrequency {
+    avg_mhz: u32,
+    min_mhz: u32,
+    /// Hardware limit (`cpuinfo_max_freq`), not the current cap.
+    max_mhz: Option<u32>,
+}
+
+const MAX_CPUS: usize = 1024;
+const MAX_CPU_MHZ: u32 = 20_000;
+
+/// Summarize `cpu*/cpufreq/scaling_cur_freq` (kHz). Any missing or malformed
+/// entry is skipped; without a single current reading the result is `None`.
+fn read_cpu_frequency(root: &Path) -> Option<CpuFrequency> {
+    let mut current = Vec::new();
+    let mut maximum: Option<u32> = None;
+    let mut seen = 0;
+    for entry in std::fs::read_dir(root).ok()?.flatten() {
+        let name = entry.file_name();
+        let Some(index) = name.to_str().and_then(|value| value.strip_prefix("cpu")) else {
+            continue;
+        };
+        if index.is_empty() || !index.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        seen += 1;
+        if seen > MAX_CPUS {
+            break;
+        }
+        let cpufreq = entry.path().join("cpufreq");
+        if let Some(mhz) = read_khz_as_mhz(&cpufreq.join("scaling_cur_freq")) {
+            current.push(mhz);
+        }
+        if let Some(mhz) = read_khz_as_mhz(&cpufreq.join("cpuinfo_max_freq")) {
+            maximum = maximum.max(Some(mhz));
+        }
+    }
+    let min_mhz = *current.iter().min()?;
+    let sum: u64 = current.iter().map(|value| u64::from(*value)).sum();
+    let avg_mhz = u32::try_from((sum + current.len() as u64 / 2) / current.len() as u64).ok()?;
+    Some(CpuFrequency {
+        avg_mhz,
+        min_mhz,
+        max_mhz: maximum,
+    })
+}
+
+fn read_khz_as_mhz(path: &Path) -> Option<u32> {
+    let khz = read_bounded_text(path)?.trim().parse::<u32>().ok()?;
+    let mhz = (khz + 500) / 1000;
+    (1..=MAX_CPU_MHZ).contains(&mhz).then_some(mhz)
+}
+
 struct AcceleratorReading {
     name: String,
+    temperature_c: Option<u32>,
     utilization: Option<f64>,
     /// (total, free) bytes, when the device reports dedicated memory.
     memory: Option<(u64, u64)>,
@@ -219,9 +281,13 @@ fn parse_first_accelerator(value: &[u8]) -> Option<AcceleratorReading> {
         .lines()
         .find(|line| !line.trim().is_empty())?;
     let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
-    let [name, utilization, memory_total, memory_free] = fields.as_slice() else {
+    let [name, utilization, memory_total, memory_free, temperature] = fields.as_slice() else {
         return None;
     };
+    let temperature_c = temperature
+        .parse::<u32>()
+        .ok()
+        .filter(|value| *value <= 150);
     if name.is_empty() || name.chars().count() > 256 {
         return None;
     }
@@ -238,6 +304,7 @@ fn parse_first_accelerator(value: &[u8]) -> Option<AcceleratorReading> {
     };
     Some(AcceleratorReading {
         name: (*name).to_owned(),
+        temperature_c,
         utilization,
         memory,
     })

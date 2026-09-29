@@ -75,3 +75,27 @@ def test_sample_rejects_unknown_or_inconsistent_values(
     invalid["samples"][0].update(changes)  # type: ignore[index]
     with pytest.raises(AgentProtocolError, match="schema is invalid"):
         TelemetryRequest.parse(invalid)
+
+
+def test_cpu_frequency_and_temperature_are_optional_and_bounded() -> None:
+    older = TelemetryRequest.parse(report())
+    assert "cpu_frequency_avg_mhz" not in older.document()["samples"][0]
+
+    newer = report()
+    newer["samples"][0].update(  # type: ignore[attr-defined]
+        {
+            "cpu_frequency_avg_mhz": 2100,
+            "cpu_frequency_min_mhz": 1800,
+            "cpu_frequency_max_mhz": 3900,
+            "gpu_temperature_c": 84,
+        }
+    )
+    parsed = TelemetryRequest.parse(newer)
+    assert parsed.samples[0].cpu_frequency_max_mhz == 3900
+
+    inverted = report()
+    inverted["samples"][0].update(  # type: ignore[attr-defined]
+        {"cpu_frequency_avg_mhz": 1000, "cpu_frequency_min_mhz": 2000}
+    )
+    with pytest.raises(AgentProtocolError):
+        TelemetryRequest.parse(inverted)

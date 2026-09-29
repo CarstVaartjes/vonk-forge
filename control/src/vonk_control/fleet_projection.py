@@ -39,7 +39,12 @@ from .recipe_execution_contract import (
     parse_stored_installation_plan,
 )
 from .strict_json import StrictJSONModel
-from .telemetry import TelemetryRepository, TelemetrySampleView
+from .telemetry import (
+    CPU_LOW_CLOCK_MIN_SECONDS,
+    TelemetryRepository,
+    TelemetrySampleView,
+    sustained_low_cpu_clock,
+)
 
 _REVISION_PATTERN = r"^[0-9a-f]{64}$"
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
@@ -193,6 +198,25 @@ class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
+# Extra history beyond the one-minute rule, so a slightly late sample still
+# leaves an unbroken run to measure.
+_LOW_CLOCK_LOOKBACK_SLACK = 30
+
+
+def _low_clock_detail(sample: TelemetrySampleView) -> str:
+    average = sample.cpu_frequency_avg_mhz
+    maximum = sample.cpu_frequency_max_mhz
+    context = (
+        f"{sample.gpu_temperature_c} °C"
+        if sample.gpu_temperature_c is not None
+        else f"{sample.gpu_utilization_percent:.0f}% GPU load"
+    )
+    return (
+        f"CPU clock is low while hot or busy: {average} of {maximum} MHz at "
+        f"{context}. Thermal or power throttling is possible."
+    )
+
+
 class ProjectionReason(_StrictModel):
     code: Literal[
         "node.offline",
@@ -203,6 +227,7 @@ class ProjectionReason(_StrictModel):
         "telemetry.stale",
         "install.partial",
         "run.degraded",
+        "cpu.low-clock",
     ]
     detail: Text256
     severity: Literal["info", "warning", "error"]
@@ -258,6 +283,10 @@ class TelemetryPoint(_StrictModel):
     gpu_memory_free_bytes: int | None = Field(
         default=None, ge=0, le=_MAX_TELEMETRY_BYTES
     )
+    gpu_temperature_c: int | None = Field(default=None, ge=0, le=150)
+    cpu_frequency_avg_mhz: int | None = Field(default=None, ge=1, le=20_000)
+    cpu_frequency_min_mhz: int | None = Field(default=None, ge=1, le=20_000)
+    cpu_frequency_max_mhz: int | None = Field(default=None, ge=1, le=20_000)
 
 
 class TelemetryState(_StrictModel):
@@ -360,6 +389,10 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
         gpu_utilization_percent=value.gpu_utilization_percent,
         gpu_memory_total_bytes=value.gpu_memory_total_bytes,
         gpu_memory_free_bytes=value.gpu_memory_free_bytes,
+        gpu_temperature_c=value.gpu_temperature_c,
+        cpu_frequency_avg_mhz=value.cpu_frequency_avg_mhz,
+        cpu_frequency_min_mhz=value.cpu_frequency_min_mhz,
+        cpu_frequency_max_mhz=value.cpu_frequency_max_mhz,
     )
 
 
@@ -475,6 +508,14 @@ class FleetProjection:
             certificates = self._current_certificates(session, node_ids, current)
             inventories = self._latest_inventory(session, node_ids)
             telemetry = self._telemetry.latest_in_session(session, node_ids)
+            recent_telemetry = self._telemetry.recent_in_session(
+                session,
+                node_ids,
+                current
+                - timedelta(
+                    seconds=CPU_LOW_CLOCK_MIN_SECONDS + _LOW_CLOCK_LOOKBACK_SLACK
+                ),
+            )
             installation_rows = self._installation_rows(session, node_ids)
             run_rows = self._run_rows(session, node_ids)
             mapping_ids = {row[2].id for row in (*installation_rows, *run_rows)}
@@ -507,6 +548,7 @@ class FleetProjection:
                     certificate=certificates.get(node_id),
                     inventory=inventories.get(node_id),
                     telemetry=telemetry.get(node_id),
+                    recent_telemetry=recent_telemetry.get(node_id, ()),
                     installed=installed.get(node_id, ()),
                     loaded=loaded.get(node_id, ()),
                     reservations=reservations.get(node_id, {}),
@@ -970,6 +1012,7 @@ class FleetProjection:
         certificate: AgentCertificate | None,
         inventory: NodeInventorySnapshot | None,
         telemetry: TelemetrySampleView | None,
+        recent_telemetry: Sequence[TelemetrySampleView],
         installed: Sequence[RecipePresence],
         loaded: Sequence[RunPresence],
         reservations: Mapping[str, tuple[int, int]],
@@ -1026,6 +1069,16 @@ class FleetProjection:
                     severity="warning",
                 )
             )
+        if telemetry_state is not None and telemetry_state.freshness != "stale":
+            low_clock = sustained_low_cpu_clock(recent_telemetry)
+            if low_clock is not None:
+                warnings.append(
+                    ProjectionReason(
+                        code="cpu.low-clock",
+                        detail=_low_clock_detail(low_clock),
+                        severity="warning",
+                    )
+                )
         if any(not value.complete for value in installed):
             warnings.append(
                 ProjectionReason(
