@@ -29,7 +29,8 @@ jobs:
   native-arm64-repair-matrix:
     name: Exercise full repair matrix on disposable ARM64 systemd
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 180
+    # Passing runs take about 10 minutes; a hung matrix must fail fast.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
