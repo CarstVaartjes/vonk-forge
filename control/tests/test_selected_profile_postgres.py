@@ -527,10 +527,10 @@ def test_pending_profile_edit_is_rejected_before_selection_after_restart(
         restarted_engine.dispose()
 
 
-def test_pending_recipe_head_change_is_rejected_before_workload_fencing(
+def test_pending_recipe_head_change_is_followed_before_workload_fencing(
     postgres_engine: Engine,
 ) -> None:
-    """A stale pending review cannot cancel workloads before retry rejects it."""
+    """A pending load follows a newer recipe head before it fences any workload."""
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -595,8 +595,8 @@ def test_pending_recipe_head_change_is_rejected_before_workload_fencing(
     assert service.tick() is True
 
     resumed = service.application(pending.id)
-    assert resumed.state == "cancelled"
-    assert "recipe head changed" in (resumed.status_reason or "").lower()
+    assert resumed.state == "queued", resumed.status_reason
+    assert "re-planned" in (resumed.status_reason or "").lower()
     assert adapter.cancellations == []
     with sessions() as session:
         assert session.get(FleetProfileSelection, 1) is None
