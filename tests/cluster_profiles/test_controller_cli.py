@@ -3967,7 +3967,7 @@ def test_run_parser_exposes_spark_confirmation_and_wait_controls() -> None:
 @pytest.mark.parametrize(
     "reason_code", [None, "profile.spark_offline", "profile.node_revoked"]
 )
-def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
+def test_run_reviews_and_waits_before_reporting_endpoint(
     reason_code: str | None, capsys
 ) -> None:
     profile = {
@@ -4013,23 +4013,6 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
                 }
             if path == "/api/fleet":
                 return {"nodes": [{"id": "spk_" + "a" * 32, "display_name": "Atlas"}]}
-            if path == "/api/recipe/vonk-forge%2Fqwen-code/download":
-                return {
-                    "kind": "recipe.image.availability.v2",
-                    "id": "recipe-op",
-                    "request_id": "11111111-1111-4111-8111-111111111111",
-                    "request": {
-                        "kind": "selector",
-                        "selector": "vonk-forge/qwen-code",
-                        "force": False,
-                    },
-                }
-            if path == "/api/recipe/operations/recipe-op":
-                return {
-                    "kind": "recipe.image.availability.v2",
-                    "id": "recipe-op",
-                    "state": "succeeded",
-                }
             if path == "/api/profile/1/definition":
                 return {
                     "id": "22222222-2222-4222-8222-222222222222",
@@ -4103,3 +4086,22 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
     assert endpoints["application_id"] == application_id
     assert profile["assignments"][0]["recipe_selector"] == "vonk-forge/qwen-code"
     assert "/api/profile/1/load" in paths
+    # The Controller prepares what the load needs; the client no longer downloads.
+    assert not any("/download" in path for path in paths)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["recipe", "download", "vonk-forge/qwen-code"],
+        ["model", "download", "vonk-forge/qwen"],
+        ["recipe", "update", "--all"],
+        ["fleet", "rename", "Atlas", "Nova"],
+        ["fleet", "enroll", "Nova", "--output", "/tmp/nova.json"],
+        ["profile", "add", "vonk-forge/qwen-code", "--spark", "Atlas"],
+        ["key", "create", "app"],
+    ],
+)
+def test_every_mutating_command_accepts_yes(arguments: list[str]) -> None:
+    args = cli._parser().parse_args([*arguments, "--yes"])
+    assert args.yes is True

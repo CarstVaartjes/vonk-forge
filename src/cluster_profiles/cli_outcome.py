@@ -128,7 +128,10 @@ class CommandOutcome:
         if self.observation and self.observation.status == "timed_out":
             return 2
         if self.context == "preview":
-            return 0 if self.document.get("allowed") is True else 2
+            ready = self.document.get("allowed") is True or (
+                self.document.get("waits_for_preparation") is True
+            )
+            return 0 if ready else 2
         if self.context == "read":
             return 0
         state = operation_state(self.document)

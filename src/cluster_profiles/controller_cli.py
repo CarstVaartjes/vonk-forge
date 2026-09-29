@@ -304,10 +304,14 @@ def _interval_seconds(value: str) -> float:
     return _finite_seconds(value, label="poll interval", minimum=0.01, maximum=30)
 
 
+def _add_yes(parser: argparse.ArgumentParser) -> None:
+    """Every mutating command accepts --yes; it only matters where one asks first."""
+    parser.add_argument("--yes", action="store_true", help="Confirm without asking")
+
+
 def _action_flags(
     parser: argparse.ArgumentParser,
     *,
-    destructive: bool = False,
     recipe_remove: bool = False,
     followable: bool = False,
 ) -> None:
@@ -323,8 +327,7 @@ def _action_flags(
             help="Return once accepted instead of following",
         )
         _watch_controls(parser)
-    if destructive:
-        parser.add_argument("--yes", action="store_true", help="Confirm without asking")
+    _add_yes(parser)
     if recipe_remove:
         model_choice = parser.add_mutually_exclusive_group()
         model_choice.add_argument("--with-model", action="store_true")
@@ -343,6 +346,7 @@ def _profile_edit_flags(
         metavar="N",
         help="Refuse the edit unless the saved profile is at revision N",
     )
+    _add_yes(parser)
     _add_output(parser)
 
 
@@ -402,6 +406,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "enroll", help="Create a one-time enrollment grant"
     )
     enroll.set_defaults(outcome_context="mutation")
+    _add_yes(enroll)
     enroll.add_argument("name")
     enroll.add_argument("--output", type=Path, required=True, metavar="FILE")
     enroll.add_argument("--request-key", type=_uuid_argument)
@@ -550,7 +555,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "remove", help="Review and remove Controller model cache assets"
     )
     _selector(model_remove, "model", help="Exact model selector or friendly name")
-    _action_flags(model_remove, destructive=True, followable=True)
+    _action_flags(model_remove, followable=True)
     model_remove.add_argument(
         "--review",
         action="store_true",
@@ -560,7 +565,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "cancel", help="Cancel one model download while preserving resumable files"
     )
     model_cancel.add_argument("operation_id", type=_uuid_selector)
-    _action_flags(model_cancel, destructive=True, followable=True)
+    _action_flags(model_cancel, followable=True)
     model_cancel.add_argument(
         "--reason",
         default="operator requested cancellation",
@@ -631,7 +636,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "remove", help="Review and remove Controller recipe cache assets"
     )
     _selector(recipe_remove, "recipe", help="Exact recipe selector or friendly name")
-    _action_flags(recipe_remove, destructive=True, recipe_remove=True, followable=True)
+    _action_flags(recipe_remove, recipe_remove=True, followable=True)
     recipe_remove.add_argument(
         "--review",
         action="store_true",
@@ -641,7 +646,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "cancel", help="Cancel one accepted recipe preparation"
     )
     recipe_cancel.add_argument("operation_id")
-    _action_flags(recipe_cancel, destructive=True, followable=True)
+    _action_flags(recipe_cancel, followable=True)
     recipe_cancel.add_argument("--reason", default="operator requested cancellation")
 
     recipe_installation = recipe_actions.add_parser(
@@ -659,7 +664,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     installation_reconcile.add_argument(
         "installation_id", type=_uuid_argument, help="Exact installation UUID"
     )
-    _action_flags(installation_reconcile, destructive=True, followable=True)
+    _action_flags(installation_reconcile, followable=True)
     installation_reconcile.add_argument(
         "--review",
         action="store_true",
@@ -819,6 +824,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     key_create = key_actions.add_parser(
         "create", help="Create a client key; it is shown only once"
     )
+    _add_yes(key_create)
     key_create.add_argument("name")
     key_create.add_argument(
         "--model",
@@ -3520,7 +3526,7 @@ def _run(
     client: ControllerClient,
     factory: Callable[[], str],
 ) -> dict[str, object]:
-    """Run one exact library recipe using the ordinary cache/profile contracts."""
+    """Run one exact library recipe; the Controller prepares what the load needs."""
     number = _profile_number(args)
     deadline = time.monotonic() + args.timeout_seconds
     selector = _resolve_run_recipe(client, args.selector, deadline=deadline)
@@ -3542,34 +3548,6 @@ def _run(
         ]
         if len(spark_names) != len(nodes):
             raise ControlMalformedResponse("fleet response contains an invalid Spark")
-
-    download_args = argparse.Namespace(
-        command="recipe",
-        recipe_action="download",
-        selector=selector,
-        request_key=None,
-        detach=False,
-        follow=True,
-        watch=getattr(args, "watch", False),
-        timeout_seconds=args.timeout_seconds,
-        interval_seconds=args.interval_seconds,
-        global_json=getattr(args, "global_json", False),
-        json=getattr(args, "json", False),
-        no_input=getattr(args, "no_input", False),
-        _watch_callback=getattr(args, "_watch_callback", None),
-    )
-    prepared = _follow_mutation(
-        client,
-        "recipe",
-        _submit_cache_request(client, "recipe", download_args, factory),
-        download_args,
-    )
-    prepared_state = operation_state(prepared)
-    if prepared_state not in {"succeeded", "completed"}:
-        args.outcome_context = "mutation"
-        if isinstance(getattr(download_args, "observation", None), Observation):
-            args.observation = download_args.observation
-        return {"state": prepared_state or "unknown", "prepared": prepared}
 
     edit_args = argparse.Namespace(
         command="profile",
@@ -3622,7 +3600,6 @@ def _run(
             args.observation = load_args.observation
         return {
             "recipe": selector,
-            "prepared": prepared,
             "application": application,
             "state": application_state or "unknown",
         }
@@ -3632,7 +3609,6 @@ def _run(
     endpoints = _profile(endpoint_args, client, factory)
     return {
         "recipe": selector,
-        "prepared": prepared,
         "application": application,
         "state": application_state,
         "endpoints": endpoints,

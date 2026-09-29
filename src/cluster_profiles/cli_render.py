@@ -216,6 +216,23 @@ def _failure(value: object) -> None:
     _actions(failure.get("recovery_actions"))
 
 
+def _waiting(payload: Mapping[str, object]) -> None:
+    """What a queued or blocked operation waits for, and when it is checked again."""
+    blockers = payload.get("blockers")
+    if isinstance(blockers, list):
+        for item in blockers:
+            if not isinstance(item, Mapping):
+                continue
+            nodes = item.get("node_ids")
+            where = f" [{_words(nodes)}]" if isinstance(nodes, list) and nodes else ""
+            _field(
+                "Waiting for",
+                f"{_text(item.get('code'))}: {_text(item.get('detail'))}{where}",
+            )
+    if payload.get("next_attempt_at") is not None:
+        _field("Next attempt", _time(payload["next_attempt_at"]))
+
+
 def _node(node: Mapping[str, object], *, detail: bool) -> None:
     name = node.get("display_name")
     _field("Spark", name)
@@ -847,7 +864,13 @@ def _gateway_keys(payload: Mapping[str, object], action: object) -> None:
 
 
 def _preview(payload: Mapping[str, object]) -> None:
-    print("Ready for review" if payload.get("allowed") is True else "Blocked")
+    if payload.get("allowed") is True:
+        print("Ready for review")
+    elif payload.get("waits_for_preparation") is True:
+        print("Ready after preparation")
+        print("The Controller prepares what is listed below, then continues.")
+    else:
+        print("Blocked")
     _field("Profile", payload.get("profile_name"))
     _field("Revision", payload.get("profile_revision"))
     _field("Plan digest", payload.get("plan_digest"))
@@ -862,6 +885,11 @@ def _preview(payload: Mapping[str, object]) -> None:
         _field("Current", assignment.get("current_state"))
         _field("Desired", assignment.get("desired_state"))
         _reasons(assignment.get("reasons"), subject=assignment.get("recipe_title"))
+    for step in (
+        _records(payload, "preparation_steps") if "preparation_steps" in payload else []
+    ):
+        print(f"Prepare {_text(step.get('index'))}. {_text(step.get('label'))}")
+        _field("Affected Sparks", _words(step.get("node_ids")))
     for step in _records(payload, "steps"):
         print(f"{_text(step.get('index'))}. {_text(step.get('label'))}")
         _field("Affected Sparks", _words(step.get("node_ids")))
@@ -1052,6 +1080,7 @@ def _application(payload: Mapping[str, object]) -> None:
     _field("State", payload.get("state"))
     if payload.get("status_reason") is not None:
         _field("Reason", payload["status_reason"])
+    _waiting(payload)
     progress = _optional(payload.get("progress"), "progress")
     _field(
         "Steps",
@@ -1088,7 +1117,8 @@ def _operation(payload: Mapping[str, object], noun: str) -> None:
         else payload.get("request_key"),
     )
     _field("State", payload.get("state"))
-    _field("Progress", progress_line(payload))
+    _field("Progress", _measured_progress(payload))
+    _waiting(payload)
     if payload.get("selector") is not None:
         print(f"USE {_text(payload['selector'])}")
     if availability:
@@ -1382,6 +1412,7 @@ def _activity(
             )
         if operation.get("status_reason") is not None:
             _warn(f"Reason: {_text(operation['status_reason'])}")
+        _waiting(operation)
         recovery = _optional(operation.get("recovery"), "operation recovery")
         _actions(recovery.get("actions"))
         print()
@@ -1652,6 +1683,16 @@ def render_payload(
 
 
 def progress_line(observed: Mapping[str, object]) -> str:
+    """Describe measured work, and what it waits for when it is waiting."""
+    line = _measured_progress(observed)
+    blockers = observed.get("blockers")
+    first = blockers[0] if isinstance(blockers, list) and blockers else None
+    if isinstance(first, Mapping):
+        return f"{line} (waiting: {_text(first.get('code'))})"
+    return line
+
+
+def _measured_progress(observed: Mapping[str, object]) -> str:
     """Describe measured work; a missing or explicitly unknown total stays unknown."""
     progress = _optional(observed.get("progress"), "progress")
     nested = progress.get("operation")
