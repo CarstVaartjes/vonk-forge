@@ -1362,6 +1362,61 @@ def test_current_candidate_is_derived_from_the_published_arm64_release(
     assert request_hosts == ["caddy", "caddy", "caddy"]
 
 
+@pytest.mark.parametrize(
+    ("artifacts", "relay_status"),
+    [
+        # A release published without its Spark agent package.
+        ({}, 200),
+        # A malformed package record used to escape as an AttributeError.
+        (
+            {
+                "agent-package-linux-arm64": "vonk-forge-agent.deb",
+                "agent-package-signature-linux-arm64": {"path": "signature"},
+            },
+            200,
+        ),
+        # The release relay refuses the document.
+        (None, 404),
+    ],
+)
+def test_an_unresolvable_release_is_an_actionable_refusal(
+    tmp_path, artifacts, relay_status
+) -> None:
+    generation = "9" * 64
+    release = {"artifacts": artifacts, "channel": "dev", "generation": generation}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/artifacts/dev/current.manifest":
+            return httpx2.Response(
+                200,
+                text=(
+                    f"generation={generation}\n"
+                    f"release_path=artifacts/dev/releases/{generation}/release.json\n"
+                ),
+            )
+        return httpx2.Response(relay_status, content=json.dumps(release).encode())
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'candidate.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime(2026, 8, 27, tzinfo=UTC)
+    upgrades = AgentUpgradeService(
+        sessions,
+        AgentJobService(sessions, clock=clock),
+        clock=clock,
+        release_api_url="http://caddy:8084",
+        transport=httpx2.MockTransport(handler),
+    )
+
+    with pytest.raises(AgentUpgradeConflict) as refused:
+        upgrades.current_package()
+
+    detail = str(refused.value)
+    assert detail.startswith("the current dev agent package could not be resolved")
+    assert "install.vonkforge.ai" in detail
+    assert detail.endswith("then retry")
+
+
 def _operation_nodes(sessions, job_id: str) -> list[str]:
     with sessions() as session:
         return list(

@@ -240,6 +240,7 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
             "routes",
             "supervisor",
             "state",
+            "gateway",
         )
     }
     ownership: list[tuple[int, int]] = []
@@ -257,6 +258,7 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
         (10001, 10001),
         (10001, 10001),
         (10002, 10001),
+        (-1, 10001),
     ]
     expected_paths = (
         roots["state"],
@@ -264,6 +266,7 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
         roots["routes"],
         roots["routes"] / "generations",
         roots["supervisor"],
+        roots["gateway"],
     )
     assert {
         path.relative_to(tmp_path).as_posix(): path.stat().st_mode & 0o777
@@ -274,6 +277,7 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
         "routes": 0o750,
         "routes/generations": 0o750,
         "supervisor": 0o750,
+        "gateway": 0o770,
     }
 
 
@@ -287,9 +291,38 @@ def test_shared_volume_preparation_rejects_symlinked_component(tmp_path: Path) -
         routes=routes,
         supervisor=tmp_path / "supervisor",
         state=tmp_path / "state",
+        gateway=tmp_path / "gateway",
     )
 
     with pytest.raises(RuntimeSecretError, match="shared runtime directory is unsafe"):
         prepare_shared_volumes(paths)
 
     assert list(outside.iterdir()) == []
+
+
+def test_controller_gets_its_own_readable_master_key_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    staged: list[tuple[Path, Path, int, int, int]] = []
+
+    def record(source, destination, *, owner_uid=0, owner_gid=0, mode=0o444):
+        staged.append((source, destination, owner_uid, owner_gid, mode))
+        return destination
+
+    monkeypatch.setattr(runtime_init, "stage_private_key", record)
+    monkeypatch.setattr(runtime_init, "_stage_optional_private_key", record)
+
+    stage_compose_secrets(Path("/src"), Path("/dst"))
+
+    master = Path("/src/litellm-master-key")
+    copies = {
+        (dest.name, uid, mode) for src, dest, uid, _, mode in staged if src == master
+    }
+    assert copies == {
+        ("litellm-master-key", 10002, 0o400),
+        ("gateway-litellm-master-key", 10001, 0o400),
+    }
+    from vonk_control.gateway_keys import MASTER_KEY_FILE
+    from vonk_control.settings import SECRETS_ROOT
+
+    assert MASTER_KEY_FILE == SECRETS_ROOT / "gateway-litellm-master-key"

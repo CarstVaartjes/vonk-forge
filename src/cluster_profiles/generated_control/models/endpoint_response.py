@@ -29,7 +29,6 @@ class EndpointResponse:
             alias (str):
             api_base (str):
             backend_api_base (str):
-            expires_at (str):
             generation (int):
             node_id (str):
             observed_at (str):
@@ -39,7 +38,6 @@ class EndpointResponse:
     alias: str
     api_base: str
     backend_api_base: str
-    expires_at: str
     generation: int
     node_id: str
     observed_at: str
@@ -56,8 +54,6 @@ class EndpointResponse:
 
         backend_api_base = self.backend_api_base
 
-        expires_at = self.expires_at
-
         generation = self.generation
 
         node_id = self.node_id
@@ -73,7 +69,6 @@ class EndpointResponse:
             "alias": alias,
             "api_base": api_base,
             "backend_api_base": backend_api_base,
-            "expires_at": expires_at,
             "generation": generation,
             "node_id": node_id,
             "observed_at": observed_at,
@@ -93,8 +88,6 @@ class EndpointResponse:
 
         backend_api_base = d.pop("backend_api_base")
 
-        expires_at = d.pop("expires_at")
-
         generation = d.pop("generation")
 
         node_id = d.pop("node_id")
@@ -107,7 +100,6 @@ class EndpointResponse:
             alias=alias,
             api_base=api_base,
             backend_api_base=backend_api_base,
-            expires_at=expires_at,
             generation=generation,
             node_id=node_id,
             observed_at=observed_at,

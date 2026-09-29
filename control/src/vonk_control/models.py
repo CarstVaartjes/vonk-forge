@@ -214,11 +214,6 @@ class RoutePublication(Base):
             "activation_marker_digest IS NULL OR length(activation_marker_digest) = 64",
             name="ck_route_publications_activation_marker_digest_length",
         ),
-        CheckConstraint(
-            "lease_expires_at IS NULL OR "
-            "(lease_issued_at IS NOT NULL AND lease_expires_at > lease_issued_at)",
-            name="ck_route_publications_lease_window",
-        ),
     )
     authority_id: Mapped[str] = mapped_column(
         ForeignKey("recipe_route_authorities.authority_id", ondelete="CASCADE"),
@@ -232,8 +227,6 @@ class RoutePublication(Base):
     bundle_digest: Mapped[str | None] = mapped_column(String(64))
     activation_marker: Mapped[dict[str, object] | None] = mapped_column(JSON)
     activation_marker_digest: Mapped[str | None] = mapped_column(String(64))
-    lease_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RoutePublicationOwner(Base):

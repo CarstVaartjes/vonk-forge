@@ -613,10 +613,12 @@ def assert_repeatable(first: Path, second: Path) -> None:
 
 def secret_snapshot(bundle: Path) -> dict[Path, bytes]:
     secrets = bundle / "secrets"
+    # The Controller owns the keys it writes under secrets/gateway.
+    gateway_dir = secrets / "gateway"
     return {
         path.relative_to(secrets): path.read_bytes()
         for path in secrets.rglob("*")
-        if path.is_file()
+        if path.is_file() and gateway_dir not in path.parents
     }
 
 

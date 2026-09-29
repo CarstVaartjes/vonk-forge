@@ -51,8 +51,7 @@ class _Routes:
         del run_id
         raise AssertionError("cancelled build recovery must not publish a route")
 
-    def maintain(self, *, renew_before_seconds: int = 10) -> bool:
-        del renew_before_seconds
+    def maintain(self) -> bool:
         return False
 
 

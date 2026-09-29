@@ -16,6 +16,9 @@ class RuntimeSecretError(RuntimeError):
     """A private runtime secret cannot be projected safely."""
 
 
+GATEWAY_MASTER_KEY_NAME = "gateway-litellm-master-key"
+
+
 @dataclass(frozen=True)
 class SharedRuntimePaths:
     """Shared named-volume roots initialized by the control API pre-exec."""
@@ -24,6 +27,7 @@ class SharedRuntimePaths:
     routes: Path = Path("/routes")
     supervisor: Path = Path("/supervisor")
     state: Path = Path("/state")
+    gateway: Path = Path("/gateway-secrets")
 
 
 def read_runtime_secret(
@@ -253,6 +257,15 @@ def stage_compose_secrets(
             owner_gid=10001,
             mode=0o400,
         )
+    # The Controller manages gateway client keys with the LiteLLM master key;
+    # it cannot read the litellm-owned copy below, so it gets its own.
+    stage_private_key(
+        source_root / "litellm-master-key",
+        destination_root / GATEWAY_MASTER_KEY_NAME,
+        owner_uid=10001,
+        owner_gid=10001,
+        mode=0o400,
+    )
     for name in (
         "litellm-master-key",
         "litellm-database-url",
@@ -377,6 +390,11 @@ def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
     routes = _directory(paths.routes, 10001, 10001, 0o750)
     _directory(routes / "generations", 10001, 10001, 0o750)
     _directory(paths.supervisor, 10002, 10001, 0o750)
+    # Host bind mount holding the default gateway client key. The installer
+    # creates it for the bundle owner, who keeps ownership so the host can
+    # manage and back it up (owner -1 is left unchanged); the Controller
+    # reaches it through the group.
+    _directory(paths.gateway, -1, 10001, 0o770)
 
 
 def _identity(value: os.stat_result) -> tuple[int, ...]:

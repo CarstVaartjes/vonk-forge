@@ -984,6 +984,10 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         write_new_file(&staging.join(".env"), environment.as_bytes(), 0o600)?;
         let secret_directory = staging.join("secrets");
         create_secure_directory(&secret_directory)?;
+        // The Controller writes the gateway client key here. Create it as the
+        // invoking user so the bundle owner keeps ownership; the Controller
+        // only adjusts the group and mode.
+        create_secure_directory(&secret_directory.join(GATEWAY_SECRET_DIRECTORY))?;
         // Compose bind mounts the backup directories from the bundle. Create
         // them while the installer is still running as the invoking user so
         // Docker cannot materialize (or refuse) a missing host directory.
@@ -1015,6 +1019,8 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
 }
 
 /// Host directories the Compose bundle bind mounts.
+/// Host bind mount owned by the bundle user; the Controller writes into it.
+const GATEWAY_SECRET_DIRECTORY: &str = "gateway";
 const BUNDLE_DIRECTORIES: [&str; 2] = ["backups", "backups-offhost"];
 
 /// Fill every required value that is not set yet. A value with a default
@@ -1758,6 +1764,11 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         ensure_secure_directory(&bundle.join(directory))?;
     }
     let secret_root = bundle.join("secrets");
+    let gateway_directory = secret_root.join(GATEWAY_SECRET_DIRECTORY);
+    if fs::symlink_metadata(&gateway_directory).is_err() {
+        // Keep the mode of an existing directory: the Controller manages it.
+        create_secure_directory(&gateway_directory)?;
+    }
     let mut environment = parse_environment(&bundle.join(".env"))?;
     for internal in &payload.internal_values {
         set_environment_value(&mut environment, &internal.env, internal.value.clone());
@@ -2197,7 +2208,7 @@ fn validate_existing_bundle(bundle: &Path) -> Result<(), SetupError> {
     require_regular_file(&bundle.join(".env"))?;
     let secrets = bundle.join("secrets");
     require_real_directory(&secrets)?;
-    validate_secret_tree(&secrets)?;
+    validate_secret_tree(&secrets, true)?;
     for directory in BUNDLE_DIRECTORIES {
         if fs::symlink_metadata(bundle.join(directory)).is_ok() {
             require_real_directory(&bundle.join(directory))?;
@@ -2222,7 +2233,7 @@ fn is_stale_staging_directory_name(name: &std::ffi::OsStr) -> bool {
         && sequence.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn validate_secret_tree(directory: &Path) -> Result<(), SetupError> {
+fn validate_secret_tree(directory: &Path, top_level: bool) -> Result<(), SetupError> {
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         let path = entry.path();
@@ -2244,7 +2255,13 @@ fn validate_secret_tree(directory: &Path) -> Result<(), SetupError> {
             )));
         }
         if metadata.is_dir() {
-            validate_secret_tree(&path)?;
+            // The gateway directory holds Controller-owned client keys that
+            // the bundle owner may not be able to list; it is not a secret
+            // input, so only its type is checked.
+            if top_level && name == GATEWAY_SECRET_DIRECTORY {
+                continue;
+            }
+            validate_secret_tree(&path, false)?;
         } else if !metadata.is_file() {
             return Err(SetupError::UnsafeDestination(format!(
                 "{} is not a regular secret file",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -14,6 +16,7 @@ from vonk_control.agent_upgrades import AgentUpgradeConflict
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
 from vonk_control.enrollment import EnrollmentDenied, RemoteRevocationUncertain
 from vonk_control.library_api import _error as library_error
+from vonk_control.logging import current_request_id
 from vonk_control.operator_projection_api import (
     FleetOperatorServices,
     _AgentEnrollmentAdapter,
@@ -363,6 +366,63 @@ def test_a_refused_upgrade_names_the_authority_reason(reason: str) -> None:
     assert response.status_code == 409, response.text
     assert response.headers["x-vonk-error-code"] == "controller.fleet.upgrade_conflict"
     assert response.json()["detail"] == reason
+
+
+def test_an_unexplained_upgrade_failure_is_logged_against_its_request() -> None:
+    """The generic 503 used to leave no trace in the Controller log.
+
+    A failure no domain explains still answers "operator projection
+    unavailable", but the log now names the request id the caller was given,
+    the failure type and a redacted traceback, so the 503 can be diagnosed.
+    """
+
+    request_id = "22222222-2222-4222-8222-222222222222"
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def request_boundary(request, call_next):
+        request.state.request_id = request_id
+        current_request_id.set(request_id)
+        return await call_next(request)
+
+    install_operator_projection_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("admin", "administrator")),
+        fleet_projection=_SnapshotProjection(),
+        library_projection=None,
+        fleet_services=FleetOperatorServices(
+            upgrades=_RefusingUpgrade(
+                RuntimeError("relay failed: Authorization: Bearer leaked-token")
+            )
+        ),
+    )
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler()
+    handler.emit = records.append  # type: ignore[method-assign]
+    logger = logging.getLogger("vonk_control.operator_projection_api")
+    logger.addHandler(handler)
+    previous_level = logger.level
+    logger.setLevel(logging.INFO)
+    try:
+        response = TestClient(app).post(
+            "/api/fleet/upgrade",
+            json={"all": True, "request_key": "11111111-1111-4111-8111-111111111111"},
+        )
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "operator projection unavailable"
+    events = [json.loads(record.getMessage()) for record in records]
+    assert [event["event"] for event in events] == ["api.operator_projection_failed"]
+    event = events[0]
+    assert event["request_id"] == request_id
+    assert event["failure_type"] == "RuntimeError"
+    trace = "".join(event["traceback"])
+    assert "current_package" in trace
+    assert "relay failed" in trace
+    assert "leaked-token" not in trace
 
 
 def test_upgrade_request_replay_returns_the_same_durable_job() -> None:

@@ -38,18 +38,10 @@
           "title": "Evidence Set Digest",
           "type": "string"
         },
-        "expires_at": {
-          "title": "Expires At",
-          "type": "string"
-        },
         "generation": {
           "exclusiveMinimum": 0,
           "title": "Generation",
           "type": "integer"
-        },
-        "issued_at": {
-          "title": "Issued At",
-          "type": "string"
         },
         "litellm_sha256": {
           "pattern": "^[0-9a-f]{64}$",
@@ -94,8 +86,6 @@
         "evidence_set_digest",
         "routes_sha256",
         "litellm_sha256",
-        "issued_at",
-        "expires_at",
         "directory",
         "manifest_sha256"
       ],
@@ -5849,7 +5839,7 @@
     },
     "SupervisorAcknowledgement": {
       "additionalProperties": false,
-      "description": "One live, ready child acknowledging an exact finite route activation.",
+      "description": "One live, ready child acknowledging an exact route activation.",
       "properties": {
         "acknowledged_at": {
           "title": "Acknowledged At",
@@ -5864,10 +5854,6 @@
           "exclusiveMinimum": 0,
           "title": "Child Pid",
           "type": "integer"
-        },
-        "expires_at": {
-          "title": "Expires At",
-          "type": "string"
         },
         "generation": {
           "exclusiveMinimum": 0,
@@ -5898,7 +5884,6 @@
         "acknowledged_at",
         "activation_sha256",
         "child_pid",
-        "expires_at",
         "generation",
         "litellm_sha256",
         "state"

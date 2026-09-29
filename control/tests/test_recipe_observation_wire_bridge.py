@@ -1570,7 +1570,7 @@ def test_observation_deadline_applies_to_first_observation_not_renewal(
             def publish_run(self, run_id: str) -> object:
                 raise AssertionError("expiry must not invoke route publication")
 
-            def maintain(self, *, renew_before_seconds=10):
+            def maintain(self):
                 raise AssertionError("expiry must not invoke route maintenance")
 
         worker = RecipeOperationWorker(sessions, UnusedRoutes(), clock=lambda: now[0])

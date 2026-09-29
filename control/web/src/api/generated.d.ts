@@ -1919,8 +1919,6 @@ export interface components {
             api_base: string;
             /** Backend Api Base */
             backend_api_base: string;
-            /** Expires At */
-            expires_at: string;
             /** Generation */
             generation: number;
             /** Node Id */

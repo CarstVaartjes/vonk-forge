@@ -709,7 +709,6 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
                 "Freshness",
                 _freshness(endpoint.get("observed_at"), payload.get("observed_at")),
             )
-            _field("Route expires at", _time(endpoint.get("expires_at")))
             _field("Spark backend (diagnostic)", endpoint.get("backend_api_base"))
             if isinstance(api_base, str) and isinstance(alias, str):
                 print("Client configuration:")

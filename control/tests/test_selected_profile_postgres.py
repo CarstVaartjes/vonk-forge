@@ -88,8 +88,7 @@ class _NoopRoutes:
         del run_id
         raise AssertionError("the roster-authority test has no running recipe")
 
-    def maintain(self, *, renew_before_seconds: int = 10) -> bool:
-        del renew_before_seconds
+    def maintain(self) -> bool:
         return False
 
 

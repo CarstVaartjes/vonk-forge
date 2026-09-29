@@ -42,7 +42,7 @@ class QuietRoutes:
     def publish_run(self, run_id):
         raise AssertionError(f"retired run must not be published: {run_id}")
 
-    def maintain(self, *, renew_before_seconds=10):
+    def maintain(self):
         return False
 
 

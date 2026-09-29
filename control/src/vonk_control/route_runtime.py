@@ -21,7 +21,6 @@ from typing import Any
 from pydantic import ValidationError
 from vonk_agent_protocol.route_activation import (
     ROUTE_ACK_TIMEOUT_SECONDS,
-    ROUTE_MAXIMUM_LEASE_SECONDS,
     ActivationMarker,
     SupervisorAcknowledgement,
 )
@@ -68,7 +67,7 @@ def _parse_time(value: object, label: str) -> datetime:
 
 @dataclass(frozen=True)
 class VerifiedRouteBundle:
-    """One canonical, checksum-bound, unexpired active route bundle."""
+    """One canonical, checksum-bound active route bundle."""
 
     marker: ActivationMarker
     routes: Mapping[str, object]
@@ -106,13 +105,8 @@ class FileSupervisorAcknowledger:
 
     def __call__(self, marker: ActivationMarker) -> None:
         deadline = self._monotonic() + self._timeout_seconds
-        expires = _parse_time(marker.expires_at, "expiry timestamp")
         while True:
             now = _aware(self._clock(), "supervisor acknowledgement clock")
-            if now >= expires:
-                raise RouteRuntimeError(
-                    "active route lease expired during supervisor acknowledgement"
-                )
             if self._matches(marker, now=now):
                 return
             if self._monotonic() >= deadline:
@@ -142,21 +136,15 @@ class FileSupervisorAcknowledger:
             or acknowledgement.generation != marker.generation
             or acknowledgement.activation_sha256 != marker.digest
             or acknowledgement.litellm_sha256 != marker.litellm_sha256
-            or acknowledgement.expires_at != marker.expires_at
         ):
             return False
         try:
             acknowledged = _parse_time(
                 acknowledgement.acknowledged_at, "acknowledgement timestamp"
             )
-            issued = _parse_time(marker.issued_at, "issued timestamp")
-            expires = _parse_time(marker.expires_at, "expiry timestamp")
         except RouteRuntimeError:
             return False
-        return (
-            issued <= acknowledged <= now < expires
-            and now - acknowledged <= self._maximum_age
-        )
+        return acknowledged <= now and now - acknowledged <= self._maximum_age
 
 
 class AtomicRouteBundlePublisher:
@@ -166,16 +154,12 @@ class AtomicRouteBundlePublisher:
         self,
         root: Path,
         *,
-        clock: Callable[[], datetime],
-        maximum_lease_seconds: int = ROUTE_MAXIMUM_LEASE_SECONDS,
         validate_routes: Callable[[bytes], bool] | None = None,
         validate_litellm: Callable[[bytes], bool] | None = None,
         await_supervisor_ack: Callable[[ActivationMarker], None] | None = None,
     ) -> None:
         if root.is_symlink():
             raise RouteRuntimeError("route runtime root must not be a symlink")
-        if not 1 <= maximum_lease_seconds <= ROUTE_MAXIMUM_LEASE_SECONDS:
-            raise RouteRuntimeError("route lease bound is invalid")
         root.mkdir(parents=True, exist_ok=True, mode=0o750)
         root.chmod(0o750)
         generations = root / "generations"
@@ -185,8 +169,6 @@ class AtomicRouteBundlePublisher:
         generations.chmod(0o750)
         self._root = root
         self._generations = generations
-        self._clock = clock
-        self._maximum_lease = timedelta(seconds=maximum_lease_seconds)
         self._validate_routes = validate_routes or self._valid_json_mapping
         self._validate_litellm = validate_litellm or self._valid_litellm
         self._await_supervisor_ack = await_supervisor_ack
@@ -219,15 +201,6 @@ class AtomicRouteBundlePublisher:
         return isinstance(document, dict) and isinstance(
             document.get("model_list"), list
         )
-
-    def _lease(self, expires_at: datetime) -> tuple[datetime, datetime]:
-        issued = _aware(self._clock(), "route clock")
-        expires = _aware(expires_at, "route lease expiry")
-        if expires <= issued or expires - issued > self._maximum_lease:
-            raise RouteRuntimeError(
-                "route lease is invalid or exceeds its configured bound"
-            )
-        return issued, expires
 
     @staticmethod
     def _identity(authority_id: str, plan_digest: str, evidence_digest: str) -> None:
@@ -304,8 +277,6 @@ class AtomicRouteBundlePublisher:
         evidence_set_digest: str,
         routes: bytes,
         litellm: bytes,
-        issued: datetime,
-        expires: datetime,
     ) -> ActivationMarker:
         if self._validate_routes(routes) is not True:
             raise RouteRuntimeError("route validation rejected the staged bundle")
@@ -320,8 +291,6 @@ class AtomicRouteBundlePublisher:
             "evidence_set_digest": evidence_set_digest,
             "routes_sha256": _sha256(routes),
             "litellm_sha256": _sha256(litellm),
-            "issued_at": issued.isoformat(),
-            "expires_at": expires.isoformat(),
         }
         manifest = _encoded(manifest_document)
         manifest_digest = _sha256(manifest)
@@ -398,19 +367,8 @@ class AtomicRouteBundlePublisher:
             return
         self._atomic_write(target, content, mode=0o640)
 
-    def inspect(
-        self,
-        *,
-        expected: ActivationMarker | None = None,
-        verify_lease: bool = True,
-    ) -> ActivationMarker:
-        if not isinstance(verify_lease, bool):
-            raise RouteRuntimeError("route inspection lease flag is invalid")
-        marker = self._read_marker(
-            optional=False,
-            verify_files=True,
-            verify_lease=verify_lease,
-        )
+    def inspect(self, *, expected: ActivationMarker | None = None) -> ActivationMarker:
+        marker = self._read_marker(optional=False, verify_files=True)
         assert marker is not None
         if expected is not None and marker != expected:
             raise RouteRuntimeError(
@@ -423,16 +381,12 @@ class AtomicRouteBundlePublisher:
         *,
         optional: bool,
         verify_files: bool,
-        verify_lease: bool,
     ) -> ActivationMarker | None:
         bundle = _read_active_route_bundle(
             self._root,
             generations=self._generations,
-            clock=self._clock,
-            maximum_lease=self._maximum_lease,
             optional=optional,
             verify_files=verify_files,
-            verify_lease=verify_lease,
             validate_documents=False,
             validate_routes=self._validate_routes,
             validate_litellm=self._validate_litellm,
@@ -447,29 +401,19 @@ class AtomicRouteBundlePublisher:
             )
 
 
-def verify_active_route_bundle(
-    root: Path,
-    *,
-    clock: Callable[[], datetime],
-    maximum_lease_seconds: int = ROUTE_MAXIMUM_LEASE_SECONDS,
-) -> VerifiedRouteBundle:
+def verify_active_route_bundle(root: Path) -> VerifiedRouteBundle:
     """Read and authenticate the complete active bundle without mutating it."""
 
     if root.is_symlink() or not root.is_dir():
         raise RouteRuntimeError("route runtime root is unavailable")
-    if not 1 <= maximum_lease_seconds <= ROUTE_MAXIMUM_LEASE_SECONDS:
-        raise RouteRuntimeError("route lease bound is invalid")
     generations = root / "generations"
     if generations.is_symlink() or not generations.is_dir():
         raise RouteRuntimeError("route generation root is unavailable")
     bundle = _read_active_route_bundle(
         root,
         generations=generations,
-        clock=clock,
-        maximum_lease=timedelta(seconds=maximum_lease_seconds),
         optional=False,
         verify_files=True,
-        verify_lease=True,
         validate_documents=True,
         validate_routes=AtomicRouteBundlePublisher._valid_json_mapping,
         validate_litellm=AtomicRouteBundlePublisher._valid_litellm,
@@ -482,11 +426,8 @@ def _read_active_route_bundle(
     root: Path,
     *,
     generations: Path,
-    clock: Callable[[], datetime],
-    maximum_lease: timedelta,
     optional: bool,
     verify_files: bool,
-    verify_lease: bool,
     validate_documents: bool,
     validate_routes: Callable[[bytes], bool],
     validate_litellm: Callable[[bytes], bool],
@@ -557,17 +498,6 @@ def _read_active_route_bundle(
                     )
                 documents[name] = document
 
-    if verify_lease:
-        now = _aware(clock(), "route clock")
-        issued = _parse_time(marker.issued_at, "issued timestamp")
-        expires = _parse_time(marker.expires_at, "expiry timestamp")
-        if (
-            issued > now
-            or now >= expires
-            or expires <= issued
-            or expires - issued > maximum_lease
-        ):
-            raise RouteRuntimeError("active route lease is invalid or expired")
     return VerifiedRouteBundle(
         marker=marker,
         routes=documents.get("routes.json", {}),

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Run LiteLLM with the last exact atomic route bundle the Controller published.
 
-The activation marker still carries the Controller's issued/expiry timestamps,
-but the supervisor deliberately ignores expiry: a stalled Controller must not
-darken inference on healthy Sparks. Routes change only when the Controller
-publishes a new generation (including explicit withdrawals).
+The activation marker carries no expiry: a stalled Controller must not darken
+inference on healthy Sparks. Routes change only when the Controller publishes
+a new generation (including explicit withdrawals).
 """
 
 from __future__ import annotations
@@ -246,7 +245,6 @@ def _write_ack(
         acknowledged_at=now.astimezone(UTC).isoformat(),
         activation_sha256=request.activation_sha256,
         child_pid=child.pid,
-        expires_at=marker["expires_at"],
         generation=marker["generation"],
         litellm_sha256=marker["litellm_sha256"],
         schema_version=1,

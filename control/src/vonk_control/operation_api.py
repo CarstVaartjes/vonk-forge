@@ -139,10 +139,6 @@ class OperationProjectionError(RuntimeError):
     """Durable operation state cannot be safely projected."""
 
 
-class EndpointPublicationExpired(RuntimeError):
-    """The last durable route publication has reached its lease expiry."""
-
-
 @dataclass(frozen=True)
 class _ActiveRouteSnapshot:
     marker: Mapping[str, object]
@@ -150,8 +146,6 @@ class _ActiveRouteSnapshot:
     route_digest: str
     litellm_digest: str | None
     bundle_digest: str
-    lease_issued_at: datetime
-    lease_expires_at: datetime
     authority_id: str
     owner_generation: int
     publication_generation: int
@@ -1414,13 +1408,6 @@ class _DurableOperationProjection:
             else session.get(RecipeRouteAuthority, owner.authority_id)
         )
         if (
-            owner is not None
-            and publication is not None
-            and publication.lease_expires_at is not None
-            and _aware(publication.lease_expires_at) <= _aware(self._clock())
-        ):
-            raise EndpointPublicationExpired("active route lease expired")
-        if (
             owner is None
             or publication is None
             or authority is None
@@ -1431,8 +1418,6 @@ class _DurableOperationProjection:
             or publication.activation_marker is None
             or publication.activation_marker_digest is None
             or publication.route_digest is None
-            or publication.lease_issued_at is None
-            or publication.lease_expires_at is None
             or publication.litellm_digest is None
             or publication.bundle_digest is None
         ):
@@ -1444,8 +1429,6 @@ class _DurableOperationProjection:
             route_digest=publication.route_digest,
             litellm_digest=publication.litellm_digest,
             bundle_digest=publication.bundle_digest,
-            lease_issued_at=_aware(publication.lease_issued_at),
-            lease_expires_at=_aware(publication.lease_expires_at),
             authority_id=owner.authority_id,
             owner_generation=owner.owner_generation,
             publication_generation=publication.generation,
@@ -1455,7 +1438,7 @@ class _DurableOperationProjection:
     def _verified_routes(
         self, snapshot: _ActiveRouteSnapshot
     ) -> tuple[Mapping[str, object], Mapping[str, object]]:
-        bundle = verify_active_route_bundle(self._route_root, clock=self._clock)
+        bundle = verify_active_route_bundle(self._route_root)
         active_marker = bundle.marker
         if (
             active_marker.model_dump() != snapshot.marker
@@ -1469,10 +1452,6 @@ class _DurableOperationProjection:
             or active_marker.routes_sha256 != snapshot.route_digest
             or active_marker.litellm_sha256 != snapshot.litellm_digest
             or active_marker.manifest_sha256 != snapshot.bundle_digest
-            or _aware(snapshot.lease_issued_at)
-            != _aware(datetime.fromisoformat(active_marker.issued_at))
-            or _aware(snapshot.lease_expires_at)
-            != _aware(datetime.fromisoformat(active_marker.expires_at))
         ):
             raise RuntimeError("activation marker does not match durable state")
         routes = bundle.routes
@@ -1511,20 +1490,14 @@ class _DurableOperationProjection:
             or not isinstance(observed_at, str)
         ):
             raise RuntimeError("active endpoint is invalid")
-        expires_at = active_marker.get("expires_at")
         generation = active_marker.get("generation")
         plan_digest = active_marker.get("plan_digest")
-        if (
-            not isinstance(expires_at, str)
-            or not isinstance(generation, int)
-            or not isinstance(plan_digest, str)
-        ):
+        if not isinstance(generation, int) or not isinstance(plan_digest, str):
             raise TypeError("active endpoint marker is invalid")
         return EndpointResponse(
             alias=alias,
             api_base=gateway_api_base,
             backend_api_base=f"{scheme}://{address}:{port}{path.rstrip('/')}",
-            expires_at=expires_at,
             generation=generation,
             node_id=node_id,
             observed_at=observed_at,
@@ -1587,13 +1560,10 @@ class _DurableOperationProjection:
                 if not assignments:
                     raise KeyError(alias)
             snapshot: _ActiveRouteSnapshot | None = None
-            expired = False
             unavailable = False
             if any(item.expected_run_id is not None for item in assignments):
                 try:
                     snapshot = self._publication_snapshot(session)
-                except EndpointPublicationExpired:
-                    expired = True
                 except (OSError, RuntimeError, TypeError, ValueError):
                     unavailable = True
 
@@ -1601,11 +1571,7 @@ class _DurableOperationProjection:
         states: dict[str, FleetProfileEndpointState] = {
             item.assignment_id: item.state for item in assignments
         }
-        if expired:
-            for item in assignments:
-                if item.expected_run_id is not None:
-                    states[item.assignment_id] = "expired"
-        elif unavailable:
+        if unavailable:
             for item in assignments:
                 if item.expected_run_id is not None:
                     states[item.assignment_id] = "unavailable"

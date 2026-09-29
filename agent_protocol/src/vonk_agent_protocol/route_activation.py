@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -22,31 +21,11 @@ ROUTE_ACTIVATION_MARGIN_SECONDS = 15
 ROUTE_ACK_TIMEOUT_SECONDS = (
     ROUTE_SHUTDOWN_SECONDS + ROUTE_STARTUP_SECONDS + ROUTE_ACTIVATION_MARGIN_SECONDS
 )
-ROUTE_LEASE_SECONDS = ROUTE_ACK_TIMEOUT_SECONDS + ROUTE_ACTIVATION_MARGIN_SECONDS
-ROUTE_MAXIMUM_LEASE_SECONDS = 300
 ROUTE_EVIDENCE_MAX_AGE_SECONDS = 120
 
 
-def recipe_route_lease_expiry(
-    now: datetime, oldest_observation: datetime | None = None
-) -> datetime:
-    if now.tzinfo is None or now.utcoffset() is None:
-        raise ValueError("route lease clock must be timezone-aware")
-    now = now.astimezone(UTC)
-    expires = now + timedelta(seconds=ROUTE_LEASE_SECONDS)
-    if oldest_observation is None:
-        return expires
-    if oldest_observation.tzinfo is None or oldest_observation.utcoffset() is None:
-        raise ValueError("route observation must be timezone-aware")
-    oldest = oldest_observation.astimezone(UTC)
-    age = (now - oldest).total_seconds()
-    if not 0 <= age <= ROUTE_EVIDENCE_MAX_AGE_SECONDS:
-        raise ValueError("route observation is outside its admission freshness bound")
-    return min(expires, oldest + timedelta(seconds=ROUTE_MAXIMUM_LEASE_SECONDS))
-
-
 class SupervisorAcknowledgement(BaseModel):
-    """One live, ready child acknowledging an exact finite route activation."""
+    """One live, ready child acknowledging an exact route activation."""
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
@@ -54,7 +33,6 @@ class SupervisorAcknowledgement(BaseModel):
     acknowledged_at: str
     activation_sha256: Digest
     child_pid: Annotated[int, Field(gt=0)]
-    expires_at: str
     generation: Annotated[int, Field(gt=0)]
     litellm_sha256: Digest
     state: Literal["maintenance", "published"]
@@ -83,8 +61,6 @@ class ActivationMarker(BaseModel):
     evidence_set_digest: Digest
     routes_sha256: Digest
     litellm_sha256: Digest
-    issued_at: str
-    expires_at: str
     directory: Annotated[str, Field(pattern=r"^[0-9]{8}-[0-9a-f]{64}$")]
     manifest_sha256: Digest
 

@@ -398,7 +398,7 @@ def assemble_production_worker(
 
     recipe_routes = RecipeRouteService(
         sessions,
-        publisher=AtomicRecipeRoutePublisher(publisher, clock=clock),
+        publisher=AtomicRecipeRoutePublisher(publisher),
         management_policy=management_policy,
         clock=clock,
     )
@@ -478,10 +478,9 @@ def assemble_production_worker(
             recovery_run_stops=lifecycle,
             singleton_start_timeout_seconds=distributed_start_timeout_seconds,
         ),
-        manage_route_leases_in_background=True,
     )
     worker_background_services = tuple(background_services)
-    worker_background_closers = (*background_closers, recipe_operations.close)
+    worker_background_closers = tuple(background_closers)
     close_artifact_executor = getattr(artifact_phase_executor, "close", None)
     if callable(close_artifact_executor):
         worker_background_closers += (close_artifact_executor,)
@@ -595,8 +594,6 @@ if __name__ == "__main__":
     route_root = Path("/routes")
     publisher = AtomicRouteBundlePublisher(
         route_root,
-        clock=clock,
-        maximum_lease_seconds=300,
         await_supervisor_ack=FileSupervisorAcknowledger(
             Path("/supervisor/ack.json"),
             clock=clock,

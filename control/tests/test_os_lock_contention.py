@@ -16,7 +16,6 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -88,9 +87,7 @@ def test_publication_lock_claim_is_bounded_when_another_publisher_holds_it(
     because that call never returns while the holder lives.
     """
 
-    publisher = AtomicRouteBundlePublisher(
-        tmp_path / "runtime", clock=lambda: datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
-    )
+    publisher = AtomicRouteBundlePublisher(tmp_path / "runtime")
     root = publisher._root
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(route_runtime, "_PUBLICATION_LOCK_BUDGET_SECONDS", 0.2)

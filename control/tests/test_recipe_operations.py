@@ -102,8 +102,6 @@ from vonk_control.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     FileSupervisorAcknowledger,
-    RouteRuntimeError,
-    verify_active_route_bundle,
 )
 from vonk_control.run_admission import RunAdmissionBusy, RunAdmissionService
 from vonk_control.run_switch_operations import RunSwitchOperationService
@@ -193,8 +191,7 @@ class ConcurrentPublisher(AtomicRecipeRoutePublisher):
                 "memory",
             )
 
-    def publish_empty(self, route_digest, *, expires_at):
-        del expires_at
+    def publish_empty(self, route_digest):
         with self._guard:
             self._generation += 1
             self.aliases.append(())
@@ -4880,11 +4877,8 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
 
     current = {"now": NOW}
     live_root = tmp_path / "live-routes"
-    runtime = AtomicRouteBundlePublisher(
-        live_root,
-        clock=lambda: current["now"],
-    )
-    atomic = AtomicRecipeRoutePublisher(runtime, clock=lambda: current["now"])
+    runtime = AtomicRouteBundlePublisher(live_root)
+    atomic = AtomicRecipeRoutePublisher(runtime)
 
     class DeadlineCrossingWithdrawalFailure(AtomicRecipeRoutePublisher):
         def __init__(self) -> None:
@@ -4896,15 +4890,11 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
             current["now"] = _recovery_deadline(restart)
             return generation
 
-        def publish_empty(self, route_digest, *, expires_at):
-            del expires_at
+        def publish_empty(self, route_digest):
             self.withdrawal_attempts += 1
             if self.fail_withdrawal:
                 raise RuntimeError("synthetic route withdrawal failure")
-            return atomic.publish_empty(
-                route_digest,
-                expires_at=current["now"] + timedelta(seconds=300),
-            )
+            return atomic.publish_empty(route_digest)
 
     failing = DeadlineCrossingWithdrawalFailure()
     routes._publisher = failing
@@ -4913,8 +4903,6 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
     with pytest.raises(RuntimeError, match="deadline"):
         routes.publish_run(started.owner_id)
 
-    with pytest.raises(RouteRuntimeError, match="expired"):
-        verify_active_route_bundle(live_root, clock=lambda: current["now"])
     with sessions() as session:
         run = _required(session.get(RecipeRun, started.owner_id))
         recovery = _required(session.get(Job, restart.id))
@@ -4929,10 +4917,6 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
         assert recovery_result.get("recovery_route_published") is not True
         assert publication is not None
         assert publication.state == "withdrawal-pending"
-        assert publication.lease_expires_at is not None
-        assert publication.lease_expires_at.replace(tzinfo=UTC) == (
-            _recovery_deadline(restart)
-        )
     assert failing.withdrawal_attempts == 1
 
     failing.fail_withdrawal = False
@@ -4989,7 +4973,6 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
             "acknowledged_at": current["now"].isoformat(),
             "activation_sha256": marker.digest,
             "child_pid": 4321,
-            "expires_at": marker.expires_at,
             "generation": marker.generation,
             "litellm_sha256": marker.litellm_sha256,
             "schema_version": 1,
@@ -5015,10 +4998,9 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
 
     runtime = AtomicRouteBundlePublisher(
         live_root,
-        clock=lambda: current["now"],
         await_supervisor_ack=expire_while_waiting_for_ack,
     )
-    atomic = AtomicRecipeRoutePublisher(runtime, clock=lambda: current["now"])
+    atomic = AtomicRecipeRoutePublisher(runtime)
 
     class AcknowledgementCrossingWithdrawalFailure(AtomicRecipeRoutePublisher):
         def __init__(self) -> None:
@@ -5028,15 +5010,11 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
         def publish_recipe(self, candidate):
             return atomic.publish_recipe(candidate)
 
-        def publish_empty(self, route_digest, *, expires_at):
-            del expires_at
+        def publish_empty(self, route_digest):
             self.withdrawal_attempts += 1
             if self.fail_withdrawal:
                 raise RuntimeError("synthetic route withdrawal failure")
-            return atomic.publish_empty(
-                route_digest,
-                expires_at=current["now"] + timedelta(seconds=300),
-            )
+            return atomic.publish_empty(route_digest)
 
     failing = AcknowledgementCrossingWithdrawalFailure()
     routes._publisher = failing
@@ -5045,8 +5023,6 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
     with pytest.raises(RuntimeError, match="expired|deadline"):
         routes.publish_run(started.owner_id)
 
-    with pytest.raises(RouteRuntimeError, match="expired"):
-        verify_active_route_bundle(live_root, clock=lambda: current["now"])
     with sessions() as session:
         run = _required(session.get(RecipeRun, started.owner_id))
         recovery = _required(session.get(Job, restart.id))
@@ -5061,10 +5037,6 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
         assert recovery_result.get("recovery_route_published") is not True
         assert publication is not None
         assert publication.state == "withdrawal-pending"
-        assert publication.lease_expires_at is not None
-        assert publication.lease_expires_at.replace(tzinfo=UTC) == (
-            _recovery_deadline(restart)
-        )
     assert failing.withdrawal_attempts == 1
 
     failing.fail_withdrawal = False
