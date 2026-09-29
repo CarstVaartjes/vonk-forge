@@ -88,6 +88,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 2
     assert payload["internal_values"] == [
+        {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"},
         {"env": "VONK_INSTALL_CHANNEL", "value": "stable"},
     ]
     # Only these lack a fixed default (the management CIDRs then derive from the
@@ -137,62 +138,33 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     }
     installer_environment.add(payload["hermes"]["env"])
 
-    # Every optional service selection ships a self-contained Compose file: a
-    # fixed project name, no profiles, and nothing that needs `.env`.
-    assert "docker_compose_yaml" not in payload
-    assert set(payload["compose_variants"]) == {
-        "base",
-        "hermes",
-        "secure-remote",
-        "hermes+secure-remote",
-    }
-    optional_environment = set(payload["optional_values"]) | set(
-        payload["compose_defaults"]
-    )
-    for key, compose_text in payload["compose_variants"].items():
-        compose = yaml.safe_load(compose_text)
-        assert "${" not in compose_text
-        assert "profiles" not in compose_text
-        assert next(iter(compose)) == "name"
-        assert compose["name"] == "vonk-forge"
-        placeholders = set(re.findall(r"@@([A-Z][A-Z0-9_]*)(?:#\d+)?@@", compose_text))
-        assert placeholders <= installer_environment | optional_environment
-        assert set(compose["services"]) & {
-            "hermes-agent",
-            "hermes-litellm-key-provisioner",
-        } == (
-            {"hermes-agent", "hermes-litellm-key-provisioner"}
-            if "hermes" in key
-            else set()
-        )
-        assert set(compose["services"]) & {
-            "tailscale-gateway",
-            "tailscale-configurator",
-        } == (
-            {"tailscale-gateway", "tailscale-configurator"}
-            if "secure-remote" in key
-            else set()
-        )
-        assert compose["services"]["caddy"]["ports"] == [
-            {
-                "target": 8443,
-                "published": 8443,
-                "host_ip": "@@NAS_LAN_IP@@",
-                "protocol": "tcp",
-            }
-        ]
-    compose_text = payload["compose_variants"]["hermes+secure-remote"]
+    compose_text = payload["docker_compose_yaml"]
     compose = yaml.safe_load(compose_text)
+    required_compose_environment = set(
+        re.findall(r"(?<!\$)\$\{([A-Z_][A-Z0-9_]*):\?", compose_text)
+    )
+    assert required_compose_environment <= installer_environment
     assert set(compose["services"]) == SERVICES
     assert "include" not in compose
+    assert "name" not in compose
     assert "version" not in compose
     assert all("build" not in service for service in compose["services"].values())
-    assert (
-        compose["services"]["tailscale-configurator"]["environment"][
-            "VONK_SELECTED_PROFILES"
-        ]
-        == "hermes,secure-remote"
-    )
+    assert compose["services"]["hermes-agent"]["profiles"] == ["hermes"]
+    assert compose["services"]["hermes-litellm-key-provisioner"]["profiles"] == [
+        "hermes"
+    ]
+    assert compose["services"]["tailscale-gateway"]["profiles"] == ["secure-remote"]
+    assert compose["services"]["tailscale-configurator"]["profiles"] == [
+        "secure-remote"
+    ]
+    assert compose["services"]["caddy"]["ports"] == [
+        {
+            "target": 8443,
+            "published": 8443,
+            "host_ip": "${NAS_LAN_IP:?set reserved NAS LAN IP}",
+            "protocol": "tcp",
+        }
+    ]
     assert all(
         secret["file"].startswith("./secrets/") and "${" not in secret["file"]
         for secret in compose["secrets"].values()
@@ -280,9 +252,7 @@ def test_installer_compose_follows_the_channel_and_keeps_third_party_pins(
     document = yaml.safe_load(_render(tmp_path).read_text())
     builder = _load(SCRIPT, "channel_bundle_builder")
     payload = builder._payload(document, channel)
-    services = yaml.safe_load(payload["compose_variants"]["hermes+secure-remote"])[
-        "services"
-    ]
+    services = yaml.safe_load(payload["docker_compose_yaml"])["services"]
     lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
     for service in services.values():
         image = service["image"]

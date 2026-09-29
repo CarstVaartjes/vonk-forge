@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-: "${COMPOSE_PROJECT_NAME:=vonk-forge}"
+: "${COMPOSE_PROJECT_NAME:=vonk-forge-control}"
 : "${ORAS_PUBLISHER_IMAGE:?set digest-pinned ORAS publisher image}"
 : "${RELEASE_TAG:?set operator release tag}"
 # Agents pull operator releases from this one fixed repository.

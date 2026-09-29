@@ -89,15 +89,6 @@ fn prepare_bundle<R: io::BufRead, W: Write, S: vonk_nas_setup::SecretInput<R, W>
         )?;
     }
     writeln!(status, "Bundle ready at {}", outcome.root.display())?;
-    writeln!(
-        status,
-        "docker-compose.yaml is self-contained: it needs no .env, no profiles and no \
-         project-name setting, so your NAS Docker app and `docker compose` run the same project.\n\
-         After an install or update, use Redeploy or Recreate in your NAS Docker app, or run \
-         `docker compose pull && docker compose up -d --force-recreate`.\n\
-         Start and Stop do not apply a changed Compose file. To change a value in .env, edit it \
-         and rerun this installer, which rewrites docker-compose.yaml."
-    )?;
     Ok(())
 }
 

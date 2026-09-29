@@ -4,11 +4,9 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import hashlib
 import importlib.machinery
 import importlib.util
-import itertools
 import json
 import os
 import re
@@ -81,13 +79,6 @@ SECRET_FILES = {
     "step-ca-password": "step-ca-password",
     "step-ca-config": "step-ca/ca.json",
 }
-
-
-PROJECT_NAME = "vonk-forge"
-OPTIONAL_PROFILES = ("hermes", "secure-remote")
-# `${NAME}`, `${NAME:-default}` and `${NAME:?message}` as a whole scalar.
-INTERPOLATION = re.compile(r"\$\{([A-Z][A-Z0-9_]*)(?:(:-)([^}]*)|(:\?)[^}]*)?\}")
-PLACEHOLDER = re.compile(r"'@@([A-Z][A-Z0-9_]*(?:#[0-9]+)?)@@'")
 
 
 class BundleError(ValueError):
@@ -218,69 +209,6 @@ def _required_value(
     }
 
 
-def variant_key(profiles: set[str]) -> str:
-    """Name a variant by its sorted profile set; the installer uses the same rule."""
-
-    return "+".join(sorted(profiles)) or "base"
-
-
-def _placeholder(value: object, defaults: dict[str, str], profiles: set[str]) -> object:
-    if isinstance(value, dict):
-        return {
-            key: _placeholder(item, defaults, profiles) for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_placeholder(item, defaults, profiles) for item in value]
-    if not isinstance(value, str) or "${" not in value:
-        return value
-    match = INTERPOLATION.fullmatch(value)
-    if match is None:
-        raise BundleError("Compose interpolation must be a whole scalar value")
-    name = match.group(1)
-    if name == "COMPOSE_PROFILES":
-        # Compose profiles are client-side; hand the selection to the container.
-        return ",".join(sorted(profiles))
-    if match.group(2) == ":-":
-        # The same variable may default differently in two places; the
-        # installer reads the variable before the `#`.
-        key = name
-        while defaults.setdefault(key, match.group(3)) != match.group(3):
-            key = f"{name}#{sum(known.startswith(name) for known in defaults)}"
-        name = key
-    return f"@@{name}@@"
-
-
-def _variant(
-    document: dict[str, Any], profiles: set[str]
-) -> tuple[str, dict[str, str]]:
-    """One self-contained Compose file: a fixed name, only the selected
-    services, no profiles, and `@@NAME@@` placeholders for install-time values.
-    """
-
-    selected = copy.deepcopy(document)
-    services = selected["services"]
-    for name in list(services):
-        wanted = services[name].pop("profiles", None)
-        if wanted and not set(wanted) <= profiles:
-            del services[name]
-    for service in services.values():
-        depends = service.get("depends_on")
-        if isinstance(depends, dict):
-            for dependency in depends:
-                if dependency not in services and depends[dependency].get(
-                    "required", True
-                ):
-                    raise BundleError("a selected service needs an omitted service")
-    defaults: dict[str, str] = {}
-    selected = _placeholder(selected, defaults, profiles)  # type: ignore[assignment]
-    text = yaml.safe_dump(
-        {"name": PROJECT_NAME, **selected}, sort_keys=False, default_flow_style=False
-    )
-    if "${" in text or text.count("@@") != 2 * len(PLACEHOLDER.findall(text)):
-        raise BundleError("Compose variant left an unresolved substitution")
-    return text, defaults
-
-
 def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
     if channel not in {"dev", "stable"}:
         raise BundleError("installer channel must be dev or stable")
@@ -300,22 +228,10 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
     if "configs" in document:
         raise BundleError("Compose must not carry runtime configs")
     _validate_secret_paths(document)
-    variants: dict[str, str] = {}
-    defaults: dict[str, str] = {}
-    for count in range(len(OPTIONAL_PROFILES) + 1):
-        for chosen in itertools.combinations(OPTIONAL_PROFILES, count):
-            text, found = _variant(document, set(chosen))
-            variants[variant_key(set(chosen))] = text
-            if any(defaults.get(key, value) != value for key, value in found.items()):
-                raise BundleError("Compose variants disagree on a default")
-            defaults.update(found)
+    compose = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     return {
         "schema_version": 2,
-        # The installer picks one variant from the install mode and the Hermes
-        # choice and substitutes the placeholders, so the written Compose file
-        # needs no `.env`, no profiles and no project-name variable.
-        "compose_variants": variants,
-        "compose_defaults": defaults,
+        "docker_compose_yaml": compose,
         "preflight": [
             "Use the operator tailnet only; define and advertise only the exact Services listed below.",
             "Enable MagicDNS and HTTPS certificates in the Tailscale DNS settings.",
@@ -325,6 +241,7 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
             "Keep the raw OAuth client ID and secret ready; the secret is entered with hidden input.",
         ],
         "internal_values": [
+            {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"},
             {"env": "VONK_INSTALL_CHANNEL", "value": channel},
         ],
         # Only NAS_LAN_IP and the control hostname are asked; the others take
