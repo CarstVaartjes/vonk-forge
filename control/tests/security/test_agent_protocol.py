@@ -37,7 +37,7 @@ STOP_RESULT: dict[str, object] = {}
 PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (
-    ROOT / "inventory/wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl"
+    ROOT / "inventory/wheels/vonk_forge_public_contracts-2.1.0-py3-none-any.whl"
 )
 PUBLIC_CONTRACTS_WHEEL_HASH = hashlib.sha256(
     PUBLIC_CONTRACTS_WHEEL.read_bytes()
@@ -284,7 +284,7 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     )
     assert "/public-contracts/contracts" in dockerfile
     assert (
-        "COPY inventory/wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl /wheels/"
+        "COPY inventory/wheels/vonk_forge_public_contracts-2.1.0-py3-none-any.whl /wheels/"
         not in dockerfile
     )
     dockerignore = set(dockerignore_path.read_text().splitlines())
@@ -300,7 +300,7 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         "!control/web/**",
         "control/.venv",
         "!inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl",
-        "!inventory/wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl",
+        "!inventory/wheels/vonk_forge_public_contracts-2.1.0-py3-none-any.whl",
     } <= dockerignore
     assert "!agent_protocol/src/**" not in dockerignore
     assert {
@@ -438,7 +438,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
 
     assert installed == {
         "protocol": "4.1.0",
-        "contracts": "2.0.0",
+        "contracts": "2.1.0",
         "model": "ModelDefinition",
         "recipe": "RecipeDefinition",
         "distribution": "DistributionObject",

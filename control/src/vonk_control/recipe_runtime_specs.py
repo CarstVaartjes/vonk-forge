@@ -18,6 +18,7 @@ from vonk_agent_protocol.recipe_jobs import MAX_TIMEOUT_SECONDS
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
+    RecipeOptionError,
     document_sha256,
     read_recipe,
 )
@@ -35,9 +36,30 @@ from .runtime_writable_paths import document as writable_path_document
 
 RUNTIME_INTERFACE = "vonk.runtime.v1"
 
+# The effective recipe-option choices travel beside the setting values in the
+# mapping parameters. Setting values are scalars, so an object value cannot be
+# mistaken for a setting.
+OPTION_CHOICES_KEY = "option_choices"
+
 
 class RecipeRuntimeSpecError(ValueError):
     """The canonical recipe cannot produce a secure runtime projection."""
+
+
+def split_option_choices(
+    parameters: Mapping[str, object] | None,
+) -> tuple[dict[str, str], dict[str, object]]:
+    """Separate the recipe-option choices from the setting values."""
+
+    settings = dict(parameters or {})
+    raw = settings.pop(OPTION_CHOICES_KEY, None)
+    if raw is None:
+        return {}, settings
+    if not isinstance(raw, Mapping) or any(
+        type(name) is not str or type(value) is not str for name, value in raw.items()
+    ):
+        raise RecipeRuntimeSpecError("recipe option choices are invalid")
+    return dict(raw), settings
 
 
 def recipe_topology(value: object) -> RecipeTopology:
@@ -161,6 +183,14 @@ def compile_runtime_spec(
     are accepted.  Retired harness/distribution/patch identities are rejected.
     """
     parsed = _recipe(recipe)
+    option_choices, parameters = split_option_choices(parameters)
+    if parsed.options or option_choices:
+        # The chosen values become ordinary runtime arguments and environment,
+        # so the platform checks below apply to them exactly as to authored ones.
+        try:
+            parsed = parsed.with_option_choices(option_choices)
+        except RecipeOptionError as error:
+            raise RecipeRuntimeSpecError(str(error)) from error
     if resolved_entities is not None and not isinstance(resolved_entities, Mapping):
         raise RecipeRuntimeSpecError("resolved canonical inputs are invalid")
     if type(role) is not str or not role:

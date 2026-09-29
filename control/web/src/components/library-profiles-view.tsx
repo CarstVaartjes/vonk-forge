@@ -13,6 +13,8 @@ import {EmptyState} from "./empty-state";
 import {ProfileExport} from "./profile-export";
 import {SkeletonRows} from "./skeleton";
 import {useToast} from "./toast";
+import {RecipeOptionSelects, effectiveChoices} from "./recipe-option-selects";
+import type {OptionChoices, RecipeOption} from "./recipe-option-selects";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
 type AssignmentInput = NonNullable<FleetProfileInput["assignments"]>[number];
@@ -23,6 +25,7 @@ type AssignmentDraft = {
   modelVariant: string;
   desiredState: AssignmentInput["desired_state"];
   sparkIds: string[];
+  optionChoices: OptionChoices;
 };
 type ProfileDraft = {
   number?: number;
@@ -53,6 +56,7 @@ function profileAssignments(profile: FleetProfile): AssignmentDraft[] {
     modelVariant: assignment.model_variant ?? "",
     desiredState: assignment.desired_state,
     sparkIds: [...assignment.spark_ids].sort(),
+    optionChoices: {...(assignment.option_choices ?? {})},
   }));
 }
 
@@ -83,7 +87,7 @@ function fleetEntries(profile: FleetProfile | undefined, fleet: VisualFleetSnaps
   return fleet?.nodes.map(node => ({id: node.id, name: nodeDisplayName(node), state: "Observed"})) ?? [];
 }
 
-function inputFromDraft(draft: ProfileDraft): FleetProfileInput {
+function inputFromDraft(draft: ProfileDraft, optionsBySelector: Record<string, RecipeOption[]> = {}): FleetProfileInput {
   const input: FleetProfileInput = {
     name: draft.name,
     description: draft.description,
@@ -97,6 +101,10 @@ function inputFromDraft(draft: ProfileDraft): FleetProfileInput {
       assignment_name: assignment.assignmentName.trim() || undefined,
       model_variant: assignment.modelVariant.trim() || undefined,
       desired_state: assignment.desiredState,
+      // Every option the recipe declares is sent explicitly, defaults included.
+      option_choices: optionsBySelector[assignment.recipeSelector.trim()]
+        ? effectiveChoices(optionsBySelector[assignment.recipeSelector.trim()], assignment.optionChoices)
+        : assignment.optionChoices,
     })),
   };
   return input;
@@ -173,6 +181,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
   const [pendingLoad, setPendingLoad] = useState<PendingProfileLoad>();
   const [application, setApplication] = useState<FleetProfileApplicationView>();
   const [error, setError] = useState("");
+  const [optionsBySelector, setOptionsBySelector] = useState<Record<string, RecipeOption[]>>({});
   const [confirmingReload, setConfirmingReload] = useState(false);
   const toast = useToast();
   const setNotice = (message: string) => { if (message) toast.info(message); };
@@ -191,6 +200,17 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     return [...options.entries()].sort((left, right) => left[1].localeCompare(right[1]));
   }, [draft?.assignments, matchingEntries]);
   const draftValid = Boolean(draft?.name.trim()) && (draft?.assignments.every(assignment => assignment.recipeSelector.trim() && assignment.sparkIds.length > 0) ?? false);
+  const draftSelectors = (draft?.assignments ?? []).map(assignment => assignment.recipeSelector.trim()).filter(Boolean).join("\n");
+  useEffect(() => {
+    const controller = new AbortController();
+    for (const selector of new Set(draftSelectors.split("\n").filter(Boolean))) {
+      // Options are optional decoration: a failed read leaves the stored choices untouched.
+      void Promise.resolve().then(() => api.recipeDetail(selector, controller.signal)).then(detail => {
+        if (!controller.signal.aborted) setOptionsBySelector(current => ({...current, [selector]: detail.document.options ?? []}));
+      }).catch(() => undefined);
+    }
+    return () => controller.abort();
+  }, [api, draftSelectors]);
   const applicationRunning = Boolean(application && !TERMINAL_STATES.has(application.state));
 
   useEffect(() => {
@@ -253,7 +273,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     const count = record.recipe.recipe_document.topology.node_count;
     const sparkIds = availableFleet.slice(0, count).map(item => item.id);
     const selector = canonicalRecipeSelector(record.recipe);
-    const assignment: AssignmentDraft = {key: `assignment-${crypto.randomUUID()}`, recipeSelector: selector, assignmentName: record.recipe.slug, modelVariant: record.modelDocument?.identity.variant ?? "", desiredState: "running", sparkIds};
+    const assignment: AssignmentDraft = {key: `assignment-${crypto.randomUUID()}`, recipeSelector: selector, assignmentName: record.recipe.slug, modelVariant: record.modelDocument?.identity.variant ?? "", desiredState: "running", sparkIds, optionChoices: {}};
     updateDraft({assignments: [...draft.assignments, assignment]});
   }
 
@@ -262,7 +282,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     setSaving(true); setError("");
     try {
       const number = draft.number ?? Math.max(0, ...profiles.map(profile => profile.number)) + 1;
-      const result = await api.autosaveProfile(number, inputFromDraft(draft));
+      const result = await api.autosaveProfile(number, inputFromDraft(draft, optionsBySelector));
       setProfiles(current => [...current.filter(profile => profile.number !== result.number), result].sort((left, right) => left.number - right.number));
       setSelectedNumber(result.number); setDraft(draftFromProfile(result)); setEditing(false); setPreview(undefined); toast.success(`Profile ${result.number} · ${result.name} saved. Current runs remain unchanged until load.`);
     } catch (value) { toast.error(value instanceof Error ? value.message : "The profile could not be saved."); }
@@ -313,7 +333,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
       <aside className="library-profile-list" aria-label="Saved profiles"><div className="library-profile-list-heading"><strong>Saved profiles</strong><span>{profiles.length}</span></div>{profiles.map(profile => <button key={profile.number} type="button" className={profile.number === selectedNumber ? "is-selected" : undefined} aria-pressed={profile.number === selectedNumber} onClick={() => selectProfile(profile)}><span>Profile {profile.number} · {profile.name}</span><small>{profile.assignments.length} assignment{profile.assignments.length === 1 ? "" : "s"} · {profile.status.replaceAll("-", " ")}</small></button>)}{profiles.length === 0 && <div className="library-profile-list-empty"><strong>No saved profiles</strong><p>Create a numbered profile to describe the desired fleet setup.</p></div>}<button type="button" className="library-profile-create-link" onClick={startNew}>+ New profile</button></aside>
       {draft && editing && <div className="library-profile-editor"><header className="library-profile-editor-heading"><div><span>{draft.number ? `Edit profile ${draft.number}` : "New numbered profile"}</span><h3>{draft.name || "Unnamed profile"}</h3></div></header><div className="library-profile-fields"><label><span>Profile name</span><input value={draft.name} maxLength={120} onChange={event => updateDraft({name: event.target.value})}/></label><label><span>Retention</span><select value={draft.installationPolicy} onChange={event => updateDraft({installationPolicy: event.target.value as FleetProfileInput["installation_policy"]})}><option value="keep-cached">Keep cached artifacts</option><option value="exact">Exact desired state</option></select></label><label className="library-profile-wide"><span>Purpose</span><textarea value={draft.description} maxLength={1000} rows={2} onChange={event => updateDraft({description: event.target.value})}/></label><label className="library-profile-favorite"><input type="checkbox" checked={draft.favorite} onChange={event => updateDraft({favorite: event.target.checked})}/><span>Favorite profile</span></label></div>
         <section className="library-profile-scope" aria-labelledby="profile-fleet-heading"><div className="library-profile-section-heading"><div><h4 id="profile-fleet-heading">Fleet and assignments</h4><p>Every enrolled Spark is in the profile view. Sparks without an assignment become idle when the profile loads.</p></div><span>{availableFleet.length} Sparks</span></div><div className="library-profile-scope-list" role="list" aria-label="Enrolled Sparks">{availableFleet.map(item => <div key={item.id} role="listitem"><strong>{item.name}</strong><small>{item.state}</small></div>)}{availableFleet.length === 0 && <p>No enrolled Sparks are visible yet.</p>}</div></section>
-        <section className="library-profile-assignments" aria-label="Profile assignments"><header><h4>Recipe assignments</h4><button type="button" className="button secondary" onClick={addRecipe} disabled={matchingEntries.length === 0 || availableFleet.length === 0}>Add available Recipe</button></header>{draft.assignments.map(assignment => <article key={assignment.key} className="library-profile-assignment"><label><span>Recipe</span><select value={assignment.recipeSelector} onChange={event => updateAssignment(assignment.key, {recipeSelector: event.target.value})}>{recipeOptions.map(([selector, title]) => <option key={selector} value={selector}>{title} · {selector}</option>)}</select></label><label><span>Assignment name</span><input value={assignment.assignmentName} onChange={event => updateAssignment(assignment.key, {assignmentName: event.target.value})}/></label><label><span>Model variant</span><input value={assignment.modelVariant} onChange={event => updateAssignment(assignment.key, {modelVariant: event.target.value})}/></label><label><span>Desired state</span><select value={assignment.desiredState} onChange={event => updateAssignment(assignment.key, {desiredState: event.target.value as AssignmentInput["desired_state"]})}><option value="running">Running</option><option value="installed">Installed</option></select></label><fieldset><legend>Assigned Sparks</legend>{availableFleet.map(item => <label key={item.id}><input type="checkbox" checked={assignment.sparkIds.includes(item.id)} onChange={() => toggleSpark(assignment.key, item.id)}/><span>{names[item.id] ?? item.id}</span></label>)}</fieldset><button type="button" className="button danger" onClick={() => updateDraft({assignments: draft.assignments.filter(item => item.key !== assignment.key)})}>Remove assignment</button></article>)}{draft.assignments.length === 0 && <p>All Sparks will be idle when this profile loads.</p>}</section>
+        <section className="library-profile-assignments" aria-label="Profile assignments"><header><h4>Recipe assignments</h4><button type="button" className="button secondary" onClick={addRecipe} disabled={matchingEntries.length === 0 || availableFleet.length === 0}>Add available Recipe</button></header>{draft.assignments.map(assignment => <article key={assignment.key} className="library-profile-assignment"><label><span>Recipe</span><select value={assignment.recipeSelector} onChange={event => updateAssignment(assignment.key, {recipeSelector: event.target.value})}>{recipeOptions.map(([selector, title]) => <option key={selector} value={selector}>{title} · {selector}</option>)}</select></label><label><span>Assignment name</span><input value={assignment.assignmentName} onChange={event => updateAssignment(assignment.key, {assignmentName: event.target.value})}/></label><label><span>Model variant</span><input value={assignment.modelVariant} onChange={event => updateAssignment(assignment.key, {modelVariant: event.target.value})}/></label><label><span>Desired state</span><select value={assignment.desiredState} onChange={event => updateAssignment(assignment.key, {desiredState: event.target.value as AssignmentInput["desired_state"]})}><option value="running">Running</option><option value="installed">Installed</option></select></label><RecipeOptionSelects idPrefix={`option-${assignment.key}`} options={optionsBySelector[assignment.recipeSelector.trim()] ?? []} value={assignment.optionChoices} onChange={optionChoices => { updateAssignment(assignment.key, {optionChoices}); if (selectedProfile?.loaded_revision) setNotice("Changing recipe options saves a new profile revision; reload the profile to apply it."); }}/><fieldset><legend>Assigned Sparks</legend>{availableFleet.map(item => <label key={item.id}><input type="checkbox" checked={assignment.sparkIds.includes(item.id)} onChange={() => toggleSpark(assignment.key, item.id)}/><span>{names[item.id] ?? item.id}</span></label>)}</fieldset><button type="button" className="button danger" onClick={() => updateDraft({assignments: draft.assignments.filter(item => item.key !== assignment.key)})}>Remove assignment</button></article>)}{draft.assignments.length === 0 && <p>All Sparks will be idle when this profile loads.</p>}</section>
         <footer className="library-profile-editor-footer"><button type="button" className="button secondary" onClick={() => { if (selectedProfile) { setDraft(draftFromProfile(selectedProfile)); setEditing(false); } else setDraft(undefined); }}>Cancel</button><button type="button" className="button" disabled={!draftValid || saving} onClick={() => void saveDraft()}>{saving ? "Saving profile…" : draft.number ? "Save profile" : "Create profile"}</button></footer></div>}
       {selectedProfile && !editing && recipeUpdates.length > 0 && <section className="library-profile-update" aria-label="Recipe updates available"><ul>{recipeUpdates.map(update => <li key={update.selector}><StatusPill tone="info">update available</StatusPill> {update.detail}</li>)}</ul><button type="button" className="button secondary" disabled={loadingProfile || applicationRunning || (!loadable(preview) && !pendingLoad)} onClick={() => setConfirmingReload(true)}>Reload profile</button></section>}
       {confirmingReload && selectedProfile && <ConfirmDialog title="Reload this profile?" consequence="Reloads the profile with the newest recipe revisions. Running workloads that use an older revision restart to apply it; nothing restarts until you confirm." confirmLabel="Reload profile" command={`vonkctl --profile ${selectedProfile.number} profile load`} busy={loadingProfile} onConfirm={() => void reload()} onCancel={() => setConfirmingReload(false)}/>}

@@ -482,11 +482,9 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
     )
     node_id = "spk_" + "a" * 32
     now = datetime(2026, 9, 7, tzinfo=UTC)
-    recipe_digest = document_sha256(
-        RecipeDefinition.model_validate(recipe_revision.document).model_dump(
-            mode="json"
-        )
-    )
+    # The digest names the published document as stored, never a re-serialized
+    # parse of it.
+    recipe_digest = document_sha256(recipe_revision.document)
     with sessions.begin() as session:
         session.add(old_revision)
         session.add(AgentNode(node_id=node_id, state="active"))

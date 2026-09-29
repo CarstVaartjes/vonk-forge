@@ -80,6 +80,11 @@ Alias = Annotated[
         pattern=r"^[a-z0-9](?:[a-z0-9_.-]{0,126}[a-z0-9])?$",
     ),
 ]
+OptionSlug = Annotated[
+    str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$")
+]
+# Recipe option name -> chosen value, as the recipe declares them.
+OptionChoices = Annotated[dict[OptionSlug, OptionSlug], Field(max_length=16)]
 RecipeSelector = Annotated[
     str,
     StringConstraints(
@@ -258,6 +263,10 @@ class FleetProfileAssignmentInput(_StrictModel):
         Annotated[str, StringConstraints(min_length=1, max_length=200)] | None
     ) = None
     desired_state: Literal["installed", "running"] = "running"
+    # Saved with every option the recipe declares (a choice left out is filled
+    # with the recipe default when the profile is saved). Changing a choice
+    # changes the profile revision and needs a reload of the workload.
+    option_choices: OptionChoices = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_assignment(self) -> FleetProfileAssignmentInput:
@@ -277,6 +286,9 @@ class StoredFleetProfileAssignment(_StrictModel):
     desired_state: Literal["installed", "running"]
     alias: Alias | None = None
     nodes: list[FleetProfileNode] = Field(min_length=1, max_length=32)
+    # Effective recipe-option choices; a snapshot from before options existed
+    # has none, which reads as every option's default.
+    option_choices: OptionChoices = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_execution_assignment(self) -> StoredFleetProfileAssignment:
@@ -318,6 +330,8 @@ class FleetProfileAssignmentView(_StrictModel):
     model: dict[str, object] = Field(default_factory=dict)
     recipe: dict[str, object] = Field(default_factory=dict)
     resources: dict[str, object] = Field(default_factory=dict)
+    # The effective choice for every option of the recipe (defaults included).
+    option_choices: OptionChoices = Field(default_factory=dict)
     observed_state: str = "Not loaded"
     # Set when the loaded workload runs an older revision than the newest one;
     # informational, a reload applies it.
@@ -432,6 +446,7 @@ class FleetProfileAssignmentPreview(_StrictModel):
     desired_state: Literal["installed", "running"]
     current_state: FleetProfileAssignmentState
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    option_choices: OptionChoices = Field(default_factory=dict)
     actions: list[FleetProfileAction] = Field(max_length=7)
     reasons: list[FleetProfileReason] = Field(max_length=32)
 

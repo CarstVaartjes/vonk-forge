@@ -636,6 +636,7 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
         if noun == "recipe":
             _field("Required Sparks", item.get("node_count"))
             _field("Models", _words(item.get("model_selectors")))
+            _recipe_options(_optional(item.get("document"), "document"))
         else:
             _field("Variant", item.get("variant"))
             _field("Quantization", item.get("quantization"))
@@ -791,6 +792,33 @@ def _library(
         print(f"Next: vonkctl {noun} detail <{noun}>  (--wide shows every field here)")
 
 
+def _option_choices(value: object) -> None:
+    """One line per option a recipe was assigned with (nothing without options)."""
+    if isinstance(value, Mapping):
+        for name, chosen in value.items():
+            _field("Option", f"{_text(name)}={_text(chosen)}")
+
+
+def _recipe_options(document: Mapping[str, object]) -> None:
+    options = document.get("options")
+    if not isinstance(options, list):
+        return
+    for option in options:
+        if not isinstance(option, Mapping):
+            continue
+        _field("Option", f"{_text(option.get('name'))}: {_text(option.get('label'))}")
+        if option.get("help"):
+            print(f"  {_text(option['help'])}")
+        for choice in option.get("choices") or []:
+            if isinstance(choice, Mapping):
+                marker = " (default)" if choice.get("default") else ""
+                print(
+                    f"  - {_text(choice.get('value'))}{marker}: "
+                    f"{_text(choice.get('label'))}"
+                )
+        print(f"  Choose with: --option {_text(option.get('name'))}=VALUE")
+
+
 def _profile(payload: Mapping[str, object]) -> None:
     print(f"Profile {_text(payload.get('number'))}: {_text(payload.get('name'))}")
     _field("Revision", payload.get("revision"))
@@ -823,6 +851,7 @@ def _profile(payload: Mapping[str, object]) -> None:
         _field("Recipe", selector)
         _field("Sparks", _words(nodes))
         _field("Desired", assignment.get("desired_state"))
+        _option_choices(assignment.get("option_choices"))
         _field("Observed", match.get("observed_state") if match is not None else None)
         update = match.get("recipe_update") if match is not None else None
         if isinstance(update, Mapping):
@@ -947,6 +976,7 @@ def _preview(payload: Mapping[str, object]) -> None:
         _field("Sparks", _words(assignment.get("node_ids")))
         _field("Current", assignment.get("current_state"))
         _field("Desired", assignment.get("desired_state"))
+        _option_choices(assignment.get("option_choices"))
         _reasons(assignment.get("reasons"), subject=assignment.get("recipe_title"))
     for step in (
         _records(payload, "preparation_steps") if "preparation_steps" in payload else []

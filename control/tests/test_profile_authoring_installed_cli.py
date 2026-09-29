@@ -38,6 +38,7 @@ def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save
                 "assignment_name": "installed-draft",
                 "model_variant": "precise-variant",
                 "desired_state": "installed",
+                "option_choices": {},
             }
         ],
     }

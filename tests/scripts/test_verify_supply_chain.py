@@ -26,7 +26,7 @@ INPUTS = (
     "deploy/compose/hermes-agent/Dockerfile",
     "deploy/compose/litellm/Dockerfile",
     "deploy/compose/trust/litellm-cosign.pub",
-    "inventory/wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl",
+    "inventory/wheels/vonk_forge_public_contracts-2.1.0-py3-none-any.whl",
 )
 SUBPROCESS_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 

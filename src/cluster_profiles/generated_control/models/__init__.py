@@ -126,13 +126,17 @@ from .fleet_profile_assignment_desired_state import FleetProfileAssignmentDesire
 from .fleet_profile_assignment_failure import FleetProfileAssignmentFailure
 from .fleet_profile_assignment_input import FleetProfileAssignmentInput
 from .fleet_profile_assignment_input_desired_state import FleetProfileAssignmentInputDesiredState
+from .fleet_profile_assignment_input_option_choices import FleetProfileAssignmentInputOptionChoices
+from .fleet_profile_assignment_option_choices import FleetProfileAssignmentOptionChoices
 from .fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation
 from .fleet_profile_assignment_preview import FleetProfileAssignmentPreview
 from .fleet_profile_assignment_preview_actions_item import FleetProfileAssignmentPreviewActionsItem
 from .fleet_profile_assignment_preview_current_state import FleetProfileAssignmentPreviewCurrentState
 from .fleet_profile_assignment_preview_desired_state import FleetProfileAssignmentPreviewDesiredState
+from .fleet_profile_assignment_preview_option_choices import FleetProfileAssignmentPreviewOptionChoices
 from .fleet_profile_assignment_view import FleetProfileAssignmentView
 from .fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel
+from .fleet_profile_assignment_view_option_choices import FleetProfileAssignmentViewOptionChoices
 from .fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe
 from .fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources
 from .fleet_profile_child_progress import FleetProfileChildProgress
@@ -257,6 +261,7 @@ from .managed_catalog_sync_response_trigger import ManagedCatalogSyncResponseTri
 from .managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe
 from .mapping_selection import MappingSelection
 from .mapping_selection_action import MappingSelectionAction
+from .mapping_selection_option_choices import MappingSelectionOptionChoices
 from .mapping_selection_parameters import MappingSelectionParameters
 from .memory_usage_uncertainty import MemoryUsageUncertainty
 from .model_artifact_identity import ModelArtifactIdentity
@@ -370,6 +375,9 @@ from .recipe_operation_cancellation_result_node_evidence_type_0 import RecipeOpe
 from .recipe_operator_request import RecipeOperatorRequest
 from .recipe_operator_response import RecipeOperatorResponse
 from .recipe_operator_response_state import RecipeOperatorResponseState
+from .recipe_option import RecipeOption
+from .recipe_option_choice import RecipeOptionChoice
+from .recipe_option_choice_env import RecipeOptionChoiceEnv
 from .recipe_output_slot import RecipeOutputSlot
 from .recipe_parallelism import RecipeParallelism
 from .recipe_presence import RecipePresence
@@ -425,6 +433,7 @@ from .run_node_payload import RunNodePayload
 from .run_presence import RunPresence
 from .run_presence_degraded_reason_type_0 import RunPresenceDegradedReasonType0
 from .run_presence_group_state import RunPresenceGroupState
+from .run_presence_option_choices import RunPresenceOptionChoices
 from .run_presence_rank_state import RunPresenceRankState
 from .run_presence_route_state import RunPresenceRouteState
 from .run_presence_run_state import RunPresenceRunState
@@ -655,13 +664,17 @@ __all__ = (
     "FleetProfileAssignmentFailure",
     "FleetProfileAssignmentInput",
     "FleetProfileAssignmentInputDesiredState",
+    "FleetProfileAssignmentInputOptionChoices",
+    "FleetProfileAssignmentOptionChoices",
     "FleetProfileAssignmentPreparation",
     "FleetProfileAssignmentPreview",
     "FleetProfileAssignmentPreviewActionsItem",
     "FleetProfileAssignmentPreviewCurrentState",
     "FleetProfileAssignmentPreviewDesiredState",
+    "FleetProfileAssignmentPreviewOptionChoices",
     "FleetProfileAssignmentView",
     "FleetProfileAssignmentViewModel",
+    "FleetProfileAssignmentViewOptionChoices",
     "FleetProfileAssignmentViewRecipe",
     "FleetProfileAssignmentViewResources",
     "FleetProfileChildProgress",
@@ -786,6 +799,7 @@ __all__ = (
     "ManagedCatalogWithdrawnRecipe",
     "MappingSelection",
     "MappingSelectionAction",
+    "MappingSelectionOptionChoices",
     "MappingSelectionParameters",
     "MemoryUsageUncertainty",
     "ModelArtifactIdentity",
@@ -899,6 +913,9 @@ __all__ = (
     "RecipeOperatorRequest",
     "RecipeOperatorResponse",
     "RecipeOperatorResponseState",
+    "RecipeOption",
+    "RecipeOptionChoice",
+    "RecipeOptionChoiceEnv",
     "RecipeOutputSlot",
     "RecipeParallelism",
     "RecipePresence",
@@ -954,6 +971,7 @@ __all__ = (
     "RunPresence",
     "RunPresenceDegradedReasonType0",
     "RunPresenceGroupState",
+    "RunPresenceOptionChoices",
     "RunPresenceRankState",
     "RunPresenceRouteState",
     "RunPresenceRunState",

@@ -35,6 +35,13 @@ test("a Spark with a Controller warning is shown as needing attention with the r
   expect(screen.getByText(/Qwen is partly installed/)).toBeVisible();
 });
 
+test("a running workload shows the recipe options it was started with", async () => {
+  const running = {...node, loaded: [{run_id: "r1", rank: 0, title: "GLM", healthy: true, option_choices: {verification: "adaptive-k"}}]};
+  render(<SparkDetail api={{fleetNode: vi.fn().mockResolvedValue(running)} as unknown as ControlApi} id="spk_1" onClose={vi.fn()}/>);
+  const list = await screen.findByRole("list", {name: "Active recipe options"});
+  expect(list).toHaveTextContent("adaptive-k");
+});
+
 test("the Overview shows the CPU clock next to the temperature", async () => {
   const measured = {...node, telemetry: {freshness: "live", age_seconds: 1, sample: {cpu_frequency_avg_mhz: 2100, cpu_frequency_max_mhz: 3900, gpu_temperature_c: 84}}};
   render(<SparkDetail api={{fleetNode: vi.fn().mockResolvedValue(measured)} as unknown as ControlApi} id="spk_1" onClose={vi.fn()}/>);

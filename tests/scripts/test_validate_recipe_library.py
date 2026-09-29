@@ -224,3 +224,38 @@ def test_contract_recipe_library_rejects_an_archive_without_recipe_entrypoint(
 
     assert result.returncode != 0
     assert "exactly one recipe.json entrypoint" in result.stderr
+
+
+def _option_recipe(env: dict[str, str]):
+    from importlib.resources import files
+
+    from vonk_forge_contracts import read_recipe
+
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text(encoding="utf-8")
+    )
+    document["options"] = [
+        {
+            "name": "mode",
+            "label": "Mode",
+            "help": "How it runs.",
+            "choices": [
+                {"value": "plain", "label": "Plain", "help": "Stock.", "default": True},
+                {"value": "tuned", "label": "Tuned", "help": "Tuned.", "env": env},
+            ],
+        }
+    ]
+    return read_recipe(document)
+
+
+def test_a_recipe_option_choice_gets_the_platform_environment_policy() -> None:
+    path = Path("recipes/example.json")
+    _VALIDATOR._validate_recipe_option_policy(
+        _option_recipe({"TUNED_MODE": "1"}), path, ROOT
+    )
+    with pytest.raises(_VALIDATOR.LibraryValidationError, match="mode=tuned"):
+        _VALIDATOR._validate_recipe_option_policy(
+            _option_recipe({"HOME": "/tmp"}), path, ROOT
+        )

@@ -2463,6 +2463,10 @@ export interface components {
             model_title?: string | null;
             /** Nodes */
             nodes: components["schemas"]["FleetProfileNode"][];
+            /** Option Choices */
+            option_choices?: {
+                [key: string]: string;
+            };
             /** Recipe Id */
             recipe_id: string;
             /** Recipe Revision Id */
@@ -2512,6 +2516,10 @@ export interface components {
             desired_state: "installed" | "running";
             /** Model Variant */
             model_variant?: string | null;
+            /** Option Choices */
+            option_choices?: {
+                [key: string]: string;
+            };
             /** Recipe Selector */
             recipe_selector: string;
             /** Spark Ids */
@@ -2541,6 +2549,10 @@ export interface components {
             desired_state: "installed" | "running";
             /** Node Ids */
             node_ids: string[];
+            /** Option Choices */
+            option_choices?: {
+                [key: string]: string;
+            };
             /** Reasons */
             reasons: components["schemas"]["FleetProfileReason"][];
             /** Recipe Revision Id */
@@ -2566,6 +2578,10 @@ export interface components {
              * @default Not loaded
              */
             observed_state: string;
+            /** Option Choices */
+            option_choices?: {
+                [key: string]: string;
+            };
             /** Recipe */
             recipe?: {
                 [key: string]: unknown;
@@ -4036,6 +4052,10 @@ export interface components {
             mapping_id: string | null;
             /** Nodes */
             nodes: components["schemas"]["SparkGroupNode"][];
+            /** Option Choices */
+            option_choices?: {
+                [key: string]: string;
+            };
             /** Parameters */
             parameters?: {
                 [key: string]: unknown;
@@ -4834,6 +4854,8 @@ export interface components {
             metadata: components["schemas"]["RecipeMetadata"];
             /** Models */
             models: components["schemas"]["RecipeModelSelection"][];
+            /** Options */
+            options?: components["schemas"]["RecipeOption"][];
             provenance: components["schemas"]["RecipeProvenance"];
             release: components["schemas"]["RecipeRelease"];
             runtime: components["schemas"]["RecipeRuntime"];
@@ -5365,6 +5387,52 @@ export interface components {
             state: "accepted" | "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
             /** With Model */
             with_model: boolean;
+        };
+        /**
+         * RecipeOption
+         * @description A recipe-declared setting with a fixed set of named values.
+         *
+         *     Users pick one of the enumerated choices; there are no free-form values.
+         *     Exactly one choice is the default and applies whenever nothing is chosen.
+         */
+        RecipeOption: {
+            /** Choices */
+            choices: components["schemas"]["RecipeOptionChoice"][];
+            /** Help */
+            help: string;
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * RecipeOptionChoice
+         * @description One named value of an option, with the runtime changes it selects.
+         *
+         *     ``args`` replace a base runtime argument of the same name in place, or are
+         *     appended after the base arguments; ``env`` does the same for environment
+         *     variables. Both go through the checks of ``runtime.arguments`` and
+         *     ``runtime.environment``, and the platform applies its own security, mount
+         *     and port rules to the merged result.
+         */
+        RecipeOptionChoice: {
+            /** Args */
+            args?: components["schemas"]["RecipeRuntimeArgument"][];
+            /**
+             * Default
+             * @default false
+             */
+            default: boolean;
+            /** Env */
+            env?: {
+                [key: string]: string | number | boolean;
+            };
+            /** Help */
+            help: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
         };
         /** RecipeOutputSlot */
         RecipeOutputSlot: {
@@ -6004,6 +6072,10 @@ export interface components {
             installation_id: string;
             /** Member Node Ids */
             member_node_ids: string[];
+            /** Option Choices */
+            option_choices?: {
+                [key: string]: string;
+            };
             /** Present Ranks */
             present_ranks: number[];
             /** Rank */

@@ -45,6 +45,7 @@ def _compile(
     role: str = "entrypoint",
     rank: int = 0,
     resolved_entities: dict[str, object] | None = None,
+    parameters: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Compile published raw documents the way the Controller reads them."""
 
@@ -59,6 +60,7 @@ def _compile(
         models=parsed,
         recipe_digest=contracts.document_sha256(recipe),
         package_handle=package_handle,
+        parameters=parameters,
         role=role,
         rank=rank,
     )
@@ -474,6 +476,8 @@ def test_canonical_argv_json_and_utf8_bounds() -> None:
         _validate_argv_size([*exact_command, "x"])
 
 
+# Compiles the whole published corpus, every option choice included.
+@pytest.mark.slow(60)
 def test_current_recipe_corpus_compiles_every_role() -> None:
     """Compile every role from the current canonical recipe checkout."""
     root = recipe_library_root()
@@ -481,6 +485,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
     assert len(recipe_files) == 85
     engines: set[str] = set()
     projection_count = 0
+    option_projection_count = 0
     for path in recipe_files:
         recipe_document, models, package = _published_recipe_context(path.stem)
         recipe = contracts.read_recipe(recipe_document)
@@ -496,6 +501,18 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
                     rank=rank,
                 )
                 projection_count += 1
+                # Every choice of every option compiles on every rank.
+                for option in recipe.options:
+                    for choice in option.choices:
+                        _compile(
+                            recipe_document,
+                            models,
+                            package_handle=package,
+                            role=role.name,
+                            rank=rank,
+                            parameters={"option_choices": {option.name: choice.value}},
+                        )
+                        option_projection_count += 1
                 artifacts = _mappings(spec["artifacts"], "runtime artifacts")
                 for artifact in artifacts:
                     assert _text(
@@ -515,6 +532,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
         "pytorch-pipeline",
     }
     assert projection_count == 109
+    assert option_projection_count > 0
 
 
 def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(
@@ -801,3 +819,104 @@ def test_runtime_compiler_rejects_retired_member_paths(
         package["paths"] = ["context.tar", "Dockerfile"]
     with pytest.raises(RecipeRuntimeSpecError, match="retired member_paths"):
         _compile(recipe, model, package_handle=package, role="entrypoint", rank=0)
+
+
+def _recipe_with_options(model: dict[str, object]) -> dict[str, object]:
+    raw = _example("recipe-source-build.json")
+    runtime = _raw_runtime(raw)
+    runtime["arguments"] = [{"name": "verify", "value": "all"}]
+    runtime["environment"] = [{"name": "MODE", "value": "off"}]
+    raw["options"] = [
+        {
+            "name": "verification",
+            "label": "Verification",
+            "help": "How drafted tokens are verified.",
+            "choices": [
+                {
+                    "value": "standard",
+                    "label": "Standard",
+                    "help": "Verify every token.",
+                    "default": True,
+                },
+                {
+                    "value": "adaptive",
+                    "label": "Adaptive",
+                    "help": "Verify a per-step prefix.",
+                    "args": [
+                        {"name": "verify", "value": "prefix"},
+                        {"name": "extra-flag", "value": True},
+                    ],
+                    "env": {"MODE": "adaptive"},
+                },
+            ],
+        }
+    ]
+    return raw
+
+
+def test_chosen_recipe_options_reach_every_rank_and_default_when_unset(
+    model: dict[str, object],
+) -> None:
+    raw = _recipe_with_options(model)
+    recipe = contracts.read_recipe(raw)
+    ranks = [
+        (role.name, rank)
+        for rank, role in enumerate(
+            role for role in recipe.topology.roles for _ in range(role.count)
+        )
+    ]
+    assert ranks
+
+    def launch(parameters: dict[str, object] | None, role: str, rank: int) -> Any:
+        parsed = {contracts.document_sha256(model): contracts.read_model(model)}
+        spec = compile_runtime_spec(
+            recipe,
+            models=parsed,
+            recipe_digest=contracts.document_sha256(raw),
+            package_handle=_BUILT_IMAGE,
+            parameters=parameters,
+            role=role,
+            rank=rank,
+        )
+        env = {
+            item["name"]: item["value"]
+            for item in _mappings(_runtime(spec)["environment"], "environment")
+        }
+        return list(_argv(spec)), env
+
+    for role, rank in ranks:
+        chosen_argv, chosen_env = launch(
+            {"option_choices": {"verification": "adaptive"}}, role, rank
+        )
+        assert chosen_argv.count("--verify") == 1
+        assert chosen_argv[chosen_argv.index("--verify") + 1] == "prefix"
+        assert "--extra-flag" in chosen_argv
+        assert chosen_env["MODE"] == "adaptive"
+        default_argv, default_env = launch(None, role, rank)
+        assert default_argv[default_argv.index("--verify") + 1] == "all"
+        assert "--extra-flag" not in default_argv
+        assert default_env["MODE"] == "off"
+
+    with pytest.raises(RecipeRuntimeSpecError, match="verification"):
+        launch({"option_choices": {"verification": "nope"}}, *ranks[0])
+
+
+def test_a_recipe_option_cannot_reach_platform_owned_environment(
+    model: dict[str, object],
+) -> None:
+    raw = _recipe_with_options(model)
+    options = _raw_sequence(raw["options"], "options")
+    choices = _raw_mappings(_raw_object(options[0], "option")["choices"], "choices")
+    choices[1]["env"] = {"HOME": "/tmp"}
+    recipe = contracts.read_recipe(raw)
+    parsed = {contracts.document_sha256(model): contracts.read_model(model)}
+    with pytest.raises(RecipeRuntimeSpecError, match="platform-owned"):
+        compile_runtime_spec(
+            recipe,
+            models=parsed,
+            recipe_digest=contracts.document_sha256(raw),
+            package_handle=_BUILT_IMAGE,
+            parameters={"option_choices": {"verification": "adaptive"}},
+            role="entrypoint",
+            rank=0,
+        )

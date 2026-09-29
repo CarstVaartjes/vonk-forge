@@ -13,6 +13,7 @@ from datetime import datetime
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology
 
 from .models import (
@@ -22,7 +23,12 @@ from .models import (
     ClusterMappingNode,
     NodeInventorySnapshot,
 )
-from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
+from .recipe_runtime_specs import (
+    OPTION_CHOICES_KEY,
+    RecipeRuntimeSpecError,
+    recipe_topology,
+    split_option_choices,
+)
 from .topology import Placement, TopologyError, validate_topology
 
 
@@ -373,7 +379,48 @@ def _plan_identity(
     }
 
 
+def effective_option_choices(
+    document: Mapping[str, object], choices: Mapping[str, str] | None
+) -> dict[str, str]:
+    """The choice for every option a recipe declares (its default where none
+    was given); empty for a recipe without options. An unknown option or value
+    raises ``ClusterMappingError`` listing the valid ones."""
+
+    supplied = dict(choices or {})
+    if not supplied and not document.get("options"):
+        return {}
+    try:
+        return read_recipe(document).resolve_options(supplied)
+    except (RecipeOptionError, ValidationError) as error:
+        raise ClusterMappingError("mapping.option_invalid", str(error)) from error
+
+
+def mapping_option_choices(parameters: Mapping[str, object]) -> dict[str, str]:
+    """The option choices a stored mapping carries (none for an older one)."""
+
+    raw = parameters.get(OPTION_CHOICES_KEY)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
 def _effective_parameters(
+    document: Mapping[str, object],
+    supplied: Mapping[str, object],
+) -> dict[str, object]:
+    """Setting values plus, when the recipe declares options, the effective
+    choice for every option (the recipe default where none was supplied)."""
+
+    try:
+        choices, settings = split_option_choices(supplied)
+    except RecipeRuntimeSpecError as error:
+        raise ClusterMappingError("mapping.option_invalid", str(error)) from error
+    resolved = effective_option_choices(document, choices)
+    effective = _effective_settings(document, settings)
+    if resolved:
+        effective[OPTION_CHOICES_KEY] = resolved
+    return dict(sorted(effective.items()))
+
+
+def _effective_settings(
     document: Mapping[str, object],
     supplied: Mapping[str, object],
 ) -> dict[str, object]:

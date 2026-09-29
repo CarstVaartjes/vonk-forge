@@ -20,6 +20,7 @@ from .fleet_profile_contract import (
 )
 from .fleet_profiles import (
     FleetProfileConflict,
+    FleetProfileInvalidChoice,
     FleetProfilePermissionDenied,
     FleetProfileStalePlanConflict,
 )
@@ -167,6 +168,8 @@ def install_fleet_profile_routes(
             result = service().update_number(number, body, actor=actor.subject)
         except FleetProfileConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+        except FleetProfileInvalidChoice as error:
+            raise HTTPException(status_code=422, detail=str(error)[:256]) from None
         except KeyError:
             raise HTTPException(
                 status_code=422, detail="invalid profile number"

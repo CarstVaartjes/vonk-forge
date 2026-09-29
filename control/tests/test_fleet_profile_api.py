@@ -299,7 +299,15 @@ def test_cli_edits_and_exports_the_persisted_definition_through_real_api(
     ), capsys.readouterr().out
     saved = json.loads(capsys.readouterr().out)
     assert saved["revision"] == 2
-    assert saved["definition"] == {**definition, "name": "Renamed"}
+    expected = {
+        **definition,
+        "name": "Renamed",
+        "assignments": [
+            {**assignment, "option_choices": {}}
+            for assignment in definition["assignments"]
+        ],
+    }
+    assert saved["definition"] == expected
     assert cli.main(("--profile", "2", "profile"), control_client=client) == 0
     presentation = capsys.readouterr()
     assert "Profile 2: Renamed" in presentation.out
@@ -406,3 +414,41 @@ def test_profile_load_applies_the_current_saved_profile() -> None:
     )
     assert loaded.status_code == 202
     assert loaded.json()["profile_id"] == changed.json()["id"]
+
+
+def test_saving_a_profile_fills_option_defaults_and_refuses_unknown_choices() -> None:
+    from .test_fleet_profiles_canonical import NODE_1, NOW, _seed, _sessions
+
+    sessions = _sessions()
+    _seed(sessions, options=True)
+    client, codec = _client(
+        sessions, profiles=FleetProfileService(sessions, clock=lambda: NOW)
+    )
+    headers = _headers(codec, "administrator")
+
+    def body(choices: dict[str, str]) -> dict[str, object]:
+        return {
+            "name": "Options",
+            "expected_revision": 0,
+            "assignments": [
+                {
+                    "recipe_selector": "vonk-forge/synthetic-tiny-build",
+                    "spark_ids": [NODE_1],
+                    "assignment_name": "optioned",
+                    "option_choices": choices,
+                }
+            ],
+        }
+
+    refused = client.put(
+        "/api/profile/1", headers=headers, json=body({"verification": "nope"})
+    )
+    assert refused.status_code == 422
+    assert "standard" in refused.json()["detail"]
+    assert client.get("/api/profile/1/definition", headers=headers).json()["id"] is None
+
+    saved = client.put("/api/profile/1", headers=headers, json=body({}))
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["assignments"][0]["option_choices"] == {
+        "verification": "standard"
+    }

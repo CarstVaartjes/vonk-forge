@@ -47,7 +47,30 @@ def _sessions() -> sessionmaker:
     return sessionmaker(engine, expire_on_commit=False)
 
 
-def _seed(sessions: sessionmaker) -> None:
+RECIPE_OPTIONS = [
+    {
+        "name": "verification",
+        "label": "Verification",
+        "help": "How drafted tokens are verified.",
+        "choices": [
+            {
+                "value": "standard",
+                "label": "Standard",
+                "help": "Verify every drafted token.",
+                "default": True,
+            },
+            {
+                "value": "adaptive",
+                "label": "Adaptive",
+                "help": "Verify a per-step prefix.",
+                "env": {"VERIFY_MODE": "adaptive"},
+            },
+        ],
+    }
+]
+
+
+def _seed(sessions: sessionmaker, *, options: bool = False) -> None:
     with sessions.begin() as session:
         session.add(User(subject="test", role="administrator"))
     model_document = json.loads(
@@ -60,6 +83,8 @@ def _seed(sessions: sessionmaker) -> None:
         .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
+    if options:
+        recipe_document["options"] = RECIPE_OPTIONS
     model = ModelDefinition.model_validate(model_document)
     recipe = RecipeDefinition.model_validate(recipe_document)
     model_digest = document_sha256(model_document)
@@ -338,6 +363,7 @@ def test_profile_authoring_accepts_incomplete_group_without_revision_or_scope() 
             "assignment_name": None,
             "model_variant": "fp8",
             "desired_state": "running",
+            "option_choices": {},
         }
     ]
     assert "scope" not in document
@@ -702,3 +728,160 @@ def test_stored_application_with_a_retired_field_does_not_block_apply() -> None:
         request_key="00000000-0000-4000-8000-000000000098",
     )
     assert again.id != first.id
+
+
+def _option_profile(service: FleetProfileService, **choices: str):
+    return service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Options",
+                "assignments": [
+                    {
+                        "recipe_selector": "vonk-forge/synthetic-tiny-build",
+                        "spark_ids": [NODE_1],
+                        "assignment_name": "optioned",
+                        "option_choices": choices,
+                    }
+                ],
+            }
+        ),
+        actor="test",
+    )
+
+
+def test_a_missing_option_choice_is_saved_as_the_recipe_default() -> None:
+    sessions = _sessions()
+    _seed(sessions, options=True)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = _option_profile(service)
+
+    assert created.definition.assignments[0].option_choices == {
+        "verification": "standard"
+    }
+    assert created.assignments[0].option_choices == {"verification": "standard"}
+    chosen = service.update(
+        created.id,
+        FleetProfileInput.model_validate(
+            {
+                "name": "Options",
+                "expected_revision": created.revision,
+                "assignments": [
+                    {
+                        "recipe_selector": "vonk-forge/synthetic-tiny-build",
+                        "spark_ids": [NODE_1],
+                        "assignment_name": "optioned",
+                        "option_choices": {"verification": "adaptive"},
+                    }
+                ],
+            }
+        ),
+        actor="test",
+    )
+    # A changed choice is a new profile revision that the load will act on.
+    assert chosen.revision == created.revision + 1
+    assert chosen.profile_digest != created.profile_digest
+    assert chosen.assignments[0].option_choices == {"verification": "adaptive"}
+    assert service.preview(chosen.id).assignments[0].option_choices == {
+        "verification": "adaptive"
+    }
+
+
+def test_an_unknown_option_or_value_is_refused_with_the_choices() -> None:
+    from vonk_control.fleet_profiles import FleetProfileInvalidChoice
+
+    sessions = _sessions()
+    _seed(sessions, options=True)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    with pytest.raises(FleetProfileInvalidChoice, match="standard, adaptive"):
+        _option_profile(service, verification="nope")
+    with pytest.raises(FleetProfileInvalidChoice, match="verification"):
+        _option_profile(service, sampling="greedy")
+
+
+def test_a_profile_saved_without_choices_runs_the_recipe_defaults() -> None:
+    from vonk_control.models import FleetProfile
+
+    sessions = _sessions()
+    _seed(sessions, options=True)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = _option_profile(service, verification="adaptive")
+    with sessions.begin() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None
+        row.assignments = [
+            {key: value for key, value in assignment.items() if key != "option_choices"}
+            for assignment in row.assignments
+        ]
+
+    read = service.get(created.id)
+    assert read.assignments[0].option_choices == {"verification": "standard"}
+    assert service.preview(created.id).assignments[0].option_choices == {
+        "verification": "standard"
+    }
+
+
+def test_a_stored_choice_the_newer_recipe_no_longer_offers_falls_back_visibly() -> None:
+    from vonk_control.models import FleetProfile
+
+    sessions = _sessions()
+    _seed(sessions, options=True)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = _option_profile(service, verification="adaptive")
+    with sessions.begin() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None
+        row.assignments = [
+            {**assignment, "option_choices": {"verification": "retired"}}
+            for assignment in row.assignments
+        ]
+    read = service.get(created.id)
+    assert read.assignments[0].option_choices == {"verification": "standard"}
+    assert any("retired" in warning for warning in read.warnings)
+
+
+def test_a_run_made_with_other_option_choices_is_not_the_assignments_state() -> None:
+    from vonk_control.models import ClusterMapping, ClusterMappingNode, FleetProfile
+
+    sessions = _sessions()
+    _seed(sessions, options=True)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = _option_profile(service, verification="adaptive")
+    with sessions.begin() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None
+        [assignment] = service._execution_assignments(session, row)
+        node = assignment.nodes[0]
+        mapping = ClusterMapping(
+            recipe_revision_id=RECIPE_REVISION_ID,
+            topology_name=assignment.topology_name,
+            generation=1,
+            node_count=1,
+            state="ready",
+            parameters={"option_choices": {"verification": "standard"}},
+            placement_digest="a" * 64,
+            endpoint_owner_node_id=NODE_1,
+            created_by="test",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(mapping)
+        session.flush()
+        session.add(
+            ClusterMappingNode(
+                mapping_id=mapping.id,
+                node_id=node.node_id,
+                rank=node.rank,
+                role=node.role,
+                endpoint_owner=node.endpoint_owner,
+                created_at=NOW,
+            )
+        )
+        session.flush()
+        # The mapping was made for "standard": not this assignment's.
+        assert service._assignment_state(session, assignment).current_state == (
+            "not-placed"
+        )
+        matching = assignment.model_copy(
+            update={"option_choices": {"verification": "standard"}}
+        )
+        assert service._assignment_state(session, matching).current_state == "placed"

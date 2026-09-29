@@ -13,6 +13,8 @@ from ..models.fleet_profile_assignment_input_desired_state import FleetProfileAs
 from ..types import UNSET, Unset
 from typing import cast
 
+if TYPE_CHECKING:
+  from ..models.fleet_profile_assignment_input_option_choices import FleetProfileAssignmentInputOptionChoices
 
 
 
@@ -37,6 +39,7 @@ class FleetProfileAssignmentInput:
             assignment_name (None | str | Unset):
             desired_state (FleetProfileAssignmentInputDesiredState | Unset):  Default: 'running'.
             model_variant (None | str | Unset):
+            option_choices (FleetProfileAssignmentInputOptionChoices | Unset):
      """
 
     recipe_selector: str
@@ -44,12 +47,14 @@ class FleetProfileAssignmentInput:
     assignment_name: None | str | Unset = UNSET
     desired_state: FleetProfileAssignmentInputDesiredState | Unset = 'running'
     model_variant: None | str | Unset = UNSET
+    option_choices: FleetProfileAssignmentInputOptionChoices | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.fleet_profile_assignment_input_option_choices import FleetProfileAssignmentInputOptionChoices # noqa: PLC0415
         recipe_selector = self.recipe_selector
 
         spark_ids = self.spark_ids
@@ -73,6 +78,10 @@ class FleetProfileAssignmentInput:
         else:
             model_variant = self.model_variant
 
+        option_choices: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.option_choices, Unset):
+            option_choices = self.option_choices.to_dict()
+
 
         field_dict: dict[str, Any] = {}
 
@@ -86,6 +95,8 @@ class FleetProfileAssignmentInput:
             field_dict["desired_state"] = desired_state
         if model_variant is not UNSET:
             field_dict["model_variant"] = model_variant
+        if option_choices is not UNSET:
+            field_dict["option_choices"] = option_choices
 
         return field_dict
 
@@ -93,6 +104,7 @@ class FleetProfileAssignmentInput:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.fleet_profile_assignment_input_option_choices import FleetProfileAssignmentInputOptionChoices # noqa: PLC0415
         d = dict(src_dict)
         recipe_selector = d.pop("recipe_selector")
 
@@ -129,12 +141,23 @@ class FleetProfileAssignmentInput:
         model_variant = _parse_model_variant(d.pop("model_variant", UNSET))
 
 
+        _option_choices = d.pop("option_choices", UNSET)
+        option_choices: FleetProfileAssignmentInputOptionChoices | Unset
+        if isinstance(_option_choices,  Unset):
+            option_choices = UNSET
+        else:
+            option_choices = FleetProfileAssignmentInputOptionChoices.from_dict(_option_choices)
+
+
+
+
         fleet_profile_assignment_input = cls(
             recipe_selector=recipe_selector,
             spark_ids=spark_ids,
             assignment_name=assignment_name,
             desired_state=desired_state,
             model_variant=model_variant,
+            option_choices=option_choices,
         )
 
         return fleet_profile_assignment_input

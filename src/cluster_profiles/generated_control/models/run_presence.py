@@ -23,6 +23,7 @@ from typing import cast
 
 if TYPE_CHECKING:
   from ..models.recipe_update_notice import RecipeUpdateNotice
+  from ..models.run_presence_option_choices import RunPresenceOptionChoices
 
 
 
@@ -55,6 +56,7 @@ class RunPresence:
             run_state (RunPresenceRunState):
             title (str):
             degraded_reason (None | RunPresenceDegradedReasonType0 | Unset):
+            option_choices (RunPresenceOptionChoices | Unset):
             recipe_update (None | RecipeUpdateNotice | Unset):
      """
 
@@ -77,6 +79,7 @@ class RunPresence:
     run_state: RunPresenceRunState
     title: str
     degraded_reason: None | RunPresenceDegradedReasonType0 | Unset = UNSET
+    option_choices: RunPresenceOptionChoices | Unset = UNSET
     recipe_update: None | RecipeUpdateNotice | Unset = UNSET
 
 
@@ -85,6 +88,7 @@ class RunPresence:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.recipe_update_notice import RecipeUpdateNotice # noqa: PLC0415
+        from ..models.run_presence_option_choices import RunPresenceOptionChoices # noqa: PLC0415
         alias = self.alias
 
         expected_rank_count = self.expected_rank_count
@@ -133,6 +137,10 @@ class RunPresence:
         else:
             degraded_reason = self.degraded_reason
 
+        option_choices: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.option_choices, Unset):
+            option_choices = self.option_choices.to_dict()
+
         recipe_update: dict[str, Any] | None | Unset
         if isinstance(self.recipe_update, Unset):
             recipe_update = UNSET
@@ -166,6 +174,8 @@ class RunPresence:
         })
         if degraded_reason is not UNSET:
             field_dict["degraded_reason"] = degraded_reason
+        if option_choices is not UNSET:
+            field_dict["option_choices"] = option_choices
         if recipe_update is not UNSET:
             field_dict["recipe_update"] = recipe_update
 
@@ -176,6 +186,7 @@ class RunPresence:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.recipe_update_notice import RecipeUpdateNotice # noqa: PLC0415
+        from ..models.run_presence_option_choices import RunPresenceOptionChoices # noqa: PLC0415
         d = dict(src_dict)
         alias = d.pop("alias")
 
@@ -247,6 +258,16 @@ class RunPresence:
         degraded_reason = _parse_degraded_reason(d.pop("degraded_reason", UNSET))
 
 
+        _option_choices = d.pop("option_choices", UNSET)
+        option_choices: RunPresenceOptionChoices | Unset
+        if isinstance(_option_choices,  Unset):
+            option_choices = UNSET
+        else:
+            option_choices = RunPresenceOptionChoices.from_dict(_option_choices)
+
+
+
+
         def _parse_recipe_update(data: object) -> None | RecipeUpdateNotice | Unset:
             if data is None:
                 return data
@@ -287,6 +308,7 @@ class RunPresence:
             run_state=run_state,
             title=title,
             degraded_reason=degraded_reason,
+            option_choices=option_choices,
             recipe_update=recipe_update,
         )
 

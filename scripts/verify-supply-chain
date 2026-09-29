@@ -26,7 +26,7 @@ FLOATING_TAGS = frozenset({"latest", "main", "edge", "stable", "master", "dev"})
 PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
 PUBLIC_CONTRACT_LOCK = "control/packaging/public-contracts.lock"
 PUBLIC_CONTRACT_WHEEL = (
-    "inventory/wheels/vonk_forge_public_contracts-2.0.0-py3-none-any.whl"
+    "inventory/wheels/vonk_forge_public_contracts-2.1.0-py3-none-any.whl"
 )
 UV_LOCK_PACKAGE = re.compile(r"(?m)^\[\[package\]\]\n")
 UV_LOCK_SCALAR = re.compile(r'(?m)^(name|version) = "([^"\\\r\n]+)"$')
@@ -107,7 +107,7 @@ def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
         "source": "https://github.com/CarstVaartjes/vonk-forge-recipes.git",
         "branch": "main",
         "subdirectory": "contracts",
-        "package": "vonk-forge-public-contracts==2.0.0",
+        "package": "vonk-forge-public-contracts==2.1.0",
         "wheel": PUBLIC_CONTRACT_WHEEL,
     }
     if any(lock.get(key) != value for key, value in expected.items()):
@@ -134,7 +134,7 @@ def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
     )
     if (
         len(packages) != 1
-        or packages[0]["version"] != "2.0.0"
+        or packages[0]["version"] != "2.1.0"
         or source not in packages[0]["record"].splitlines()
     ):
         raise ValueError("control lock does not resolve the reviewed public contract")
