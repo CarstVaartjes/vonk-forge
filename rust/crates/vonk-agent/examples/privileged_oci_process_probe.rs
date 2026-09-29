@@ -50,8 +50,10 @@ fn main() {
     }
     let archive_sha = env_required("VONK_HELPER_ARCHIVE_SHA");
     let archive_bytes: u64 = env_required("VONK_HELPER_ARCHIVE_BYTES").parse().unwrap();
-    let registry_digest = env_required("VONK_HELPER_REGISTRY_DIGEST");
     let platform_digest = env_required("VONK_HELPER_PLATFORM_DIGEST");
+    // Recipe images are built locally, never pulled: the agent names the
+    // platform manifest for both digests, exactly as production imports do.
+    let registry_digest = platform_digest.clone();
     let image_ref = env_required("VONK_HELPER_IMAGE_REF");
     let action = match mode.as_str() {
         "import" => HostRuntimeAction::ImageImport,

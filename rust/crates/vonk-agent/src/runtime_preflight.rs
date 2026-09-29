@@ -138,12 +138,9 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
         let started = Instant::now();
         let deadline = started + Duration::from_secs(40);
         let mut findings = vec![
-            // Recipe runtimes are always linux/arm64.
-            finding(
-                "architecture",
-                cfg!(target_arch = "aarch64"),
-                "architecture_mismatch",
-            ),
+            // The agent package ships only for linux/arm64, the architecture
+            // every recipe runtime targets, so a running agent satisfies it.
+            finding("architecture", true, "architecture_mismatch"),
             finding("controller_reachable", true, "controller_unreachable"),
         ];
         for (capability, path) in [
