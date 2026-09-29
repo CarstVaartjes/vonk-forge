@@ -12,6 +12,10 @@ import type {
   FleetProfile,
   FleetProfileApplicationView,
   FleetProfileLoadInput,
+  CatalogSyncStatus,
+  ProfileDefinition,
+  ReconcilePlan,
+  ActivityFilters,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
@@ -261,6 +265,55 @@ export class ApiClient implements ControlApi {
   async profileEndpoints(number: number, signal?: AbortSignal): Promise<FleetProfileEndpoints> {
     return resultData(await this.generated.GET("/api/profile/{number}/endpoints", {
       params: {path: {number}},
+      signal,
+    }));
+  }
+
+  async catalogSyncStatus(signal?: AbortSignal): Promise<CatalogSyncStatus | null> {
+    // 404 means the sync has never run, which is a state, not a failure.
+    const result = await this.generated.GET("/api/catalog/managed-recipes/sync-status", {signal});
+    if (result.response.status === 404) return null;
+    return resultData(result);
+  }
+
+  async cancelModelOperation(operationId: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
+    return resultData(await this.generated.POST("/api/model/operations/{operation_id}/cancel", {
+      params: {path: {operation_id: operationId}},
+      body: {request_key: requestKey, reason: "operator requested cancellation"},
+      signal,
+    }));
+  }
+
+  async cancelRecipeOperation(operationId: string, requestKey: string, signal?: AbortSignal): Promise<RecipeCacheOperation> {
+    return resultData(await this.generated.POST("/api/recipe/operations/{operation_id}/cancel", {
+      params: {path: {operation_id: operationId}},
+      body: {request_key: requestKey, reason: "operator requested cancellation"},
+      signal,
+    }));
+  }
+
+  async previewInstallationReconcile(installationId: string, signal?: AbortSignal): Promise<ReconcilePlan> {
+    return resultData(await this.generated.POST("/api/recipe/installations/{installation_id}/reconcile/preview", {
+      params: {path: {installation_id: installationId}}, signal,
+    }));
+  }
+
+  async reconcileInstallation(installationId: string, requestKey: string, signal?: AbortSignal): Promise<unknown> {
+    return resultData(await this.generated.POST("/api/recipe/installations/{installation_id}/reconcile", {
+      params: {path: {installation_id: installationId}}, body: {request_key: requestKey}, signal,
+    }));
+  }
+
+  async profileDefinition(number: number, signal?: AbortSignal): Promise<ProfileDefinition> {
+    return resultData(await this.generated.GET("/api/profile/{number}/definition", {
+      params: {path: {number}}, signal,
+    }));
+  }
+
+  async cancelProfileApplication(applicationId: string, profileNumber: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+    return resultData(await this.generated.POST("/api/profile/applications/{application_id}/cancel", {
+      params: {path: {application_id: applicationId}},
+      body: {profile_number: profileNumber, request_key: requestKey},
       signal,
     }));
   }

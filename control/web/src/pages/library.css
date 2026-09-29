@@ -3422,3 +3422,7 @@
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
+
+.library-sync { margin: 0.25rem 0 0; font-size: 0.875rem; color: var(--muted, inherit); }
+.library-sync p { margin: 0; }
+.library-sync ul { margin: 0.25rem 0 0 1rem; padding: 0; }
