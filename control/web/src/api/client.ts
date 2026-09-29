@@ -25,7 +25,6 @@ import type {
   GatewayKeyRevoked,
   JobDetail,
   JobResumeResponse,
-  JobsResponse,
   OperationsResponse,
   OperationDetail,
   VisualFleetNode,
@@ -575,12 +574,6 @@ export class ApiClient implements ControlApi {
     const encodedJobId = encodeURIComponent(jobId);
     const encodedName = encodeURIComponent(name);
     return `/api/artifact-jobs/${encodedJobId}/results/${encodedName}/${sha256}`;
-  }
-
-  async jobs(cursor?: string): Promise<JobsResponse> {
-    return resultData(await this.generated.GET("/api/jobs", {
-      params: {query: {cursor, limit: 20}},
-    }));
   }
 
   async operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse> {

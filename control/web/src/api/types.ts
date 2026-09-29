@@ -17,8 +17,6 @@ export type GatewayKeyCreated = components["schemas"]["GatewayKeyCreated"];
 export type GatewayKeyRevoked = components["schemas"]["GatewayKeyRevoked"];
 export type JobDetail = components["schemas"]["JobDetailResponse"];
 export type JobResumeResponse = components["schemas"]["JobResumeResponse"];
-export type JobSummary = components["schemas"]["JobSummary"];
-export type JobsResponse = components["schemas"]["JobsResponse"];
 export type OperationDetail = components["schemas"]["OperationDetailResponse"];
 export type CatalogSyncStatus = components["schemas"]["ManagedCatalogSyncResponse"];
 export type ProfileDefinition = components["schemas"]["FleetProfileDefinitionView"];
@@ -183,7 +181,6 @@ export interface ControlApi extends LibraryApi {
   gatewayKeys(signal?: AbortSignal): Promise<GatewayKeyList>;
   createGatewayKey(name: string, models: string[], expires?: string): Promise<GatewayKeyCreated>;
   revokeGatewayKey(name: string): Promise<GatewayKeyRevoked>;
-  jobs(cursor?: string): Promise<JobsResponse>;
   operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse>;
   operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;

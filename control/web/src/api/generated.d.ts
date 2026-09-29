@@ -191,23 +191,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/endpoints/{alias}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Endpoint View */
-        get: operations["getPublishedEndpoint"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/fleet": {
         parameters: {
             query?: never;
@@ -372,23 +355,6 @@ export interface paths {
         put?: never;
         /** Fleet Rename */
         post: operations["renameFleetNode"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/jobs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Jobs View */
-        get: operations["listJobs"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3681,29 +3647,6 @@ export interface components {
             id: string;
             /** State */
             state: string;
-        };
-        /** JobSummary */
-        JobSummary: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Id */
-            id: string;
-            /** Kind */
-            kind: string;
-            /** State */
-            state: string;
-        };
-        /** JobsResponse */
-        JobsResponse: {
-            /** Jobs */
-            jobs: components["schemas"]["JobSummary"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
-            /** Total */
-            total: number;
         };
         JsonValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
             [key: string]: components["schemas"]["JsonValue"];
@@ -8096,64 +8039,6 @@ export interface operations {
             };
         };
     };
-    getPublishedEndpoint: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                alias: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EndpointResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
     getFleetStatus: {
         parameters: {
             query?: never;
@@ -8836,49 +8721,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    listJobs: {
-        parameters: {
-            query?: {
-                cursor?: string | null;
-                limit?: number;
-                status?: string | null;
-                target?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JobsResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };

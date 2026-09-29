@@ -433,10 +433,12 @@ def _smoke(
     campaign: Campaign,
     clock: Callable[[], float],
     sleeper: Callable[[float], None],
+    number: int,
 ) -> dict[str, object]:
     if lane.kind == "openai-service":
         return ServiceSmokeAdapter(campaign.fixtures).run(
             client,
+            number,
             lane.alias,
             recipe_key=lane.row.key,
             recipe_content_sha256=lane.row.content_sha256,
@@ -462,6 +464,7 @@ def _smoke_lanes(
     batch: Batch,
     clock: Callable[[], float],
     sleeper: Callable[[float], None],
+    number: int,
     **entry: object,
 ) -> list[dict[str, object]]:
     """Wait for and smoke every lane concurrently; record one line per lane."""
@@ -469,7 +472,7 @@ def _smoke_lanes(
     def one(lane: Lane) -> dict[str, object]:
         try:
             run_id = _wait_serving(client, lane, campaign, clock, sleeper)
-            result = _smoke(client, lane, run_id, campaign, clock, sleeper)
+            result = _smoke(client, lane, run_id, campaign, clock, sleeper, number)
         except (ControlClientError, FixtureError, QualificationError, OSError) as error:
             return log.append(
                 batch=batch.batch_id,
@@ -569,7 +572,7 @@ def load(
     )
     _apply_profile(client, number, campaign, clock, sleeper)
     results = _smoke_lanes(
-        client, lanes, campaign, log, batch, clock, sleeper, step="smoke"
+        client, lanes, campaign, log, batch, clock, sleeper, number, step="smoke"
     )
     return {"step": "load", "batch": batch.batch_id, "results": results}
 
@@ -691,6 +694,7 @@ def recover(
                 batch,
                 clock,
                 sleeper,
+                number,
                 step="recover",
                 failure_mode=mode,
             )

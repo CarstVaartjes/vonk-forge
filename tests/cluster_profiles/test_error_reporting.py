@@ -63,15 +63,15 @@ def test_local_io_keeps_safe_path_and_errno() -> None:
 
 def test_endpoint_drops_query_and_userinfo() -> None:
     assert (
-        safe_endpoint("https://user:secret@example.test/api/jobs?token=secret")
-        == "/api/jobs"
+        safe_endpoint("https://user:secret@example.test/api/fleet?token=secret")
+        == "/api/fleet"
     )
 
 
 def test_error_context_omits_unavailable_request_id() -> None:
     context = ErrorContext(
-        operation="GET /api/jobs",
-        endpoint="/api/jobs",
+        operation="GET /api/fleet",
+        endpoint="/api/fleet",
         code="controller.transport_timeout",
         source="transport",
         transport="timeout",
@@ -99,8 +99,8 @@ def test_http_errors_keep_status_code_and_request_id(
             {
                 "detail": "bad Bearer private-token",
                 "context": {
-                    "operation": "GET /api/jobs",
-                    "endpoint": "/api/jobs",
+                    "operation": "GET /api/fleet",
+                    "endpoint": "/api/fleet",
                     "http_status": status,
                     "code": code,
                     "request_id": "00000000-0000-4000-8000-000000000099",
@@ -113,7 +113,7 @@ def test_http_errors_keep_status_code_and_request_id(
 
     def opener(*_args, **_kwargs):
         raise urllib.error.HTTPError(
-            "https://forge.example.test/api/jobs?secret=private-token",
+            "https://forge.example.test/api/fleet?secret=private-token",
             status,
             "rejected",
             headers,
@@ -144,7 +144,7 @@ def test_transport_error_does_not_swallow_source(tmp_path: Path) -> None:
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
     with pytest.raises(ControlTransportError) as raised:
-        client.request("GET", "/api/jobs")
+        client.request("GET", "/api/fleet")
     assert raised.value.context is not None
     assert raised.value.context.transport == "dns"
     assert raised.value.context.decision == "retry"

@@ -281,7 +281,10 @@ def test_raw_request_encodes_bounded_query_parameters(tmp_path: Path) -> None:
 
     def opener(request, *, timeout: float):
         observed.extend((request, timeout))
-        return _Response(200, {"jobs": [], "total": 0, "next_cursor": None})
+        return _Response(
+            200,
+            {"operations": [], "total": 0, "next_cursor": None},
+        )
 
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
@@ -289,15 +292,19 @@ def test_raw_request_encodes_bounded_query_parameters(tmp_path: Path) -> None:
 
     result = client.request(
         "GET",
-        "/api/jobs",
-        query={"cursor": "next page", "status": "waiting-for-operator"},
+        "/api/operations",
+        query={"cursor": "next page", "state": "waiting-for-operator"},
     )
 
-    assert result == {"jobs": [], "total": 0, "next_cursor": None}
+    assert result == {
+        "operations": [],
+        "total": 0,
+        "next_cursor": None,
+    }
     request = observed[0]
     assert isinstance(request, urllib.request.Request)
     assert request.full_url == (
-        "https://forge.example.test/api/jobs?cursor=next+page&status=waiting-for-operator"
+        "https://forge.example.test/api/operations?cursor=next+page&state=waiting-for-operator"
     )
     assert request.get_header("Authorization") == "Bearer private-token"
 
@@ -313,7 +320,7 @@ def test_raw_request_preserves_typed_bounded_api_errors(
 
     def opener(*_args, **_kwargs):
         raise urllib.error.HTTPError(
-            "https://forge.example.test/api/jobs",
+            "https://forge.example.test/api/fleet",
             401,
             "Unauthorized",
             headers,
@@ -325,7 +332,7 @@ def test_raw_request_preserves_typed_bounded_api_errors(
     )
 
     with pytest.raises(ControlUnauthorized) as raised:
-        client.request("GET", "/api/jobs")
+        client.request("GET", "/api/fleet")
 
     assert raised.value.detail == "bad token <redacted>"
     assert raised.value.retry_after_seconds == retry_seconds
@@ -344,7 +351,7 @@ def test_raw_request_rejects_malformed_typed_errors(
 
     def opener(*_args, **_kwargs):
         raise urllib.error.HTTPError(
-            "https://forge.example.test/api/jobs",
+            "https://forge.example.test/api/fleet",
             401,
             "Unauthorized",
             headers,
@@ -356,7 +363,7 @@ def test_raw_request_rejects_malformed_typed_errors(
     )
 
     with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
-        client.request("GET", "/api/jobs")
+        client.request("GET", "/api/fleet")
 
 
 def test_raw_request_rejects_error_fields_outside_openapi_contract(

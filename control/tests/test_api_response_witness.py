@@ -96,7 +96,7 @@ def test_failed_requests_are_not_success_evidence_and_missing_routes_are_reporte
     recorder,
 ):
     app = schema_application(browser_auth=False)
-    assert TestClient(app).get("/api/jobs").status_code == 401
+    assert TestClient(app).get("/api/fleet").status_code == 401
     recorder.flush()
     report = recorder.report()
     assert report["witnessed_operation_count"] == 0
