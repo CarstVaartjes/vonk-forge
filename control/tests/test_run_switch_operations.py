@@ -51,6 +51,7 @@ from vonk_control.models import (
     RecipeSourceBundle,
     ResourceReservation,
     RunNode,
+    RuntimeImageAuthorization,
 )
 from vonk_control.operation_api import OperationQuery
 from vonk_control.operation_contract import OperationFailureEvidence
@@ -94,6 +95,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationProvider,
     RunSwitchOperationService,
+    _build_receipt_in_session,
     _phase_result,
     _transient_distribution_exception,
     effective_build_receipt,
@@ -2667,6 +2669,46 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
         phase.kind == "prepare" and phase.subphase == "container-build"
         for phase in plan.phases
     )
+
+    # The successor's own mapping is admitted against the reused build: the
+    # build keeps its original owner and the successor is authorized to use it.
+    mappings = ClusterMappingService(sessions)
+    successor_mapping = mappings.materialize(
+        mappings.preview(successor_id, nodes, {}, "admin"), actor="admin", now=NOW
+    )
+    admitted = lifecycle._install_admission.plan_install(
+        successor_mapping, build_id, now=NOW
+    )
+    assert admitted.allowed
+
+    # The container-build receipt path validates the reused build for the
+    # successor plan without treating the original revision as a mismatch.
+    # Without the successor's own authorization the original owner's build is
+    # not consumable; with it, the same verified artifact is.
+    with sessions.begin() as session:
+        with pytest.raises(RunSwitchOperationConflict):
+            _build_receipt_in_session(session, plan)
+        reused = session.get(RecipeBuild, build_id)
+        assert reused is not None
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=successor_id,
+                original_content_digest="d" * 64,
+                effective_execution_key="e" * 64,
+                image_digest=reused.image_digest,
+                local_image_config_id="sha256:" + "f" * 64,
+                oci_archive_sha256=reused.oci_layout_sha256,
+                image_bytes=reused.image_bytes,
+                build_id=reused.id,
+                authorized_at=NOW,
+                state="authorized",
+            )
+        )
+        session.flush()
+        receipt = _build_receipt_in_session(session, plan)
+        assert reused.recipe_revision_id != successor_id
+    assert receipt["build_id"] == build_id
+    assert receipt["state"] == "succeeded"
 
 
 def test_present_rebuilt_image_replaces_installation_bound_to_missing_build(
