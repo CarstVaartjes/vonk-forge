@@ -130,7 +130,7 @@ def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
     ]
     source = (
         'source = { git = "https://github.com/CarstVaartjes/'
-        f'vonk-forge-recipes.git?subdirectory=contracts&rev={revision}#{revision}" }}'
+        f'vonk-forge-recipes.git?subdirectory=contracts&branch=main#{revision}" }}'
     )
     if (
         len(packages) != 1

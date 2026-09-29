@@ -261,7 +261,7 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     assert packaging_source["branch"] == "main"
     assert packaging_source["subdirectory"] == "contracts"
     assert contract_package["source"] == {
-        "git": f"{packaging_source['source']}?subdirectory=contracts&rev={revision}#{revision}"
+        "git": f"{packaging_source['source']}?subdirectory=contracts&branch=main#{revision}"
     }
     assert "wheels" not in contract_package
     assert 'branch = "main"' in packaging_lock
