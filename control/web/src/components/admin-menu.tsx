@@ -6,7 +6,7 @@ type AdminMenuProps = {
   logoutError: string;
   loggingOut: boolean;
   navigationLocked?: boolean;
-  onNavigateToActivity(event: ReactMouseEvent<HTMLAnchorElement>): void;
+  onNavigate(event: ReactMouseEvent<HTMLAnchorElement>, route: "activity" | "keys"): void;
   onLogout(): void;
   role: string;
   subject: string;
@@ -17,7 +17,7 @@ export function AdminMenu({
   logoutError,
   loggingOut,
   navigationLocked = false,
-  onNavigateToActivity,
+  onNavigate,
   onLogout,
   role,
   subject,
@@ -93,14 +93,14 @@ export function AdminMenu({
       <button type="button" className="secondary-button" disabled={navigationLocked || cliTokenState === "downloading"} onClick={() => void downloadCliToken()}>{cliTokenState === "downloading" ? "Preparing CLI token…" : "Download CLI token"}</button>
       {cliTokenState === "downloaded" && <p className="admin-menu-status" role="status">CLI token downloaded. Keep the file private.</p>}
       {cliTokenState === "error" && <p className="admin-menu-status is-error" role="alert">The CLI token could not be downloaded. Try again.</p>}
-      <a href="/activity" className="secondary-button" aria-disabled={navigationLocked || undefined} tabIndex={navigationLocked ? -1 : undefined} onClick={event => {
+      {([["/keys", "keys", "API keys"], ["/activity", "activity", "Open Activity"]] as const).map(([href, route, label]) => <a key={route} href={href} className="secondary-button" aria-disabled={navigationLocked || undefined} tabIndex={navigationLocked ? -1 : undefined} onClick={event => {
         if (navigationLocked) {
           event.preventDefault();
           return;
         }
         setMenuOpen(false);
-        onNavigateToActivity(event);
-      }}>Open Activity</a>
+        onNavigate(event, route);
+      }}>{label}</a>)}
       <button type="button" className="logout" aria-disabled={loggingOut || navigationLocked || undefined} disabled={loggingOut || navigationLocked} onClick={onLogout}>{loggingOut ? "Signing out…" : "Logout"}</button>
       {logoutError && <p role="alert">{logoutError}</p>}
     </div>}

@@ -15,8 +15,8 @@ import {LibraryRecipeUpdateAction} from "./library-recipe-update-action";
 // mirror --sort and --updated-since; `updated` is the recency window that the
 // request turns into a timestamp. Both ordering controls are applied by the
 // projection to the whole library, so changing one restarts paging.
-export type LibraryWorkcellFilters = {model: string; usage: string; family: string; version: string; quantization: string; publisher: string; alignment: string; sparks: string; sort: LibrarySort; updated: LibraryRecency};
-export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {model: "", usage: "", family: "", version: "", quantization: "", publisher: "", alignment: "", sparks: "", sort: "updated", updated: "any"};
+export type LibraryWorkcellFilters = {model: string; usage: string; family: string; version: string; quantization: string; publisher: string; alignment: string; sparks: string; cached: boolean; sort: LibrarySort; updated: LibraryRecency};
+export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {model: "", usage: "", family: "", version: "", quantization: "", publisher: "", alignment: "", sparks: "", cached: false, sort: "updated", updated: "any"};
 
 // The values here are checked against the generated `sort` union, so a server
 // value rename or removal breaks the type gate instead of drifting silently.
@@ -51,6 +51,7 @@ export function libraryFiltersFromSearch(params: URLSearchParams): LibraryWorkce
     publisher: params.get("publisher") ?? "",
     alignment: params.get("alignment") ?? "",
     sparks: params.get("sparks") ?? "",
+    cached: params.get("cached") === "1",
     sort: librarySortFromValue(params.get("sort") ?? ""),
     updated: libraryRecencyFromValue(params.get("updated") ?? ""),
   };
@@ -59,6 +60,7 @@ export function libraryFiltersToSearch(filters: LibraryWorkcellFilters, params =
   for (const name of FILTER_PARAMS) {
     if (filters[name]) params.set(name, filters[name]); else params.delete(name);
   }
+  if (filters.cached) params.set("cached", "1"); else params.delete("cached");
   if (filters.sort === "updated") params.delete("sort"); else params.set("sort", filters.sort);
   if (filters.updated === "any") params.delete("updated"); else params.set("updated", filters.updated);
   return params;
@@ -75,8 +77,23 @@ export type LibraryRecipeRecord = {
   modelTitle: string;
   modelFiles: LibraryViewModel["model_document"]["files"];
   modelBytes: number;
+  modelCached: boolean;
   capabilities: string[];
 };
+
+/** Cached, downloading, or running: the same test `vonkctl ... --cached` applies. */
+export function isModelCached(model: LibraryViewModel): boolean {
+  return model.local.controller === "cached" || model.local.controller === "preparing" || (model.local.running_on ?? []).length > 0;
+}
+
+/** What the operator filtered by, in words, for an empty result. */
+export function activeFilterSummary(filters: LibraryWorkcellFilters, query: string): string[] {
+  const parts = FILTER_PARAMS.filter(name => filters[name]).map(name => `${name}: ${filters[name]}`);
+  if (filters.cached) parts.unshift("cached only");
+  if (filters.updated !== "any") parts.push(`updated: ${LIBRARY_RECENCY_LABELS[filters.updated].toLocaleLowerCase()}`);
+  if (query.trim()) parts.push(`search: ${query.trim()}`);
+  return parts;
+}
 
 function modelTitle(model: LibraryViewModel): string {
   return model.model_document.identity.model.title || model.model_document.identity.family.title || `${model.model.publisher}/${model.model.slug}`;
@@ -98,8 +115,9 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
     const files = model.model_document.files;
     const bytes = files.reduce((total, file) => total + file.size_bytes, 0);
     const capabilities = model.model_capabilities ?? [];
-    if (model.recipes.length === 0) return [{key: `model:${key}`, title, model: model.model, modelDocument: model.model_document, modelCapabilities: model.model_capabilities, modelKey: key, modelTitle: title, modelFiles: files, modelBytes: bytes, capabilities}];
-    return model.recipes.map(recipe => ({key: recipeRecordKey(key, recipe), title: recipe.title, recipe, model: model.model, modelDocument: model.model_document, modelCapabilities: model.model_capabilities, modelKey: key, modelTitle: title, modelFiles: files, modelBytes: bytes, capabilities: [...new Set([...capabilities, ...recipe.capabilities])]}));
+    const modelCached = isModelCached(model);
+    if (model.recipes.length === 0) return [{key: `model:${key}`, title, model: model.model, modelDocument: model.model_document, modelCapabilities: model.model_capabilities, modelKey: key, modelTitle: title, modelFiles: files, modelBytes: bytes, modelCached, capabilities}];
+    return model.recipes.map(recipe => ({key: recipeRecordKey(key, recipe), title: recipe.title, recipe, model: model.model, modelDocument: model.model_document, modelCapabilities: model.model_capabilities, modelKey: key, modelTitle: title, modelFiles: files, modelBytes: bytes, modelCached, capabilities: [...new Set([...capabilities, ...recipe.capabilities])]}));
   });
 }
 
@@ -113,6 +131,7 @@ export function filterLibraryRecipeRecords(records: LibraryRecipeRecord[], filte
   return records.filter(record => {
     const text = [record.title, record.modelTitle, record.recipe?.slug ?? "", ...record.capabilities].join(" ").toLocaleLowerCase();
     return (!needle || text.includes(needle))
+      && (!filters.cached || record.modelCached)
       && (!filters.model || record.modelKey === filters.model)
       && (!filters.usage || record.capabilities.includes(filters.usage))
       && (!filters.family || recordFamily(record) === filters.family)
@@ -122,6 +141,13 @@ export function filterLibraryRecipeRecords(records: LibraryRecipeRecord[], filte
       && (!filters.alignment || record.recipe?.recipe_document.metadata.alignment === filters.alignment)
       && (!filters.sparks || String(record.recipe?.recipe_document.topology.node_count) === filters.sparks);
   });
+}
+
+/** Says which filters emptied the list, or that the library itself is empty. */
+export function EmptyLibrary({filters, query, onClear, noun = "models"}: {filters: LibraryWorkcellFilters; query: string; onClear(): void; noun?: string}) {
+  const active = activeFilterSummary(filters, query);
+  if (active.length === 0) return <p className="library-empty-state">The library has no {noun} yet. Its catalog sync status is shown above.</p>;
+  return <p className="library-empty-state">No {noun} match {active.join(", ")}. <button type="button" className="button secondary" onClick={onClear}>Clear filters</button></p>;
 }
 
 function NavigateLink({current, href, onNavigate, children}: {current?: boolean; href: string; onNavigate: (event: MouseEvent<HTMLAnchorElement>, path: string) => void; children: ReactNode}) {
@@ -177,13 +203,14 @@ export function LibraryWorkcell({api, detail: _detail, fleet: _fleet, filters, o
       <label>Creator<select aria-label="Filter creator" value={filters.publisher} onChange={event => onFiltersChange({...filters, publisher: event.target.value})}><option value="">All creators</option>{[...new Set(records.map(record => record.recipe?.publisher).filter((value): value is string => Boolean(value)))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Alignment<select aria-label="Filter alignment" value={filters.alignment} onChange={event => onFiltersChange({...filters, alignment: event.target.value})}><option value="">All alignments</option>{[...new Set(records.flatMap(record => record.recipe?.recipe_document.metadata.alignment ? [record.recipe.recipe_document.metadata.alignment] : []))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Sparks<select aria-label="Filter Sparks" value={filters.sparks} onChange={event => onFiltersChange({...filters, sparks: event.target.value})}><option value="">Any Sparks</option>{[...new Set(records.map(record => String(record.recipe?.recipe_document.topology.node_count ?? "")).filter(Boolean))].sort((a, b) => Number(a) - Number(b)).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label className="library-cached-filter"><input type="checkbox" checked={filters.cached} onChange={event => onFiltersChange({...filters, cached: event.target.checked})}/> Cached only</label>
       <label>Sort<select aria-label="Sort Library" value={filters.sort} onChange={event => onFiltersChange({...filters, sort: librarySortFromValue(event.target.value)})}>{LIBRARY_SORTS.map(value => <option key={value} value={value}>{LIBRARY_SORT_LABELS[value]}</option>)}</select></label>
       <label>Updated<select aria-label="Filter updated" value={filters.updated} onChange={event => onFiltersChange({...filters, updated: libraryRecencyFromValue(event.target.value)})}>{LIBRARY_RECENCY_VALUES.map(value => <option key={value} value={value}>{LIBRARY_RECENCY_LABELS[value]}</option>)}</select></label>
     <LibraryRecipeUpdateAction api={api} onUpdated={refresh} /></div>
     <div className="library-paired-list" aria-label="Model and recipe list">
       <div className="library-paired-heading"><span>Models · {models.length} of {new Set(records.map(record => record.modelKey)).size}</span><span>Recipes for selected Model · {selectedRecipes.length}</span></div>
       <div className="library-paired-panes">
-        <div className="library-model-pane" aria-label="Models"><ul>{models.map(model => <li key={model.modelKey}><NavigateLink current={model.modelKey === selectedModelKey} href={modelLibraryPath(model.modelKey)} onNavigate={onNavigate}><span className={model.modelKey === selectedModelKey ? "is-selected" : undefined}><strong>{model.modelTitle}</strong><small>{model.model?.publisher}/{model.model?.slug}</small><small>{model.modelFiles.length} files · {formatBytes(model.modelBytes)}</small><em>{model.capabilities.join(" · ") || "Capabilities not declared"}</em></span></NavigateLink></li>)}</ul>{models.length === 0 && <p className="library-empty-state">No Models match these filters.</p>}</div>
+        <div className="library-model-pane" aria-label="Models"><ul>{models.map(model => <li key={model.modelKey}><NavigateLink current={model.modelKey === selectedModelKey} href={modelLibraryPath(model.modelKey)} onNavigate={onNavigate}><span className={model.modelKey === selectedModelKey ? "is-selected" : undefined}><strong>{model.modelTitle}</strong><small>{model.model?.publisher}/{model.model?.slug}</small><small>{model.modelFiles.length} files · {formatBytes(model.modelBytes)}</small><em>{model.capabilities.join(" · ") || "Capabilities not declared"}</em></span></NavigateLink></li>)}</ul>{models.length === 0 && <EmptyLibrary filters={filters} query={query} onClear={() => { onFiltersChange(EMPTY_LIBRARY_WORKCELL_FILTERS); onQueryChange(""); }}/>}</div>
         <div className="library-recipe-pane" aria-label="Recipes matching selected Model" ref={recipePaneRef} tabIndex={-1}>{selectedModel && <div className="library-selected-model-context"><strong>{selectedModel.modelTitle}</strong><span>{selectedModel.modelFiles.length} files · {formatBytes(selectedModel.modelBytes)} · {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}</span></div>}<ul>{selectedRecipes.map(record => { const document = record.recipe!.recipe_document; const roleBytes = document.topology.roles.reduce((sum, role) => sum + role.count * role.resources.disk.image_bytes + role.count * role.resources.disk.artifact_bytes, 0); return <li key={record.key}><NavigateLink href={recipeLibraryPath(record.recipe!.recipe_id)} onNavigate={onNavigate}><strong>{record.title}</strong><small>{recipeAttribution(document)} · {document.runtime.engine} · release {document.release.version} · {document.topology.node_count} Spark{document.topology.node_count === 1 ? "" : "s"}</small><small>{document.topology.roles.map(role => `${role.name}: ${formatBytes(role.resources.memory.peak_bytes)} peak`).join(" · ")}</small><small>{formatBytes(roleBytes)} image + artifact envelope</small></NavigateLink><LibraryRecipeDownloadAction api={api} missingModels={missingModelsFor(record.recipe!)} onDownloaded={refresh} selector={canonicalRecipeSelector(record.recipe!)} /><LibraryRecipeRemoveAction api={api} onRemoved={refresh} selector={canonicalRecipeSelector(record.recipe!)} /></li>; })}</ul>{selectedModel && selectedRecipes.length === 0 && <div className="library-empty-recipe"><strong>No Recipe linked</strong><span>This exact Model is available for cache management but has no runnable Recipe.</span></div>}{!selectedModel && <p className="library-empty-state">Select a Model to see matching Recipes.</p>}</div>
       </div>
     </div>

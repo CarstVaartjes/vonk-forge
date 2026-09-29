@@ -30,7 +30,8 @@ copied into support tickets with credentials or private keys.
 ## Freshness and delivery
 
 Fleet labels samples using the configured live and delayed thresholds. A
-missing, delayed, or stale badge is actionable evidence. The web client uses
+missing, delayed, or stale sample is actionable evidence: web and `vonkctl`
+show an online Spark with one as "needs attention" and name the reason. The web client uses
 the Fleet SSE stream, reconnects after interruption, and falls back to polling
 without mutating node state. The two-second reporting intent is not a promise
 that every sample reaches the browser.

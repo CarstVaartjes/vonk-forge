@@ -1,14 +1,8 @@
-import type {VisualFleetNode, VisualFleetSnapshot} from "../api/types";
+import type {VisualFleetNode} from "../api/types";
 
 export type TelemetryFreshness = "live" | "delayed" | "stale";
-export type NodeOperationalState = TelemetryFreshness | "offline";
-
-export type NodeMemoryCapacity = {
-  available: number;
-  total: number;
-  used: number;
-  utilizationPercent: number;
-};
+/** The words `vonkctl fleet` uses. */
+export type NodeStatus = "online" | "needs attention" | "offline";
 
 const LIVE_MAXIMUM_MS = 6_000;
 const DELAYED_MAXIMUM_MS = 20_000;
@@ -22,11 +16,6 @@ export function telemetryFreshnessAt(observedAt: string | null | undefined, now:
   if (age <= LIVE_MAXIMUM_MS) return "live";
   if (age <= DELAYED_MAXIMUM_MS) return "delayed";
   return "stale";
-}
-
-export function nodeOperationalState(node: VisualFleetNode, now: Date): NodeOperationalState {
-  if (node.connection.online_state !== "online") return "offline";
-  return telemetryFreshnessAt(node.telemetry?.sample.observed_at, now);
 }
 
 const TELEMETRY_WARNING_CODES = new Set<VisualFleetNode["warnings"][number]["code"]>([
@@ -49,9 +38,14 @@ export function reconcileTelemetryWarnings(
   return reconciled;
 }
 
-export function nodeWarningsAt(node: VisualFleetNode, now: Date): VisualFleetNode["warnings"] {
-  if (!node.telemetry?.sample) return node.warnings;
-  return reconcileTelemetryWarnings(node.warnings, telemetryFreshnessAt(node.telemetry.sample.observed_at, now));
+/** Online, offline, or online but needing attention, with the reasons in plain words. */
+export function nodeStatus(node: VisualFleetNode, now: Date): {status: NodeStatus; reasons: string[]} {
+  if (node.connection.online_state !== "online") return {status: "offline", reasons: [offlineReasonLabel(node.connection.offline_reason)]};
+  const warnings = node.telemetry?.sample
+    ? reconcileTelemetryWarnings(node.warnings, telemetryFreshnessAt(node.telemetry.sample.observed_at, now))
+    : node.warnings;
+  const reasons = warnings.map(warning => warning.detail);
+  return {status: reasons.length > 0 ? "needs attention" : "online", reasons};
 }
 
 const OFFLINE_REASON_LABELS: Record<NonNullable<VisualFleetNode["connection"]["offline_reason"]>, string> = {
@@ -127,137 +121,15 @@ export function nodeSecondaryName(node: VisualFleetNode): string | null {
   return hostname.localeCompare(primary, undefined, {sensitivity: "accent"}) === 0 ? null : hostname;
 }
 
-export function timestampPresentation(value: string | null | undefined, now: Date, prefix = "Updated"): {dateTime: string; exact: string; relative: string} | null {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (!Number.isFinite(parsed.getTime())) return null;
-  const deltaSeconds = Math.max(0, Math.round((now.getTime() - parsed.getTime()) / 1000));
-  let amount = deltaSeconds;
-  let unit = "second";
-  if (deltaSeconds >= 86_400) {
-    amount = Math.floor(deltaSeconds / 86_400);
-    unit = "day";
-  } else if (deltaSeconds >= 3_600) {
-    amount = Math.floor(deltaSeconds / 3_600);
-    unit = "hour";
-  } else if (deltaSeconds >= 60) {
-    amount = Math.floor(deltaSeconds / 60);
-    unit = "minute";
-  }
-  return {
-    dateTime: parsed.toISOString(),
-    exact: parsed.toLocaleString([], {dateStyle: "medium", timeStyle: "long"}),
-    relative: `${prefix} ${amount} ${unit}${amount === 1 ? "" : "s"} ago`,
-  };
-}
-
-function finite(value: number | null | undefined): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-}
-
-export function nodeUnifiedMemory(node: VisualFleetNode): NodeMemoryCapacity | null {
+/** Used share and total of the Spark's memory, from the live sample when there is one. */
+export function nodeMemory(node: VisualFleetNode): {usedPercent: number; totalBytes: number} | null {
   const sample = node.telemetry?.sample;
-  const hostAvailable = finite(sample?.memory_available_bytes ?? node.inventory?.host_memory_free_bytes);
-  const hostTotal = finite(sample?.memory_total_bytes ?? node.inventory?.host_memory_total_bytes);
-  const gpuAvailable = finite(sample?.gpu_memory_free_bytes ?? node.inventory?.gpu_memory_free_bytes);
-  const gpuTotal = finite(sample?.gpu_memory_total_bytes ?? node.inventory?.gpu_memory_total_bytes);
-  if (hostAvailable === null || hostTotal === null || gpuAvailable === null || gpuTotal === null) return null;
-  const total = Math.min(hostTotal, gpuTotal);
-  if (total <= 0) return null;
-  const available = Math.min(total, Math.min(hostAvailable, gpuAvailable));
-  const used = Math.max(0, total - available);
-  return {available, total, used, utilizationPercent: (used / total) * 100};
+  const total = sample?.memory_total_bytes ?? node.inventory?.host_memory_total_bytes;
+  const free = sample?.memory_available_bytes ?? node.inventory?.host_memory_free_bytes;
+  if (typeof total !== "number" || typeof free !== "number" || total <= 0) return null;
+  return {usedPercent: Math.round(100 * (total - free) / total), totalBytes: total};
 }
 
-function groupReason(reason: string | null | undefined): string {
-  return reason ? reason.replaceAll("-", " ") : "reason unavailable";
-}
-
-export function installationGroupLabel(group: VisualFleetNode["installed"][number]): string {
-  const ranks = `${group.present_ranks.length} of ${group.expected_rank_count} ranks`;
-  return group.complete
-    ? `Complete · ${ranks}`
-    : `Partial · ${ranks} · ${groupReason(group.degraded_reason)}`;
-}
-
-export function runGroupLabel(group: VisualFleetNode["loaded"][number]): string {
-  const ranks = `${group.present_ranks.length} of ${group.expected_rank_count} ranks`;
-  return group.healthy
-    ? `Healthy · ${ranks}`
-    : `Degraded · ${ranks} · ${groupReason(group.degraded_reason)}`;
-}
-
-export type FleetSummary = {
-  delayed: number;
-  installedRecipes: number;
-  live: number;
-  loadedRecipes: number;
-  offline: number;
-  stale: number;
-  total: number;
-  unifiedAvailableBytes: number | null;
-  unifiedCapacity: "known" | "partial" | "unknown";
-  unifiedReportingNodes: number;
-  unifiedTotalBytes: number | null;
-  warnings: number;
-};
-
-function warningConditionKey(nodeId: string, code: VisualFleetNode["warnings"][number]["code"]): string {
-  if (TELEMETRY_WARNING_CODES.has(code)) return `${nodeId}:telemetry`;
-  return `${nodeId}:${code}`;
-}
-
-export function summarizeFleet(snapshot: VisualFleetSnapshot, now: Date): FleetSummary {
-  const summary: FleetSummary = {
-    delayed: 0,
-    installedRecipes: 0,
-    live: 0,
-    loadedRecipes: 0,
-    offline: 0,
-    stale: 0,
-    total: snapshot.nodes.length,
-    unifiedAvailableBytes: 0,
-    unifiedCapacity: "unknown",
-    unifiedReportingNodes: 0,
-    unifiedTotalBytes: 0,
-    warnings: 0,
-  };
-  const installed = new Set<string>();
-  const loaded = new Set<string>();
-  const warningConditions = new Set<string>();
-  for (const node of snapshot.nodes) {
-    const state = nodeOperationalState(node, now);
-    summary[state] += 1;
-    for (const warning of nodeWarningsAt(node, now)) {
-      warningConditions.add(warningConditionKey(node.id, warning.code));
-    }
-    if (state === "delayed" || state === "stale") warningConditions.add(`${node.id}:telemetry`);
-    if (state === "offline") warningConditions.add(`${node.id}:node.offline`);
-    for (const installation of node.installed) {
-      if (installation.complete) installed.add(installation.installation_id);
-    }
-    for (const run of node.loaded) {
-      if (run.healthy) loaded.add(run.run_id);
-    }
-    if (state !== "live") continue;
-    const unified = nodeUnifiedMemory(node);
-    if (unified) {
-      summary.unifiedAvailableBytes! += unified.available;
-      summary.unifiedTotalBytes! += unified.total;
-      summary.unifiedReportingNodes += 1;
-    }
-  }
-  summary.installedRecipes = installed.size;
-  summary.loadedRecipes = loaded.size;
-  summary.warnings = warningConditions.size;
-  if (summary.unifiedReportingNodes === 0) {
-    summary.unifiedAvailableBytes = null;
-    summary.unifiedTotalBytes = null;
-    summary.unifiedCapacity = "unknown";
-  } else if (summary.unifiedReportingNodes < summary.live) {
-    summary.unifiedCapacity = "partial";
-  } else {
-    summary.unifiedCapacity = "known";
-  }
-  return summary;
+export function nodeDiskFreeBytes(node: VisualFleetNode): number | null {
+  return node.inventory?.disk_free_bytes ?? node.telemetry?.sample.disk_free_bytes ?? null;
 }

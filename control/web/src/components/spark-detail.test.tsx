@@ -11,7 +11,8 @@ test("removing a Spark requires typing its name", async () => {
   const removeFleetNode = vi.fn().mockResolvedValue({action: "remove", state: "done"});
   const onClose = vi.fn();
   render(<SparkDetail api={{fleetNode: vi.fn().mockResolvedValue(node), removeFleetNode} as unknown as ControlApi} id="spk_1" onClose={onClose}/>);
-  fireEvent.click(await screen.findByRole("button", {name: "Remove"}));
+  fireEvent.click(await screen.findByRole("tab", {name: "Settings"}));
+  fireEvent.click(screen.getByRole("button", {name: "Remove"}));
   const confirm = screen.getByRole("button", {name: "Remove Spark"});
   expect(confirm).toBeDisabled();
   fireEvent.change(screen.getByLabelText(/Type/), {target: {value: "Kitchen"}});
@@ -20,9 +21,16 @@ test("removing a Spark requires typing its name", async () => {
   await waitFor(() => expect(onClose).toHaveBeenCalled());
 });
 
-test("recent logs load on demand", async () => {
+test("recent logs load when the Logs tab opens", async () => {
   const fleetLogs = vi.fn().mockResolvedValue({entries: [{evidence_id: "e1", level: "error", source: "runtime", observed_at: "2026-09-27T10:00:00Z", message: "boom"}]});
   render(<SparkDetail api={{fleetNode: vi.fn().mockResolvedValue(node), fleetLogs} as unknown as ControlApi} id="spk_1" onClose={vi.fn()}/>);
-  fireEvent.click(await screen.findByRole("button", {name: "Recent logs"}));
+  fireEvent.click(await screen.findByRole("tab", {name: "Logs"}));
   expect(await screen.findByText(/boom/)).toBeVisible();
+});
+
+test("a Spark with a Controller warning is shown as needing attention with the reason", async () => {
+  const warned = {...node, warnings: [{code: "install.partial", detail: "Qwen is partly installed", severity: "warning"}]};
+  render(<SparkDetail api={{fleetNode: vi.fn().mockResolvedValue(warned)} as unknown as ControlApi} id="spk_1" onClose={vi.fn()}/>);
+  expect(await screen.findByText("needs attention")).toBeVisible();
+  expect(screen.getByText(/Qwen is partly installed/)).toBeVisible();
 });

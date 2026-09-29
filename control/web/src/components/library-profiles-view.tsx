@@ -3,7 +3,7 @@ import type {MouseEvent} from "react";
 import {ApiError} from "../api/client";
 import {canonicalRecipeSelector} from "../api/types";
 import type {ControlApi, FleetProfile, FleetProfileApplicationView, FleetProfileEndpoints, FleetProfileInput, FleetProfilePreview, VisualFleetSnapshot} from "../api/types";
-import {nodeDisplayName} from "../lib/fleet";
+import {formatBytes, nodeDisplayName} from "../lib/fleet";
 import type {LibraryRecipeRecord} from "./library-workcell";
 import {CancelOperation} from "./cancel-operation";
 import {ProfileExport} from "./profile-export";
@@ -125,20 +125,12 @@ async function submitProfileLoad(
   }
 }
 
-function formatBytes(value: unknown): string | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
-  if (value < 1024) return `${Math.round(value)} B`;
-  const units = ["KiB", "MiB", "GiB", "TiB"];
-  let amount = value;
-  let unit = "B";
-  for (const next of units) { amount /= 1024; unit = next; if (amount < 1024) break; }
-  return `${amount.toFixed(amount >= 10 ? 0 : 1)} ${unit}`;
-}
+const bytes = (value: unknown) => typeof value === "number" && value >= 0 ? formatBytes(value) : undefined;
 
 function ProfileProgress({application, cancel}: {application: FleetProfileApplicationView; cancel?(requestKey: string): Promise<unknown>}) {
   const progress = applicationProgressRecord(application);
-  const completed = formatBytes(progress.bytes);
-  const total = formatBytes(progress.total_bytes);
+  const completed = bytes(progress.bytes);
+  const total = bytes(progress.total_bytes);
   const value = typeof progress.bytes === "number" && typeof progress.total_bytes === "number" && progress.total_bytes > 0 ? Math.min(100, Math.max(0, progress.bytes / progress.total_bytes * 100)) : undefined;
   const phase = typeof progress.phase === "string" ? progress.phase.replaceAll("-", " ") : "Profile load";
   const nodeIds = Array.isArray(progress.node_ids) ? progress.node_ids.filter((id): id is string => typeof id === "string") : [];

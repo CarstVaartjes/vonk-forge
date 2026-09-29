@@ -3,6 +3,7 @@ import type {ControlApi, EnrollmentGrantResponse, EnrollmentGrantStatus} from ".
 import {safeErrorText} from "../lib/error-display";
 import {ConfirmPanel} from "./confirm-panel";
 import {CopyButton} from "./copy-button";
+import {Time} from "./time";
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
@@ -43,7 +44,7 @@ export function EnrollmentGrant({api, grant}: {api: ControlApi; grant: Enrollmen
   }
 
   return <div className="fleet-enrollment-result">
-    <p><strong>Grant expires:</strong> <time dateTime={grant.expires_at}>{new Date(grant.expires_at).toLocaleString()}</time></p>
+    <p><strong>Grant expires:</strong> <Time value={grant.expires_at}/></p>
     <p>Run this command on the Spark. The installer will ask for the one-use pairing token.</p>
     <pre><code>{command}</code></pre><CopyButton label="command" value={command}/>
     <p><label htmlFor={`grant-token-${grant.id}`}>One-use pairing token</label></p>
