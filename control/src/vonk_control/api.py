@@ -293,6 +293,21 @@ def _log_request_failure(
     )
 
 
+def _log_agent_rejection(request: Request, status: int, reason: str) -> None:
+    """One line for a 4xx on an agent endpoint: request id and reason, no body."""
+    from .logging import log_event
+
+    log_event(
+        _LOGGER,
+        "agent.request_rejected",
+        service="controller",
+        endpoint=request.url.path,
+        request_id=getattr(request.state, "request_id", None),
+        http_status=status,
+        reason=reason[:200],
+    )
+
+
 async def _bounded_request_body(request: Request, maximum: int) -> bytes:
     body = bytearray()
     async for chunk in request.stream():
@@ -523,6 +538,12 @@ def create_app(
             # A handler turned this failure into a bare 5xx; keep the cause
             # (the raise ... from None only hides it from the traceback).
             _log_request_failure(request, error.status_code, cause)
+        if (
+            request.url.path.startswith("/agent/")
+            and 400 <= error.status_code < 500
+            and error.status_code not in {401, 403}
+        ):
+            _log_agent_rejection(request, error.status_code, str(error.detail))
         if request.url.path.startswith("/api/catalog/"):
             return Response(
                 content=_catalog_error_content(request, error),
@@ -581,6 +602,16 @@ def create_app(
             return await request_validation_exception_handler(request, error)
         from .logging import redact_text
 
+        if request.url.path.startswith("/agent/"):
+            _log_agent_rejection(
+                request,
+                422,
+                "invalid field "
+                + ", ".join(
+                    ".".join(str(part) for part in item["loc"])
+                    for item in error.errors()[:8]
+                ),
+            )
         response = RequestValidationProblem(
             detail="request is invalid",
             issues=[

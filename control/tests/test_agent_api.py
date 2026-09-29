@@ -683,6 +683,27 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
     )
 
 
+def test_agent_4xx_logs_one_line_with_request_id_and_field(agent_system, caplog):
+    client, _, _, clock = agent_system
+    caplog.set_level("INFO")
+
+    response = client.post(
+        "/agent/inventory",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={"schema_version": 1, "observed_at": clock.now.isoformat()},
+    )
+
+    assert response.status_code == 422
+    lines = [
+        r.getMessage()
+        for r in caplog.records
+        if "agent.request_rejected" in r.getMessage()
+    ]
+    assert len(lines) == 1
+    assert "gpu_count" in lines[0] and "request_id" in lines[0]
+    assert clock.now.isoformat() not in lines[0]
+
+
 def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_system):
     client, services, _, clock = agent_system
     identity = RecipeReconciliationIdentity(
