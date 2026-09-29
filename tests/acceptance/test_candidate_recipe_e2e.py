@@ -16,7 +16,7 @@ import os
 import subprocess
 import sys
 import tarfile
-import uuid
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -268,7 +268,6 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         pytest.fail("acceptance token file is empty or contains whitespace")
     headers = {"Authorization": f"Bearer {token}"}
     timeout = float(os.environ.get("VONK_ACCEPTANCE_TIMEOUT_SECONDS", "30"))
-    request_key = str(uuid.uuid4())
     expected_recipe_rows = index["recipes"]
     expected_recipe_keys = {
         _identity_key(row["document"], row["content_sha256"])
@@ -300,18 +299,19 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         )
         assert remote_entry["package"] == entry["package"]
 
-        sync = client.post(
-            "/api/catalog/managed-recipes/sync",
-            json={
-                "request_key": request_key,
-                "expected_commit": index["source_commit"],
-            },
-        )
-        assert sync.status_code == 200, sync.text[:1024]
-        sync_payload = sync.json()
+        # The Controller syncs the catalog by itself shortly after start.
+        deadline = time.monotonic() + max(timeout, 120)
+        while True:
+            sync = client.get("/api/catalog/managed-recipes/sync-status")
+            sync_payload = sync.json() if sync.status_code == 200 else {}
+            if sync_payload.get("state") in {"current", "partial", "failed"} and (
+                sync_payload.get("commit") == index["source_commit"]
+            ):
+                break
+            assert time.monotonic() < deadline, sync.text[:1024]
+            time.sleep(2)
         assert sync_payload["state"] == "current"
         assert sync_payload["commit"] == index["source_commit"]
-        assert sync_payload["expected_commit"] == index["source_commit"]
         assert sync_payload["total_count"] == len(expected_recipe_rows)
         assert sync_payload["processed_count"] == len(expected_recipe_rows)
         assert sync_payload["imported_count"] + sync_payload["unchanged_count"] == len(

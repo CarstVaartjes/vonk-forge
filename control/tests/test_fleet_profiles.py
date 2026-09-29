@@ -1229,7 +1229,7 @@ def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) 
         assert row is not None
         row.state = old_state
         row.status_reason = "stored attempt cannot continue"
-        damaged_progress = {**row.progress, "unexpected": {}}
+        damaged_progress = {**row.progress, "attempt": "invalid"}
         row.progress = damaged_progress
 
     second = service.load(

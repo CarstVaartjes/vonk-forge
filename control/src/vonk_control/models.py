@@ -1332,12 +1332,16 @@ class RecipeLibrarySyncRun(Base):
     error_code: Mapped[str | None] = mapped_column(String(128))
     error_detail: Mapped[str | None] = mapped_column(String(256))
     actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    # The Controller version and recipe contract that produced this result.
+    controller_marker: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    # Last progress of a running sync; a stale one is dead.
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

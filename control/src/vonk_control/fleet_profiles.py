@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import time
 import uuid
@@ -36,6 +37,7 @@ from .artifact_lifecycle import (
 from .artifact_reference_scan import require_model_sets_open
 from .auth import MUTATION_ROLES, Actor
 from .bounded_json import integer, require_mapping, sequence
+from .catalog_revision_contract import read_catalog_document
 from .failure_classification import error_code, is_security_failure
 from .fleet_profile_contract import (
     FleetProfileAction,
@@ -152,7 +154,7 @@ from .run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationService,
 )
-from .strict_json import stored_document_detail
+from .strict_json import read_stored_document, stored_document_detail
 from .user_authority import serialize_user_authority
 
 if TYPE_CHECKING:
@@ -215,6 +217,8 @@ _PROFILE_ADMISSION_RETRY_DELAYS_SECONDS = (0.05, 0.15, 0.35)
 #: scan, while still letting every parked order record its own ending.
 _MAX_PARKED_APPLICATION_OBSERVATIONS = 8
 _CANCELLATION_OBSERVATION_SECONDS = 5
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _profile_activity_pending(state, cancellation_state):
@@ -309,8 +313,11 @@ def _persisted_profile_plan(row: FleetProfileApplication) -> FleetProfilePreview
     """Load the complete stored preview through its canonical contract."""
 
     try:
-        plan = FleetProfilePreview.model_validate_json(
-            json.dumps(row.plan), strict=True
+        plan = read_stored_document(
+            lambda value: FleetProfilePreview.model_validate_json(
+                json.dumps(value), strict=True
+            ),
+            row.plan,
         )
     except (TypeError, ValueError, ValidationError) as error:
         raise FleetProfileConflict("Persisted Fleet profile plan is invalid") from error
@@ -339,8 +346,11 @@ def _persisted_profile_result(
             raise FleetProfileConflict("Persisted Fleet profile result is invalid")
         return None
     try:
-        return FleetProfileApplicationResult.model_validate_json(
-            json.dumps(row.result), strict=True
+        return read_stored_document(
+            lambda value: FleetProfileApplicationResult.model_validate_json(
+                json.dumps(value), strict=True
+            ),
+            row.result,
         )
     except (TypeError, ValueError, ValidationError) as error:
         raise FleetProfileConflict(
@@ -358,8 +368,11 @@ def _canonical_progress(value: object) -> FleetProfileApplicationProgress:
     receipt with a same-shaped neighbour.
     """
 
-    return FleetProfileApplicationProgress.model_validate_json(
-        canonical_message(value), strict=True
+    return read_stored_document(
+        lambda document: FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(document), strict=True
+        ),
+        value,
     )
 
 
@@ -369,9 +382,7 @@ def _persisted_profile_progress(
     """Load progress through its canonical contract before worker mutation."""
 
     try:
-        return FleetProfileApplicationProgress.model_validate_json(
-            canonical_message(row.progress), strict=True
-        )
+        return _canonical_progress(row.progress)
     except (TypeError, ValueError, ValidationError) as error:
         raise FleetProfileConflict(
             "Persisted Fleet profile progress is invalid"
@@ -2758,23 +2769,33 @@ class FleetProfileService:
                 "recipe selector is not an exact unique active recipe"
             )
         document = candidates[0]
-        revision = session.scalar(
-            select(CatalogDocumentRevision.id)
-            .where(
-                CatalogDocumentRevision.document_id == document,
-                CatalogDocumentRevision.kind == "recipe",
-                CatalogDocumentRevision.state == "active",
+        revisions = tuple(
+            session.scalars(
+                select(CatalogDocumentRevision)
+                .where(
+                    CatalogDocumentRevision.document_id == document,
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                )
+                .order_by(
+                    CatalogDocumentRevision.revision_number.desc(),
+                    CatalogDocumentRevision.created_at.desc(),
+                    CatalogDocumentRevision.id.desc(),
+                )
+                .limit(16)
             )
-            .order_by(
-                CatalogDocumentRevision.revision_number.desc(),
-                CatalogDocumentRevision.created_at.desc(),
-                CatalogDocumentRevision.id.desc(),
-            )
-            .limit(1)
         )
-        if revision is None:
+        if not revisions:
             raise FleetProfileConflict("recipe has no active catalog revision")
-        return document, revision
+        # The newest revision this Controller can read; when none is readable
+        # the newest one is kept so the choice can report what needs attention.
+        for revision in revisions:
+            try:
+                read_catalog_document(revision)
+            except ValueError:
+                continue
+            return document, revision.id
+        return document, revisions[0].id
 
     @classmethod
     def _recipe_document(
@@ -4929,7 +4950,14 @@ class FleetProfileService:
                     )
                 )
                 for other in applications:
-                    other_progress = _canonical_progress(other.progress)
+                    try:
+                        other_progress = _canonical_progress(other.progress)
+                    except (TypeError, ValueError):
+                        # Unreadable history never blocks a new application.
+                        _LOGGER.warning(
+                            "skipping unreadable profile application %s", other.id
+                        )
+                        continue
                     if (
                         other_progress.retry_of_application_id == parent.id
                         or other.state in {"queued", "running"}
@@ -7241,6 +7269,31 @@ class FleetProfileService:
             else {node_id for choice in choices for node_id in choice.spark_ids}
         )
         for choice in choices:
+            _, head = self._recipe_document(session, choice.recipe_selector)
+            try:
+                read_catalog_document(head)
+            except ValueError as error:
+                # No readable revision exists for this recipe (the identity
+                # lookup already prefers the newest readable one). Show the
+                # choice as needing attention instead of failing the profile.
+                _LOGGER.warning(
+                    "profile %s choice %s needs attention: %s",
+                    row.id,
+                    choice.recipe_selector,
+                    error,
+                )
+                warnings.append(
+                    f"Recipe {choice.recipe_selector} needs attention: "
+                    "no readable revision is available; the recipe catalog "
+                    "sync will replace it"
+                )
+                cache_unknown += 1
+                assignments.append(
+                    self._attention_assignment(
+                        session, choice, loaded_assignments=loaded_assignments
+                    )
+                )
+                continue
             recipe, revision, cache = self._resolve_choice(session, choice)
             required = recipe_topology(revision.document).node_count
             if self._cache_resolver is None:
@@ -7473,6 +7526,44 @@ class FleetProfileService:
         return _OBSERVED_ASSIGNMENT_LABELS[
             cls._assignment_state(session, loaded).current_state
         ]
+
+    def _attention_assignment(
+        self,
+        session: Session,
+        choice: FleetProfileAssignmentInput,
+        *,
+        loaded_assignments: Sequence[FleetProfileAssignment] | None,
+    ) -> FleetProfileAssignmentView:
+        document_id = session.scalar(
+            select(CatalogDocument.id).where(
+                CatalogDocument.kind == "recipe",
+                CatalogDocument.publisher == choice.recipe_selector.split("/")[0],
+                CatalogDocument.slug == choice.recipe_selector.split("/")[-1],
+            )
+        )
+        return FleetProfileAssignmentView(
+            selector=self._assignment_selector(choice),
+            display_name=choice.recipe_selector,
+            recipe_selector=choice.recipe_selector,
+            recipe_id=document_id,
+            spark_ids=list(choice.spark_ids),
+            assigned_sparks=len(choice.spark_ids),
+            model={"variant": choice.model_variant, "state": "Needs attention"},
+            recipe={
+                "selector": choice.recipe_selector,
+                "state": "Needs attention",
+            },
+            observed_state=(
+                self._observed_assignment_state(
+                    session,
+                    loaded_assignments,
+                    recipe_id=document_id,
+                    spark_ids=choice.spark_ids,
+                )
+                if document_id is not None
+                else "Not loaded"
+            ),
+        )
 
     @staticmethod
     def _model_title(session: Session, document: Mapping[str, object]) -> str | None:

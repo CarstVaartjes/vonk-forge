@@ -94,17 +94,6 @@ enrolled roster is unchanged. Missing or degraded assignments are reconciled
 through profile application, run recovery, and route recovery as appropriate;
 this does not change the accepted profile or grant new authority.
 
-## Unclaimed containers
-
-The Controller's records are the authority. The agent asks the Controller about
-each locally retained run and, when the Controller has no record of it, removes
-the run's `lifecycle.json`, which is the local claim. This includes service runs
-started before run generations were reported. The root helper checks every
-minute for `vonk-<uuid>` containers with no such claim. An exited one is
-removed immediately; a running one is stopped and removed after ten minutes
-without a claim. Containers with any other name are never touched, and an
-unreachable Controller leaves the claim, and the workload, in place.
-
 ## Cancellation and replacement
 
 A new explicit request on selected Sparks supersedes older overlapping intent.
