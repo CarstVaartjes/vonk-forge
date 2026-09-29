@@ -34,3 +34,10 @@ test("a Spark with a Controller warning is shown as needing attention with the r
   expect(await screen.findByText("needs attention")).toBeVisible();
   expect(screen.getByText(/Qwen is partly installed/)).toBeVisible();
 });
+
+test("a running workload shows the recipe options it was started with", async () => {
+  const running = {...node, loaded: [{run_id: "r1", rank: 0, title: "GLM", healthy: true, option_choices: {verification: "adaptive-k"}}]};
+  render(<SparkDetail api={{fleetNode: vi.fn().mockResolvedValue(running)} as unknown as ControlApi} id="spk_1" onClose={vi.fn()}/>);
+  const list = await screen.findByRole("list", {name: "Active recipe options"});
+  expect(list).toHaveTextContent("adaptive-k");
+});

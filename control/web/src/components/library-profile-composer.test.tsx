@@ -40,3 +40,31 @@ test("adding a recipe preserves the saved definition of existing assignments", a
     assignments: [definition.assignments[0], expect.objectContaining({recipe_selector: "vonk-forge/qwen-code", desired_state: "running"})],
   });
 });
+
+const options = [
+  {name: "verification", label: "Verification", help: "How drafted tokens are verified.", choices: [{value: "standard", label: "Standard", help: "All.", default: true, args: [], env: {}}, {value: "adaptive-k", label: "Adaptive", help: "Prefix.", default: false, args: [], env: {}}]},
+  {name: "projections", label: "Projections", help: "Dense weights.", choices: [{value: "stock", label: "Stock", help: "BF16.", default: true, args: [], env: {}}, {value: "dense-fp8", label: "FP8", help: "FP8.", default: false, args: [], env: {}}]},
+];
+const optioned = {...detail, definition: {topology: {name: "single"}, options}} as unknown as LibraryViewRecipeDetail;
+
+test("untouched recipe options are saved explicitly with the recipe defaults", async () => {
+  const user = userEvent.setup();
+  const autosaveProfile = vi.fn(async () => saved);
+  const api = {profiles: vi.fn(async () => ({profiles: []})), autosaveProfile} as unknown as ControlApi;
+  render(<LibraryNodeNamesProvider names={{[nodeId]: "Spark Alpha"}}><LibraryProfileComposer api={api} detail={optioned}/></LibraryNodeNamesProvider>);
+  await user.click(screen.getByRole("button", {name: "Add to Fleet Profile"}));
+  expect(await screen.findByLabelText("Verification")).toHaveValue("standard");
+  await user.click(screen.getByRole("button", {name: "Create Fleet Profile"}));
+  expect(autosaveProfile).toHaveBeenCalledWith(1, expect.objectContaining({assignments: [expect.objectContaining({option_choices: {verification: "standard", projections: "stock"}})]}));
+});
+
+test("a chosen recipe option is saved with the assignment", async () => {
+  const user = userEvent.setup();
+  const autosaveProfile = vi.fn(async () => saved);
+  const api = {profiles: vi.fn(async () => ({profiles: []})), autosaveProfile} as unknown as ControlApi;
+  render(<LibraryNodeNamesProvider names={{[nodeId]: "Spark Alpha"}}><LibraryProfileComposer api={api} detail={optioned}/></LibraryNodeNamesProvider>);
+  await user.click(screen.getByRole("button", {name: "Add to Fleet Profile"}));
+  await user.selectOptions(await screen.findByLabelText("Verification"), "adaptive-k");
+  await user.click(screen.getByRole("button", {name: "Create Fleet Profile"}));
+  expect(autosaveProfile).toHaveBeenCalledWith(1, expect.objectContaining({assignments: [expect.objectContaining({option_choices: {verification: "adaptive-k", projections: "stock"}})]}));
+});

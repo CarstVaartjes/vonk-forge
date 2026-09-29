@@ -76,6 +76,7 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
           <div><dt>Host</dt><dd>{node.hostname}{node.ip_address ? ` · ${node.ip_address}` : ""}</dd></div>
           <div><dt>Recipes</dt><dd>{node.loaded.filter(item => item.healthy).length} running · {node.installed.filter(item => item.complete).length} installed</dd></div>
         </dl>
+        {node.loaded.some(item => Object.keys(item.option_choices ?? {}).length > 0) && <ul className="spark-run-options" aria-label="Active recipe options">{node.loaded.filter(item => Object.keys(item.option_choices ?? {}).length > 0).map(item => <li key={`${item.run_id}:${item.rank}`}><strong>{item.title}</strong> {Object.entries(item.option_choices ?? {}).map(([name, value]) => <StatusPill key={name} tone="neutral">{name}: {value}</StatusPill>)}</li>)}</ul>}
         {status.reasons.length > 0 && <ul className="spark-warnings" aria-label="Needs attention">{status.reasons.map((reason, index) => <li key={index}><StatusPill tone="warning">{status.status === "offline" ? "offline" : "attention"}</StatusPill> {reason}</li>)}</ul>}
         {node.installed.some(item => !item.complete) && <ul className="spark-warnings" aria-label="Incomplete installations">{node.installed.filter(item => !item.complete).map(item => <li key={item.installation_id}><StatusPill tone="warning">{item.group_state}</StatusPill> {item.title} · {item.present_ranks.length} of {item.expected_rank_count} ranks <InstallationReconcile api={api} installationId={item.installation_id}/></li>)}</ul>}
       </>}

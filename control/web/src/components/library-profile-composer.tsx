@@ -2,6 +2,8 @@ import {useEffect, useMemo, useState} from "react";
 import {canonicalRecipeSelector} from "../api/types";
 import type {ControlApi, FleetProfile, FleetProfileInput, LibraryViewRecipeDetail} from "../api/types";
 import {useLibraryNodeName} from "./library-node-names";
+import {RecipeOptionSelects, effectiveChoices} from "./recipe-option-selects";
+import type {OptionChoices} from "./recipe-option-selects";
 
 function nextProfileNumber(profiles: FleetProfile[]): number {
   return Math.max(0, ...profiles.map(profile => profile.number)) + 1;
@@ -25,6 +27,8 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState<FleetProfile>();
+  const recipeOptions = detail.definition.options ?? [];
+  const [chosenOptions, setChosenOptions] = useState<OptionChoices>({});
   const eligibleGroups = useMemo(
     () => detail.placement.flatMap(placement => placement.recommendations.filter(group => group.eligible))
       .sort((left, right) => Number(right.node_ids.includes(preferredNodeId ?? "")) - Number(left.node_ids.includes(preferredNodeId ?? ""))),
@@ -59,6 +63,8 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
       assignment_name: assignmentName.trim(),
       model_variant: modelVariant,
       desired_state: desiredState,
+      // Every option is sent explicitly; untouched ones carry the recipe default.
+      ...(recipeOptions.length > 0 ? {option_choices: effectiveChoices(recipeOptions, chosenOptions)} : {}),
     } satisfies NonNullable<FleetProfileInput["assignments"]>[number];
     try {
       const existing = target === "new" ? undefined : profiles.find(profile => profile.number === Number(target));
@@ -95,6 +101,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
       <label><span>Assignment name</span><input value={assignmentName} maxLength={128} onChange={event => setAssignmentName(event.target.value)}/></label>
       <label className="profile-composer-wide"><span>Spark group</span><select value={groupIndex} onChange={event => setGroupIndex(Number(event.target.value))}>{eligibleGroups.map((candidate, index) => <option key={`${candidate.topology_name}:${candidate.node_ids.join(":")}`} value={index}>{candidate.nodes.map(node => nodeName(node.node_id)).join(" + ")} · {candidate.load_state === "loaded" ? "running" : candidate.install_state === "complete" ? "installed" : "ready"}</option>)}</select></label>
     </div>
+    <RecipeOptionSelects idPrefix="composer-option" options={recipeOptions} value={chosenOptions} onChange={setChosenOptions}/>
     {group && <ol className="profile-rank-preview" aria-label="Selected Sparks">{group.nodes.map(node => <li key={node.node_id}><span>Spark</span><strong>{nodeName(node.node_id)}</strong><small>{node.node_id}</small></li>)}</ol>}
     {error && <p className="dialog-error" role="alert">{error}</p>}
     <footer><span>{group?.nodes.length ?? 0} {group?.nodes.length === 1 ? "Spark" : "Sparks"} · selector {recipeSelector}</span><button type="button" disabled={!group || saving || !assignmentName.trim() || (target === "new" && !name.trim())} onClick={() => void save()}>{saving ? "Saving profile…" : target === "new" ? "Create Fleet Profile" : "Add workload"}</button></footer>
