@@ -9,6 +9,7 @@ from contextlib import redirect_stdout
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from io import StringIO
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -173,6 +174,10 @@ class FakeClient:
         known = known or re.fullmatch(r"/api/jobs/[^/]+", path) is not None
         known = (
             known
+            or re.fullmatch(r"/api/operations/[^/]+(?:/evidence)?", path) is not None
+        )
+        known = (
+            known
             or re.fullmatch(r"/api/fleet/[^/]+/(rename|re-enroll|remove)", path)
             is not None
         )
@@ -222,6 +227,8 @@ class FakeClient:
                     "node_id",
                     "request_id",
                 }
+            elif path.endswith("/evidence"):
+                assert query == {"attempt": 2}
             elif run_switch_operation_path is not None:
                 assert query is None
             else:
@@ -792,6 +799,38 @@ def test_fleet_activity_passes_all_filters_to_one_canonical_page() -> None:
             },
         )
     ]
+
+
+def test_fleet_evidence_downloads_the_current_attempt_to_a_private_file(
+    tmp_path: Path,
+) -> None:
+    bundle = {"schema": "evidence"}
+    client = FakeClient(
+        {
+            ("GET", "/api/operations/op-1"): {"attempt": 2},
+            ("GET", "/api/operations/op-1/evidence"): bundle,
+        }
+    )
+    output = tmp_path / "evidence.json"
+
+    status, payload = run(
+        ("fleet", "evidence", "op-1", "--output", str(output), "--json"), client
+    )
+
+    assert status == 0 and payload["attempt"] == 2
+    assert json.loads(output.read_text()) == bundle
+    assert output.stat().st_mode & 0o077 == 0
+    assert client.calls[-1][3] == {"attempt": 2}
+
+
+def test_recipe_sync_status_treats_a_missing_sync_as_never_run() -> None:
+    class NeverSynced(FakeClient):
+        def request(self, method, path, *args, **kwargs):
+            raise ControlHTTPError(404, "not found")
+
+    status, payload = run(("recipe", "sync-status", "--json"), NeverSynced({}))
+
+    assert status == 0 and payload == {"state": "never-run"}
 
 
 def test_fleet_resume_requires_owner_advertised_action_and_posts_explicit_intent() -> (
