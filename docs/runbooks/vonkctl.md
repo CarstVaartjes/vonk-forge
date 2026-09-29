@@ -858,12 +858,13 @@ creating and revoking need the administrator role:
 vonkctl key create laptop --output client-key   # private file, mode 600
 vonkctl key create ci --model ALIAS --expires 30d
 vonkctl key list
+vonkctl key roll ci --yes   # new secret, same name and models; the old one stops working
 vonkctl key revoke ci --yes
 ```
 
 The web manages the same keys under the operator menu, **API keys**.
 
-`key create` shows the key once: on stdout, or only in the new `--output` file.
+`key create` and `key roll` show the key once: on stdout, or only in the new `--output` file.
 Without `--model` a key may use every gateway model, so it keeps working as
 profiles change; `--expires` takes a duration such as `30d` or `12h` and the
 default is never. `key list` shows names, models, creation, expiry, and last

@@ -4,6 +4,7 @@ import {vi} from "vitest";
 import {ApiError} from "../api/client";
 import type {ControlApi, FleetProfile, FleetProfileApplicationView, FleetProfilePreview} from "../api/types";
 import {LibraryProfilesView} from "./library-profiles-view";
+import {ToastProvider} from "./toast";
 
 const nodeA = "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const nodeB = "spk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -79,9 +80,9 @@ test("shows a refused profile load without resubmitting it", async () => {
   const loadProfile = vi.fn(async () => application);
   loadProfile.mockRejectedValueOnce(new ApiError(409, "Profile admission refused"));
   const api = apiFor({loadProfile});
-  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+  render(<ToastProvider><LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/></ToastProvider>);
   await user.click(await screen.findByRole("button", {name: "Load profile"}));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Profile admission refused");
+  expect(await within(screen.getByRole("region", {name: "Notifications"})).findByText(/Profile admission refused/)).toBeVisible();
   expect(loadProfile).toHaveBeenCalledTimes(1);
 });
 

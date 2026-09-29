@@ -837,6 +837,15 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(key_create)
     key_list = key_actions.add_parser("list", help="List client keys, never secrets")
     _add_output(key_list)
+    key_roll = key_actions.add_parser(
+        "roll", help="Replace a client key's secret; the new one is shown only once"
+    )
+    key_roll.add_argument("name")
+    key_roll.add_argument("--yes", action="store_true", help="Confirm without asking")
+    key_roll.add_argument(
+        "--output", type=Path, help="Write the key to this new private file"
+    )
+    _add_output(key_roll)
     key_revoke = key_actions.add_parser("revoke", help="Revoke a client key by name")
     key_revoke.add_argument("name")
     key_revoke.add_argument("--yes", action="store_true", help="Confirm without asking")
@@ -3713,14 +3722,22 @@ def _key(args: argparse.Namespace, client: ControllerClient) -> dict[str, object
             args, f"Revoke key {args.name}? Apps using it stop working immediately."
         )
         return client.request("POST", f"/api/key/{_quoted(args.name)}/revoke", {})
-    payload: dict[str, object] = {"name": args.name, "models": args.models}
-    if args.expires is not None:
-        payload["expires"] = args.expires
+    if action == "roll":
+        _confirm_action(
+            args,
+            f"Roll key {args.name}? Apps using the old secret stop working immediately.",
+        )
+        path, payload = f"/api/key/{_quoted(args.name)}/roll", {}
+    else:
+        path = "/api/key"
+        payload = {"name": args.name, "models": args.models}
+        if args.expires is not None:
+            payload["expires"] = args.expires
     if args.output is None:
-        return client.request("POST", "/api/key", payload)
+        return client.request("POST", path, payload)
     # Reserve the private file before the key exists so it cannot be lost.
     with PrivateOutput(args.output) as destination:
-        result = client.request("POST", "/api/key", payload)
+        result = client.request("POST", path, payload)
         destination.write_bytes(f"{result.pop('key')}\n".encode())
     result["output"] = str(args.output.absolute())
     return result

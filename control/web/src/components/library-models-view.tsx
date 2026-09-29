@@ -67,7 +67,7 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
     </div>
     <div className="library-model-list" aria-label="Model library">
       {[...groups].map(([key, revisions]) => <ModelRevisionsRow key={key} api={api} revisions={revisions} onNavigate={onNavigate} onPrepared={refresh} />)}
-      {visible.length === 0 && <EmptyLibrary filters={filters} query={query} onClear={() => { updateFilters(EMPTY_LIBRARY_WORKCELL_FILTERS); onQueryChange(""); }}/>}
+      {visible.length === 0 && <EmptyLibrary filters={filters} query={query} onRefresh={refresh} onClear={() => { updateFilters(EMPTY_LIBRARY_WORKCELL_FILTERS); onQueryChange(""); }}/>}
     </div>
   </section>;
 }

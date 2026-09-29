@@ -3,6 +3,9 @@ import {availabilityFailure, LibraryAvailabilityFeedback} from "../components/li
 import {useCallback, useEffect, useId, useMemo, useRef, useState} from "react";
 import type {SyntheticEvent} from "react";
 import type {ActivityFilters, ControlApi, JobDetail, OperationDetail, VisualFleetSnapshot} from "../api/types";
+import {EmptyState} from "../components/empty-state";
+import {PageHeader} from "../components/page-header";
+import {SkeletonRows} from "../components/skeleton";
 import {StatusPill} from "../components/status-pill";
 import {nodeDisplayName} from "../lib/fleet";
 import {exactTime, relativeTime} from "../lib/time";
@@ -678,10 +681,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
 
   const filtering = Boolean(query.trim() || category || actor || status || filters.state || filters.target || filters.requestId);
   return <div className="activity-page">
-    <header className="activity-hero">
-      <div><h1 tabIndex={-1}>Activity</h1><p>Understand meaningful control-plane changes without exposing technical identifiers by default.</p></div>
-      <button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => setAttempt(value => value + 1)}>{loading && events ? "Refreshing…" : "Refresh activity"}</button>
-    </header>
+    <PageHeader title="Activity" description="Meaningful control-plane changes, without technical identifiers by default." actions={<button type="button" className="button" disabled={loading || loadingMore} onClick={() => setAttempt(value => value + 1)}>{loading && events ? "Refreshing…" : "Refresh activity"}</button>}/>
 
     {events && events.length > 0 && <ActivityOverview events={filtered} filtering={filtering} loadedCount={events.length}/>}
 
@@ -714,11 +714,9 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
       </div>
     </section>
 
-    {loading && !events && <section className="activity-state" role="status"><strong>Loading activity…</strong><p>Reading the latest operator and system events.</p></section>}
+    {loading && !events && !error && <SkeletonRows columns={4} label="Loading activity"/>}
     {error && <section className="activity-state is-error" role="alert"><div><strong>Activity unavailable</strong><p>{error}</p></div><button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => setAttempt(value => value + 1)}>Try again</button></section>}
-    {!loading && !error && events?.length === 0 && filtering && <section className="activity-state"><strong>No matching activity</strong><p>No operation matches these filters. Remove one or more filters.</p><button type="button" className="button secondary" onClick={clearFilters}>Clear filters</button></section>}
-    {!loading && !error && events?.length === 0 && !filtering && <section className="activity-state"><strong>No activity in the loaded window</strong><p>No operation records were returned by the current API window.</p></section>}
-    {events && filtered.length === 0 && events.length > 0 && <section className="activity-state"><strong>No matching activity</strong><p>Try a broader search or remove one or more filters.</p><button type="button" className="button secondary" onClick={clearFilters}>Clear filters</button></section>}
+    {!loading && !error && events && filtered.length === 0 && <EmptyState title="No activity yet" description="Activity lists the changes made to your fleet, keys and library." filtered={filtering} onClearFilters={clearFilters} action={{label: "Refresh", onClick: () => setAttempt(value => value + 1)}}/>}
     {displayed.length > 0 && (view === "timeline" ? <ActivityTimeline api={api} events={displayed} now={now} onJobUpdate={updateOperation} onOperationUpdate={updateCanonicalOperation} targetNames={targetNames}/> : <ActivityTable api={api} events={displayed} now={now} onJobUpdate={updateOperation} onOperationUpdate={updateCanonicalOperation} targetNames={targetNames}/>)}
   </div>;
 }

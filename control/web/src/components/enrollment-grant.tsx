@@ -1,9 +1,10 @@
 import {useEffect, useState} from "react";
 import type {ControlApi, EnrollmentGrantResponse, EnrollmentGrantStatus} from "../api/types";
 import {safeErrorText} from "../lib/error-display";
-import {ConfirmPanel} from "./confirm-panel";
+import {ConfirmDialog} from "./confirm-dialog";
 import {CopyButton} from "./copy-button";
 import {Time} from "./time";
+import {useToast} from "./toast";
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
@@ -18,7 +19,7 @@ export function EnrollmentGrant({api, grant}: {api: ControlApi; grant: Enrollmen
   const [status, setStatus] = useState<EnrollmentGrantStatus | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
   const command = enrollmentCommand(grant);
   const open = !status || status.state === "pending";
 
@@ -35,11 +36,12 @@ export function EnrollmentGrant({api, grant}: {api: ControlApi; grant: Enrollmen
     setBusy(true);
     try {
       setStatus(await api.revokeEnrollment(grant.id));
-      setConfirming(false);
+      toast.success("Enrollment grant revoked.");
     } catch (failure) {
-      setError(safeErrorText(failure instanceof Error ? failure.message : "Could not revoke the grant"));
+      toast.error(safeErrorText(failure instanceof Error ? failure.message : "Could not revoke the grant"));
     } finally {
       setBusy(false);
+      setConfirming(false);
     }
   }
 
@@ -51,8 +53,7 @@ export function EnrollmentGrant({api, grant}: {api: ControlApi; grant: Enrollmen
     <input id={`grant-token-${grant.id}`} readOnly value={grant.token} aria-label="One-use pairing token"/><CopyButton label="pairing token" value={grant.token}/>
     <p role="status" data-grant-state={status?.state ?? "unknown"}><strong>Grant status:</strong> {status?.state ?? "checking…"}{status?.state === "consumed" && status.display_name ? ` by ${status.display_name}` : ""}</p>
     {open && !confirming && <button type="button" className="button secondary" onClick={() => setConfirming(true)}>Revoke grant</button>}
-    {confirming && <ConfirmPanel title="Revoke this grant?" consequence="The pairing token stops working. A Spark that has not enrolled yet cannot use it." confirmLabel="Revoke grant" command={`vonkctl fleet enrollment revoke ${grant.id} --yes`} busy={busy} onConfirm={() => void revoke()} onCancel={() => setConfirming(false)}/>}
-    {error && <p role="alert">{error}</p>}
+    {confirming && <ConfirmDialog title="Revoke this grant?" consequence="The pairing token stops working. A Spark that has not enrolled yet cannot use it." confirmLabel="Revoke grant" command={`vonkctl fleet enrollment revoke ${grant.id} --yes`} busy={busy} onConfirm={() => void revoke()} onCancel={() => setConfirming(false)}/>}
   </div>;
 }
 
