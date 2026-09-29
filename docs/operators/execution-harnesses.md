@@ -34,10 +34,10 @@ pass ordinary engine arguments unchanged after the executable. Several recipes
 for the same model and Spark count remain independent revisions, including
 variants from one creator with different engines or settings.
 
-## The eight built-in harnesses
+## The nine built-in harnesses
 
 The built-in compiler adapters are `comfyui`, `diffusers`, `ds4`, `llama-cpp`,
-`pytorch-pipeline`, `sglang`, `tensorrt-llm`, and `vllm`. Their names describe
+`pytorch-pipeline`, `sglang`, `tensorfold`, `tensorrt-llm`, and `vllm`. Their names describe
 execution behavior, not separate catalog entities or a promise that every
 model supports every engine or topology. The selected Model, Recipe, package,
 compiler, structural qualification, and Fleet admission must agree.

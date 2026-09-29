@@ -89,6 +89,15 @@ CANONICAL_HARNESSES: tuple[CanonicalHarnessMetadata, ...] = (
         wrapper="/opt/vonk/bin/ds4-serve",
     ),
     CanonicalHarnessMetadata(
+        slug="tensorfold",
+        adapters=("openai",),
+        capability_requirements=("nvidia-gpu",),
+        topology_modes=("single",),
+        security_exceptions=(),
+        executables=("tensorfold-serve", "tensorfold"),
+        wrapper="/opt/vonk/bin/tensorfold-serve",
+    ),
+    CanonicalHarnessMetadata(
         slug="diffusers",
         adapters=("image-job", "audio-job", "video-job", "artifact-job"),
         capability_requirements=("nvidia-gpu",),
