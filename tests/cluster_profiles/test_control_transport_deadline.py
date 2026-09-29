@@ -86,6 +86,20 @@ def https_peer(tmp_path, monkeypatch):
     stop = threading.Event()
 
     class Handler(BaseHTTPRequestHandler):
+        # The client's close can surface anywhere in the exchange, not only
+        # while respond() is writing; record it wherever it lands.
+        def handle(self):
+            try:
+                super().handle()
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
+                state["closed"].set()
+
+        def finish(self):
+            try:
+                super().finish()
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
+                state["closed"].set()
+
         def do_POST(self):
             body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
             state["calls"].append((self.command, self.path, body))
