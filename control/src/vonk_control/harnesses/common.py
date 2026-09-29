@@ -222,6 +222,7 @@ _ENGINE_LAUNCH_PREFIXES: dict[str, tuple[str, ...]] = {
     "llama-cpp": ("/opt/vonk/bin/llama-server",),
     "ds4": ("/opt/vonk/bin/ds4-serve",),
     "tensorfold": ("/opt/vonk/bin/tensorfold-serve",),
+    "exllamav3": ("/opt/vonk/bin/exllamav3-serve",),
     "diffusers": ("/opt/vonk/bin/diffusers-job",),
     "comfyui": ("/opt/vonk/bin/comfyui-job",),
     "pytorch-pipeline": ("/opt/vonk/bin/pytorch-pipeline",),
@@ -238,7 +239,15 @@ def _validate_engine_launch(slug: str, command: tuple[str, ...]) -> None:
         or not (command[2] == "/models" or command[2].startswith("/models/"))
     ):
         raise HarnessCompileError("vLLM launch must name its model mount")
-    if slug in {"vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4", "tensorfold"}:
+    if slug in {
+        "vllm",
+        "sglang",
+        "tensorrt-llm",
+        "llama-cpp",
+        "ds4",
+        "tensorfold",
+        "exllamav3",
+    }:
         if "--host" not in command or "--port" not in command:
             raise HarnessCompileError("serving harness launch lacks host and port")
     else:

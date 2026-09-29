@@ -102,6 +102,7 @@ _ENGINE_PATHS: dict[str, tuple[RuntimeWritablePath, ...]] = {
     "llama-cpp": _COMMON_PATHS,
     "ds4": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "tensorfold": (*_COMMON_PATHS, *_PYTHON_PATHS),
+    "exllamav3": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "diffusers": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "comfyui": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "pytorch-pipeline": (*_COMMON_PATHS, *_PYTHON_PATHS),
@@ -130,6 +131,10 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
     ),
     # TensorFold serves no /metrics; like TensorRT-LLM it is unsupported.
     "tensorfold": EngineTelemetryContract(
+        "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
+    ),
+    # ExLlamaV3 serves no /metrics; unsupported like TensorFold.
+    "exllamav3": EngineTelemetryContract(
         "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),
     "diffusers": EngineTelemetryContract(
@@ -192,6 +197,7 @@ for _slug in (
     "tensorrt-llm",
     "ds4",
     "tensorfold",
+    "exllamav3",
     "diffusers",
     "comfyui",
     "pytorch-pipeline",

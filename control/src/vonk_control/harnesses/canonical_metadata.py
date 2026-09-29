@@ -98,6 +98,15 @@ CANONICAL_HARNESSES: tuple[CanonicalHarnessMetadata, ...] = (
         wrapper="/opt/vonk/bin/tensorfold-serve",
     ),
     CanonicalHarnessMetadata(
+        slug="exllamav3",
+        adapters=("openai",),
+        capability_requirements=("nvidia-gpu",),
+        topology_modes=("single",),
+        security_exceptions=(),
+        executables=("exllamav3-serve", "exllamav3"),
+        wrapper="/opt/vonk/bin/exllamav3-serve",
+    ),
+    CanonicalHarnessMetadata(
         slug="diffusers",
         adapters=("image-job", "audio-job", "video-job", "artifact-job"),
         capability_requirements=("nvidia-gpu",),

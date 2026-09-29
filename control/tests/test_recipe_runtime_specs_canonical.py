@@ -265,6 +265,11 @@ def test_runtime_compiler_rejects_retired_entity_authorities(
             ["/opt/vonk/bin/tensorfold-serve"],
             "recipe-source-build.json",
         ),
+        (
+            "exllamav3",
+            ["/opt/vonk/bin/exllamav3-serve"],
+            "recipe-source-build.json",
+        ),
         ("diffusers", ["/opt/vonk/bin/diffusers-job"], "recipe-job.json"),
         ("comfyui", ["/opt/vonk/bin/comfyui-job"], "recipe-job.json"),
         ("pytorch-pipeline", ["/opt/vonk/bin/pytorch-pipeline"], "recipe-job.json"),

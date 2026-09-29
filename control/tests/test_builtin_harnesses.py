@@ -35,12 +35,21 @@ BUILTINS = (
     "llama-cpp",
     "ds4",
     "tensorfold",
+    "exllamav3",
     "diffusers",
     "comfyui",
     "pytorch-pipeline",
 )
 
-OPENAI_BUILTINS = {"vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4", "tensorfold"}
+OPENAI_BUILTINS = {
+    "vllm",
+    "sglang",
+    "tensorrt-llm",
+    "llama-cpp",
+    "ds4",
+    "tensorfold",
+    "exllamav3",
+}
 ENTRYPOINTS = {
     "vllm": ["/opt/vonk/bin/vllm", "serve", "/models"],
     "sglang": ["/opt/vonk/bin/sglang-serve", "serve", "/models"],
@@ -48,6 +57,7 @@ ENTRYPOINTS = {
     "llama-cpp": ["/opt/vonk/bin/llama-server", "/models"],
     "ds4": ["/opt/vonk/bin/ds4-serve", "/models"],
     "tensorfold": ["/opt/vonk/bin/tensorfold-serve"],
+    "exllamav3": ["/opt/vonk/bin/exllamav3-serve"],
     "diffusers": ["/opt/vonk/bin/diffusers-job"],
     "comfyui": ["/opt/vonk/bin/comfyui-job"],
     "pytorch-pipeline": ["/opt/vonk/bin/pytorch-pipeline"],
@@ -86,6 +96,11 @@ ARGS = {
         {"name": "port", "value": 8000},
         {"name": "parallel", "value": 5},
         {"name": "context", "value": 32768},
+    ],
+    "exllamav3": [
+        {"name": "host", "value": "0.0.0.0"},
+        {"name": "port", "value": 8000},
+        {"name": "max-seq-len", "value": 32768},
     ],
     "diffusers": [
         {"name": "pipeline", "value": "text-to-image"},
