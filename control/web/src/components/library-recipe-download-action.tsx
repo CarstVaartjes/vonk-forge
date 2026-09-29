@@ -91,7 +91,7 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
     </button>
     {missingModels.length > 0 && <span className="library-cache-missing">Also caches {missingModels.join(", ")}</span>}
     {(busy || phase) && <span role="status">{phase}</span>}
-    {busy && operationId && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." cancel={key => api.cancelRecipeOperation(operationId, key)}/>}
+    {busy && operationId && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." command={`vonkctl recipe cancel ${operationId}`} cancel={key => api.cancelRecipeOperation(operationId, key)}/>}
     {error && <span className="library-cache-error" role="alert">{error}</span>}
   </div>;
 }

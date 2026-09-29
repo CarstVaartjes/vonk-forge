@@ -147,7 +147,7 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
   expect(screen.queryByRole("heading", {name: "Agent Enrollment · Failed"})).not.toBeInTheDocument();
 
   await user.type(screen.getByRole("searchbox", {name: "Search activity"}), "no such activity");
-  const emptyState = screen.getByText("No matching activity").closest("section")!;
+  const emptyState = screen.getByText("No results match these filters").closest("section")!;
   expect(emptyState).toBeVisible();
   expect(within(screen.getByRole("region", {name: "Matching activity summary"})).getByRole("img")).toHaveAccessibleName("0 recorded, 0 in progress, 0 need review, 0 unsuccessful, 0 unknown");
   await user.click(within(emptyState).getByRole("button", {name: "Clear filters"}));
@@ -387,12 +387,12 @@ test("shows a retryable error when activity fails to load", async () => {
   const user = userEvent.setup();
   render(<ActivityPage api={api(undefined, undefined, loadOperations)} now={NOW}/>);
 
-  expect(screen.getByText("Loading activity…")).toBeVisible();
+  expect(screen.getByLabelText("Loading activity")).toHaveAttribute("aria-busy", "true");
   const alert = await screen.findByRole("alert");
   expect(alert).toHaveTextContent("operation projection unavailable");
   expect(screen.queryByRole("region", {name: "Activity history coverage"})).not.toBeInTheDocument();
   await user.click(within(alert).getByRole("button", {name: "Try again"}));
-  await waitFor(() => expect(screen.getByText("No activity in the loaded window")).toBeVisible());
+  await waitFor(() => expect(screen.getByText("No activity yet")).toBeVisible());
   expect(loadOperations).toHaveBeenCalledTimes(2);
 });
 
@@ -410,7 +410,7 @@ test("clears dynamic filters that are no longer available after refresh", async 
 
   await waitFor(() => expect(loadOperations).toHaveBeenCalledTimes(2));
   await waitFor(() => expect(screen.getByLabelText("Operator")).toHaveValue(""));
-  expect(screen.getByText("No activity in the loaded window")).toBeVisible();
+  expect(screen.getByText("No activity yet")).toBeVisible();
 });
 
 test("resets pagination busy state when a new activity load supersedes load-more", async () => {
@@ -427,7 +427,7 @@ test("resets pagination busy state when a new activity load supersedes load-more
   expect(screen.getByRole("button", {name: "Loading older operations…"})).toBeDisabled();
 
   view.rerender(<ActivityPage api={secondApi} now={NOW}/>);
-  await waitFor(() => expect(screen.getByText("No activity in the loaded window")).toBeVisible());
+  await waitFor(() => expect(screen.getByText("No activity yet")).toBeVisible());
   expect(screen.getByRole("button", {name: "Refresh activity"})).toBeEnabled();
 });
 

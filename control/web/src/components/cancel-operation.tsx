@@ -1,26 +1,26 @@
 import {useState} from "react";
+import {safeErrorText} from "../lib/error-display";
+import {ConfirmDialog} from "./confirm-dialog";
+import {useToast} from "./toast";
 
 /**
  * Cancel one accepted operation. The Controller owns cleanup and keeps
  * resumable work, so the confirmation states the consequence and the request
  * key is stable across retries of an unclear response.
  */
-export function CancelOperation({what, consequence, cancel}: {what: string; consequence: string; cancel(requestKey: string): Promise<unknown>}) {
+export function CancelOperation({what, consequence, command, cancel}: {what: string; consequence: string; command?: string; cancel(requestKey: string): Promise<unknown>}) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const [requestKey] = useState(() => crypto.randomUUID());
+  const toast = useToast();
   async function confirm() {
-    setBusy(true); setError("");
-    try { await cancel(requestKey); setConfirming(false); }
-    catch (value) { setError(value instanceof Error ? value.message.slice(0, 256) : "Cancellation failed"); }
-    finally { setBusy(false); }
+    setBusy(true);
+    try { await cancel(requestKey); toast.success(`Cancelled the ${what}.`); }
+    catch (value) { toast.error(safeErrorText(value instanceof Error ? value.message : "Cancellation failed", 256)); }
+    finally { setBusy(false); setConfirming(false); }
   }
-  if (!confirming) return <button type="button" className="button secondary" onClick={() => setConfirming(true)}>Cancel {what}</button>;
-  return <span className="library-cancel-operation" role="group" aria-label={`Confirm cancel ${what}`}>
-    <span>{consequence}</span>
-    <button type="button" className="button danger" disabled={busy} onClick={() => void confirm()}>{busy ? "Cancelling…" : `Confirm cancel ${what}`}</button>
-    <button type="button" className="button secondary" disabled={busy} onClick={() => setConfirming(false)}>Keep running</button>
-    {error && <span role="alert">{error}</span>}
-  </span>;
+  return <>
+    <button type="button" className="button secondary" onClick={() => setConfirming(true)}>Cancel {what}</button>
+    {confirming && <ConfirmDialog title={`Cancel this ${what}?`} consequence={consequence} confirmLabel={`Confirm cancel ${what}`} command={command} busy={busy} onConfirm={() => void confirm()} onCancel={() => setConfirming(false)}/>}
+  </>;
 }

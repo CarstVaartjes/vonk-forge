@@ -80,6 +80,19 @@ def _client(service, role="administrator") -> TestClient:
     return TestClient(app)
 
 
+def test_roll_replaces_the_secret_and_keeps_name_and_models():
+    litellm = FakeLiteLlm()
+    client = _client(_service(litellm))
+    first = client.post("/api/key", json={"name": "ci", "models": ["qwen"]}).json()
+    rolled = client.post("/api/key/ci/roll")
+    assert rolled.status_code == 200
+    body = rolled.json()
+    assert body["name"] == "ci" and body["models"] == ["qwen"]
+    assert body["key"] != first["key"]
+    assert [item["name"] for item in client.get("/api/key").json()["keys"]] == ["ci"]
+    assert client.post("/api/key/missing/roll").status_code == 404
+
+
 def test_create_list_and_revoke_client_keys():
     litellm = FakeLiteLlm()
     client = _client(_service(litellm))
@@ -116,6 +129,7 @@ def test_only_administrators_create_or_revoke_keys():
     client = _client(_service(FakeLiteLlm()), role="operator")
     assert client.post("/api/key", json={"name": "x"}).status_code == 403
     assert client.post("/api/key/x/revoke").status_code == 403
+    assert client.post("/api/key/x/roll").status_code == 403
     assert client.get("/api/key").status_code == 200
 
 

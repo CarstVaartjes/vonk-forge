@@ -2,6 +2,7 @@ import {render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {vi} from "vitest";
 import {AdminMenu} from "./admin-menu";
+import {ToastProvider} from "./toast";
 
 function renderMenu(overrides: Partial<React.ComponentProps<typeof AdminMenu>> = {}) {
   const props: React.ComponentProps<typeof AdminMenu> = {
@@ -14,7 +15,7 @@ function renderMenu(overrides: Partial<React.ComponentProps<typeof AdminMenu>> =
     subject: "admin",
     ...overrides,
   };
-  render(<AdminMenu {...props}/>);
+  render(<ToastProvider><AdminMenu {...props}/></ToastProvider>);
   return props;
 }
 
@@ -45,9 +46,11 @@ test("supports disclosure keyboard navigation and restores trigger focus on Esca
   await user.keyboard("{ArrowDown}");
   expect(screen.getByRole("link", {name: "Open Activity"})).toHaveFocus();
   await user.keyboard("{ArrowDown}");
+  expect(screen.getByRole("link", {name: /Documentation/})).toHaveFocus();
+  await user.keyboard("{ArrowDown}");
   expect(screen.getByRole("button", {name: "Logout"})).toHaveFocus();
   await user.keyboard("{ArrowUp}");
-  expect(screen.getByRole("link", {name: "Open Activity"})).toHaveFocus();
+  expect(screen.getByRole("link", {name: /Documentation/})).toHaveFocus();
   await user.keyboard("{Escape}");
 
   expect(screen.queryByRole("group", {name: "Operator actions"})).not.toBeInTheDocument();
@@ -109,5 +112,5 @@ test("downloads a CLI token from the account menu and reports the result", async
   await user.click(screen.getByRole("button", {name: "Download CLI token"}));
 
   expect(onDownloadCliToken).toHaveBeenCalledOnce();
-  expect(await screen.findByRole("status")).toHaveTextContent("CLI token downloaded");
+  expect(await within(screen.getByRole("region", {name: "Notifications"})).findByText(/CLI token downloaded/)).toBeVisible();
 });

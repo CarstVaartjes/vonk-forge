@@ -1,6 +1,7 @@
 import {fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {afterEach} from "vitest";
 import {FleetPage} from "./fleet-simplified";
+import {ToastProvider} from "../components/toast";
 import type {ControlApi, EnrollmentGrantResponse} from "../api/types";
 
 let nodes: unknown[] = [];
@@ -68,11 +69,11 @@ test("Fleet creates a one-use grant and shows the exact Spark command, token, an
 
 test("Fleet reports grant creation failures without losing the form", async () => {
   const enrollFleetNode = vi.fn().mockRejectedValue(new Error("Control API returned 503: enrollment unavailable"));
-  render(<FleetPage api={{visualFleet: vi.fn(), enrollFleetNode} as unknown as ControlApi}/>);
+  render(<ToastProvider><FleetPage api={{visualFleet: vi.fn(), enrollFleetNode} as unknown as ControlApi}/></ToastProvider>);
   fireEvent.click(screen.getByRole("button", {name: "Enroll Spark"}));
   fireEvent.change(screen.getByLabelText("Spark name"), {target: {value: "Kitchen Spark"}});
   fireEvent.click(screen.getByRole("button", {name: "Create enrollment grant"}));
-  expect(await screen.findByRole("alert")).toHaveTextContent("enrollment unavailable");
+  expect(await within(screen.getByRole("region", {name: "Notifications"})).findByText(/enrollment unavailable/)).toBeVisible();
   expect(screen.getByLabelText("Spark name")).toHaveValue("Kitchen Spark");
 });
 

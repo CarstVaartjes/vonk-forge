@@ -177,6 +177,7 @@ export interface ControlApi extends LibraryApi {
   revokeEnrollment(grantId: string): Promise<EnrollmentGrantStatus>;
   gatewayKeys(signal?: AbortSignal): Promise<GatewayKeyList>;
   createGatewayKey(name: string, models: string[], expires?: string): Promise<GatewayKeyCreated>;
+  rollGatewayKey(name: string): Promise<GatewayKeyCreated>;
   revokeGatewayKey(name: string): Promise<GatewayKeyRevoked>;
   operations(cursor?: string, signal?: AbortSignal, filters?: ActivityFilters): Promise<OperationsResponse>;
   operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail>;

@@ -312,13 +312,16 @@ pub fn build_exact_recipe_run_observations(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecipeRunDisposition {
     /// The Controller has a record of the run; its integrity checks apply.
-    Known,
+    /// `run_generation` is its accepted generation while the run is running.
+    Known { run_generation: Option<u32> },
     /// The Controller has no record of the run and never will accept it.
     Unowned,
 }
 
 /// Response header naming a run the Controller has no record of.
 pub const RECIPE_RUN_DISPOSITION_HEADER: &str = "x-vonk-recipe-run-disposition";
+/// Response header carrying the accepted generation of a known running run.
+pub const RECIPE_RUN_GENERATION_HEADER: &str = "x-vonk-recipe-run-generation";
 /// The only disposition value: the Controller never owned this run.
 pub const RECIPE_RUN_UNOWNED: &str = "unowned";
 
@@ -701,7 +704,14 @@ impl AgentHttpClient {
             .await?;
         classify_response(&response)?;
         match response.headers().get(RECIPE_RUN_DISPOSITION_HEADER) {
-            None => Ok(RecipeRunDisposition::Known),
+            None => Ok(RecipeRunDisposition::Known {
+                run_generation: response
+                    .headers()
+                    .get(RECIPE_RUN_GENERATION_HEADER)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .filter(|generation| *generation > 0),
+            }),
             Some(value) if value.as_bytes() == RECIPE_RUN_UNOWNED.as_bytes() => {
                 Ok(RecipeRunDisposition::Unowned)
             }

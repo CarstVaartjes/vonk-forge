@@ -253,6 +253,11 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
     }
 }
 
+enum Prepared {
+    Plan(crate::oci::RecipeRunInspectionPlan),
+    Observed(ExactRecipeRunObservation),
+}
+
 /// True the first time this process reports on `key`; keeps a permanent
 /// per-run condition from filling the journal every sweep.
 fn first_report_of_run(key: &str) -> bool {
@@ -315,22 +320,24 @@ impl<R> RecipeExecutor<'_, R> {
         Ok(self.runtime.recipe_run_inspection_results()?.len())
     }
 
-    /// Retire a retained run whose managed metadata cannot be read or
-    /// parsed, once the Controller confirms it has no record of that run.
-    ///
-    /// Such metadata (for example a lifecycle written by an older agent, or
-    /// one that no longer binds to its installation) can never be inspected
-    /// or stopped, so skipping it only repeats the same diagnostic every
-    /// sweep and leaves the claim in place forever.  The Controller's answer
-    /// is authoritative: whatever the local failure, an unowned run is
-    /// retired.  A run the Controller knows keeps its failure visible (once
-    /// per process), and an unreachable Controller changes nothing.
-    async fn retire_unparseable_unowned_run(&self, run_id: &str, _error: &OciError) -> bool
+    /// Ask the Controller about one local run; a failed lookup is logged once
+    /// per process and never changes anything.
+    async fn run_disposition(&self, run_id: &str) -> Option<RecipeRunDisposition>
     where
         R: ProcessRunner,
     {
-        self.retire_unowned_run(run_id, "unreadable managed metadata")
-            .await
+        let id = uuid::Uuid::parse_str(run_id).ok()?;
+        match self.client.recipe_run_disposition(id).await {
+            Ok(disposition) => Some(disposition),
+            Err(lookup) => {
+                if first_report_of_run(&format!("{run_id}/disposition")) {
+                    eprintln!(
+                        "vonk-agent: exact recipe run {run_id} disposition is unavailable ({lookup}); logged once per process"
+                    );
+                }
+                None
+            }
+        }
     }
 
     /// Retire the local lifecycle of a run the Controller has no record of.
@@ -340,34 +347,95 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
-        let Ok(id) = uuid::Uuid::parse_str(run_id) else {
+        if self.run_disposition(run_id).await != Some(RecipeRunDisposition::Unowned) {
             return false;
-        };
-        match self.client.recipe_run_disposition(id).await {
-            Ok(RecipeRunDisposition::Unowned) => match self.runtime.complete_stop(run_id) {
-                Ok(()) => {
-                    eprintln!(
-                        "vonk-agent: retired exact recipe run {run_id}: {reason} and unknown to the Controller"
-                    );
-                    true
-                }
-                Err(retire) => {
-                    eprintln!(
-                        "vonk-agent: exact recipe run {run_id} is unknown to the Controller; retirement failed ({})",
-                        retire.safe_category()
-                    );
-                    false
-                }
-            },
-            Ok(RecipeRunDisposition::Known) => false,
-            Err(lookup) => {
-                if first_report_of_run(&format!("{run_id}/disposition")) {
-                    eprintln!(
-                        "vonk-agent: exact recipe run {run_id} disposition is unavailable ({lookup}); logged once per process"
-                    );
-                }
+        }
+        self.retire_claim(run_id, reason)
+    }
+
+    /// Drop the lifecycle claim of a run the Controller already named unowned.
+    fn retire_claim(&self, run_id: &str, reason: &str) -> bool
+    where
+        R: ProcessRunner,
+    {
+        match self.runtime.complete_stop(run_id) {
+            Ok(()) => {
+                eprintln!(
+                    "vonk-agent: retired exact recipe run {run_id}: {reason} and unknown to the Controller"
+                );
+                true
+            }
+            Err(retire) => {
+                eprintln!(
+                    "vonk-agent: exact recipe run {run_id} is unknown to the Controller; retirement failed ({})",
+                    retire.safe_category()
+                );
                 false
             }
+        }
+    }
+
+    /// Converge a retained run whose managed metadata cannot be read or
+    /// parsed (an older agent's format, a retired field, a missing
+    /// generation), using only the run id and the Controller's answer:
+    ///
+    /// - unowned: retire the local claim;
+    /// - known: when the exact container is provably not running, report that
+    ///   truth at the Controller's generation so it can recover or release
+    ///   the run; otherwise keep the run and log once;
+    /// - unreachable Controller: do nothing.
+    async fn observe_unreadable_run(
+        &self,
+        run_id: &str,
+        error: &OciError,
+    ) -> Result<ExactRecipeRunObservation, RecipeObservationError>
+    where
+        R: ProcessRunner,
+    {
+        let skip = |detail: &str| {
+            if first_report_of_run(run_id) {
+                eprintln!(
+                    "vonk-agent: skipping exact recipe run {run_id}: invalid managed metadata ({}); {detail}; logged once per process",
+                    error.safe_category()
+                );
+            }
+            RecipeObservationError::SkippedRun
+        };
+        let Some(disposition) = self.run_disposition(run_id).await else {
+            return Err(skip("the Controller is unreachable"));
+        };
+        match disposition {
+            RecipeRunDisposition::Unowned => {
+                if self.retire_claim(run_id, "unreadable managed metadata") {
+                    Err(RecipeObservationError::UnownedRun)
+                } else {
+                    Err(skip("retirement failed"))
+                }
+            }
+            RecipeRunDisposition::Known {
+                run_generation: Some(run_generation),
+            } => {
+                let request_root = self.runtime_root.join("runtime-requests");
+                let boundary = HostRuntimeBoundary {
+                    client: self.client,
+                    request_root: &request_root,
+                    helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+                };
+                match boundary.inspect_recipe_run(vec![run_id.to_owned()]).await {
+                    Ok(false) => Ok(ExactRecipeRunObservation {
+                        run_id: uuid::Uuid::parse_str(run_id)
+                            .map_err(|_| RecipeObservationError::SkippedRun)?,
+                        run_generation,
+                        process_running: false,
+                        endpoint_ready: Some(false),
+                    }),
+                    Ok(true) => Err(skip("the container is running")),
+                    Err(_) => Err(skip("the container could not be inspected")),
+                }
+            }
+            RecipeRunDisposition::Known {
+                run_generation: None,
+            } => Err(skip("the Controller does not have it running")),
         }
     }
 
@@ -384,24 +452,20 @@ impl<R> RecipeExecutor<'_, R> {
         let results = stream::iter(plans)
             .filter_map(|plan| async move {
                 match plan {
-                    Ok(Some(plan)) => Some(Ok(plan)),
+                    Ok(Some(plan)) => Some(Ok(Prepared::Plan(plan))),
                     Ok(None) => None,
-                    Err((run_id, error)) => {
-                        if self.retire_unparseable_unowned_run(&run_id, &error).await {
-                            return Some(Err(RecipeObservationError::UnownedRun));
-                        }
-                        if first_report_of_run(&run_id) {
-                            eprintln!(
-                                "vonk-agent: skipping exact recipe run {run_id}: invalid managed metadata ({}); logged once per process",
-                                error.safe_category()
-                            );
-                        }
-                        Some(Err(RecipeObservationError::SkippedRun))
-                    }
+                    Err((run_id, error)) => Some(
+                        self.observe_unreadable_run(&run_id, &error)
+                            .await
+                            .map(Prepared::Observed),
+                    ),
                 }
             })
-            .map(|plan| async move {
-                let plan = plan?;
+            .map(|prepared| async move {
+                let plan = match prepared? {
+                    Prepared::Plan(plan) => plan,
+                    Prepared::Observed(observation) => return Ok(observation),
+                };
                 let request_root = self.runtime_root.join("runtime-requests");
                 let boundary = HostRuntimeBoundary {
                     client: self.client,
@@ -3831,6 +3895,8 @@ mod tests {
                         reports.push(json!({ "disposition": path }));
                         let header = if disposition.is_empty() {
                             String::new()
+                        } else if let Some(generation) = disposition.strip_prefix("generation=") {
+                            format!("x-vonk-recipe-run-generation: {generation}\r\n")
                         } else {
                             format!("x-vonk-recipe-run-disposition: {disposition}\r\n")
                         };
@@ -4197,6 +4263,26 @@ mod tests {
             .unwrap();
         server.finish();
         assert!(!metadata.join("lifecycle.json").exists());
+    }
+
+    #[tokio::test]
+    async fn known_disposition_carries_the_controller_generation() {
+        let run_id = uuid::Uuid::parse_str("ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c").unwrap();
+        for (answer, expected) in [
+            ("generation=7", Some(7)),
+            ("generation=0", None),
+            ("generation=junk", None),
+            ("", None),
+        ] {
+            let server = ObservationServer::with_disposition(Some(204), Some(answer));
+            assert_eq!(
+                server.client.recipe_run_disposition(run_id).await.unwrap(),
+                crate::client::RecipeRunDisposition::Known {
+                    run_generation: expected
+                }
+            );
+            server.finish();
+        }
     }
 
     #[test]

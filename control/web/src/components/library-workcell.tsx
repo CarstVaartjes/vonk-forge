@@ -5,6 +5,7 @@ import {canonicalRecipeSelector} from "../api/types";
 import type {LibraryRoute} from "../lib/library-route";
 import {modelKey, modelLibraryPath, recipeLibraryPath} from "../lib/library-route";
 import {formatBytes} from "../lib/fleet";
+import {EmptyState} from "./empty-state";
 import {LibraryRecipeDownloadAction} from "./library-recipe-download-action";
 import {LibraryRecipeRemoveAction} from "./library-recipe-remove-action";
 import {LibraryRecipeUpdateAction} from "./library-recipe-update-action";
@@ -144,10 +145,9 @@ export function filterLibraryRecipeRecords(records: LibraryRecipeRecord[], filte
 }
 
 /** Says which filters emptied the list, or that the library itself is empty. */
-export function EmptyLibrary({filters, query, onClear, noun = "models"}: {filters: LibraryWorkcellFilters; query: string; onClear(): void; noun?: string}) {
-  const active = activeFilterSummary(filters, query);
-  if (active.length === 0) return <p className="library-empty-state">The library has no {noun} yet. Its catalog sync status is shown above.</p>;
-  return <p className="library-empty-state">No {noun} match {active.join(", ")}. <button type="button" className="button secondary" onClick={onClear}>Clear filters</button></p>;
+export function EmptyLibrary({filters, query, onClear, onRefresh, noun = "models"}: {filters: LibraryWorkcellFilters; query: string; onClear(): void; onRefresh?(): void; noun?: string}) {
+  const filtered = activeFilterSummary(filters, query).length > 0;
+  return <EmptyState title={`No ${noun}`} description={`${noun[0]!.toLocaleUpperCase()}${noun.slice(1)} come from the recipe library, which the Controller syncs automatically; its sync status is shown above.`} filtered={filtered} onClearFilters={onClear} action={onRefresh ? {label: "Refresh library", onClick: onRefresh} : undefined}/>;
 }
 
 function NavigateLink({current, href, onNavigate, children}: {current?: boolean; href: string; onNavigate: (event: MouseEvent<HTMLAnchorElement>, path: string) => void; children: ReactNode}) {
@@ -210,7 +210,7 @@ export function LibraryWorkcell({api, detail: _detail, fleet: _fleet, filters, o
     <div className="library-paired-list" aria-label="Model and recipe list">
       <div className="library-paired-heading"><span>Models · {models.length} of {new Set(records.map(record => record.modelKey)).size}</span><span>Recipes for selected Model · {selectedRecipes.length}</span></div>
       <div className="library-paired-panes">
-        <div className="library-model-pane" aria-label="Models"><ul>{models.map(model => <li key={model.modelKey}><NavigateLink current={model.modelKey === selectedModelKey} href={modelLibraryPath(model.modelKey)} onNavigate={onNavigate}><span className={model.modelKey === selectedModelKey ? "is-selected" : undefined}><strong>{model.modelTitle}</strong><small>{model.model?.publisher}/{model.model?.slug}</small><small>{model.modelFiles.length} files · {formatBytes(model.modelBytes)}</small><em>{model.capabilities.join(" · ") || "Capabilities not declared"}</em></span></NavigateLink></li>)}</ul>{models.length === 0 && <EmptyLibrary filters={filters} query={query} onClear={() => { onFiltersChange(EMPTY_LIBRARY_WORKCELL_FILTERS); onQueryChange(""); }}/>}</div>
+        <div className="library-model-pane" aria-label="Models"><ul>{models.map(model => <li key={model.modelKey}><NavigateLink current={model.modelKey === selectedModelKey} href={modelLibraryPath(model.modelKey)} onNavigate={onNavigate}><span className={model.modelKey === selectedModelKey ? "is-selected" : undefined}><strong>{model.modelTitle}</strong><small>{model.model?.publisher}/{model.model?.slug}</small><small>{model.modelFiles.length} files · {formatBytes(model.modelBytes)}</small><em>{model.capabilities.join(" · ") || "Capabilities not declared"}</em></span></NavigateLink></li>)}</ul>{models.length === 0 && <EmptyLibrary noun="recipes" filters={filters} query={query} onRefresh={refresh} onClear={() => { onFiltersChange(EMPTY_LIBRARY_WORKCELL_FILTERS); onQueryChange(""); }}/>}</div>
         <div className="library-recipe-pane" aria-label="Recipes matching selected Model" ref={recipePaneRef} tabIndex={-1}>{selectedModel && <div className="library-selected-model-context"><strong>{selectedModel.modelTitle}</strong><span>{selectedModel.modelFiles.length} files · {formatBytes(selectedModel.modelBytes)} · {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}</span></div>}<ul>{selectedRecipes.map(record => { const document = record.recipe!.recipe_document; const roleBytes = document.topology.roles.reduce((sum, role) => sum + role.count * role.resources.disk.image_bytes + role.count * role.resources.disk.artifact_bytes, 0); return <li key={record.key}><NavigateLink href={recipeLibraryPath(record.recipe!.recipe_id)} onNavigate={onNavigate}><strong>{record.title}</strong><small>{recipeAttribution(document)} · {document.runtime.engine} · release {document.release.version} · {document.topology.node_count} Spark{document.topology.node_count === 1 ? "" : "s"}</small><small>{document.topology.roles.map(role => `${role.name}: ${formatBytes(role.resources.memory.peak_bytes)} peak`).join(" · ")}</small><small>{formatBytes(roleBytes)} image + artifact envelope</small></NavigateLink><LibraryRecipeDownloadAction api={api} missingModels={missingModelsFor(record.recipe!)} onDownloaded={refresh} selector={canonicalRecipeSelector(record.recipe!)} /><LibraryRecipeRemoveAction api={api} onRemoved={refresh} selector={canonicalRecipeSelector(record.recipe!)} /></li>; })}</ul>{selectedModel && selectedRecipes.length === 0 && <div className="library-empty-recipe"><strong>No Recipe linked</strong><span>This exact Model is available for cache management but has no runnable Recipe.</span></div>}{!selectedModel && <p className="library-empty-state">Select a Model to see matching Recipes.</p>}</div>
       </div>
     </div>

@@ -1,16 +1,18 @@
-import {render, screen, waitFor} from "@testing-library/react";
+import {render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {CancelOperation} from "./cancel-operation";
 import {CatalogSyncStatusLine} from "./catalog-sync-status";
 import {InstallationReconcile} from "./installation-reconcile";
+import {ToastProvider} from "./toast";
 
 test("cancel needs a confirmation and reuses one request key", async () => {
   const cancel = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValue({});
-  render(<CancelOperation what="download" consequence="c" cancel={cancel}/>);
+  render(<ToastProvider><CancelOperation what="download" consequence="c" cancel={cancel}/></ToastProvider>);
   await userEvent.click(screen.getByRole("button", {name: "Cancel download"}));
   expect(cancel).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", {name: /Confirm cancel/}));
-  await screen.findByRole("alert");
+  await within(screen.getByRole("region", {name: "Notifications"})).findByText("boom");
+  await userEvent.click(screen.getByRole("button", {name: "Cancel download"}));
   await userEvent.click(screen.getByRole("button", {name: /Confirm cancel/}));
   await waitFor(() => expect(cancel).toHaveBeenCalledTimes(2));
   expect(cancel.mock.calls[0]![0]).toBe(cancel.mock.calls[1]![0]);
@@ -28,9 +30,9 @@ test("sync status treats a never-run sync as a state and lists problems", async 
 
 test("reconcile submits only after the plan is reviewed", async () => {
   const api = {previewInstallationReconcile: vi.fn().mockResolvedValue({allowed: true, phases: [{}], blockers: [], reclaimed_bytes: 0}), reconcileInstallation: vi.fn().mockResolvedValue({})};
-  render(<InstallationReconcile api={api} installationId="i1"/>);
-  expect(screen.queryByRole("button", {name: "Confirm reconcile"})).toBeNull();
+  render(<ToastProvider><InstallationReconcile api={api} installationId="i1"/></ToastProvider>);
+  expect(screen.queryByRole("alertdialog")).toBeNull();
   await userEvent.click(screen.getByRole("button", {name: "Review reconcile"}));
-  await userEvent.click(await screen.findByRole("button", {name: "Confirm reconcile"}));
+  await userEvent.click(await screen.findByRole("button", {name: "Reconcile"}));
   await waitFor(() => expect(api.reconcileInstallation).toHaveBeenCalledWith("i1", expect.any(String)));
 });
