@@ -22,9 +22,9 @@ from sqlalchemy.pool import StaticPool
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.distribution import (
-    CompositeVerifiedObjectSource,
-    MemoryVerifiedObjectSource,
-    ModelCacheVerifiedObjectSource,
+    CompositeObjectSource,
+    MemoryObjectSource,
+    ModelCacheObjectSource,
 )
 from vonk_control.jobs import JobService
 from vonk_control.model_cache import (
@@ -1290,13 +1290,11 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     }
     assert {item["file_id"] for item in descriptors} == {"weights", "tokenizer"}
     assert {item["model_content_sha256"] for item in descriptors} == {model_a}
-    model_source = ModelCacheVerifiedObjectSource.from_service(service)
+    model_source = ModelCacheObjectSource.from_service(service)
     receipts = model_source.verified_model_objects_for_set(
         first.artifact_set_sha256 or ""
     )
-    composed_source = CompositeVerifiedObjectSource(
-        model_source, MemoryVerifiedObjectSource()
-    )
+    composed_source = CompositeObjectSource(model_source, MemoryObjectSource())
     assert (
         composed_source.verified_model_objects_for_set(first.artifact_set_sha256 or "")
         == receipts
@@ -2211,7 +2209,7 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     assert target.read_bytes() == good
 
 
-def test_distribution_manifest_uses_receipts_and_serves_only_the_requested_file(
+def test_distribution_manifest_uses_receipts_and_serves_without_hashing(
     cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from vonk_control.distribution import DistributionError
@@ -2236,23 +2234,23 @@ def test_distribution_manifest_uses_receipts_and_serves_only_the_requested_file(
         return verify(path, spec)
 
     monkeypatch.setattr(service, "_verify_file", record_check)
-    source = ModelCacheVerifiedObjectSource.from_service(service)
+    source = ModelCacheObjectSource.from_service(service)
     objects = source.objects_for_set(operation.artifact_set_sha256)
     assert len(objects) == 2
     assert checks == [], "loading descriptors must not scan model bytes"
     digest = str(primary["sha256"])
-    opened = source.open_verified(digest, len(b"primary weights"))
+    opened = source.open_object(digest, len(b"primary weights"))
     try:
         assert opened.stream.read() == b"primary weights"
     finally:
         opened.stream.close()
-    assert checks == [digest], "serving one file must not verify unrelated weights"
+    assert checks == [], "serving must not hash any cached object"
 
-    # Trusting publication receipts for descriptors must not bypass the
-    # content check at the actual byte-serving boundary.
-    service._object_path(digest).write_bytes(b"mutated weights")
+    # Serving trusts the ingress-verified receipt but still checks that the
+    # stored object has the exact recorded size.
+    service._object_path(digest).write_bytes(b"truncated")
     with pytest.raises(DistributionError, match="NAS cache object is unavailable"):
-        source.open_verified(digest, len(b"primary weights"))
+        source.open_object(digest, len(b"primary weights"))
 
 
 def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(
@@ -2462,13 +2460,13 @@ def test_serving_one_object_does_not_inspect_the_rest_of_the_set(cache, tmp_path
         return original(object_digest, expected_bytes)
 
     service._object_is_available = spy
-    path, size, _ = service.verified_artifact_file(digest, first["sha256"], "a.bin")
+    path, size, _ = service.cached_artifact_file(digest, first["sha256"], "a.bin")
     assert path.read_bytes() == b"served" and size == 6
     assert inspected == [first["sha256"]]
     # A damaged object is still refused when it is the one being served.
     service._object_path(second["sha256"]).unlink()
     with pytest.raises(ModelCacheConflict):
-        service.verified_artifact_file(digest, second["sha256"], "b.bin")
+        service.cached_artifact_file(digest, second["sha256"], "b.bin")
 
 
 def test_atomic_repair_keeps_path_and_open_reader_available(
@@ -2484,7 +2482,7 @@ def test_atomic_repair_keeps_path_and_open_reader_available(
         request_key="00000000-0000-4000-8000-000000001003",
     )
     digest = downloaded.artifact_set_sha256
-    target, _, _ = service.verified_artifact_file(
+    target, _, _ = service.cached_artifact_file(
         digest, artifact["sha256"], "weights.bin"
     )
     original = __import__("os").replace
@@ -2516,13 +2514,9 @@ def test_atomic_repair_keeps_path_and_open_reader_available(
     assert replacements == [target]
 
 
-def test_reconciliation_reuses_verified_bytes_but_detects_same_size_mutation(
+def test_reconciliation_and_serving_do_not_rehash_cached_objects(
     cache, tmp_path, monkeypatch
 ):
-    from types import SimpleNamespace
-
-    from vonk_control.cached_file_verification import CachedFileVerifier
-
     service, _ = cache
     artifact = _artifact(tmp_path, b"good")
     downloaded = _download(
@@ -2531,24 +2525,37 @@ def test_reconciliation_reuses_verified_bytes_but_detects_same_size_mutation(
         model_content_sha256="a" * 64,
         request_key="00000000-0000-4000-8000-000000001005",
     )
-    monkeypatch.setattr("vonk_control.model_cache.verified_files", CachedFileVerifier())
-    calls = []
-    original = hashlib.sha256
 
-    def sha256():
-        calls.append(1)
-        return original()
+    def fail_hash(*_args, **_kwargs):
+        raise AssertionError("cached objects are hashed once, on ingress")
 
-    monkeypatch.setattr(
-        "vonk_control.cached_file_verification.hashlib", SimpleNamespace(sha256=sha256)
-    )
-    service.reconcile_storage()
+    monkeypatch.setattr(service, "_verify_file", fail_hash)
     service.reconcile_storage()
     service.get_entry(downloaded.artifact_set_sha256)
-    assert len(calls) == 1
-    service._object_path(artifact["sha256"]).write_bytes(b"evil")
-    service.reconcile_storage()
-    assert service.get_entry(downloaded.artifact_set_sha256)["state"] == "needs-repair"
+    _path, size, digest = service.cached_artifact_file(
+        downloaded.artifact_set_sha256, artifact["sha256"], "weights.bin"
+    )
+    assert (size, digest) == (4, artifact["sha256"])
+    # Size and receipt are the reuse check: a resized object is not served.
+    service._object_path(artifact["sha256"]).write_bytes(b"evil!")
+    with pytest.raises(ModelCacheConflict):
+        service.cached_artifact_file(
+            downloaded.artifact_set_sha256, artifact["sha256"], "weights.bin"
+        )
+
+
+def test_ingress_rejects_bytes_that_do_not_match_the_pinned_digest(cache, tmp_path):
+    service, _ = cache
+    artifact = _artifact(tmp_path, b"good payload")
+    artifact["sha256"] = hashlib.sha256(b"evil payload").hexdigest()
+    failed = _download(
+        service,
+        [artifact],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000001007",
+    )
+    assert failed.state != "succeeded"
+    assert not service._object_path(str(artifact["sha256"])).exists()
 
 
 def test_repair_capacity_admission_preserves_verified_object(

@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fmt, fs,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
@@ -9,9 +8,8 @@ use std::{
 
 use futures_util::{StreamExt, TryStreamExt, stream};
 use reqwest::{Certificate, Client, Identity, StatusCode};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufWriter};
+use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::generated::{
@@ -60,16 +58,6 @@ const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const ROTATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
 const DISTRIBUTION_CONCURRENCY: usize = 16;
-#[cfg(test)]
-thread_local! {
-    static DISTRIBUTION_HASH_READ_BYTES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-fn distribution_hash_read_bytes() -> u64 {
-    DISTRIBUTION_HASH_READ_BYTES.with(std::cell::Cell::get)
-}
-
 /// Release the page cache for a completed distribution object.
 ///
 /// Best effort on purpose: the object is transferred, verified and receipted,
@@ -393,41 +381,6 @@ pub struct AgentHttpClient {
     controller: Url,
     node_id: String,
     progress_phase: Arc<Mutex<Option<ProgressSnapshot>>>,
-    // This process alone can vouch for a completed private object. A restart
-    // deliberately loses the receipt and rehashes any preexisting final file.
-    distribution_receipts: Arc<Mutex<HashMap<PathBuf, DistributionObjectReceipt>>>,
-}
-
-#[derive(Clone)]
-struct DistributionObjectReceipt {
-    digest: String,
-    size: u64,
-    dev: u64,
-    ino: u64,
-    mtime: (i64, i64),
-    ctime: (i64, i64),
-}
-
-impl DistributionObjectReceipt {
-    fn new(digest: &str, metadata: &fs::Metadata) -> Self {
-        Self {
-            digest: digest.to_owned(),
-            size: metadata.len(),
-            dev: metadata.dev(),
-            ino: metadata.ino(),
-            mtime: (metadata.mtime(), metadata.mtime_nsec()),
-            ctime: (metadata.ctime(), metadata.ctime_nsec()),
-        }
-    }
-
-    fn matches(&self, digest: &str, metadata: &fs::Metadata) -> bool {
-        self.digest == digest
-            && self.size == metadata.len()
-            && self.dev == metadata.dev()
-            && self.ino == metadata.ino()
-            && self.mtime == (metadata.mtime(), metadata.mtime_nsec())
-            && self.ctime == (metadata.ctime(), metadata.ctime_nsec())
-    }
 }
 
 impl AgentHttpClient {
@@ -438,7 +391,6 @@ impl AgentHttpClient {
             controller: Url::parse(controller).expect("test controller URL must be valid"),
             node_id: node_id.to_owned(),
             progress_phase: Arc::new(Mutex::new(None)),
-            distribution_receipts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -463,7 +415,6 @@ impl AgentHttpClient {
             controller: config.controller_url.clone(),
             node_id: config.node_id.clone(),
             progress_phase: Arc::new(Mutex::new(None)),
-            distribution_receipts: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -837,16 +788,14 @@ impl AgentHttpClient {
                 .open(&temporary)
                 .await?;
             let mut observed = 0_u64;
-            let mut hasher = Sha256::new();
             while let Some(chunk) = response.chunk().await? {
                 observed = observed
                     .checked_add(chunk.len() as u64)
                     .filter(|value| *value <= expected_bytes)
                     .ok_or(ClientError::Protocol)?;
-                hasher.update(&chunk);
                 output.write_all(&chunk).await?;
             }
-            if observed != expected_bytes || hex::encode(hasher.finalize()) != sha256 {
+            if observed != expected_bytes {
                 return Err(ClientError::Protocol);
             }
             output.sync_all().await?;
@@ -1238,9 +1187,8 @@ impl AgentHttpClient {
         F: FnMut(u64, &'static str),
     {
         // The assignment-bound mTLS endpoint and its exact ranged response
-        // headers establish the transfer contract. Hash the completed object
-        // before accepting it so a digest-named cache file cannot be trusted
-        // merely because its length and custody metadata look correct.
+        // headers establish the transfer contract. The digest is the object's
+        // name; its size and custody are checked, its bytes are not re-hashed.
         if !valid_sha256(plan_digest)
             || !valid_sha256(sha256)
             || !(1..=16 * 1024_u64.pow(4)).contains(&expected_bytes)
@@ -1254,87 +1202,22 @@ impl AgentHttpClient {
         }
         ensure_private_parent(parent, managed_root).await?;
 
-        if let Some(file) = inspect_trusted_final(destination, expected_bytes).await? {
-            let before = file.metadata().await?;
-            let cached = self
-                .distribution_receipts
-                .lock()
-                .expect("distribution receipt lock")
-                .get(destination)
-                .is_some_and(|receipt| receipt.matches(sha256, &before));
-            if cached {
-                return Ok(());
-            }
-            drop(file);
-            progress(expected_bytes, "verifying");
-            match sha256_path_with_metadata(destination, expected_bytes).await {
-                Ok((observed, metadata))
-                    if observed == sha256
-                        && validate_trusted_metadata(&metadata, expected_bytes) =>
-                {
-                    self.distribution_receipts
-                        .lock()
-                        .expect("distribution receipt lock")
-                        .insert(
-                            destination.to_path_buf(),
-                            DistributionObjectReceipt::new(sha256, &metadata),
-                        );
-                    // Verifying an object already on disk reads all of it, so it
-                    // fills the page cache exactly as a transfer does. The live
-                    // observation that motivated this: a re-verified 199 GB
-                    // object left the device reporting about 2 GB free, and the
-                    // checkpoint loader refused its 1.27 GB staging buffer.
-                    release_distribution_page_cache(destination);
-                    return Ok(());
-                }
-                // The object sits at its exact digest name with exact custody
-                // and still fails its content check, so this is a proven
-                // mismatch inside the managed cache.  Quarantine only that
-                // object: leaving it in place makes every later attempt trust
-                // the metadata and re-report the same failure without ever
-                // rehydrating the bytes from the authorized assignment.
-                Ok(_) => {
-                    self.distribution_receipts
-                        .lock()
-                        .expect("distribution receipt lock")
-                        .remove(destination);
-                    quarantine_proven_object(destination, expected_bytes).await?
-                }
-                Err(error) => return Err(error),
-            }
+        // An object at its digest name was renamed there only after a full
+        // transfer, so its name, size and private custody are the identity.
+        if inspect_trusted_final(destination, expected_bytes)
+            .await?
+            .is_some()
+        {
+            return Ok(());
         }
 
         let partial = partial_path(destination);
-        let mut output = open_trusted_partial(&partial).await?;
+        let output = open_trusted_partial(&partial).await?;
         let metadata = output.metadata().await?;
         let mut offset = metadata.len();
         if offset > expected_bytes {
             return Err(ClientError::Protocol);
         }
-        // A resumed partial has no process receipt: read its durable prefix
-        // exactly once, then hash the remaining authenticated range as written.
-        let mut hasher = Sha256::new();
-        if offset > 0 {
-            output.seek(std::io::SeekFrom::Start(0)).await?;
-            let mut remaining = offset;
-            let mut buffer = vec![0_u8; 64 * 1024];
-            while remaining > 0 {
-                let take = buffer.len().min(remaining as usize);
-                let count = output.read(&mut buffer[..take]).await?;
-                if count == 0 {
-                    return Err(ClientError::Protocol);
-                }
-                hasher.update(&buffer[..count]);
-                #[cfg(test)]
-                DISTRIBUTION_HASH_READ_BYTES.with(|bytes| bytes.set(bytes.get() + count as u64));
-                remaining -= count as u64;
-            }
-            let after = output.metadata().await?;
-            if !same_file_metadata(&metadata, &after) {
-                return Err(ClientError::Protocol);
-            }
-        }
-
         // TLS/network chunks can be much smaller than an efficient disk
         // write. Coalesce them so Tokio does not dispatch a blocking file
         // operation for every received chunk. Keep this writer across range
@@ -1382,7 +1265,6 @@ impl AgentHttpClient {
                         return Err(ClientError::Protocol);
                     }
                     output.write_all(&chunk).await?;
-                    hasher.update(&chunk);
                     // This writer survives network retries, so resume from
                     // its accepted bytes even within an interrupted range.
                     offset += chunk.len() as u64;
@@ -1419,19 +1301,11 @@ impl AgentHttpClient {
         {
             return Err(ClientError::Protocol);
         }
-        // Prove the bytes we hold before they take the digest name.  Renaming
-        // first and checking afterwards leaves a file at the digest name after
-        // a mismatch, so every later attempt would trust its metadata and
-        // re-report the same failure instead of transferring the object again.
+        // Bytes came over the assignment-bound mTLS channel from our own
+        // Controller, so size and custody are checked here and the content is
+        // not re-hashed. The digest names the object; ingress hashing happens
+        // once, where the Controller's cache first receives the bytes.
         progress(expected_bytes, "verifying");
-        let received_digest = hex::encode(hasher.finalize());
-        if received_digest != sha256 {
-            // Exactly-owned received bytes that are provably not the requested
-            // object: discard this partial so the next authorized attempt
-            // starts from empty rather than resuming bytes we cannot keep.
-            quarantine_proven_object_matching(&partial, expected_bytes, &synced_metadata).await?;
-            return Err(ClientError::Protocol);
-        }
         let before_rename = tokio::fs::symlink_metadata(&partial).await?;
         if !same_file_metadata(&synced_metadata, &before_rename) {
             return Err(ClientError::Protocol);
@@ -1450,16 +1324,8 @@ impl AgentHttpClient {
         {
             return Err(ClientError::Protocol);
         }
-        self.distribution_receipts
-            .lock()
-            .expect("distribution receipt lock")
-            .insert(
-                destination.to_path_buf(),
-                DistributionObjectReceipt::new(sha256, &final_metadata),
-            );
-        // The transfer and its verification both filled the page cache with an
-        // object of up to hundreds of gigabytes. It stays on disk and keeps its
-        // receipt; the resident pages do not need to stay with it.
+        // The transfer filled the page cache with an object of up to hundreds
+        // of gigabytes. It stays on disk; the resident pages do not need to.
         release_distribution_page_cache(destination);
         Ok(())
     }
@@ -1507,13 +1373,8 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         if existing == expected_bytes {
-            if sha256_path(destination, expected_bytes).await? == sha256 {
-                progress(expected_bytes);
-                return Ok(());
-            }
-            // A complete object with the wrong identity is corruption, not a
-            // resumable checkpoint. Keep it for diagnostics and fail closed.
-            return Err(ClientError::Protocol);
+            progress(expected_bytes);
+            return Ok(());
         }
         let mut output = tokio::fs::OpenOptions::new()
             .create(true)
@@ -1573,7 +1434,7 @@ impl AgentHttpClient {
             progress(offset);
         }
         output.sync_all().await?;
-        if sha256_path(destination, expected_bytes).await? != sha256 {
+        if tokio::fs::metadata(destination).await?.len() != expected_bytes {
             return Err(ClientError::Protocol);
         }
         Ok(())
@@ -2200,52 +2061,6 @@ async fn bounded_claim_body(response: reqwest::Response) -> Result<Vec<u8>, Clie
     bounded_body_limit(response, MAX_CLAIM_BODY_BYTES).await
 }
 
-async fn sha256_path(path: &Path, expected_bytes: u64) -> Result<String, ClientError> {
-    Ok(sha256_path_with_metadata(path, expected_bytes).await?.0)
-}
-
-async fn sha256_path_with_metadata(
-    path: &Path,
-    expected_bytes: u64,
-) -> Result<(String, fs::Metadata), ClientError> {
-    let mut file = tokio::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
-        .open(path)
-        .await?;
-    let before = file.metadata().await?;
-    if !before.file_type().is_file() || before.file_type().is_symlink() || before.nlink() != 1 {
-        return Err(ClientError::Protocol);
-    }
-    let mut digest = Sha256::new();
-    let mut total = 0_u64;
-    // Keep the buffer on the heap: this async future is held by the default
-    // tokio worker stack, where a 1 MiB inline array can overflow it.  64 KiB
-    // matches the bounded buffers used by the adjacent OCI hashing paths.
-    let mut buffer = vec![0_u8; 64 * 1024];
-    loop {
-        let count = tokio::io::AsyncReadExt::read(&mut file, &mut buffer).await?;
-        if count == 0 {
-            break;
-        }
-        total = total.saturating_add(count as u64);
-        if total > expected_bytes {
-            return Err(ClientError::Protocol);
-        }
-        digest.update(&buffer[..count]);
-        #[cfg(test)]
-        DISTRIBUTION_HASH_READ_BYTES.with(|bytes| bytes.set(bytes.get() + count as u64));
-    }
-    if total != expected_bytes {
-        return Err(ClientError::Protocol);
-    }
-    let after = file.metadata().await?;
-    if !same_file_metadata(&before, &after) {
-        return Err(ClientError::Protocol);
-    }
-    Ok((hex::encode(digest.finalize()), before))
-}
-
 fn same_file_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
     same_file_content_identity(before, after)
         && before.ctime() == after.ctime()
@@ -2362,40 +2177,6 @@ async fn open_trusted_partial(path: &Path) -> Result<tokio::fs::File, ClientErro
     Ok(file)
 }
 
-/// Remove one managed cache object whose content check already failed.
-///
-/// The caller has proven both the digest mismatch and the exact custody of the
-/// file, so this never reaches an unrelated path.  Custody is re-validated
-/// immediately before removal, and a file whose ownership, link count, type or
-/// mode is not exactly ours is refused rather than deleted: a permission
-/// problem, a symlink or an ambiguous hardlink is a failure to report, never a
-/// reason to widen what this agent is willing to remove.
-async fn quarantine_proven_object(path: &Path, expected_bytes: u64) -> Result<(), ClientError> {
-    let metadata = tokio::fs::symlink_metadata(path).await?;
-    if !validate_trusted_metadata(&metadata, expected_bytes) {
-        return Err(ClientError::Protocol);
-    }
-    tokio::fs::remove_file(path).await?;
-    if let Some(parent) = path.parent() {
-        sync_parent(parent).await?;
-    }
-    Ok(())
-}
-
-async fn quarantine_proven_object_matching(
-    path: &Path,
-    expected_bytes: u64,
-    opened: &fs::Metadata,
-) -> Result<(), ClientError> {
-    let metadata = tokio::fs::symlink_metadata(path).await?;
-    if !validate_trusted_metadata(&metadata, expected_bytes)
-        || !same_file_metadata(opened, &metadata)
-    {
-        return Err(ClientError::Protocol);
-    }
-    quarantine_proven_object(path, expected_bytes).await
-}
-
 async fn sync_parent(parent: &Path) -> Result<(), ClientError> {
     tokio::fs::File::open(parent).await?.sync_all().await?;
     Ok(())
@@ -2467,7 +2248,7 @@ mod tests {
     use super::{
         AgentHttpClient, AgentResult, ClientError, ControllerError, ExactRecipeRunObservation,
         MAX_REJECTION_CONTEXT_CHARS, clamp_inventory_request, controller_rejection_digest,
-        distribution_hash_read_bytes, is_rotation_conflict, partial_path, valid_reported_hostname,
+        is_rotation_conflict, partial_path, valid_reported_hostname,
     };
     use crate::{
         oci::OciRuntime,
@@ -2642,7 +2423,6 @@ mod tests {
                 controller: Url::parse(&format!("http://{address}/")).unwrap(),
                 node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
                 progress_phase: Default::default(),
-                distribution_receipts: Default::default(),
             },
             server,
         )
@@ -3179,7 +2959,6 @@ mod tests {
         WrongEtagFirstObject,
         /// Serve the requested range with the correct length and ETag but
         /// different bytes, so only the content check can reject it.
-        WrongBodyFirstObject,
         InterruptFirstObject,
         UnavailableFirstObject,
     }
@@ -3200,7 +2979,6 @@ mod tests {
             controller: Url::parse(controller).unwrap(),
             node_id: node_id.to_owned(),
             progress_phase: Default::default(),
-            distribution_receipts: Default::default(),
         }
     }
 
@@ -3296,18 +3074,6 @@ mod tests {
                 assert!(end >= start && end < source.len());
                 assert!(end - start < 8 * 1024 * 1024);
                 let body = source[start..=end].to_vec();
-                let body = if matches!(mode, DistributionFixtureMode::WrongBodyFirstObject)
-                    && digest == assignment.objects[0].sha256
-                {
-                    // Same length, same range, same ETag: the transfer contract
-                    // holds while the bytes are not the requested object, so the
-                    // client can only reject this on its own content check.
-                    let mut mutated = body;
-                    *mutated.first_mut().expect("non-empty object body") ^= 0xff;
-                    mutated
-                } else {
-                    body
-                };
                 let response_digest =
                     if matches!(mode, DistributionFixtureMode::WrongEtagFirstObject)
                         && digest == assignment.objects[0].sha256
@@ -3365,7 +3131,7 @@ mod tests {
         crate::image_importer::ImageImporter {
             data_root: root.path(),
         }
-        .retain_verified_distribution_archive(
+        .retain_distribution_archive(
             &archive_sha,
             &format!("sha256:{image_digest}"),
             archive.len() as u64,
@@ -3452,7 +3218,7 @@ mod tests {
             data_root: root.path(),
         };
         let cached = importer
-            .retain_verified_distribution_archive(
+            .retain_distribution_archive(
                 &evidence.oci_archive_sha256,
                 &evidence.oci_image_digest,
                 evidence.oci_archive_bytes,
@@ -3460,19 +3226,23 @@ mod tests {
             )
             .unwrap();
         assert_eq!(cached, evidence.oci_archive_path);
-        let before_retry_hash_reads = distribution_hash_read_bytes();
+        // Replace the cached archive with same-size different bytes: a replay
+        // trusts name, size and custody, so it neither re-hashes nor re-fetches.
+        let cached_bytes = std::fs::read(&evidence.oci_archive_path).unwrap();
+        std::fs::write(&evidence.oci_archive_path, vec![0_u8; cached_bytes.len()]).unwrap();
         let reused_evidence = client
             .download_distribution(TEST_PLAN_DIGEST, &assignment_root, &archive_root)
             .await
             .unwrap();
         assert_eq!(
-            distribution_hash_read_bytes(),
-            before_retry_hash_reads,
-            "same-process assignment replay must reuse exact verified-object custody"
+            std::fs::read(&evidence.oci_archive_path).unwrap(),
+            vec![0_u8; cached_bytes.len()],
+            "an adopted or cached archive is not re-hashed on replay"
         );
+        std::fs::write(&evidence.oci_archive_path, &cached_bytes).unwrap();
         assert_eq!(reused_evidence.downloaded_bytes, evidence.downloaded_bytes);
         let reused = importer
-            .retain_verified_distribution_archive(
+            .retain_distribution_archive(
                 &evidence.oci_archive_sha256,
                 &evidence.oci_image_digest,
                 evidence.oci_archive_bytes,
@@ -3578,7 +3348,6 @@ mod tests {
             data_root: root.path(),
         };
         let first_installation = "cb555393-764b-4eb6-8f15-b416d289428f";
-        let before_install_hash_reads = crate::oci::test_sha256_open_file_call_count();
         runtime
             .install(
                 &plan,
@@ -3586,11 +3355,6 @@ mod tests {
                 &plan.identity.recipe_revision_sha256,
             )
             .unwrap();
-        assert_eq!(
-            crate::oci::test_sha256_open_file_call_count(),
-            before_install_hash_reads,
-            "fresh installation hashes the source while copying it"
-        );
         assert_eq!(
             std::fs::read(root.path().join(format!(
                 "installations/{first_installation}/models/primary/weights.bin"
@@ -3600,7 +3364,6 @@ mod tests {
         );
         assert!(archive_root.join(&archive_sha256).is_file());
 
-        let before_reinstall = crate::oci::test_sha256_open_file_call_count();
         runtime
             .install(
                 &plan,
@@ -3608,11 +3371,6 @@ mod tests {
                 &plan.identity.recipe_revision_sha256,
             )
             .unwrap();
-        assert_eq!(
-            crate::oci::test_sha256_open_file_call_count(),
-            before_reinstall,
-            "reinstall reuses the receipt-bound destination without rereading the source"
-        );
 
         let second_assignment = assignment.clone();
         let second_plan_digest = "f".repeat(64);
@@ -3761,88 +3519,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_distribution_repairs_a_corrupt_owned_object_from_the_source() {
-        // A cache object can carry the exact digest name, the exact expected
-        // length and exact custody and still hold the wrong bytes.  Leaving it
-        // in place made every later attempt re-report the mismatch without ever
-        // transferring the object again, so the cache stayed poisoned forever.
-        let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
-        let mut objects = HashMap::new();
-        objects.insert(hex_sha256(model), model.to_vec());
-        objects.insert(hex_sha256(&archive), archive);
-        let (client, server) = distribution_fixture_server(
-            assignment.clone(),
-            objects,
-            1,
-            DistributionFixtureMode::Good,
-        );
-        let root = tempfile::tempdir().unwrap();
-        let destination = root.path().join("config.json");
-        let mut corrupt = model.to_vec();
-        corrupt[0] ^= 0xff;
-        std::fs::write(&destination, &corrupt).unwrap();
-        std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600)).unwrap();
-
-        client
-            .download_distribution_object(
-                TEST_PLAN_DIGEST,
-                &assignment.objects[0].sha256,
-                model.len() as u64,
-                &destination,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(std::fs::read(&destination).unwrap(), model);
-        assert!(!partial_path(&destination).exists());
-        assert_eq!(server.join().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn distribution_receipt_invalidates_on_same_size_mutation() {
-        let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
-        let mut objects = HashMap::new();
-        objects.insert(hex_sha256(model), model.to_vec());
-        objects.insert(hex_sha256(&archive), archive);
-        let (client, server) = distribution_fixture_server(
-            assignment.clone(),
-            objects,
-            2,
-            DistributionFixtureMode::Good,
-        );
-        let root = tempfile::tempdir().unwrap();
-        let destination = root.path().join("config.json");
-        let digest = &assignment.objects[0].sha256;
-        client
-            .download_distribution_object(
-                TEST_PLAN_DIGEST,
-                digest,
-                model.len() as u64,
-                &destination,
-            )
-            .await
-            .unwrap();
-        let mut corrupt = model.to_vec();
-        corrupt[0] ^= 0xff;
-        std::fs::write(&destination, &corrupt).unwrap();
-        client
-            .download_distribution_object(
-                TEST_PLAN_DIGEST,
-                digest,
-                model.len() as u64,
-                &destination,
-            )
-            .await
-            .unwrap();
-        assert_eq!(std::fs::read(destination).unwrap(), model);
-        assert_eq!(server.join().unwrap().len(), 2);
-    }
-
-    #[tokio::test]
     async fn distribution_rejects_partial_replacement_after_stream_hash() {
         let model = b"small model object";
         let (archive, image_digest) = oci_archive_fixture();
@@ -3890,40 +3566,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_distribution_discards_bytes_that_fail_their_content_check() {
-        // The received bytes are proven before they take the digest name.  A
-        // file renamed with the digest name first and checked afterwards would
-        // keep that name after the mismatch and poison later attempts.
+    async fn distribution_reuses_an_existing_object_without_hashing_or_fetching() {
+        // Name, size and private custody are the identity of an object already
+        // in the managed cache. Same-size different bytes are neither hashed
+        // nor re-transferred; the unreachable Controller proves no request.
         let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
-        let mut objects = HashMap::new();
-        objects.insert(hex_sha256(model), model.to_vec());
-        objects.insert(hex_sha256(&archive), archive);
-        let (client, server) = distribution_fixture_server(
-            assignment.clone(),
-            objects,
-            1,
-            DistributionFixtureMode::WrongBodyFirstObject,
-        );
         let root = tempfile::tempdir().unwrap();
         let destination = root.path().join("config.json");
+        let mut other = model.to_vec();
+        other[0] ^= 0xff;
+        std::fs::write(&destination, &other).unwrap();
+        std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let client = AgentHttpClient {
+            client: Arc::new(RwLock::new(reqwest::Client::new())),
+            controller: Url::parse("http://127.0.0.1:1/").unwrap(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            progress_phase: Default::default(),
+        };
 
-        assert!(matches!(
-            client
-                .download_distribution_object(
-                    TEST_PLAN_DIGEST,
-                    &assignment.objects[0].sha256,
-                    model.len() as u64,
-                    &destination,
-                )
-                .await,
-            Err(ClientError::Protocol)
-        ));
+        client
+            .download_distribution_object(
+                TEST_PLAN_DIGEST,
+                &hex_sha256(model),
+                model.len() as u64,
+                &destination,
+            )
+            .await
+            .unwrap();
 
-        assert!(!destination.exists());
-        assert!(!partial_path(&destination).exists());
-        assert_eq!(server.join().unwrap().len(), 1);
+        assert_eq!(std::fs::read(&destination).unwrap(), other);
     }
 
     #[tokio::test]
@@ -4079,48 +3750,6 @@ mod tests {
         assert_eq!(authorized_server.join().unwrap().len(), 1);
     }
 
-    #[tokio::test]
-    async fn distribution_acceptance_repairs_a_corrupt_owned_archive_from_the_source() {
-        // This used to stay a permanent failure.  A corrupt object at its exact
-        // digest name with exact custody is repairable inside the managed cache,
-        // so the authorized assignment rehydrates it instead of leaving every
-        // later acceptance run blocked on the same object.
-        let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
-        let mut objects = HashMap::new();
-        objects.insert(hex_sha256(model), model.to_vec());
-        objects.insert(hex_sha256(&archive), archive.clone());
-        let root = tempfile::tempdir().unwrap();
-        let model_path = root
-            .path()
-            .join("models")
-            .join(&assignment.objects[0].sha256);
-        std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
-        std::fs::write(&model_path, model).unwrap();
-        std::fs::set_permissions(&model_path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let archive_root = root.path().join("oci-archives");
-        let destination = archive_root.join(&assignment.oci_archive_sha256);
-        std::fs::create_dir_all(&archive_root).unwrap();
-        std::fs::write(&destination, vec![0_u8; archive.len()]).unwrap();
-        std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let (client, server) = distribution_fixture_server(
-            assignment.clone(),
-            objects,
-            2,
-            DistributionFixtureMode::Good,
-        );
-
-        client
-            .download_distribution(TEST_PLAN_DIGEST, root.path(), &archive_root)
-            .await
-            .unwrap();
-
-        assert_eq!(std::fs::read(&destination).unwrap(), archive);
-        assert_eq!(std::fs::read(&model_path).unwrap(), model);
-        assert_eq!(server.join().unwrap().len(), 2);
-    }
-
     fn job_input_client(
         declared_bytes: usize,
         body: Vec<u8>,
@@ -4150,7 +3779,6 @@ mod tests {
                 controller: Url::parse(&format!("http://{address}/")).unwrap(),
                 node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
                 progress_phase: Default::default(),
-                distribution_receipts: Default::default(),
             },
             server,
         )
@@ -4246,7 +3874,6 @@ mod tests {
                 controller: base_client.controller,
                 node_id: base_client.node_id,
                 progress_phase: Default::default(),
-                distribution_receipts: Default::default(),
             },
             server,
         )
@@ -4686,7 +4313,6 @@ mod tests {
             controller: Url::parse("http://127.0.0.1:9/").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             progress_phase: Default::default(),
-            distribution_receipts: Default::default(),
         };
         assert!(matches!(
             client.report_telemetry(&[]).await,
@@ -4941,7 +4567,8 @@ mod tests {
     #[tokio::test]
     async fn recipe_job_input_stream_is_exact_and_cleans_interrupted_or_invalid_temps() {
         let cases = [
-            (7, b"weights".to_vec(), "a".repeat(64), false),
+            // The digest names the input; only size is checked on receipt.
+            (7, b"weights".to_vec(), "a".repeat(64), true),
             (7, b"short".to_vec(), hex_sha256(b"short!!"), false),
             (8, b"oversize".to_vec(), hex_sha256(b"oversize"), false),
             (7, b"weights".to_vec(), hex_sha256(b"weights"), true),

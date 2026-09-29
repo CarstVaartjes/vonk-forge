@@ -47,7 +47,6 @@ from vonk_control.agent_api import (
     EnrollmentRateLimiter,
     _bounded_enrollment_body,
     _read_chunks,
-    _sealed_snapshot,
 )
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
@@ -1184,7 +1183,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
     storage = FilesystemRuntimeImageStorage(services.artifact_root)
-    assert storage.verify_existing(layout_digest, len(payload)).read_bytes() == payload
+    assert storage.existing_archive(layout_digest, len(payload)).read_bytes() == payload
     assert not (services.artifact_root / layout_digest).exists()
     with services.sessions() as session:
         build = session.get(RecipeBuild, build_id)
@@ -3299,48 +3298,6 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
     )
 
 
-def test_recipe_image_range_does_not_snapshot_the_complete_archive(
-    agent_system, monkeypatch
-) -> None:
-    client, services, _, clock = agent_system
-    payload = b"accepted recipe image archive"
-    digest = hashlib.sha256(payload).hexdigest()
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-
-    storage = FilesystemRuntimeImageStorage(services.artifact_root)
-    (storage.root / digest).write_bytes(payload)
-    services.operations.enqueue(
-        parent(services.sessions, clock).id,
-        NODE_A,
-        "recipe.image.import.v1",
-        "a" * 64,
-        {
-            "build_id": "00000000-0000-4000-8000-000000000010",
-            "mapping_id": "00000000-0000-4000-8000-000000000011",
-            "mapping_generation": 1,
-            "source_node_id": NODE_A,
-            "image_digest": "sha256:" + "b" * 64,
-            "oci_layout_sha256": digest,
-            "image_bytes": len(payload),
-        },
-    )
-
-    def fail_snapshot(*_args, **_kwargs):
-        raise AssertionError("recipe image ranges must not snapshot the archive")
-
-    monkeypatch.setattr("vonk_control.agent_api._sealed_snapshot", fail_snapshot)
-    response = client.get(
-        f"/agent/artifacts/{digest}",
-        headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=1-3"},
-    )
-
-    assert (
-        response.status_code,
-        response.content,
-        response.headers["content-range"],
-    ) == (206, payload[1:4], f"bytes 1-3/{len(payload)}")
-
-
 def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
     client, services, _, clock = agent_system
     digest = "a" * 64
@@ -3363,12 +3320,17 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
     )
 
 
-def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
+def test_artifact_range_is_served_without_hashing_or_copying_the_file(
+    agent_system,
+) -> None:
     from .package_upgrade_fixtures import source_transport
 
     client, services, _, clock = agent_system
-    digest = hashlib.sha256(b"expected").hexdigest()
-    (services.artifact_root / digest).write_bytes(b"tampered")
+    payload = b"stored package bytes"
+    # Same size, different content than the name says: served as stored, which
+    # only holds if the route does not re-hash the object.
+    digest = hashlib.sha256(b"a different payload").hexdigest()
+    (services.artifact_root / digest).write_bytes(payload)
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
@@ -3377,7 +3339,7 @@ def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
         {
             "schema_version": 1,
             "architecture": "linux-arm64",
-            "package_bytes": 8,
+            "package_bytes": len(payload),
             "package_sha256": digest,
             "package_signature": "a" * 128,
             "package_url": "https://install.vonkforge.ai/releases/test/vonk-forge-agent.deb",
@@ -3387,12 +3349,17 @@ def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
             **source_transport(),
         },
     )
-    assert (
-        client.get(
-            f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
-        ).status_code
-        == 404
+
+    response = client.get(
+        f"/agent/artifacts/{digest}",
+        headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=1-3"},
     )
+
+    assert (
+        response.status_code,
+        response.content,
+        response.headers["content-range"],
+    ) == (206, payload[1:4], f"bytes 1-3/{len(payload)}")
 
 
 def test_retired_agent_update_tuf_routes_are_absent(agent_system) -> None:
@@ -3451,36 +3418,6 @@ def test_artifact_stream_close_releases_its_descriptor(tmp_path) -> None:
     stream = _read_chunks(descriptor, 0, 8)
     assert next(stream) == b"artifact"
     stream.close()
-    with pytest.raises(OSError):
-        os.fstat(descriptor)
-
-
-def test_artifact_snapshot_is_immutable_after_source_overwrite(tmp_path) -> None:
-    source = tmp_path / "artifact"
-    source.write_bytes(b"original")
-    descriptor = os.open(source, os.O_RDONLY)
-    snapshot = _sealed_snapshot(
-        descriptor, 8, 1024, hashlib.sha256(b"original").hexdigest()
-    )
-    source.write_bytes(b"replaced")
-    try:
-        assert snapshot.read() == b"original"
-    finally:
-        snapshot.close()
-
-
-def test_snapshot_allocation_failure_closes_source_descriptor(
-    tmp_path, monkeypatch
-) -> None:
-    source = tmp_path / "artifact"
-    source.write_bytes(b"original")
-    descriptor = os.open(source, os.O_RDONLY)
-    monkeypatch.setattr(
-        "vonk_control.agent_api.tempfile.TemporaryFile",
-        lambda **_kwargs: (_ for _ in ()).throw(OSError("full")),
-    )
-    with pytest.raises(OSError, match="full"):
-        _sealed_snapshot(descriptor, 8, 1024, hashlib.sha256(b"original").hexdigest())
     with pytest.raises(OSError):
         os.fstat(descriptor)
 

@@ -117,7 +117,7 @@ _EXTERNAL_TAILS = frozenset(
         "disk_usage",
         # Content verification of stored objects.
         "verify_path",
-        "verify_existing",
+        "existing_archive",
         # Process execution, off-thread work, and bounded waiting.
         "Popen",
         "check_call",

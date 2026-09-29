@@ -13,12 +13,12 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import DistributionObject
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distribution import (
-    CompositeVerifiedObjectSource,
+    CompositeObjectSource,
     DistributionError,
     DistributionService,
-    FilesystemVerifiedObjectSource,
-    ModelCacheVerifiedObjectSource,
-    RecipeBuildVerifiedObjectSource,
+    FilesystemObjectSource,
+    ModelCacheObjectSource,
+    RecipeBuildObjectSource,
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.model_cache import (
@@ -207,7 +207,7 @@ def _prebuilt_oci_source(root: Path, payload: bytes):
     image_digest = "sha256:" + hashlib.sha256(b"prebuilt-image").hexdigest()
     (root / archive_sha256).write_bytes(payload)
     return (
-        FilesystemVerifiedObjectSource(
+        FilesystemObjectSource(
             root,
             runtime_images={archive_sha256: image_digest},
         ),
@@ -240,7 +240,7 @@ def _local_build_oci_source(sessions, root: Path, revision_id: str, payload: byt
                 updated_at=NOW,
             )
         )
-    return RecipeBuildVerifiedObjectSource(sessions, root), archive_sha256, image_digest
+    return RecipeBuildObjectSource(sessions, root), archive_sha256, image_digest
 
 
 def _assignment(
@@ -350,7 +350,7 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
         )
         manifest = restarted_cache.manifest_for_artifact_set(artifact_set_sha256)
         assert manifest.digest == artifact_set_sha256
-        model_source = ModelCacheVerifiedObjectSource.from_service(restarted_cache)
+        model_source = ModelCacheObjectSource.from_service(restarted_cache)
         model_objects = model_source.objects_for_set(artifact_set_sha256)
         assert {item.sha256 for item in model_objects} == {
             str(artifacts[0]["sha256"]),
@@ -359,7 +359,7 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
         assert model_source.verify_artifact_set(artifact_set_sha256, model_objects)
 
         distribution = DistributionService(
-            CompositeVerifiedObjectSource(model_source, oci_source),
+            CompositeObjectSource(model_source, oci_source),
             sessions=restarted_sessions,
         )
         plan_digest = "3" * 64
@@ -408,7 +408,7 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
         assert error.value.code == "distribution.model_set_mismatch"
 
         assert (
-            restarted_cache.verified_artifact_file(
+            restarted_cache.cached_artifact_file(
                 artifact_set_sha256,
                 str(artifacts[0]["sha256"]),
                 "weights/model.bin",
@@ -460,13 +460,11 @@ def test_succeeded_local_recipe_build_archive_uses_the_same_verified_distributio
         database, cache.root
     )
     try:
-        model_source = ModelCacheVerifiedObjectSource.from_service(restarted_cache)
-        oci_source = RecipeBuildVerifiedObjectSource(
-            restarted_sessions, tmp_path / "local-oci"
-        )
+        model_source = ModelCacheObjectSource.from_service(restarted_cache)
+        oci_source = RecipeBuildObjectSource(restarted_sessions, tmp_path / "local-oci")
         assert oci_source.verify_runtime_image(image_digest, archive_sha256)
         distribution = DistributionService(
-            CompositeVerifiedObjectSource(model_source, oci_source),
+            CompositeObjectSource(model_source, oci_source),
             sessions=restarted_sessions,
         )
         model_objects = model_source.objects_for_set(artifact_set_sha256)
@@ -542,7 +540,7 @@ def test_empty_support_file_can_be_cached_and_served_as_an_immutable_object(
         descriptor = restarted_cache.resolve_verified_artifact_set(set_digest)[0]
         assert descriptor["bytes"] == 0
         assert descriptor["sha256"] == hashlib.sha256(b"").hexdigest()
-        path, size, digest = restarted_cache.verified_artifact_file(
+        path, size, digest = restarted_cache.cached_artifact_file(
             set_digest,
             str(descriptor["sha256"]),
             str(descriptor["path"]),

@@ -12,7 +12,7 @@ from vonk_agent_protocol import DistributionObject
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.distribution import (
     DistributionService,
-    MemoryVerifiedObjectSource,
+    MemoryObjectSource,
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor import DurableDistributionPhaseExecutor
@@ -34,7 +34,7 @@ from .test_runtime_image_preparation import (
 )
 
 
-class _ModelObjectSource(MemoryVerifiedObjectSource):
+class _ModelObjectSource(MemoryObjectSource):
     """Memory source that also answers the exact model-set lookup."""
 
     def objects_for_set(
@@ -59,7 +59,7 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
     source = _ModelObjectSource()
     source.register_artifact_set(model_set_digest, (model,))
     # This fixture source owns no Controller image cache, so it declares the
-    # prepared archive exactly as MemoryVerifiedObjectSource intends. The real
+    # prepared archive exactly as MemoryObjectSource intends. The real
     # path reads the receipt in the cache root instead.
     source.register_runtime_image(BUILT_IMAGE_DIGEST, ARCHIVE_DIGEST)
     executor = DurableDistributionPhaseExecutor(
@@ -177,7 +177,7 @@ def _archive_gate_service(tmp_path: Path):
 
     from vonk_control.distribution import (
         DistributionService,
-        RecipeBuildVerifiedObjectSource,
+        RecipeBuildObjectSource,
     )
 
     storage = FilesystemRuntimeImageStorage(tmp_path)
@@ -197,7 +197,7 @@ def _archive_gate_service(tmp_path: Path):
             verified_at=datetime.now(UTC),
         )
         session.commit()
-    source = RecipeBuildVerifiedObjectSource(sessions, tmp_path)
+    source = RecipeBuildObjectSource(sessions, tmp_path)
     service = DistributionService(source, sessions=sessions)
     plan = RunSwitchPlan.model_construct(
         preparation=None,

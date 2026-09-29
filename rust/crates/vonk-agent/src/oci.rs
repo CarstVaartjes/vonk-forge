@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{Read, Write},
     net::IpAddr,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
@@ -1589,7 +1589,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let mut refreshed = Vec::with_capacity(unique_artifacts.len());
         for artifact in unique_artifacts {
             let destination = models.join(&artifact.selection_id).join(&artifact.path);
-            let (mut file, metadata) = open_trusted_model_file(&destination, artifact.size_bytes)?;
+            let (_file, metadata) = open_trusted_model_file(&destination, artifact.size_bytes)?;
             if let Some(entry) = receipt_index.as_ref().and_then(|index| {
                 index
                     .get(&(artifact.selection_id.as_str(), artifact.path.as_str()))
@@ -1598,9 +1598,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 refreshed.push((**entry).clone());
                 continue;
             }
-            if sha256_open_file(&mut file, &metadata)? != artifact.sha256 {
-                return Err(OciError::Artifact);
-            }
+            // Model files reached this installation from the Controller over
+            // mTLS; size and trusted custody (checked above) are the check.
             refreshed.push(installation_metadata_entry(artifact, &metadata));
         }
         refreshed.sort();
@@ -1818,26 +1817,6 @@ impl Drop for TemporaryArtifact {
     }
 }
 
-fn sha256_open_file(file: &mut File, before: &fs::Metadata) -> Result<String, OciError> {
-    #[cfg(test)]
-    SHA256_OPEN_FILE_CALLS.with(|calls| calls.set(calls.get() + 1));
-    file.seek(SeekFrom::Start(0))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    let after = file.metadata()?;
-    if !trusted_model_file(file, &after, before.len()) || !metadata_stable(before, &after) {
-        return Err(OciError::Artifact);
-    }
-    Ok(hex::encode(hasher.finalize()))
-}
-
 fn metadata_stable(before: &fs::Metadata, after: &fs::Metadata) -> bool {
     before.dev() == after.dev()
         && before.ino() == after.ino()
@@ -1846,16 +1825,6 @@ fn metadata_stable(before: &fs::Metadata, after: &fs::Metadata) -> bool {
             == timestamp_ns(after.mtime(), after.mtime_nsec())
         && timestamp_ns(before.ctime(), before.ctime_nsec())
             == timestamp_ns(after.ctime(), after.ctime_nsec())
-}
-
-#[cfg(test)]
-thread_local! {
-    static SHA256_OPEN_FILE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-pub(crate) fn test_sha256_open_file_call_count() -> usize {
-    SHA256_OPEN_FILE_CALLS.with(|calls| calls.get())
 }
 
 fn write_installation_metadata(
@@ -2173,11 +2142,10 @@ fn materialize_compiled_models(
             )
             .open(&temporary)?;
         let mut temporary_guard = TemporaryArtifact::new(temporary.clone());
-        // The source is an immutable managed distribution object. Hash the
-        // bytes in the same pass that writes the private installation; the
-        // retained source handle and stable metadata bind that read to the
-        // exact object opened above. A failed digest never publishes a model.
-        let mut hasher = Sha256::new();
+        // The source is an immutable managed distribution object received
+        // from the Controller over mTLS. Its bytes are not re-hashed; the
+        // retained source handle, exact size and stable metadata bind this
+        // copy to the object opened above.
         let mut copied = 0_u64;
         let mut buffer = [0_u8; 64 * 1024];
         loop {
@@ -2186,7 +2154,6 @@ fn materialize_compiled_models(
                 break;
             }
             output.write_all(&buffer[..read])?;
-            hasher.update(&buffer[..read]);
             copied = copied.checked_add(read as u64).ok_or(OciError::Artifact)?;
             if copied > artifact.size_bytes {
                 return Err(OciError::Artifact);
@@ -2196,7 +2163,6 @@ fn materialize_compiled_models(
         let source_after = source_file.metadata()?;
         let output_metadata = output.metadata()?;
         if copied != artifact.size_bytes
-            || hex::encode(hasher.finalize()) != artifact.sha256
             || !trusted_model_file(&source_file, &source_after, artifact.size_bytes)
             || !metadata_stable(&source_metadata, &source_after)
             || !trusted_model_metadata(&output_metadata, artifact.size_bytes)
@@ -2210,7 +2176,7 @@ fn materialize_compiled_models(
         temporary_guard.retain();
         sync_parent(parent)?;
         // The copy just filled the page cache with the destination, and the
-        // read that verified it filled the same cache with the source object.
+        // read filled the same cache with the source object.
         // Neither is needed once this artifact is complete, and the workload
         // this installation exists for needs the memory more.
         release_page_cache(&destination)?;
@@ -2467,8 +2433,8 @@ fn canonical_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        InstallationReconciliationState, OciError, OciRuntime, SHA256_OPEN_FILE_CALLS,
-        ensure_runtime_tmp, materialize_compiled_models, read_installation_metadata,
+        InstallationReconciliationState, OciError, OciRuntime, ensure_runtime_tmp,
+        materialize_compiled_models, read_installation_metadata,
         read_reconciliation_directory_identity, reconciliation_checkpoint_path,
         reconciliation_quarantine_path, release_page_cache, unique_plan_artifacts,
         write_installation_metadata, write_reconciliation_checkpoint,
@@ -3099,12 +3065,8 @@ mod tests {
         let (installation_id, _, _) = persisted_installation(data.path());
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
         runtime.verify_installation(&installation_id).unwrap();
-
-        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
-        assert_eq!(after, before);
     }
 
     #[test]
@@ -3161,8 +3123,6 @@ mod tests {
         ));
         let model = installation.join("models/primary/config.json");
         let before = fs::metadata(&model).unwrap();
-        let hashes_before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
-
         runtime
             .install_with_space_check(
                 &plan,
@@ -3176,10 +3136,6 @@ mod tests {
         assert_eq!(
             (after.dev(), after.ino(), after.ctime_nsec()),
             (before.dev(), before.ino(), before.ctime_nsec())
-        );
-        assert_eq!(
-            SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()),
-            hashes_before
         );
         assert!(model_root.is_dir());
 
@@ -3225,16 +3181,12 @@ mod tests {
 
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
 
         std::thread::sleep(Duration::from_millis(2));
         fs::write(installation.join("models/primary/config.json"), b"primary").unwrap();
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before + 1);
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before + 1);
     }
 
     #[test]
@@ -3248,12 +3200,8 @@ mod tests {
         );
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
         runtime.verify_installation(&installation_id).unwrap();
-
-        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
-        assert_eq!(after, before);
     }
 
     #[test]
@@ -3264,9 +3212,7 @@ mod tests {
         let primary = installation.join("models/primary/config.json");
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
 
         let transition = runtime
             .begin_installation_acl_transition(&installation_id)
@@ -3285,11 +3231,7 @@ mod tests {
             .finish_installation_acl_transition(&installation_id, transition)
             .unwrap();
         runtime.verify_installation(&installation_id).unwrap();
-        let after_acl = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
-        assert_eq!(after_acl, before);
-
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), after_acl);
     }
 
     #[test]
@@ -3362,22 +3304,17 @@ mod tests {
     }
 
     #[test]
-    fn trusted_installation_verification_hashes_and_rejects_same_size_mutation() {
+    fn installation_verification_does_not_rehash_same_size_content() {
         let data = tempdir().unwrap();
         let (installation_id, installation, _) = persisted_installation(data.path());
         let primary = installation.join("models/primary/config.json");
         fs::write(&primary, b"mutated").unwrap();
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
-        assert!(matches!(
-            runtime.verify_installation(&installation_id),
-            Err(OciError::Artifact)
-        ));
-
-        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
-        assert_eq!(after, before + 1);
+        // Bytes were placed by the agent from the Controller; size and
+        // custody are the check, so a same-size edit is not re-hashed.
+        runtime.verify_installation(&installation_id).unwrap();
     }
 
     #[test]
@@ -3389,15 +3326,9 @@ mod tests {
         fs::write(&primary, b"primary").unwrap();
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
         runtime.verify_installation(&installation_id).unwrap();
-
-        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
-        assert_eq!(after, before + 1);
         runtime.verify_installation(&installation_id).unwrap();
-        let final_count = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
-        assert_eq!(final_count, after);
     }
 
     #[test]
@@ -3672,12 +3603,10 @@ mod tests {
             .path()
             .join("installations/cb555393-764b-4eb6-8f15-b416d289428f");
         write_installation_metadata(&installation, &plan).unwrap();
-        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         let repeated =
             materialize_compiled_models(data.path(), &plan, "cb555393-764b-4eb6-8f15-b416d289428f")
                 .unwrap();
         assert_eq!(repeated.len(), 1);
-        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
         assert_eq!(plan.artifacts.len(), 2);
     }
 }

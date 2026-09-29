@@ -25,7 +25,7 @@ from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distribution import (
     DistributionService,
-    MemoryVerifiedObjectSource,
+    MemoryObjectSource,
     build_distribution_service_from_components,
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
@@ -87,7 +87,7 @@ def _unused_executor_services(
     engine = create_engine("sqlite+pysqlite:///:memory:", poolclass=StaticPool)
     sessions = sessionmaker(engine, expire_on_commit=False)
     operations = AgentJobService(sessions, clock=clock)
-    distribution = DistributionService(MemoryVerifiedObjectSource(), sessions=sessions)
+    distribution = DistributionService(MemoryObjectSource(), sessions=sessions)
     return sessions, operations, distribution
 
 
@@ -194,7 +194,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     archive = DistributionObject(
         name="image.oci.tar", sha256="c" * 64, bytes=11, kind="oci-archive"
     )
-    source = MemoryVerifiedObjectSource(
+    source = MemoryObjectSource(
         {"a" * 64: b"x" * 10, "b" * 64: b"y" * 5, "c" * 64: b"z" * 11}
     )
     source.register_artifact_set("d" * 64, (model, config))
@@ -551,7 +551,7 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
 
 def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> None:  # noqa: F811
     _client, services, _tokens, clock = agent_system
-    source = MemoryVerifiedObjectSource()
+    source = MemoryObjectSource()
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
     executor = DurableDistributionPhaseExecutor(
         services.sessions, services.operations, distribution, clock=clock
@@ -855,7 +855,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
 
     The model source is a fixture-backed cache because catalog/network inputs
     are unavailable in this unit lane.  OCI bytes still cross the production
-    RecipeBuildVerifiedObjectSource boundary, and the agent HTTP boundary is
+    RecipeBuildObjectSource boundary, and the agent HTTP boundary is
     exercised with the enrolled certificate identities.
     """
     client, services, _tokens, clock = agent_system

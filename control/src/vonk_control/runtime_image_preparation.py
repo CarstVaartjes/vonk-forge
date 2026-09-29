@@ -40,7 +40,6 @@ from .artifact_lifecycle import (
     ArtifactLifecycleError,
     require_reference_open,
 )
-from .cached_file_verification import verified_files
 from .catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_document,
@@ -779,8 +778,8 @@ class RuntimeImageStorage(Protocol):
         """Verify and atomically publish an archive and its receipt."""
         ...
 
-    def verify_existing(self, archive_sha256: str, expected_bytes: int) -> Path:
-        """Return an existing verified archive or raise."""
+    def existing_archive(self, archive_sha256: str, expected_bytes: int) -> Path:
+        """Return an existing published archive (identity and size) or raise."""
         ...
 
     def published_archive_bytes(self, archive_sha256: str) -> int:
@@ -1023,7 +1022,7 @@ class FilesystemRuntimeImageStorage:
         _atomic_json_replace(receipt_path, published.to_mapping())
         return published
 
-    def verify_existing(self, archive_sha256: str, expected_bytes: int) -> Path:
+    def existing_archive(self, archive_sha256: str, expected_bytes: int) -> Path:
         if _SHA256.fullmatch(archive_sha256) is None:
             raise RuntimeImagePreparationError(
                 "runtime_image.archive_invalid", "OCI archive digest is invalid"
@@ -1047,13 +1046,15 @@ class FilesystemRuntimeImageStorage:
                 "runtime_image.archive_mismatch",
                 "stored OCI archive is not a regular file",
             )
+        # The archive was verified when it was published under this digest;
+        # reuse checks identity (the name) and size, and does not re-hash.
         if (
             not 1 <= expected_bytes <= self.maximum_bytes
-            or not verified_files.verify_path(path, archive_sha256, expected_bytes)
+            or observed.st_size != expected_bytes
         ):
             raise RuntimeImagePreparationError(
                 "runtime_image.archive_mismatch",
-                "stored OCI archive failed content verification",
+                "stored OCI archive does not match its recorded size",
             )
         return path
 
@@ -1339,7 +1340,7 @@ class FilesystemRuntimeImageStorage:
         """Report archive presence; clean absence is a miss, not a failure."""
 
         try:
-            self.verify_existing(receipt.oci_archive_sha256, receipt.image_bytes)
+            self.existing_archive(receipt.oci_archive_sha256, receipt.image_bytes)
         except RuntimeImagePreparationError as error:
             if error.code == "runtime_image.cache_missing":
                 return False
@@ -1546,7 +1547,7 @@ def _prepare_from_build(
         raise RuntimeImagePreparationError(
             "runtime_image.receipt_invalid", "source-build input identity is invalid"
         )
-    existing = storage.verify_existing(archive_sha, image_bytes)
+    existing = storage.existing_archive(archive_sha, image_bytes)
     expected_interface_label = _runtime_interface_label(expected_interface)
     try:
         cached = storage.read_receipt(archive_sha)

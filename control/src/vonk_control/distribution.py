@@ -10,15 +10,18 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
-from threading import RLock
+from threading import Lock
+from time import monotonic
 from typing import BinaryIO, Protocol
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionObject,
@@ -31,7 +34,6 @@ from .artifact_lifecycle import (
     require_reference_open,
 )
 from .artifact_reference_scan import require_model_sets_open
-from .cached_file_verification import verified_files
 from .distribution_assignment import NodeDistributionAssignment
 from .models import (
     ArtifactDistributionAssignment,
@@ -51,16 +53,16 @@ class DistributionError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
-class VerifiedObject:
-    """A source handle that has been checked against its content address."""
+class OpenedObject:
+    """An open stored object whose name is its content address and whose size was checked."""
 
     stream: BinaryIO
     size: int
     sha256: str
 
 
-class VerifiedObjectSource(Protocol):
-    def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
+class ObjectSource(Protocol):
+    def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         """Open a complete immutable object or raise DistributionError."""
         ...
 
@@ -84,7 +86,7 @@ def artifact_set_sha256(objects: tuple[DistributionObject, ...]) -> str:
 _artifact_set_digest = artifact_set_sha256
 
 
-class FilesystemVerifiedObjectSource:
+class FilesystemObjectSource:
     """Adapter for flat content-addressed Controller/NAS object storage."""
 
     def __init__(
@@ -114,7 +116,7 @@ class FilesystemVerifiedObjectSource:
             expected
         )
 
-    def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
+    def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise DistributionError(
                 "distribution.object_invalid", "object digest is invalid"
@@ -155,29 +157,21 @@ class FilesystemVerifiedObjectSource:
             ):
                 os.close(fd)
                 raise DistributionError(
-                    "distribution.object_unavailable", "verified object length changed"
+                    "distribution.object_unavailable", "stored object length changed"
                 )
+            # The name is the digest and the object entered the store through an
+            # ingress that verified it; serving checks identity and size only.
             source = os.fdopen(fd, "rb", closefd=True)
-            try:
-                valid = verified_files.verify(source, digest, expected_bytes)
-            except (OSError, ValueError):
-                source.close()
-                raise
-            if not valid:
-                source.close()
-                raise DistributionError(
-                    "distribution.object_unavailable", "verified object digest mismatch"
-                )
-            return VerifiedObject(source, expected_bytes, digest)
+            return OpenedObject(source, expected_bytes, digest)
         except DistributionError:
             raise
         except OSError as error:
             raise DistributionError(
-                "distribution.object_unavailable", "verified object is unavailable"
+                "distribution.object_unavailable", "stored object is unavailable"
             ) from error
 
 
-class RecipeBuildVerifiedObjectSource(FilesystemVerifiedObjectSource):
+class RecipeBuildObjectSource(FilesystemObjectSource):
     """Verified OCI source backed by succeeded Controller recipe builds."""
 
     def __init__(
@@ -218,7 +212,7 @@ class RecipeBuildVerifiedObjectSource(FilesystemVerifiedObjectSource):
                 is not None
             )
 
-    def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
+    def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         with self.sessions() as session:
             authorized = session.scalar(
                 select(RecipeBuild.id).where(
@@ -232,10 +226,10 @@ class RecipeBuildVerifiedObjectSource(FilesystemVerifiedObjectSource):
                 "distribution.object_unavailable",
                 "OCI archive is not a succeeded build artifact",
             )
-        return super().open_verified(digest, expected_bytes)
+        return super().open_object(digest, expected_bytes)
 
 
-class ModelCacheVerifiedObjectSource:
+class ModelCacheObjectSource:
     """Narrow adapter for the NAS model-cache verified-object service.
 
     ``manifests`` is keyed by the cache service's own artifact-set digest and
@@ -249,36 +243,36 @@ class ModelCacheVerifiedObjectSource:
     _manifests: dict[str, tuple[DistributionObject, ...]]
     _receipts: dict[str, tuple[dict[str, object], ...]]
     _paths: dict[str, tuple[str, str, object]]
-    _open_verified: Callable[[str, int], VerifiedObject]
+    _open_object: Callable[[str, int], OpenedObject]
 
     def __init__(
         self,
-        open_verified: Callable[[str, int], VerifiedObject],
+        open_object: Callable[[str, int], OpenedObject],
         manifests: dict[str, tuple[DistributionObject, ...]],
     ) -> None:
-        self._open_verified = open_verified
+        self._open_object = open_object
         self._manifests = dict(manifests)
         self._receipts: dict[str, tuple[dict[str, object], ...]] = {}
 
-    def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
-        return self._open_verified(digest, expected_bytes)
+    def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
+        return self._open_object(digest, expected_bytes)
 
     def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
         return False
 
     @classmethod
-    def from_service(cls, service: object) -> ModelCacheVerifiedObjectSource:
+    def from_service(cls, service: object) -> ModelCacheObjectSource:
         """Construct directly from the NAS worker's verified-object service."""
         return cls._from_cache_service(service)
 
     @classmethod
-    def _from_cache_service(cls, service: object) -> ModelCacheVerifiedObjectSource:
+    def _from_cache_service(cls, service: object) -> ModelCacheObjectSource:
         adapter = cls.__new__(cls)
         adapter._service = service
         adapter._manifests = {}
         adapter._receipts = {}
         adapter._paths = {}
-        adapter._open_verified = adapter._open_cache_object
+        adapter._open_object = adapter._open_cache_object
         return adapter
 
     def _load_manifest(self, digest: str) -> tuple[DistributionObject, ...]:
@@ -341,7 +335,7 @@ class ModelCacheVerifiedObjectSource:
             self._receipts[digest] = tuple(receipts)
         return result
 
-    def _open_cache_object(self, digest: str, expected_bytes: int) -> VerifiedObject:
+    def _open_cache_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         entry = self._paths.get(digest)
         if entry is None:
             raise DistributionError(
@@ -349,7 +343,7 @@ class ModelCacheVerifiedObjectSource:
             )
         set_digest, path, _ = entry
         try:
-            file_provider = getattr(self._service, "verified_artifact_file", None)
+            file_provider = getattr(self._service, "cached_artifact_file", None)
             if not isinstance(file_provider, Callable):
                 raise TypeError("NAS cache object provider is unavailable")
             verified_path, size, verified_digest = file_provider(
@@ -360,7 +354,7 @@ class ModelCacheVerifiedObjectSource:
                     "distribution.object_unavailable",
                     "NAS cache object identity changed",
                 )
-            return VerifiedObject(verified_path.open("rb"), size, digest)
+            return OpenedObject(verified_path.open("rb"), size, digest)
         except DistributionError:
             raise
         except Exception as error:
@@ -413,13 +407,13 @@ class ModelCacheVerifiedObjectSource:
         return receipts
 
 
-class CompositeVerifiedObjectSource:
+class CompositeObjectSource:
     """Join the NAS model cache and Controller OCI archive boundaries."""
 
     def __init__(
         self,
-        model_source: VerifiedObjectSource,
-        oci_source: VerifiedObjectSource,
+        model_source: ObjectSource,
+        oci_source: ObjectSource,
     ) -> None:
         self.model_source = model_source
         self.oci_source = oci_source
@@ -443,19 +437,19 @@ class CompositeVerifiedObjectSource:
             )
         return resolver(artifact_set_sha256)
 
-    def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
+    def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         # Both sources are content addressed. Probe the model cache first so a
         # shared NAS object is never copied into a second Controller store.
         try:
-            return self.model_source.open_verified(digest, expected_bytes)
+            return self.model_source.open_object(digest, expected_bytes)
         except DistributionError as model_error:
             try:
-                return self.oci_source.open_verified(digest, expected_bytes)
+                return self.oci_source.open_object(digest, expected_bytes)
             except DistributionError:
                 raise model_error
 
 
-class MemoryVerifiedObjectSource:
+class MemoryObjectSource:
     """Small deterministic fixture source used by Controller integration tests."""
 
     def __init__(self, objects: dict[str, bytes] | None = None) -> None:
@@ -490,7 +484,7 @@ class MemoryVerifiedObjectSource:
         # production NAS adapter above performs the same exact lookup.
         return self.artifact_manifests.get(artifact_set_sha256) == expected
 
-    def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
+    def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         payload = self.objects.get(digest)
         if (
             payload is None
@@ -500,7 +494,11 @@ class MemoryVerifiedObjectSource:
             raise DistributionError(
                 "distribution.object_unavailable", "verified object digest mismatch"
             )
-        return VerifiedObject(BytesIO(payload), len(payload), digest)
+        return OpenedObject(BytesIO(payload), len(payload), digest)
+
+
+_AUTHORIZATION_CACHE_ENTRIES = 1024
+_AUTHORIZATION_TTL_SECONDS = 30.0
 
 
 class DistributionService:
@@ -508,7 +506,7 @@ class DistributionService:
 
     def __init__(
         self,
-        source: VerifiedObjectSource,
+        source: ObjectSource,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         sessions: sessionmaker[Session] | None = None,
@@ -516,8 +514,18 @@ class DistributionService:
         self.source = source
         self.clock = clock
         self.sessions = sessions
+        # In-memory mode (no database) is a test double. Its dict needs a lock
+        # for check-then-write in register/revoke only; database mode takes no
+        # process-wide lock because Postgres arbitrates concurrent access.
         self._assignments: dict[tuple[str, str], NodeDistributionAssignment] = {}
-        self._lock = RLock()
+        self._lock = Lock()
+        # Authorization is decided per assignment, not per range request.
+        # Bounded and short-lived so a revocation made by another process is
+        # seen within _AUTHORIZATION_TTL_SECONDS (eventually consistent).
+        self._authorized: OrderedDict[
+            tuple[str, str], tuple[NodeDistributionAssignment, float]
+        ] = OrderedDict()
+        self._authorized_lock = Lock()  # guards only the dict, never I/O
 
     def attach_sessions(self, sessions: sessionmaker[Session]) -> DistributionService:
         """Bind the service to the Controller's durable assignment store."""
@@ -547,9 +555,9 @@ class DistributionService:
                 "distribution.runtime_image_mismatch",
                 "assignment OCI archive does not match the verified image identity",
             )
-        with self._lock:
-            key = (assignment.plan_digest, assignment.node_id)
-            if self.sessions is None:
+        key = (assignment.plan_digest, assignment.node_id)
+        if self.sessions is None:
+            with self._lock:
                 existing = self._assignments.get(key)
                 if existing is not None and existing != assignment:
                     raise DistributionError(
@@ -557,58 +565,64 @@ class DistributionService:
                         "node assignment is already bound",
                     )
                 self._assignments[key] = assignment
+            return
+        try:
+            self._register_row(assignment)
+        except IntegrityError:
+            # A concurrent identical registration won the unique
+            # (plan_digest, node_id) constraint; the second pass compares.
+            self._register_row(assignment)
+
+    def _register_row(self, assignment: NodeDistributionAssignment) -> None:
+        sessions = self.sessions
+        assert sessions is not None
+        with sessions.begin() as session:
+            row = session.scalar(
+                select(ArtifactDistributionAssignment)
+                .where(
+                    ArtifactDistributionAssignment.plan_digest
+                    == assignment.plan_digest,
+                    ArtifactDistributionAssignment.node_id == assignment.node_id,
+                )
+                .with_for_update()
+            )
+            if row is not None:
+                if self._from_row(row) != assignment:
+                    raise DistributionError(
+                        "distribution.assignment_conflict",
+                        "node assignment is already bound",
+                    )
                 return
-            with self.sessions.begin() as session:
-                row = session.scalar(
-                    select(ArtifactDistributionAssignment)
-                    .where(
-                        ArtifactDistributionAssignment.plan_digest
-                        == assignment.plan_digest,
-                        ArtifactDistributionAssignment.node_id == assignment.node_id,
-                    )
-                    .with_for_update()
+            now = self.clock()
+            try:
+                require_model_sets_open(
+                    session,
+                    (assignment.model_artifact_set_sha256,),
+                    now=now,
                 )
-                if row is not None:
-                    if self._from_row(row) != assignment:
-                        raise DistributionError(
-                            "distribution.assignment_conflict",
-                            "node assignment is already bound",
-                        )
-                    return
-                now = self.clock()
-                try:
-                    require_model_sets_open(
-                        session,
-                        (assignment.model_artifact_set_sha256,),
-                        now=now,
-                    )
-                    require_reference_open(
-                        session,
-                        (
-                            ArtifactIdentity(
-                                "runtime-image", assignment.oci_archive_sha256
-                            ),
-                        ),
-                        now=now,
-                    )
-                except ArtifactLifecycleError as error:
-                    raise DistributionError(error.code, error.detail) from error
-                session.add(
-                    ArtifactDistributionAssignment(
-                        id=assignment.assignment_id,
-                        plan_digest=assignment.plan_digest,
-                        node_id=assignment.node_id,
-                        generation=assignment.generation,
-                        expires_at=assignment.expires_at,
-                        model_artifact_set_sha256=assignment.model_artifact_set_sha256,
-                        objects=[item.to_mapping() for item in assignment.objects],
-                        oci_image_digest=assignment.oci_image_digest,
-                        oci_archive_sha256=assignment.oci_archive_sha256,
-                        state="active",
-                        created_at=now,
-                        updated_at=now,
-                    )
+                require_reference_open(
+                    session,
+                    (ArtifactIdentity("runtime-image", assignment.oci_archive_sha256),),
+                    now=now,
                 )
+            except ArtifactLifecycleError as error:
+                raise DistributionError(error.code, error.detail) from error
+            session.add(
+                ArtifactDistributionAssignment(
+                    id=assignment.assignment_id,
+                    plan_digest=assignment.plan_digest,
+                    node_id=assignment.node_id,
+                    generation=assignment.generation,
+                    expires_at=assignment.expires_at,
+                    model_artifact_set_sha256=assignment.model_artifact_set_sha256,
+                    objects=[item.to_mapping() for item in assignment.objects],
+                    oci_image_digest=assignment.oci_image_digest,
+                    oci_archive_sha256=assignment.oci_archive_sha256,
+                    state="active",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
 
     @staticmethod
     def _from_row(row: ArtifactDistributionAssignment) -> NodeDistributionAssignment:
@@ -630,6 +644,8 @@ class DistributionService:
 
     def revoke(self, *, plan_digest: str, node_id: str) -> None:
         """Revoke a durable assignment; revocation is fail-closed on reads."""
+        with self._authorized_lock:
+            self._authorized.pop((plan_digest, node_id), None)
         if self.sessions is None:
             with self._lock:
                 self._assignments.pop((plan_digest, node_id), None)
@@ -651,40 +667,66 @@ class DistributionService:
     def authorize(
         self, *, node_id: str, plan_digest: str
     ) -> NodeDistributionAssignment:
-        with self._lock:
-            if self.sessions is None:
-                assignment = self._assignments.get((plan_digest, node_id))
-                plan_assignment = next(
-                    (
-                        item
-                        for (digest, _node), item in self._assignments.items()
-                        if digest == plan_digest
-                    ),
-                    None,
+        """Decide once per assignment, not once per range request.
+
+        A positive decision is remembered for a short, bounded time and never
+        past the assignment's own expiry. There is no process-wide lock: the
+        database arbitrates, and the cache only holds immutable assignments.
+        """
+        key = (plan_digest, node_id)
+        now = self.clock()
+        with self._authorized_lock:
+            cached = self._authorized.get(key)
+            if cached is not None:
+                assignment, decided_at = cached
+                if (
+                    monotonic() - decided_at < _AUTHORIZATION_TTL_SECONDS
+                    and assignment.expires_at > now
+                ):
+                    return assignment
+                del self._authorized[key]
+        assignment = self._authorize_uncached(node_id=node_id, plan_digest=plan_digest)
+        with self._authorized_lock:
+            self._authorized[key] = (assignment, monotonic())
+            while len(self._authorized) > _AUTHORIZATION_CACHE_ENTRIES:
+                self._authorized.popitem(last=False)
+        return assignment
+
+    def _authorize_uncached(
+        self, *, node_id: str, plan_digest: str
+    ) -> NodeDistributionAssignment:
+        if self.sessions is None:
+            assignment = self._assignments.get((plan_digest, node_id))
+            plan_assignment = next(
+                (
+                    item
+                    for (digest, _node), item in list(self._assignments.items())
+                    if digest == plan_digest
+                ),
+                None,
+            )
+        else:
+            with self.sessions() as session:
+                row = session.scalar(
+                    select(ArtifactDistributionAssignment).where(
+                        ArtifactDistributionAssignment.plan_digest == plan_digest,
+                        ArtifactDistributionAssignment.node_id == node_id,
+                    )
                 )
-            else:
-                with self.sessions() as session:
-                    row = session.scalar(
+                if row is None:
+                    assignment = None
+                    plan_assignment = session.scalar(
                         select(ArtifactDistributionAssignment).where(
                             ArtifactDistributionAssignment.plan_digest == plan_digest,
-                            ArtifactDistributionAssignment.node_id == node_id,
                         )
                     )
-                    if row is None:
-                        assignment = None
-                        plan_assignment = session.scalar(
-                            select(ArtifactDistributionAssignment).where(
-                                ArtifactDistributionAssignment.plan_digest
-                                == plan_digest,
-                            )
-                        )
-                    elif row.state != "active":
-                        raise DistributionError(
-                            "distribution.revoked", "assignment is no longer active"
-                        )
-                    else:
-                        assignment = self._from_row(row)
-                        plan_assignment = assignment
+                elif row.state != "active":
+                    raise DistributionError(
+                        "distribution.revoked", "assignment is no longer active"
+                    )
+                else:
+                    assignment = self._from_row(row)
+                    plan_assignment = assignment
         if assignment is None:
             if plan_assignment is not None:
                 raise DistributionError(
@@ -721,7 +763,7 @@ class DistributionService:
 
     def open_object(
         self, *, node_id: str, plan_digest: str, digest: str
-    ) -> tuple[NodeDistributionAssignment, DistributionObject, VerifiedObject]:
+    ) -> tuple[NodeDistributionAssignment, DistributionObject, OpenedObject]:
         assignment = self.authorize(node_id=node_id, plan_digest=plan_digest)
         object_spec = next(
             (item for item in assignment.objects if item.sha256 == digest), None
@@ -741,12 +783,12 @@ class DistributionService:
                 "assignment model objects do not match the cache manifest",
             )
         try:
-            opened = self.source.open_verified(digest, object_spec.bytes)
+            opened = self.source.open_object(digest, object_spec.bytes)
         except DistributionError:
             raise
         except Exception as error:
             raise DistributionError(
-                "distribution.object_unavailable", "verified object is unavailable"
+                "distribution.object_unavailable", "stored object is unavailable"
             ) from error
         if opened.size != object_spec.bytes or opened.sha256 != digest:
             opened.stream.close()
@@ -757,15 +799,15 @@ class DistributionService:
 
 
 __all__ = [
-    "CompositeVerifiedObjectSource",
+    "CompositeObjectSource",
     "DistributionError",
     "DistributionService",
-    "FilesystemVerifiedObjectSource",
-    "MemoryVerifiedObjectSource",
-    "ModelCacheVerifiedObjectSource",
-    "RecipeBuildVerifiedObjectSource",
-    "VerifiedObject",
-    "VerifiedObjectSource",
+    "FilesystemObjectSource",
+    "MemoryObjectSource",
+    "ModelCacheObjectSource",
+    "ObjectSource",
+    "OpenedObject",
+    "RecipeBuildObjectSource",
     "artifact_set_sha256",
     "build_distribution_service",
     "build_distribution_service_from_components",
@@ -773,15 +815,15 @@ __all__ = [
 
 
 def build_distribution_service(
-    model_source: VerifiedObjectSource,
-    oci_source: VerifiedObjectSource,
+    model_source: ObjectSource,
+    oci_source: ObjectSource,
     sessions: sessionmaker[Session],
     *,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> DistributionService:
     """Production construction hook used by Controller startup wiring."""
     return DistributionService(
-        CompositeVerifiedObjectSource(model_source, oci_source),
+        CompositeObjectSource(model_source, oci_source),
         clock=clock,
         sessions=sessions,
     )
@@ -796,8 +838,8 @@ def build_distribution_service_from_components(
 ) -> DistributionService:
     """Build the production source pair from Controller startup components."""
     return build_distribution_service(
-        ModelCacheVerifiedObjectSource.from_service(model_cache),
-        RecipeBuildVerifiedObjectSource(sessions, artifact_root),
+        ModelCacheObjectSource.from_service(model_cache),
+        RecipeBuildObjectSource(sessions, artifact_root),
         sessions,
         clock=clock,
     )

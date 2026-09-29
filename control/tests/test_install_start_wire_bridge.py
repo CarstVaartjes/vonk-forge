@@ -14,7 +14,7 @@ from vonk_agent_protocol import (
     DistributionAssignment,
     RecipeStartResult,
 )
-from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
+from vonk_control.distribution import DistributionService, MemoryObjectSource
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.models import AgentOperation, InstallationNode, RunNode
 
@@ -260,7 +260,7 @@ def test_controller_distribution_http_response_round_trips_through_rust(
     agent_system, install_start_wire_probe: Path
 ) -> None:
     client, services, _tokens, clock = agent_system
-    source = MemoryVerifiedObjectSource()
+    source = MemoryObjectSource()
     assignment = _assignment(
         NODE_A,
         source.put(b"model payload"),

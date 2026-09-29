@@ -5,13 +5,11 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import hashlib
-import hmac
 import json
 import logging
 import os
 import re
 import stat
-import tempfile
 import time
 import uuid
 from collections import deque
@@ -593,6 +591,7 @@ def _references_digest(value: object, digest: str) -> bool:
 
 
 def _sha256_path(path: Path, expected_bytes: int) -> str:
+    """Hash an uploaded archive once, where it enters the Controller store."""
     digest = hashlib.sha256()
     read = 0
     with path.open("rb") as stream:
@@ -658,13 +657,11 @@ def _commit_recipe_image_upload(
     destination: Path,
     *,
     expected_bytes: int,
-    layout_sha256: str,
 ) -> None:
     if destination.exists():
-        if (
-            destination.stat().st_size != expected_bytes
-            or _sha256_path(destination, expected_bytes) != layout_sha256
-        ):
+        # The destination is named by its layout digest, so identity and size
+        # are enough; it is not re-hashed.
+        if destination.stat().st_size != expected_bytes:
             raise HTTPException(
                 status_code=409, detail="recipe image storage conflicts"
             )
@@ -762,82 +759,13 @@ def _read_chunks(descriptor: int, start: int, length: int):
         os.lseek(descriptor, start, os.SEEK_SET)
         remaining = length
         while remaining:
-            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
             if not chunk:
                 break
             remaining -= len(chunk)
             yield chunk
     finally:
         os.close(descriptor)
-
-
-def _sealed_snapshot(descriptor: int, size: int, maximum: int, digest: str):
-    snapshot = None
-    try:
-        # Ownership transfers to _SnapshotResponse, which closes after send.
-        snapshot = tempfile.TemporaryFile(mode="w+b")  # noqa: SIM115
-        copied = 0
-        content_hash = hashlib.sha256()
-        while copied < size:
-            chunk = os.read(descriptor, min(64 * 1024, size - copied))
-            if not chunk:
-                raise HTTPException(
-                    status_code=404, detail="artifact changed during read"
-                )
-            copied += len(chunk)
-            if copied > maximum:
-                raise HTTPException(status_code=413, detail="artifact not available")
-            content_hash.update(chunk)
-            snapshot.write(chunk)
-        after = os.fstat(descriptor)
-        if after.st_size != size or os.read(descriptor, 1):
-            raise HTTPException(status_code=404, detail="artifact changed during read")
-        if not hmac.compare_digest(content_hash.hexdigest(), digest):
-            raise HTTPException(status_code=404, detail="artifact not found")
-        snapshot.seek(0)
-        return snapshot
-    except Exception:
-        if snapshot is not None:
-            snapshot.close()
-        raise
-    finally:
-        os.close(descriptor)
-
-
-class _SnapshotResponse(StreamingResponse):
-    def __init__(
-        self,
-        snapshot,
-        start: int,
-        length: int,
-        *,
-        status_code: int = 200,
-        headers: Mapping[str, str] | None = None,
-        media_type: str | None = None,
-    ) -> None:
-        self._snapshot = snapshot
-        super().__init__(
-            self._chunks(start, length),
-            status_code=status_code,
-            headers=headers,
-            media_type=media_type,
-        )
-
-    def _chunks(self, start: int, length: int):
-        self._snapshot.seek(start)
-        remaining = length
-        while remaining:
-            chunk = self._snapshot.read(min(64 * 1024, remaining))
-            if not chunk:
-                raise RuntimeError("sealed artifact snapshot was truncated")
-            remaining -= len(chunk)
-            yield chunk
-
-    async def __call__(self, scope, receive, send) -> None:
-        try:
-            await super().__call__(scope, receive, send)
-        finally:
-            self._snapshot.close()
 
 
 def install_agent_routes(
@@ -1697,7 +1625,6 @@ def install_agent_routes(
                     temporary,
                     destination,
                     expected_bytes=headers.image_bytes,
-                    layout_sha256=headers.layout_sha256,
                 )
                 build.image_digest = headers.image_digest
                 build.oci_layout_sha256 = headers.layout_sha256
@@ -1717,7 +1644,7 @@ def install_agent_routes(
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        descriptor, size, maximum, recipe_image = _open_owned_artifact(
+        descriptor, size, _maximum, _recipe_image = _open_owned_artifact(
             required, identity, sha256
         )
         try:
@@ -1743,24 +1670,11 @@ def install_agent_routes(
         }
         if code == status.HTTP_206_PARTIAL_CONTENT:
             headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-        if recipe_image:
-            # Recipe images are verified while they enter the content-addressed
-            # store and rehashed by the agent before Docker sees them. Reading
-            # only the requested range keeps multi-gigabyte images resumable;
-            # snapshotting and hashing the complete archive for every 8 MiB
-            # request is quadratic and can exceed the agent's HTTP deadline
-            # before the first response byte.
-            return StreamingResponse(
-                _read_chunks(descriptor, start, length),
-                status_code=code,
-                headers=headers,
-                media_type="application/octet-stream",
-            )
-        snapshot = _sealed_snapshot(descriptor, size, maximum, sha256)
-        return _SnapshotResponse(
-            snapshot,
-            start,
-            length,
+        # Content-addressed objects are verified where they enter the store
+        # (build output, source publication). Serving reads only the requested
+        # range: re-hashing the whole object per range request is quadratic.
+        return StreamingResponse(
+            _read_chunks(descriptor, start, length),
             status_code=code,
             headers=headers,
             media_type="application/octet-stream",
@@ -1873,7 +1787,7 @@ def install_agent_routes(
                     chunk = opened.stream.read(min(1024 * 1024, remaining))
                     if not chunk:
                         raise RuntimeError(
-                            "verified object was truncated during transfer"
+                            "stored object was truncated during transfer"
                         )
                     remaining -= len(chunk)
                     yield chunk

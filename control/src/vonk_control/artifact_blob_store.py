@@ -191,12 +191,7 @@ class ArtifactBlobStore:
         path = self._root / sha256[:2] / sha256
         if path.is_symlink() or not path.is_file() or path.stat().st_size != size_bytes:
             raise ArtifactBlobStoreError("stored artifact is unavailable")
-        digest = hashlib.sha256()
-        with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024**2), b""):
-                digest.update(chunk)
-        if digest.hexdigest() != sha256:
-            raise ArtifactBlobStoreError("stored artifact digest is inconsistent")
+        # Bytes are hashed once, on upload; the file is named by that digest.
         return path
 
     @staticmethod

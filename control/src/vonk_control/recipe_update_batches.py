@@ -196,7 +196,7 @@ class RecipeUpdateBatches:
                 receipt = self.owner._storage.read_receipt(
                     authorization.oci_archive_sha256
                 )
-                self.owner._storage.verify_existing(
+                self.owner._storage.existing_archive(
                     receipt.oci_archive_sha256, receipt.image_bytes
                 )
             except RuntimeImagePreparationError as error:

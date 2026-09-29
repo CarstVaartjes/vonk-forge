@@ -27,7 +27,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, ArtifactDistributionResult
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
+from vonk_control.distribution import DistributionService, MemoryObjectSource
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.models import AgentCertificate, AgentNode, AgentOperation, Base
 
@@ -138,7 +138,7 @@ def _certificate_files(root: Path) -> dict[str, Path]:
     return files
 
 
-def _assignment(source: MemoryVerifiedObjectSource, now: datetime):
+def _assignment(source: MemoryObjectSource, now: datetime):
     large = b"model shard\n" * 500_000
     small = b"config!"
     archive = b"oci archive"
@@ -267,7 +267,7 @@ class DistributionHandler(BaseHTTPRequestHandler):
 @pytest.fixture
 def distribution_https(tmp_path: Path, controller):
     sessions, clock = controller
-    source = MemoryVerifiedObjectSource()
+    source = MemoryObjectSource()
     assignment, large_digest, small_digest, archive_digest = _assignment(
         source, clock.now
     )

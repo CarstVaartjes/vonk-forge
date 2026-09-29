@@ -3159,7 +3159,7 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
     assert observed.state == "cancelled"
     assert observed.result is None
     assert observed.cancellation is not None
-    retained = storage.verify_existing(ARCHIVE_SHA, len(ARCHIVE))
+    retained = storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE))
     assert retained.read_bytes() == ARCHIVE
     with sessions() as session:
         assert session.scalar(select(RuntimeImageAuthorization)) is None
@@ -3615,7 +3615,7 @@ def test_archive_integrity_failure_builds_the_image_again(tmp_path: Path) -> Non
     now = [datetime(2026, 9, 6, 12, tzinfo=UTC)]
     transport = Transport()
     storage = FilesystemRuntimeImageStorage(tmp_path)
-    original = storage.verify_existing
+    original = storage.existing_archive
     corrupt = [True]
 
     def verify_once(archive_sha256: str, expected_bytes: int) -> Path:
@@ -3640,7 +3640,7 @@ def test_archive_integrity_failure_builds_the_image_again(tmp_path: Path) -> Non
     )
     service.run_pending()
     assert service.get(first.id).state == "succeeded"
-    storage.verify_existing = verify_once  # type: ignore[method-assign]
+    storage.existing_archive = verify_once  # type: ignore[method-assign]
     again = service.start_selector(
         recipe.identity.slug, actor="operator", request_id="4" * 36
     )

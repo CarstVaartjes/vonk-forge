@@ -34,7 +34,7 @@ from vonk_control.agent_jobs import (
 from vonk_control.distribution import (
     DistributionError,
     DistributionService,
-    MemoryVerifiedObjectSource,
+    MemoryObjectSource,
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.install_admission import InstallAdmissionService
@@ -1556,7 +1556,7 @@ def test_distribution_heartbeat_renews_only_live_authorized_transfer(
     service, restriction
 ) -> None:
     jobs, sessions, clock = service
-    source = MemoryVerifiedObjectSource()
+    source = MemoryObjectSource()
     model_digest = source.put(b"weights")
     image_digest = source.put(b"image")
     assignment = NodeDistributionAssignment.parse(
