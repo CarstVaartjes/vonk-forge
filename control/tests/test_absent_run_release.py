@@ -89,33 +89,7 @@ def test_stop_of_a_run_the_spark_reports_gone_succeeds_and_releases(tmp_path):
         )
 
 
-def test_superseded_run_reported_gone_is_released_not_recovered(tmp_path):
-    sessions, service, queue, mapping, build, nodes = setup_services(
-        tmp_path, distributed_lifecycle=True
-    )
-    installed = installed_recipe(service, mapping, build, nodes, request_id="i" * 36)
-    started = started_recipe(
-        sessions, service, installed.owner_id, nodes, request_id="r" * 36
-    )
-    service, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
-    routes.publish_run(started.owner_id)
-    _report_absent(sessions, started.owner_id)
-    with sessions.begin() as session:
-        for node in session.scalars(select(AgentNode)):
-            node.workload_intent_ordinal += 1  # a newer intent owns the Spark
-    recovery = DistributedRecoveryCoordinator(
-        sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
-    )
-
-    assert recovery.tick() is True
-
-    assert _active_run_claims(sessions, started.owner_id) == 0
-    with sessions() as session:
-        assert _run(session, started.owner_id).state == "stopped"
-        assert not list(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
-
-
-def test_superseded_run_without_a_gone_report_keeps_its_claims(tmp_path):
+def test_superseded_run_is_settled_and_released_not_recovered(tmp_path):
     sessions, service, queue, mapping, build, nodes = setup_services(
         tmp_path, distributed_lifecycle=True
     )
@@ -127,15 +101,18 @@ def test_superseded_run_without_a_gone_report_keeps_its_claims(tmp_path):
     routes.publish_run(started.owner_id)
     with sessions.begin() as session:
         for node in session.scalars(select(RunNode)):
-            node.state = "failed"  # failed, but no Spark has said it is gone
+            node.state = "failed"  # no Spark has to say it is gone
         for agent in session.scalars(select(AgentNode)):
-            agent.workload_intent_ordinal += 1
+            agent.workload_intent_ordinal += 1  # a newer intent owns the Spark
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
     )
 
-    recovery.tick()
+    assert recovery.tick() is True
 
-    assert _active_run_claims(sessions, started.owner_id) > 0
+    assert _active_run_claims(sessions, started.owner_id) == 0
     with sessions() as session:
-        assert _run(session, started.owner_id).state == "running"
+        run = _run(session, started.owner_id)
+        assert run.state == "failed"
+        assert "newer workload intent" in (run.route_error or "")
+        assert not list(session.scalars(select(Job).where(Job.kind == "recipe.stop")))

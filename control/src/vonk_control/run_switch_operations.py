@@ -66,6 +66,7 @@ from .memory_reservations import (
 from .model_cache import ModelCacheService
 from .model_cache_contract import ModelCacheDownloadPreviewResponse
 from .models import (
+    ACTIVE_RUN_STATES,
     AgentNode,
     CatalogDocumentRevision,
     ClusterMapping,
@@ -468,8 +469,7 @@ class _ResourceFits:
         return self.requires_early_stop("run-switch.insufficient-disk")
 
 
-_ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
-_STOPPABLE_RUN_STATES = _ACTIVE_RUN_STATES | {"lost"}
+_STOPPABLE_RUN_STATES = ACTIVE_RUN_STATES | {"lost"}
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _OPERATION_KINDS = frozenset(
     {"recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"}
@@ -1813,7 +1813,7 @@ class RecipeLifecyclePhaseExecutor:
                     and status.route_state == "withdrawn"
                     and all(rank.state == "stopped" for rank in status.ranks)
                 )
-                waiting = status.state in _ACTIVE_RUN_STATES or status.route_state in {
+                waiting = status.state in ACTIVE_RUN_STATES or status.route_state in {
                     "pending",
                 }
                 status_reason = (
@@ -2036,7 +2036,7 @@ class RecipeLifecyclePhaseExecutor:
                     )
                 )
             )
-            active_runs = sum(run.state in _ACTIVE_RUN_STATES for run in runs)
+            active_runs = sum(run.state in ACTIVE_RUN_STATES for run in runs)
             unwithdrawn_routes = sum(run.route_state != "withdrawn" for run in runs)
             verified = (
                 installation.state == "installed"
@@ -8774,7 +8774,7 @@ def _start_still_progressing(
         status: Any = getter(run_id)
     except (KeyError, RuntimeError, TypeError, ValueError):
         return False
-    return status.state in _ACTIVE_RUN_STATES and any(
+    return status.state in ACTIVE_RUN_STATES and any(
         rank.fresh and rank.state in {"planned", "starting", "running"}
         for rank in status.ranks
     )

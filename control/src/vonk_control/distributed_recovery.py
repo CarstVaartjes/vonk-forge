@@ -25,6 +25,7 @@ from .distributed_lifecycle import (
 )
 from .litellm import LiteLlmGeneration
 from .models import (
+    ACTIVE_RUN_STATES,
     AgentNode,
     AgentOperation,
     AgentPresence,
@@ -33,6 +34,7 @@ from .models import (
     Job,
     RecipeInstallation,
     RecipeRun,
+    ResourceReservation,
     RunNode,
 )
 from .recipe_execution_contract import (
@@ -146,6 +148,7 @@ class DistributedRecoveryCoordinator:
         queued = False
         worked = False
         with self._routes.publication_transaction() as session:
+            worked = self._settle_unreadable_runs(session, now)
             candidates = tuple(
                 session.scalars(
                     select(RecipeRun)
@@ -185,38 +188,24 @@ class DistributedRecoveryCoordinator:
                     worked = True
                 if self._active_recovery(session, run.id):
                     continue
-                if _superseded_absent_run(session, run, run_nodes, now):
-                    settle_absent_run_in_session(
-                        session,
+                if _superseded(session, run, run_nodes):
+                    _settle_unrecoverable(
                         run,
-                        run_nodes,
+                        "a newer workload intent owns this run's Sparks; it is "
+                        "settled instead of recovered",
                         now,
-                        reason=(
-                            "the Spark reports this run gone and a newer workload "
-                            "intent owns it; its claims are released"
-                        ),
                     )
                     worked = True
                     continue
-                try:
-                    run_plan = run_plan_document(run.plan)
-                except RecipeExecutionContractError:
-                    run.state = "failed"
-                    run.route_state = "withdrawn"
-                    run.route_error = "stored run plan is invalid"
-                    run.updated_at = now
-                    worked = True
-                    continue
+                run_plan = run_plan_document(run.plan)
                 if run_plan.get("execution_mode") == "one-shot-jobs":
-                    run.state = "failed"
-                    run.route_state = "withdrawn"
-                    run.route_error = (
+                    _settle_unrecoverable(
+                        run,
                         "automatic recovery stopped because a one-shot job may "
                         "have completed external effects before its result was "
-                        "lost; verify those effects, then submit a new authorized run"
+                        "lost; verify those effects, then submit a new authorized run",
+                        now,
                     )
-                    run.route_next_attempt_at = None
-                    run.updated_at = now
                     worked = True
                     continue
                 if (
@@ -349,11 +338,7 @@ class DistributedRecoveryCoordinator:
                     )
                     continue
                 except DistributedLifecycleError as error:
-                    run.state = "failed"
-                    run.route_state = "withdrawn"
-                    run.route_error = str(error)[:512]
-                    run.route_next_attempt_at = None
-                    run.updated_at = now
+                    _settle_unrecoverable(run, str(error), now)
                     worked = True
                     continue
                 run.route_state = "withdrawn"
@@ -372,9 +357,42 @@ class DistributedRecoveryCoordinator:
                 queued = True
                 worked = True
                 break
+            worked = release_inactive_run_claims_in_session(session, now) or worked
         if queued:
             self._agent_jobs.notify_available()
         return worked
+
+    def _settle_unreadable_runs(self, session: Session, now: datetime) -> bool:
+        """A run whose stored plan this Controller cannot read is settled.
+
+        Such a run was written under an older contract: it can be neither
+        recovered nor stopped from its plan, so it must not keep holding
+        capacity or wait for a stop that can never be planned. Its claims are
+        released by the ownership rule below.
+        """
+
+        unsettled = (*ACTIVE_RUN_STATES, "lost")
+        unreadable = []
+        for run in session.scalars(
+            select(RecipeRun).where(RecipeRun.state.in_(unsettled))
+        ):
+            try:
+                run_plan_document(run.plan)
+            except RecipeExecutionContractError:
+                unreadable.append(run.id)
+        for run_id in unreadable:
+            run = session.get(RecipeRun, run_id, with_for_update=True)
+            if run is None or run.state not in unsettled:
+                continue
+            if run.route_state != "withdrawn":
+                self._routes.withdraw_run_in_session(session, run.id)
+            _settle_unrecoverable(
+                run,
+                "the stored run plan is unreadable (older contract); the run is "
+                "settled and its capacity released",
+                now,
+            )
+        return bool(unreadable)
 
     @staticmethod
     def _active_recovery(session: Session, run_id: str) -> bool:
@@ -515,22 +533,16 @@ def run_node_reports_absent(run: RecipeRun, node: RunNode, now: datetime) -> boo
     return timedelta(0) <= age < timedelta(seconds=ROUTE_EVIDENCE_MAX_AGE_SECONDS)
 
 
-def _superseded_absent_run(
-    session: Session, run: RecipeRun, run_nodes: Sequence[RunNode], now: datetime
-) -> bool:
-    """A newer workload intent owns these Sparks and every rank is reported gone.
+def _superseded(session: Session, run: RecipeRun, run_nodes: Sequence[RunNode]) -> bool:
+    """A newer workload intent owns at least one of this run's Sparks.
 
-    Recovery restarts only a run that is still desired. Once a later intent has
-    taken the Sparks, an absent run has nothing left to recover: its claims are
-    released so the newer intent can be admitted.
+    Recovery restarts only a run that is still desired; once a later intent
+    has taken its Sparks there is nothing left to recover.
     """
 
-    if not run_nodes or not all(
-        run_node_reports_absent(run, node, now) for node in run_nodes
-    ):
-        return False
-    starts = tuple(
-        session.scalars(
+    accepted = [
+        ordinal
+        for ordinal in session.scalars(
             select(Job.payload["workload_intent_ordinal"].as_integer()).where(
                 Job.kind == "recipe.start",
                 Job.payload["owner_kind"].as_string() == "run",
@@ -538,19 +550,55 @@ def _superseded_absent_run(
                 Job.state == "succeeded",
             )
         )
-    )
-    accepted = [ordinal for ordinal in starts if ordinal is not None]
-    if not accepted:
+        if ordinal is not None
+    ]
+    if not accepted or not run_nodes:
         return False
     ordinal = min(accepted)
-    current = tuple(
-        session.scalars(
+    return any(
+        value > ordinal
+        for value in session.scalars(
             select(AgentNode.workload_intent_ordinal).where(
                 AgentNode.node_id.in_([node.node_id for node in run_nodes])
             )
         )
     )
-    return any(value > ordinal for value in current)
+
+
+def _settle_unrecoverable(run: RecipeRun, reason: str, now: datetime) -> None:
+    """Record why a run is not recovered; the ownership rule frees its claims."""
+
+    run.state = "failed"
+    run.route_state = "withdrawn"
+    run.route_error = reason[:512]
+    run.route_next_attempt_at = None
+    run.updated_at = now
+
+
+def release_inactive_run_claims_in_session(session: Session, now: datetime) -> bool:
+    """The one ownership rule for run capacity.
+
+    Ports, rendezvous ports and memory are held only by a run the Controller
+    considers active (planned, starting, running, or stopping). Any other run
+    (failed, stopped, lost, or gone) holds nothing: whatever it may still
+    occupy physically is what the Spark's next inventory reports, never a
+    permanent reservation that blocks admission.
+    """
+
+    claims = session.scalars(
+        select(ResourceReservation)
+        .outerjoin(RecipeRun, RecipeRun.id == ResourceReservation.owner_id)
+        .where(
+            ResourceReservation.owner_kind == "run",
+            ResourceReservation.state == "active",
+            or_(RecipeRun.id.is_(None), RecipeRun.state.not_in(ACTIVE_RUN_STATES)),
+        )
+        .with_for_update(of=ResourceReservation)
+    ).all()
+    for claim in claims:
+        claim.state = "released"
+        claim.released_at = now
+    return bool(claims)
 
 
 def settle_absent_run_in_session(
@@ -558,8 +606,6 @@ def settle_absent_run_in_session(
     run: RecipeRun,
     run_nodes: Sequence[RunNode],
     now: datetime,
-    *,
-    reason: str | None = None,
 ) -> None:
     """Record a run its Sparks report gone as stopped and release its claims."""
 
@@ -568,7 +614,7 @@ def settle_absent_run_in_session(
         node.updated_at = now
     run.state = "stopped"
     run.route_state = "withdrawn"
-    run.route_error = reason
+    run.route_error = None
     run.route_next_attempt_at = None
     run.stopped_at = now
     run.updated_at = now

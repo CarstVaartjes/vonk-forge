@@ -2175,11 +2175,12 @@ def test_bootstrap_requires_the_host_helper_authority(
     assert response.json() == {"detail": "host runtime authority is unavailable"}
 
 
-def test_recipe_run_disposition_names_only_runs_the_controller_never_owned(
+def test_recipe_run_disposition_names_every_run_the_controller_does_not_want(
     agent_system,
 ) -> None:
-    # A Spark can retain a run this Controller never owned; the run id alone
-    # must answer whether an owner exists, and a known run is never unowned.
+    # Only an active run is wanted. A run this Controller never owned, and a
+    # run it knows but failed, stopped or lost, are both named unowned so the
+    # agent retires its local claim instead of keeping it forever.
     client, services, _, clock = agent_system
     known_run_id = "70000000-0000-4000-8000-000000000071"
     with services.sessions.begin() as session:
@@ -2192,8 +2193,8 @@ def test_recipe_run_disposition_names_only_runs_the_controller_never_owned(
                 run_generation=1,
                 alias="known-exact",
                 plan_digest="1" * 64,
-                plan={"schema_version": 1, "observation_schema_version": 2},
-                state="stopped",
+                plan={"kind": "old"},
+                state="failed",
                 route_state="withdrawn",
                 actor="admin",
                 created_at=clock.now,
@@ -2201,34 +2202,37 @@ def test_recipe_run_disposition_names_only_runs_the_controller_never_owned(
             )
         )
 
-    def disposition(run_id: str, headers: dict[str, str]):
-        return client.get(f"/agent/recipe-runs/{run_id}/disposition", headers=headers)
+    def disposition(run_id: str, headers: dict[str, str] | None = None):
+        return client.get(
+            f"/agent/recipe-runs/{run_id}/disposition",
+            headers=agent_headers(NODE_A, "serial-a") if headers is None else headers,
+        )
 
-    unowned = disposition(
-        "e85c4710-e437-4d12-8191-499596aa2a4c", agent_headers(NODE_A, "serial-a")
-    )
-    known = disposition(known_run_id, agent_headers(NODE_A, "serial-a"))
-    malformed = disposition("E85C4710-not-a-run", agent_headers(NODE_A, "serial-a"))
-    anonymous = disposition("e85c4710-e437-4d12-8191-499596aa2a4c", {})
+    def in_state(state: str, generation: int = 1):
+        with services.sessions.begin() as session:
+            run = session.get(RecipeRun, known_run_id)
+            assert run is not None
+            run.state = state
+            run.run_generation = generation
+        return disposition(known_run_id)
 
-    assert unowned.status_code == 204
-    assert unowned.headers["x-vonk-recipe-run-disposition"] == "unowned"
-    assert known.status_code == 204
-    assert "x-vonk-recipe-run-disposition" not in known.headers
-    # A stopped run has no generation an agent could report against.
-    assert "x-vonk-recipe-run-generation" not in known.headers
-
-    with services.sessions.begin() as session:
-        run = session.get(RecipeRun, known_run_id)
-        assert run is not None
-        run.state = "running"
-        run.run_generation = 4
-    running = disposition(known_run_id, agent_headers(NODE_A, "serial-a"))
-    assert running.status_code == 204
+    never_owned = disposition("e85c4710-e437-4d12-8191-499596aa2a4c")
+    assert never_owned.status_code == 204
+    assert never_owned.headers["x-vonk-recipe-run-disposition"] == "unowned"
+    for state in ("failed", "stopped", "lost"):
+        not_wanted = in_state(state)
+        assert not_wanted.status_code == 204
+        assert not_wanted.headers["x-vonk-recipe-run-disposition"] == "unowned"
+        assert "x-vonk-recipe-run-generation" not in not_wanted.headers
+    for state in ("planned", "starting", "stopping"):
+        wanted = in_state(state)
+        assert "x-vonk-recipe-run-disposition" not in wanted.headers
+        assert "x-vonk-recipe-run-generation" not in wanted.headers
+    running = in_state("running", generation=4)
     assert "x-vonk-recipe-run-disposition" not in running.headers
     assert running.headers["x-vonk-recipe-run-generation"] == "4"
-    assert malformed.status_code == 422
-    assert anonymous.status_code == 401
+    assert disposition("E85C4710-not-a-run").status_code == 422
+    assert disposition("e85c4710-e437-4d12-8191-499596aa2a4c", {}).status_code == 401
 
 
 def test_recipe_run_observation_report_applies_process_state_per_run(

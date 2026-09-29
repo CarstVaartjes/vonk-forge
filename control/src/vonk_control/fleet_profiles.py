@@ -94,6 +94,7 @@ from .fleet_profile_contract import (
 )
 from .logging import redact_text
 from .models import (
+    ACTIVE_RUN_STATES,
     AgentNode,
     AgentNodeProfile,
     CatalogDocument,
@@ -174,7 +175,6 @@ _STORED_ASSIGNMENTS = TypeAdapter(
     list[FleetProfileAssignmentInput], config=ConfigDict(strict=True)
 )
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
-_ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 _ACTIVE_INSTALL_STATES = frozenset(
     {"planned", "installing", "installed", "partial", "failed"}
 )
@@ -4050,7 +4050,7 @@ class FleetProfileService:
         active_runs = tuple(
             session.scalars(
                 select(RecipeRun)
-                .where(RecipeRun.state.in_(_ACTIVE_RUN_STATES))
+                .where(RecipeRun.state.in_(ACTIVE_RUN_STATES))
                 .order_by(RecipeRun.created_at, RecipeRun.id)
             )
         )
@@ -8240,7 +8240,7 @@ class FleetProfileService:
             select(RecipeRun)
             .where(
                 RecipeRun.installation_id == installation.id,
-                RecipeRun.state.in_(_ACTIVE_RUN_STATES),
+                RecipeRun.state.in_(ACTIVE_RUN_STATES),
             )
             .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())
             .limit(1)

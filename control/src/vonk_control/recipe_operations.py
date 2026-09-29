@@ -3906,7 +3906,8 @@ class RecipeOperationService:
                 if node is None or run is None:
                     raise RecipeOperationConflict("run cancellation scope changed")
                 # The agent sends cancelled only after its exact host STOP has
-                # returned. Keep reservations for the current intent's stop.
+                # returned. A lost run is not active, so the recovery tick's
+                # ownership rule releases its claims.
                 node.state = "stopped"
                 node.updated_at = now
                 run.state = "lost"
