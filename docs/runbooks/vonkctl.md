@@ -632,6 +632,10 @@ vonkctl profile list
 vonkctl --profile 2 profile configure --name "Coding"
 vonkctl --profile 2 profile add "Qwen Code" --spark Atlas --spark Boreal
 vonkctl --profile 2 profile add "Qwen Code" --spark Atlas --as coding --state installed
+# A recipe may declare options with fixed choices (see `vonkctl recipe detail`).
+# Unspecified options use the recipe default; interactive runs ask, Enter accepts it.
+vonkctl --profile 2 profile add "GLM" --spark Atlas --option verification=adaptive-k
+vonkctl --profile 2 profile configure --assignment coding --option projections=dense-fp8
 vonkctl --profile 2 profile configure --description "Coding setup" --retention exact --favorite true --label use=code
 vonkctl --profile 2 profile remove "Qwen Code" --spark Boreal
 vonkctl --profile 2 profile export --output coding.json
