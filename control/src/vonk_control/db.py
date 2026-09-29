@@ -265,11 +265,21 @@ def _check_constraint_differences(connection: Connection) -> list[str]:
                 ).scalar_one()
                 return plan[0]["Plan"]["Output"]
 
+            def same(expected_sql: str, reflected_sql: str) -> bool:
+                if expected_sql == reflected_sql:
+                    return True
+                # A live check may reference a column the model no longer has;
+                # it cannot match the declared one, so it gets replaced.
+                try:
+                    with connection.begin_nested():
+                        return normalized(expected_sql) == normalized(reflected_sql)
+                except SQLAlchemyError:
+                    return False
+
             differences.extend(
                 f"changed check constraint {table_name}.{name}"
                 for name in sorted(declared.keys() & reflected.keys())
-                if expected[name] != reflected[name]
-                and normalized(expected[name]) != normalized(reflected[name])
+                if not same(expected[name], reflected[name])
             )
         finally:
             connection.execute(DropTable(temporary))
