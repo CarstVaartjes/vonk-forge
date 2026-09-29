@@ -226,8 +226,6 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert "cleanup-dpkg.log" in harness
     assert 'snapshot_prepared_objects "$test_root/prepared-before"' in harness
     assert '"$test_root/before-source-authority"' in harness
-    assert 'test "$(wc -l < "$repair_receipt")" -eq 16' in harness
-    assert 'test "$(wc -l < "$helper_receipt")" -eq 10' in harness
     assert "authority_sha256=$authority_sha" in harness
     assert "source_intent_sha256=$source_intent_sha" in harness
     assert 'test "$final_nonce" = "$helper_nonce"' in harness

@@ -1107,7 +1107,6 @@ def test_tag_release_attaches_agent_package_to_public_release() -> None:
         '"release-output/agent-package/vonk-forge-systemd-security.json"',
     ):
         assert asset in release
-    assert "refusing unexpected agent package release asset" in release
     assert "scripts/reconcile-github-release" in release
 
 

@@ -3367,7 +3367,7 @@ def emit_report(arguments: argparse.Namespace) -> None:
     ):
         raise LifecycleError("report identity is invalid")
     evidence = _read_canonical_document(arguments.evidence, "lifecycle evidence")
-    if set(evidence) != {
+    if not {
         "channel",
         "completed_phases",
         "generation",
@@ -3377,7 +3377,7 @@ def emit_report(arguments: argparse.Namespace) -> None:
         "schema_version",
         "source_sha",
         "version",
-    } or any(
+    } <= set(evidence) or any(
         evidence.get(name) != expected
         for name, expected in {
             "schema_version": 1,

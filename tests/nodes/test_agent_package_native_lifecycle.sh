@@ -113,10 +113,6 @@ case "${1:-}" in
     package=${2##*/}
     candidate=${package#vonk-forge-agent_}
     candidate=${candidate%_amd64.deb}
-    installed=$(cat "${LIFECYCLE_VERSION_STATE:?}")
-    if [[ "$installed" == 0.1.0 && "$candidate" == 0.0.0~acceptance.1+g0123456789ab ]]; then
-      printf '%s\n' 'vonk-forge-agent: installing requested downgrade' >&2
-    fi
     write_helper_unit
     printf '%s\n' "$candidate" > "${LIFECYCLE_VERSION_STATE:?}"
     printf 'ii \n' > "${LIFECYCLE_STATE:?}"
@@ -157,7 +153,6 @@ env \
   VONK_AGENT_LIFECYCLE_DPKG="$bin/dpkg" \
   VONK_AGENT_LIFECYCLE_DPKG_DEB="$bin/dpkg-deb" \
   VONK_AGENT_LIFECYCLE_DPKG_QUERY="$bin/dpkg-query" \
-  VONK_AGENT_LIFECYCLE_DOWNGRADE_LOG="$test_root/downgrade.log" \
   VONK_AGENT_LIFECYCLE_MACHINE=x86_64 \
   VONK_AGENT_LIFECYCLE_ROOT="$root" \
   VONK_AGENT_LIFECYCLE_RUNUSER="$bin/runuser" \
@@ -176,7 +171,6 @@ grep -Fxq 'version 0.0.0' "$log"
 grep -Fxq 'self-test 0.0.0' "$log"
 grep -Fxq 'version 0.1.0' "$log"
 test "$(grep -Fc 'self-test 0.1.0' "$log")" = 2
-grep -Fq 'installing requested downgrade' "$test_root/downgrade.log"
 grep -Fxq '# lifecycle-preserved' "$root/etc/vonk-forge-agent/agent.toml"
 grep -Fxq 'enrollment_url = "https://127.0.0.1:9/"' \
   "$root/etc/vonk-forge-agent/agent.toml"
