@@ -186,7 +186,16 @@ class DistributedRecoveryCoordinator:
                 if self._active_recovery(session, run.id):
                     continue
                 if _superseded_absent_run(session, run, run_nodes, now):
-                    settle_absent_run_in_session(session, run, run_nodes, now)
+                    settle_absent_run_in_session(
+                        session,
+                        run,
+                        run_nodes,
+                        now,
+                        reason=(
+                            "the Spark reports this run gone and a newer workload "
+                            "intent owns it; its claims are released"
+                        ),
+                    )
                     worked = True
                     continue
                 try:
@@ -545,7 +554,12 @@ def _superseded_absent_run(
 
 
 def settle_absent_run_in_session(
-    session: Session, run: RecipeRun, run_nodes: Sequence[RunNode], now: datetime
+    session: Session,
+    run: RecipeRun,
+    run_nodes: Sequence[RunNode],
+    now: datetime,
+    *,
+    reason: str | None = None,
 ) -> None:
     """Record a run its Sparks report gone as stopped and release its claims."""
 
@@ -554,7 +568,7 @@ def settle_absent_run_in_session(
         node.updated_at = now
     run.state = "stopped"
     run.route_state = "withdrawn"
-    run.route_error = None
+    run.route_error = reason
     run.route_next_attempt_at = None
     run.stopped_at = now
     run.updated_at = now
