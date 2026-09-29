@@ -8,7 +8,7 @@ Run `deploy/compose/bin/publish-release /absolute/path/to/release` with
 `ORAS_PUBLISHER_IMAGE` and `RELEASE_TAG` set. It pushes to the fixed
 `vonk/releases` repository, validates the tag and the publisher image's exact
 SHA-256 digest, and joins `${COMPOSE_PROJECT_NAME}_registry-publisher`
-(`vonk-forge-control` unless set).
+(`vonk-forge` unless set).
 
 `ORAS_PUBLISHER_IMAGE` must contain `@sha256:<64 lowercase hex>` and be
 approved through the deployment image process. The publisher network is

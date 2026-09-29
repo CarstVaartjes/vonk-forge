@@ -24,7 +24,8 @@ curl -fsSL https://install.vonkforge.ai/dev/nas | sh
 ```
 
 Answer the prompts, then drag the generated `vonk-forge/` directory onto the
-NAS and start `docker-compose.yaml` in its Docker application. The directory
+NAS and start `docker-compose.yaml` in its Docker application. After any later update,
+use Redeploy or Recreate there (Start and Stop do not apply a changed Compose file). The directory
 contains the Compose file, `.env`, and all required secrets. No repository
 checkout, Docker daemon, sudo, SSH, or NAS mount is needed to prepare it.
 

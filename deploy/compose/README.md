@@ -51,12 +51,20 @@ below. Secure remote also asks for:
 Both modes offer an optional LiteLLM upstream provider key and an optional
 Hugging Face token. The Spark management CIDRs default to the controller's own
 /24 and the direct fabric CIDRs to `192.168.100.0/24,192.168.101.0/24`; the
-installer prints both, and you can change them in `.env`. Passwords, service
+installer prints both. To change them, edit `.env` and rerun the installer,
+which writes the values into `docker-compose.yaml`. Passwords, service
 tokens, signing keys, database URLs, and a coherent Step CA PKI are always
 generated locally (the administrator password is in `secrets/admin-password`).
 Secret values are written only under `secrets/`; `.env` holds the few
 non-secret site values. Rerunning the installer on an existing bundle keeps
 them and regenerates `docker-compose.yaml`.
+
+`docker-compose.yaml` is self-contained. It declares its project name
+(`vonk-forge`), holds the concrete NAS address, hostname and CIDRs, and lists
+only the selected services (no Compose profiles), so nothing in it depends on
+`.env`, `COMPOSE_PROFILES` or the directory name. A NAS Docker app that does not
+read `.env` therefore runs the same project as `docker compose` in the
+directory. `.env` remains the installer's record of the site values.
 
 For gated or private Hugging Face model-cache downloads, see the
 [Hugging Face model-cache authentication guide](../../docs/model-cache-huggingface-auth.md).
@@ -107,8 +115,16 @@ curl -fsSL https://install.vonkforge.ai/nas | sh
 Upgrade mode preserves `secrets/`, site identity, and the values of current
 `.env` settings while atomically replacing the release-controlled Compose file
 and adding any newly required inputs. Settings a release no longer uses are
-dropped from `.env` and listed in the installer output. Place the resulting directory over the controller project, pull, and
-redeploy. Keep named volumes during normal upgrades.
+dropped from `.env` and listed in the installer output. Place the resulting directory over the controller project, then apply it:
+
+- In a NAS Docker app, use **Redeploy** or **Recreate** on the project (with
+  re-pull of images if offered). **Start** and **Stop** only start and stop the
+  containers that already exist; they do not recreate a container whose
+  definition changed, so a stale container can keep running.
+- From a shell: `docker compose pull && docker compose up -d --wait
+  --remove-orphans --force-recreate`.
+
+Keep named volumes during normal upgrades.
 
 Non-secret runtime configuration (the Caddyfile, service entrypoints,
 Prometheus, Grafana, registry and LiteLLM supervisor files) ships inside the
