@@ -138,8 +138,6 @@ def _service(*args: object, **kwargs: object) -> RecipeImageAvailabilityService:
     assert isinstance(storage, FilesystemRuntimeImageStorage)
     kwargs.setdefault("builder", _builder(storage))
     kwargs.setdefault("transport", Transport())
-    # Every preparation is a build; let the tests' parallel claims run.
-    kwargs.setdefault("max_parallel_builds", kwargs.get("max_parallel", 4))
     return RecipeImageAvailabilityService(*args, **kwargs)  # type: ignore[arg-type]
 
 
@@ -2192,85 +2190,6 @@ def test_publication_contention_reschedules_without_spending_transfer_retry(
     engine.dispose()
 
 
-def test_postgres_claims_are_fenced_and_respect_build_capacity(
-    tmp_path: Path, postgres_engine
-) -> None:
-    Base.metadata.create_all(postgres_engine)
-    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    build_recipe = _recipe("recipe-source-build.json")
-    now = datetime.now(UTC)
-    with sessions.begin() as session:
-        session.add_all(
-            [
-                CatalogDocument(
-                    id="document-pg-build",
-                    kind="recipe",
-                    publisher=build_recipe.identity.publisher,
-                    slug=build_recipe.identity.slug,
-                    title=build_recipe.metadata.title,
-                    created_by="test",
-                    created_at=now,
-                    updated_at=now,
-                ),
-            ]
-        )
-        session.flush()
-        build_revision = _add_revision(session, "revision-pg-build", build_recipe)
-        build_revision.document_id = "document-pg-build"
-
-    def authority(recipe_revision_id: str, *, force: bool = False):
-        del force
-        return build_recipe, _build_runtime()
-
-    def new_service(root: Path) -> RecipeImageAvailabilityService:
-        return _service(
-            sessions,
-            storage=FilesystemRuntimeImageStorage(root),
-            authority=authority,
-            transport=Transport(),
-            clock=lambda: datetime.now(UTC),
-            max_parallel=2,
-            max_parallel_builds=1,
-            claim_lease_seconds=10,
-        )
-
-    first = new_service(tmp_path / "first")
-    second = new_service(tmp_path / "second")
-    build_a = first.start("revision-pg-build", actor="operator", request_id="q" * 36)
-    build_b = first.start("revision-pg-build", actor="operator", request_id="r" * 36)
-
-    # The second worker sees the first worker's live build lease and waits.
-    claims = tuple(
-        service.claim_pending(limit=1, owner_id="pg-worker")
-        for service in (first, second)
-    )
-    build_claims = [claim for batch in claims for claim in batch]
-    assert len(build_claims) == 1
-    assert build_claims[0].operation_id in {build_a.id, build_b.id}
-
-    # The live build lease fences its sibling even when another worker asks for
-    # a fresh claim; the worker cannot evade the global build cap.
-    assert first.claim_pending(limit=1, owner_id="pg-worker-c") == ()
-
-    build_claim = build_claims[0]
-    with sessions.begin() as session:
-        operation = session.get(Job, build_claim.operation_id)
-        assert operation is not None
-        operation.updated_at = datetime.now(UTC) - timedelta(seconds=10)
-        operation.payload = dict(operation.payload) | {
-            "claim_until": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
-        }
-        sibling = session.get(
-            Job, build_b.id if build_claim.operation_id == build_a.id else build_a.id
-        )
-        assert sibling is not None
-        sibling.updated_at = datetime.now(UTC) + timedelta(seconds=10)
-    reclaimed = first.claim_pending(limit=1, owner_id="pg-worker-d")
-    assert len(reclaimed) == 1
-    assert reclaimed[0].operation_id == build_claim.operation_id
-    assert first.claim_pending(limit=1, owner_id="pg-worker-e") == ()
-
-
 def test_postgres_model_child_lock_contention_resumes_same_preparation(
     tmp_path: Path, postgres_engine
 ) -> None:
@@ -2579,7 +2498,6 @@ def test_running_preparation_for_an_older_revision_is_not_cancelled(
         transport=Transport(),
         clock=lambda: datetime.now(UTC),
         max_parallel=1,
-        max_parallel_builds=1,
         claim_lease_seconds=120,
     )
     running = service.start("revision-running", actor="operator", request_id="o" * 36)

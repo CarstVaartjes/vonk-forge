@@ -190,7 +190,6 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
         receipt_writer=lambda *_args: None,
         model_cache=cache,
         clock=lambda: datetime.now(UTC),
-        max_parallel_builds=2,
     )
     seeded_parent = service.start(
         recipe_revision_id,
