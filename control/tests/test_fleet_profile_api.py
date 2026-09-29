@@ -292,7 +292,7 @@ def test_cli_edits_and_exports_the_persisted_definition_through_real_api(
     capsys.readouterr()
     assert (
         cli.main(
-            ("--profile", "2", "profile", "name", "Renamed", "--json"),
+            ("--profile", "2", "profile", "configure", "--name", "Renamed", "--json"),
             control_client=client,
         )
         == 0

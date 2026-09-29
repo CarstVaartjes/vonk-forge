@@ -139,9 +139,7 @@ def test_missing_nas_assets_do_not_hide_a_fitting_recipe_or_create_work(
         builds = [(row.id, row.state) for row in session.scalars(select(RecipeBuild))]
         jobs = tuple(session.scalars(select(Job.id)))
     with TestClient(app) as client:
-        response = client.get(
-            "/api/recipe/library", params={"all_models": True, "fits_fleet": True}
-        )
+        response = client.get("/api/recipe/library", params={"fits_fleet": True})
         assert response.status_code == 200, response.text
         rows = response.json()["recipes"]
         assert len(rows) == 1
@@ -156,8 +154,8 @@ def test_missing_nas_assets_do_not_hide_a_fitting_recipe_or_create_work(
         render_payload(response.json(), "recipe", action="library", wide=True)
         rendered = capsys.readouterr().out
         assert "Fleet fit: ready" in rendered
-        assert "Exact NAS assets: blocked" in rendered
-        assert "Readiness: blocked" in rendered
+        assert "Exact NAS assets: not cached" in rendered
+        assert "Readiness: needs download" in rendered
         assert rendered.count(check["cache"]["reasons"][0]["detail"]) == 1
         token = tmp_path / "client-token"
         token.write_text("fixture-token")
@@ -180,15 +178,13 @@ def test_missing_nas_assets_do_not_hide_a_fitting_recipe_or_create_work(
         control = ControlClient("https://forge.example.test", token, opener=opener)
         assert (
             main(
-                ("recipe", "library", "--all-models", "--fits-fleet", "--json"),
+                ("recipe", "library", "--fits-fleet", "--json"),
                 control_client=control,
             )
             == 0
         )
         assert json.loads(capsys.readouterr().out)["recipes"][0]["assessment"] == check
-        response = client.get(
-            "/api/recipe/library", params={"all_models": True, "ready": True}
-        )
+        response = client.get("/api/recipe/library", params={"ready": True})
         assert response.status_code == 200, response.text
         assert response.json()["recipes"] == []
     with sessions() as session:
@@ -198,7 +194,7 @@ def test_missing_nas_assets_do_not_hide_a_fitting_recipe_or_create_work(
         assert tuple(session.scalars(select(Job.id))) == jobs
     assert (
         projection.recipe_detail(rows[0]["selector"]).assessment
-        == projection.recipe_library(all_models=True).recipes[0].assessment
+        == projection.recipe_library().recipes[0].assessment
     )
 
 
@@ -210,20 +206,18 @@ def test_stale_capacity_is_unavailable_and_filter_cannot_report_empty_success(
         for row in session.scalars(select(NodeInventorySnapshot)):
             row.observed_at = NOW - timedelta(hours=1)
     with TestClient(app) as client:
-        response = client.get("/api/recipe/library", params={"all_models": True})
+        response = client.get("/api/recipe/library", params={})
         assert response.status_code == 200, response.text
         assert (
             response.json()["recipes"][0]["assessment"]["fleet_fit"]["state"]
             == "unavailable"
         )
-        response = client.get(
-            "/api/recipe/library", params={"all_models": True, "fits_fleet": True}
-        )
+        response = client.get("/api/recipe/library", params={"fits_fleet": True})
         assert response.status_code == 503, response.text
         assert "remove the readiness filter" in response.json()["detail"]
         response = client.get(
             "/api/recipe/library",
-            params={"all_models": True, "assess": False, "ready": True},
+            params={"assess": False, "ready": True},
         )
         assert response.status_code == 422
 
@@ -263,7 +257,7 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
     assessed_library,
 ):
     projection, sessions, cache, _, _, _, _, build_id, _, storage = assessed_library
-    recipe = projection.recipe_library(all_models=True, assess=False).recipes[0]
+    recipe = projection.recipe_library(assess=False).recipes[0]
     manifest = cache.resolve_artifact_set(
         recipe_revision_id=recipe.identity.recipe_revision_id
     )
@@ -299,12 +293,12 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
                 state="authorized",
             )
         )
-    ready = projection.recipe_library(all_models=True).recipes[0].assessment
+    ready = projection.recipe_library().recipes[0].assessment
     assert ready is not None
     assert ready.readiness.state == "ready", ready.readiness.model_dump(mode="json")
     assert ready.fleet_fit.state == "ready"
     assert ready.cache.state == "ready"
-    assert len(projection.recipe_library(all_models=True, ready=True).recipes) == 1
+    assert len(projection.recipe_library(ready=True).recipes) == 1
     # A cached subset for the same primary model is not the exact recipe set.
     other = replace(
         manifest,
@@ -320,7 +314,7 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
     )
     _publish_model_fixture(cache, sessions, other)
     paths[0].unlink()
-    missing = projection.recipe_library(all_models=True).recipes[0].assessment
+    missing = projection.recipe_library().recipes[0].assessment
     assert missing is not None
     assert missing.cache.state == "blocked"
     assert missing.fleet_fit.state == "ready"
@@ -329,7 +323,7 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
         output.truncate(manifest.artifacts[0].expected_bytes)
     archive = storage.root / build.oci_layout_sha256
     archive.unlink()
-    missing = projection.recipe_library(all_models=True).recipes[0].assessment
+    missing = projection.recipe_library().recipes[0].assessment
     assert missing is not None
     assert missing.readiness.state == "blocked"
     assert any("recipe-not-cached" in reason.detail for reason in missing.cache.reasons)
@@ -367,7 +361,7 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
             memory_pool="shared",
         )
     )
-    rows = projection.recipe_library(all_models=True, fits_fleet=True).recipes
+    rows = projection.recipe_library(fits_fleet=True).recipes
     assert len(rows) == 1
     assessment = rows[0].assessment
     assert assessment is not None and assessment.group is not None
@@ -394,15 +388,13 @@ def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
         assessment_module, "time", SimpleNamespace(monotonic=lambda: clock[0])
     )
     monkeypatch.setattr(service, "inspect_candidate", slow_inspect)
-    projection.recipe_library(all_models=True, assess=False)
+    projection.recipe_library(assess=False)
     assert calls == []
     with TestClient(app) as client:
-        response = client.get(
-            "/api/recipe/library", params={"all_models": True, "fits_fleet": True}
-        )
+        response = client.get("/api/recipe/library", params={"fits_fleet": True})
         assert response.status_code == 503, response.text
     assert len(calls) == 1
-    assessment = projection.recipe_library(all_models=True).recipes[0].assessment
+    assessment = projection.recipe_library().recipes[0].assessment
     assert assessment is not None
     assert assessment.fleet_fit.state == "unavailable"
     assert "5-second" in assessment.fleet_fit.reasons[0].detail
@@ -410,7 +402,7 @@ def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
 
 def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_library):
     projection, sessions, *_ = assessed_library
-    recipe = projection.recipe_library(all_models=True, assess=False).recipes[0]
+    recipe = projection.recipe_library(assess=False).recipes[0]
     _insert_canonical_rows(
         sessions,
         kind="recipe",
@@ -455,7 +447,7 @@ def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_libra
         assert head is not None
         head.active_revision_id = successor.id
     page = projection.recipe_library(
-        all_models=True, publisher=["test"], limit=1, sort="name", fits_fleet=True
+        publisher=["test"], limit=1, sort="name", fits_fleet=True
     )
     assert [item.selector for item in page.recipes] == ["test/recipe-0001"]
     assert page.next_cursor is None

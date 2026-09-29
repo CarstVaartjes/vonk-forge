@@ -8242,7 +8242,7 @@
             "title": "Alignment",
             "type": "array"
           },
-          "all_models": {
+          "cached": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -8251,7 +8251,7 @@
                 "type": "null"
               }
             ],
-            "title": "All Models"
+            "title": "Cached"
           },
           "family": {
             "items": {
@@ -8273,17 +8273,6 @@
               }
             ],
             "title": "Fits Fleet"
-          },
-          "local_only": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Local Only"
           },
           "model": {
             "items": {
@@ -22773,11 +22762,11 @@
           },
           {
             "in": "query",
-            "name": "local",
+            "name": "cached",
             "required": false,
             "schema": {
               "default": false,
-              "title": "Local",
+              "title": "Cached",
               "type": "boolean"
             }
           }
@@ -25121,11 +25110,11 @@
           },
           {
             "in": "query",
-            "name": "all_models",
+            "name": "cached",
             "required": false,
             "schema": {
               "default": false,
-              "title": "All Models",
+              "title": "Cached",
               "type": "boolean"
             }
           },

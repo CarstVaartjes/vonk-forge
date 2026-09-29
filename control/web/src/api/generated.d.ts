@@ -3662,14 +3662,12 @@ export interface components {
         LibraryFilterValues: {
             /** Alignment */
             alignment?: string[];
-            /** All Models */
-            all_models?: boolean | null;
+            /** Cached */
+            cached?: boolean | null;
             /** Family */
             family?: string[];
             /** Fits Fleet */
             fits_fleet?: boolean | null;
-            /** Local Only */
-            local_only?: boolean | null;
             /** Model */
             model?: string[];
             /** Publisher */
@@ -8980,7 +8978,7 @@ export interface operations {
                 search?: string | null;
                 updated_since?: string | null;
                 sort?: "updated" | "name";
-                local?: boolean;
+                cached?: boolean;
             };
             header?: never;
             path?: never;
@@ -10622,7 +10620,7 @@ export interface operations {
                 limit?: number;
                 cursor?: string | null;
                 model?: string[] | null;
-                all_models?: boolean;
+                cached?: boolean;
                 ready?: boolean | null;
                 fits_fleet?: boolean | null;
                 assess?: boolean;

@@ -5,7 +5,7 @@ import {formatBytes} from "../lib/fleet";
 import {modelLibraryPath, modelKey, recipeLibraryPath} from "../lib/library-route";
 import {LibraryCacheAction} from "./library-cache-action";
 import type {LibraryRecipeRecord, LibraryWorkcellFilters} from "./library-workcell";
-import {filterLibraryRecipeRecords, LIBRARY_RECENCY_LABELS, LIBRARY_RECENCY_VALUES, libraryFiltersToSearch, libraryRecencyFromValue, LIBRARY_SORTS, LIBRARY_SORT_LABELS, librarySortFromValue} from "./library-workcell";
+import {EMPTY_LIBRARY_WORKCELL_FILTERS, EmptyLibrary, filterLibraryRecipeRecords, isModelCached, LIBRARY_RECENCY_LABELS, LIBRARY_RECENCY_VALUES, libraryFiltersToSearch, libraryRecencyFromValue, LIBRARY_SORTS, LIBRARY_SORT_LABELS, librarySortFromValue} from "./library-workcell";
 
 type LibraryModelsViewProps = {
   api: ControlApi;
@@ -27,6 +27,7 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
   const filteredRecipes = filterLibraryRecipeRecords(entries, filters, query);
   const normalizedQuery = query.trim().toLowerCase();
   const visible = models
+    .filter(model => !filters.cached || isModelCached(model))
     .filter(model => !filters.model || modelKey(model.model) === filters.model)
     .filter(model => !filters.usage || model.usage.includes(filters.usage))
     .filter(model => !filters.family || model.family === filters.family)
@@ -60,12 +61,13 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
       <label>Quantization<select aria-label="Filter model quantization" value={filters.quantization} onChange={event => updateFilters({quantization: event.target.value})}><option value="">All quantization</option>{[...new Set(models.map(model => model.quantization).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Creator<select aria-label="Filter model creator" value={filters.publisher} onChange={event => updateFilters({publisher: event.target.value})}><option value="">All creators</option>{[...new Set(models.map(model => model.model.publisher).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Alignment<select aria-label="Filter model alignment" value={filters.alignment} onChange={event => updateFilters({alignment: event.target.value})}><option value="">All alignments</option>{[...new Set(models.flatMap(model => model.alignment))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label className="library-cached-filter"><input type="checkbox" checked={filters.cached} onChange={event => updateFilters({cached: event.target.checked})}/> Cached only</label>
       <label>Sort<select aria-label="Sort models" value={filters.sort} onChange={event => updateFilters({sort: librarySortFromValue(event.target.value)})}>{LIBRARY_SORTS.map(value => <option key={value} value={value}>{LIBRARY_SORT_LABELS[value]}</option>)}</select></label>
       <label>Updated<select aria-label="Filter model updated" value={filters.updated} onChange={event => updateFilters({updated: libraryRecencyFromValue(event.target.value)})}>{LIBRARY_RECENCY_VALUES.map(value => <option key={value} value={value}>{LIBRARY_RECENCY_LABELS[value]}</option>)}</select></label>
     </div>
     <div className="library-model-list" aria-label="Model library">
       {[...groups].map(([key, revisions]) => <ModelRevisionsRow key={key} api={api} revisions={revisions} onNavigate={onNavigate} onPrepared={refresh} />)}
-      {visible.length === 0 && <p className="library-empty-state">No models match the current filters.</p>}
+      {visible.length === 0 && <EmptyLibrary filters={filters} query={query} onClear={() => { updateFilters(EMPTY_LIBRARY_WORKCELL_FILTERS); onQueryChange(""); }}/>}
     </div>
   </section>;
 }

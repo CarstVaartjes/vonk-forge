@@ -128,7 +128,6 @@ vonkctl fleet
 vonkctl fleet --wide
 vonkctl fleet detail Atlas
 vonkctl fleet detail Atlas --watch --interval-seconds 2
-vonkctl fleet node-profile Atlas
 vonkctl fleet rename Atlas "Studio Spark"
 vonkctl fleet enroll Atlas --output atlas-grant.json
 vonkctl fleet re-enroll Atlas --output atlas-replacement.json --yes
@@ -167,15 +166,13 @@ intent, and the accepted receipt binds the exact target list and plan.
 When the Controller returns retained logs with no live follow support, the CLI
 returns that snapshot immediately instead of waiting for a local timeout.
 
-`fleet node-profile` resolves an exact enrolled node and shows its identity,
-hostname, lifecycle, and labels. `--json` retains the full canonical Fleet
-detail document. It never edits or loads a workload profile. Exact node IDs
-take priority over displayed names; duplicate names return every candidate ID.
+Exact node IDs take priority over displayed names; duplicate names return every
+candidate ID.
 
 Profile recipe selection reads all catalog pages before accepting a friendly
 name. Canonical recipe selectors and logical recipe IDs take priority over
-titles, and prefixes are refused. `profile add`, `profile remove`, and
-`fleet node-profile` share a selection deadline across their reads: 30 seconds
+titles, and prefixes are refused. `profile add` and `profile remove`
+share a selection deadline across their reads: 30 seconds
 by default, configurable with `--timeout-seconds` up to 300. Expiry, repeated
 cursors, malformed rows, and ambiguous choices save nothing. If a catalog
 continuation becomes invalid because its matching collection changed, repeat
@@ -308,9 +305,10 @@ A timeout or Ctrl-C ends observation without cancelling removal.
 vonkctl recipe
 vonkctl recipe sync-status
 vonkctl recipe library
-vonkctl recipe library --model "Qwen 3.8" --all-models
-vonkctl recipe library --all-models --fits-fleet
-vonkctl recipe library --all-models --ready
+vonkctl recipe library --cached
+vonkctl recipe library --model "Qwen 3.8"
+vonkctl recipe library --fits-fleet
+vonkctl recipe library --ready
 vonkctl recipe detail qwen-code
 vonkctl recipe detail qwen-code --watch
 vonkctl recipe download qwen-code       # repeat to refresh a completed copy
@@ -480,8 +478,11 @@ running and reconnect to it; a new request is not required when the writer
 releases its lock. Compatible partial model files survive worker termination
 and are resumed from their retained length before verification and publication.
 
-Recipe library defaults to exact model variants that are cached, downloading,
-or running locally. `--all-models` broadens that view. Recipe removal requires an explicit model-cache choice: use `--keep-model` to preserve it or
+`recipe library` and `model library` list the whole published library, a page
+at a time; the CACHE and READY columns say what is local. `--cached` narrows the
+list to what is cached, downloading, or running locally. A recipe that only
+needs its assets downloaded reads `needs download`; `blocked` is reserved for a
+real blocker, and `--wide` or `detail` names it. Recipe removal requires an explicit model-cache choice: use `--keep-model` to preserve it or
 `--with-model` to request dependent model removal. A removal without an
 explicit choice fails closed rather than prompting or guessing. Cached updates
 are automatically used by the next Profile load; there is no Profile update
@@ -628,14 +629,14 @@ and reconciles them through the existing run and route recovery paths.
 ```bash
 vonkctl profile
 vonkctl profile list
-vonkctl --profile 2 profile name "Coding"
+vonkctl --profile 2 profile configure --name "Coding"
 vonkctl --profile 2 profile add "Qwen Code" --spark Atlas --spark Boreal
 vonkctl --profile 2 profile add "Qwen Code" --spark Atlas --as coding --state installed
 vonkctl --profile 2 profile configure --description "Coding setup" --retention exact --favorite true --label use=code
 vonkctl --profile 2 profile remove "Qwen Code" --spark Boreal
 vonkctl --profile 2 profile export --output coding.json
 vonkctl --profile 3 profile import --file coding.json --expected-revision 0
-vonkctl --profile 2 profile load --dry-run
+vonkctl --profile 2 profile load --review
 vonkctl --profile 2 profile load
 vonkctl --profile 2 profile load --detach
 vonkctl --profile 2 profile progress --follow
@@ -678,15 +679,15 @@ of following it. For scripts, JSON, redirected input, or `--no-input`, use
 `--yes`; the CLI submits the load directly and the Controller plans it:
 
 ```bash
-vonkctl --profile 2 --json profile load --dry-run > reviewed-plan.json
+vonkctl --profile 2 --json profile load --review > reviewed-plan.json
 # Inspect the plan, then submit the latest plan.
 vonkctl --profile 2 --json profile load --yes --detach
 ```
 
-A dry-run reports the current plan without submitting. A load always applies
+A review reports the current plan without submitting. A load always applies
 the Controller's current plan, even when waitable blockers are present; the
 Controller parks the request until they clear. Authentication and authorization failures
-such as 401 or 403 remain refusals. Do not combine `--dry-run` with `--yes` or
+such as 401 or 403 remain refusals. Do not combine `--review` with `--yes` or
 `--detach`.
 
 Profile authoring stores the canonical recipe identity (`publisher/slug`), sorted
@@ -857,8 +858,10 @@ creating and revoking need the administrator role:
 vonkctl key create laptop --output client-key   # private file, mode 600
 vonkctl key create ci --model ALIAS --expires 30d
 vonkctl key list
-vonkctl key revoke ci
+vonkctl key revoke ci --yes
 ```
+
+The web manages the same keys under the operator menu, **API keys**.
 
 `key create` shows the key once: on stdout, or only in the new `--output` file.
 Without `--model` a key may use every gateway model, so it keeps working as
@@ -884,7 +887,7 @@ suppresses interaction and does not grant consent.
 
 Successful reads exit 0 even when the inspected operation failed. Following
 successful work exits 0; an awaited partial result exits 1; failed, blocked,
-cancelled or timed-out follows exit 2. A blocked dry-run also exits 2. Ctrl-C
+cancelled or timed-out follows exit 2. A blocked review also exits 2. Ctrl-C
 exits 130 and a closed output pipe exits 141; neither cancels Controller work.
 
 Unknown totals are shown as unknown; a build step count is not converted into a

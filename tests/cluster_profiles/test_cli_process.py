@@ -44,7 +44,7 @@ def test_blocked_preview_is_not_successful_admission(capsys) -> None:
     client = Observations({"allowed": False, "reasons": [{"code": "cache_missing"}]})
     assert (
         cli.main(
-            ("--profile", "1", "profile", "load", "--dry-run", "--json"),
+            ("--profile", "1", "profile", "load", "--review", "--json"),
             control_client=client,
         )
         == 2
@@ -126,7 +126,13 @@ def test_invalid_wait_options_fail_before_any_request(flag, value, capsys) -> No
 
 def test_profile_edit_requires_explicit_selection_before_read(capsys) -> None:
     client = Observations({"revision": 1, "assignments": []})
-    assert cli.main(("profile", "name", "Coding", "--json"), control_client=client) == 2
+    assert (
+        cli.main(
+            ("profile", "configure", "--name", "Coding", "--json"),
+            control_client=client,
+        )
+        == 2
+    )
     assert "--profile" in json.loads(capsys.readouterr().out)["error"]
     assert not client.calls
 

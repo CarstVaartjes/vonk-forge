@@ -209,7 +209,7 @@ def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
     status = cli.main(
-        ("--profile", "7", "profile", "load", "--dry-run", "--json"),
+        ("--profile", "7", "profile", "load", "--review", "--json"),
         control_client=client,
     )
     assert status == 0, capsys.readouterr().out

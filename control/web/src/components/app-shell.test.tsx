@@ -145,6 +145,8 @@ test("keeps administrative actions behind the account menu", async () => {
   await user.click(screen.getByRole("button", {name: /admin@example.test/i}));
   const actions = screen.getByRole("group", {name: "Operator actions"});
   expect(within(actions).getByRole("link", {name: "Open Activity"})).toHaveAttribute("href", "/activity");
+  expect(within(actions).getByRole("link", {name: "API keys"})).toHaveAttribute("href", "/keys");
+  expect(within(screen.getByRole("navigation", {name: "Primary"})).queryByRole("link", {name: /keys/i})).toBeNull();
 });
 
 test("renders the reusable status component", () => {

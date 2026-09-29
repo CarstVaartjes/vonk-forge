@@ -78,6 +78,11 @@ def test_key_list_and_revoke(capsys):
     client = KeyClient()
     assert cli.main(["key", "list"], control_client=client) == 0
     assert "laptop" in capsys.readouterr().out
-    assert cli.main(["key", "revoke", "laptop"], control_client=client) == 0
+    assert (
+        cli.main(["key", "revoke", "laptop", "--no-input"], control_client=client) != 0
+    )
+    assert not any(call[0] == "POST" for call in client.calls)
+    capsys.readouterr()
+    assert cli.main(["key", "revoke", "laptop", "--yes"], control_client=client) == 0
     assert "Revoked key laptop." in capsys.readouterr().out
     assert client.calls[-1] == ("POST", "/api/key/laptop/revoke", {})

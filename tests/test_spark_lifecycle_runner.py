@@ -242,7 +242,7 @@ def test_synthetic_canary_lists_the_complete_recipe_catalog() -> None:
     with pytest.raises(lifecycle.LifecycleError, match="exact synthetic canary Recipe"):
         run._run_synthetic_canary("spk_" + "1" * 32)
 
-    assert calls == [("GET", "/api/recipe/library", {"query": {"all_models": "true"}})]
+    assert calls == [("GET", "/api/recipe/library", {})]
 
 
 def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:

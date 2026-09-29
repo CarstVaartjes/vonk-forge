@@ -228,8 +228,8 @@ def test_models_cursor_is_bound_to_its_ordering(projection: LibraryProjection) -
 def test_recipe_library_sort_recency_and_cursor(
     projection: LibraryProjection,
 ) -> None:
-    by_name = projection.recipe_library(limit=100, all_models=True, sort="name")
-    by_updated = projection.recipe_library(limit=100, all_models=True, sort="updated")
+    by_name = projection.recipe_library(limit=100, sort="name")
+    by_updated = projection.recipe_library(limit=100, sort="updated")
     name_order = [item.selector for item in by_name.recipes]
     updated_order = [item.selector for item in by_updated.recipes]
 
@@ -239,18 +239,16 @@ def test_recipe_library_sort_recency_and_cursor(
     assert set(name_order) == set(updated_order)
 
     recent = projection.recipe_library(
-        limit=100, all_models=True, sort="updated", updated_since=_AFTER_OLDEST
+        limit=100, sort="updated", updated_since=_AFTER_OLDEST
     )
     assert [item.selector for item in recent.recipes] == _selectors(("bravo", "alpha"))
     assert recent.facets == by_updated.facets
     assert recent.filters.sort == "updated"
 
-    page = projection.recipe_library(limit=2, all_models=True, sort="updated")
+    page = projection.recipe_library(limit=2, sort="updated")
     assert page.next_cursor is not None
     with pytest.raises(ValueError, match="cursor is invalid"):
-        projection.recipe_library(
-            limit=2, all_models=True, sort="name", cursor=page.next_cursor
-        )
+        projection.recipe_library(limit=2, sort="name", cursor=page.next_cursor)
 
 
 def _reject_unknown_sort(method: Callable[..., object], message: str) -> None:

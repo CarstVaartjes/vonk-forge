@@ -1,6 +1,7 @@
 import "./library-availability-progress.css";
 import {useMemo} from "react";
 import {formatBytes} from "../lib/fleet";
+import {Time} from "./time";
 
 export type AvailabilityProgress = {
   phase: string;
@@ -50,15 +51,6 @@ function eta(value: number): string {
   return seconds ? `${minutes}m ${seconds}s left` : `${minutes}m left`;
 }
 
-function observationAge(value: Date): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - value.getTime()) / 1000));
-  if (seconds < 5) return "just now";
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
-}
-
 export function LibraryAvailabilityProgress({progress}: {progress: AvailabilityProgress}) {
   const transferring = /^(download(ing)?|transfer(ring)?|copying|upload(ing)?|distribution)$/.test(progress.phase);
   const percentage = useMemo(() => transferring && progress.totalBytes && progress.totalBytes > 0 ? Math.min(100, progress.completedBytes / progress.totalBytes * 100) : undefined, [progress.completedBytes, progress.totalBytes, transferring]);
@@ -76,7 +68,7 @@ export function LibraryAvailabilityProgress({progress}: {progress: AvailabilityP
       {progress.activity && <span>{progress.activity === "possibly_stalled" ? "Possibly stalled · work continues" : progress.activity === "waiting" ? "Waiting for progress" : "Active"}</span>}
       {progress.completedItems !== undefined && <span>{progress.completedItems}{progress.totalItems !== undefined ? ` of ${progress.totalItems}` : ""} items</span>}
       {progress.elapsedSeconds !== undefined && <span>{Math.floor(progress.elapsedSeconds / 60)}m elapsed</span>}
-      {lastProgress && !Number.isNaN(lastProgress.getTime()) && <span>Last progress <time dateTime={progress.lastProgressAt} title={lastProgress.toLocaleString()}>{observationAge(lastProgress)}</time></span>}
+      {lastProgress && progress.lastProgressAt && !Number.isNaN(lastProgress.getTime()) && <span>Last progress <Time value={progress.lastProgressAt}/></span>}
     </p>}
     {progress.step && <p>{progress.step}</p>}
     {progress.logExcerpt && <details><summary>Show latest log excerpt</summary><pre>{progress.logExcerpt}</pre></details>}

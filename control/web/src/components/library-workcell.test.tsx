@@ -1,7 +1,7 @@
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {vi} from "vitest";
 import type {ControlApi} from "../api/types";
-import {buildLibraryRecipeRecords, filterLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS, LibraryWorkcell} from "./library-workcell";
+import {activeFilterSummary, buildLibraryRecipeRecords, filterLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS, LibraryWorkcell} from "./library-workcell";
 import {cacheRemovalReview} from "../test-fixtures/cache-removal";
 import {libraryViewSnapshot} from "../test-fixtures/library";
 import {modelKey} from "../lib/library-route";
@@ -29,6 +29,23 @@ test("filters by exact model identity", () => {
   const key = records[0]!.modelKey;
   expect(filterLibraryRecipeRecords(records, {...EMPTY_LIBRARY_WORKCELL_FILTERS, model: key}, "").every(record => record.modelKey === key)).toBe(true);
 });
+test("shows the whole library by default and narrows to cached models on request", () => {
+  // Break caught: the default hides everything that is not cached yet.
+  const records = buildLibraryRecipeRecords(libraryViewSnapshot);
+  expect(filterLibraryRecipeRecords(records, EMPTY_LIBRARY_WORKCELL_FILTERS, "")).toHaveLength(records.length);
+  const cached = filterLibraryRecipeRecords(records, {...EMPTY_LIBRARY_WORKCELL_FILTERS, cached: true}, "");
+  expect(cached.every(record => record.modelCached)).toBe(true);
+  expect(cached.length).toBeLessThan(records.length);
+});
+
+test("an empty result names the filters that caused it, and none when none were set", () => {
+  expect(activeFilterSummary(EMPTY_LIBRARY_WORKCELL_FILTERS, "")).toEqual([]);
+  const summary = activeFilterSummary({...EMPTY_LIBRARY_WORKCELL_FILTERS, cached: true, usage: "chat"}, "qwen").join(" ");
+  expect(summary).toContain("cached");
+  expect(summary).toContain("chat");
+  expect(summary).toContain("qwen");
+});
+
 test("keeps URL-selected Models in the paired right pane", () => {
   const model = libraryViewSnapshot.models[79]!;
   const key = modelKey(model.model);

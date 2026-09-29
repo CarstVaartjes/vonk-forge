@@ -32,10 +32,9 @@ class LibraryFilterValues:
 
         Attributes:
             alignment (list[str] | Unset):
-            all_models (bool | None | Unset):
+            cached (bool | None | Unset):
             family (list[str] | Unset):
             fits_fleet (bool | None | Unset):
-            local_only (bool | None | Unset):
             model (list[str] | Unset):
             publisher (list[str] | Unset):
             quantization (list[str] | Unset):
@@ -49,10 +48,9 @@ class LibraryFilterValues:
      """
 
     alignment: list[str] | Unset = UNSET
-    all_models: bool | None | Unset = UNSET
+    cached: bool | None | Unset = UNSET
     family: list[str] | Unset = UNSET
     fits_fleet: bool | None | Unset = UNSET
-    local_only: bool | None | Unset = UNSET
     model: list[str] | Unset = UNSET
     publisher: list[str] | Unset = UNSET
     quantization: list[str] | Unset = UNSET
@@ -75,11 +73,11 @@ class LibraryFilterValues:
 
 
 
-        all_models: bool | None | Unset
-        if isinstance(self.all_models, Unset):
-            all_models = UNSET
+        cached: bool | None | Unset
+        if isinstance(self.cached, Unset):
+            cached = UNSET
         else:
-            all_models = self.all_models
+            cached = self.cached
 
         family: list[str] | Unset = UNSET
         if not isinstance(self.family, Unset):
@@ -92,12 +90,6 @@ class LibraryFilterValues:
             fits_fleet = UNSET
         else:
             fits_fleet = self.fits_fleet
-
-        local_only: bool | None | Unset
-        if isinstance(self.local_only, Unset):
-            local_only = UNSET
-        else:
-            local_only = self.local_only
 
         model: list[str] | Unset = UNSET
         if not isinstance(self.model, Unset):
@@ -168,14 +160,12 @@ class LibraryFilterValues:
         })
         if alignment is not UNSET:
             field_dict["alignment"] = alignment
-        if all_models is not UNSET:
-            field_dict["all_models"] = all_models
+        if cached is not UNSET:
+            field_dict["cached"] = cached
         if family is not UNSET:
             field_dict["family"] = family
         if fits_fleet is not UNSET:
             field_dict["fits_fleet"] = fits_fleet
-        if local_only is not UNSET:
-            field_dict["local_only"] = local_only
         if model is not UNSET:
             field_dict["model"] = model
         if publisher is not UNSET:
@@ -207,14 +197,14 @@ class LibraryFilterValues:
         alignment = cast(list[str], d.pop("alignment", UNSET))
 
 
-        def _parse_all_models(data: object) -> bool | None | Unset:
+        def _parse_cached(data: object) -> bool | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
             return cast(bool | None | Unset, data)
 
-        all_models = _parse_all_models(d.pop("all_models", UNSET))
+        cached = _parse_cached(d.pop("cached", UNSET))
 
 
         family = cast(list[str], d.pop("family", UNSET))
@@ -228,16 +218,6 @@ class LibraryFilterValues:
             return cast(bool | None | Unset, data)
 
         fits_fleet = _parse_fits_fleet(d.pop("fits_fleet", UNSET))
-
-
-        def _parse_local_only(data: object) -> bool | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(bool | None | Unset, data)
-
-        local_only = _parse_local_only(d.pop("local_only", UNSET))
 
 
         model = cast(list[str], d.pop("model", UNSET))
@@ -310,10 +290,9 @@ class LibraryFilterValues:
 
         library_filter_values = cls(
             alignment=alignment,
-            all_models=all_models,
+            cached=cached,
             family=family,
             fits_fleet=fits_fleet,
-            local_only=local_only,
             model=model,
             publisher=publisher,
             quantization=quantization,

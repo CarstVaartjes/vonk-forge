@@ -49,7 +49,7 @@ def test_recipe_readiness_flags_are_forwarded_to_the_controller(capsys):
     client = Pages([{"recipes": [], "next_cursor": None}])
     assert (
         cli.main(
-            ["--json", "recipe", "library", "--all-models", "--ready", "--fits-fleet"],
+            ["--json", "recipe", "library", "--ready", "--fits-fleet"],
             control_client=client,
         )
         == 0
@@ -208,22 +208,3 @@ def test_a_selector_prefix_does_not_select_a_different_variant():
     client = Pages([{"recipes": [recipe("one/code-nvfp4", "Coding NVFP4")]}])
     with pytest.raises(SelectorError, match="unknown"):
         controller_cli._resolve_recipe_selector(client, "one/code")
-
-
-def test_node_profile_is_a_focused_read_of_the_canonical_node(capsys):
-    node = {
-        "id": "spk_" + "a" * 32,
-        "display_name": "Atlas",
-        "hostname": "atlas.local",
-        "lifecycle": "managed",
-        "labels": {"room": "lab"},
-    }
-    client = Pages([{"nodes": [node]}, node])
-    assert cli.main(("fleet", "node-profile", "Atlas"), control_client=client) == 0
-    output = capsys.readouterr().out
-    assert "room=lab" in output and node["id"] in output and "managed" in output
-    assert "Running workloads" not in output
-    assert [(call[0], call[1]) for call in client.calls] == [
-        ("GET", "/api/fleet"),
-        ("GET", "/api/fleet/" + node["id"]),
-    ]

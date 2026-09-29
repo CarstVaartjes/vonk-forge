@@ -24,7 +24,7 @@ def _get_kwargs(
     limit: int | Unset = 100,
     cursor: None | str | Unset = UNSET,
     model: list[str] | None | Unset = UNSET,
-    all_models: bool | Unset = False,
+    cached: bool | Unset = False,
     ready: bool | None | Unset = UNSET,
     fits_fleet: bool | None | Unset = UNSET,
     assess: bool | Unset = True,
@@ -63,7 +63,7 @@ def _get_kwargs(
         json_model = model
     params["model"] = json_model
 
-    params["all_models"] = all_models
+    params["cached"] = cached
 
     json_ready: bool | None | Unset
     if isinstance(ready, Unset):
@@ -212,7 +212,7 @@ def sync_detailed(
     limit: int | Unset = 100,
     cursor: None | str | Unset = UNSET,
     model: list[str] | None | Unset = UNSET,
-    all_models: bool | Unset = False,
+    cached: bool | Unset = False,
     ready: bool | None | Unset = UNSET,
     fits_fleet: bool | None | Unset = UNSET,
     assess: bool | Unset = True,
@@ -231,7 +231,7 @@ def sync_detailed(
         limit (int | Unset):  Default: 100.
         cursor (None | str | Unset):
         model (list[str] | None | Unset):
-        all_models (bool | Unset):  Default: False.
+        cached (bool | Unset):  Default: False.
         ready (bool | None | Unset):
         fits_fleet (bool | None | Unset):
         assess (bool | Unset):  Default: True.
@@ -256,7 +256,7 @@ def sync_detailed(
         limit=limit,
 cursor=cursor,
 model=model,
-all_models=all_models,
+cached=cached,
 ready=ready,
 fits_fleet=fits_fleet,
 assess=assess,
@@ -282,7 +282,7 @@ def sync(
     limit: int | Unset = 100,
     cursor: None | str | Unset = UNSET,
     model: list[str] | None | Unset = UNSET,
-    all_models: bool | Unset = False,
+    cached: bool | Unset = False,
     ready: bool | None | Unset = UNSET,
     fits_fleet: bool | None | Unset = UNSET,
     assess: bool | Unset = True,
@@ -301,7 +301,7 @@ def sync(
         limit (int | Unset):  Default: 100.
         cursor (None | str | Unset):
         model (list[str] | None | Unset):
-        all_models (bool | Unset):  Default: False.
+        cached (bool | Unset):  Default: False.
         ready (bool | None | Unset):
         fits_fleet (bool | None | Unset):
         assess (bool | Unset):  Default: True.
@@ -327,7 +327,7 @@ def sync(
 limit=limit,
 cursor=cursor,
 model=model,
-all_models=all_models,
+cached=cached,
 ready=ready,
 fits_fleet=fits_fleet,
 assess=assess,
@@ -347,7 +347,7 @@ async def asyncio_detailed(
     limit: int | Unset = 100,
     cursor: None | str | Unset = UNSET,
     model: list[str] | None | Unset = UNSET,
-    all_models: bool | Unset = False,
+    cached: bool | Unset = False,
     ready: bool | None | Unset = UNSET,
     fits_fleet: bool | None | Unset = UNSET,
     assess: bool | Unset = True,
@@ -366,7 +366,7 @@ async def asyncio_detailed(
         limit (int | Unset):  Default: 100.
         cursor (None | str | Unset):
         model (list[str] | None | Unset):
-        all_models (bool | Unset):  Default: False.
+        cached (bool | Unset):  Default: False.
         ready (bool | None | Unset):
         fits_fleet (bool | None | Unset):
         assess (bool | Unset):  Default: True.
@@ -391,7 +391,7 @@ async def asyncio_detailed(
         limit=limit,
 cursor=cursor,
 model=model,
-all_models=all_models,
+cached=cached,
 ready=ready,
 fits_fleet=fits_fleet,
 assess=assess,
@@ -417,7 +417,7 @@ async def asyncio(
     limit: int | Unset = 100,
     cursor: None | str | Unset = UNSET,
     model: list[str] | None | Unset = UNSET,
-    all_models: bool | Unset = False,
+    cached: bool | Unset = False,
     ready: bool | None | Unset = UNSET,
     fits_fleet: bool | None | Unset = UNSET,
     assess: bool | Unset = True,
@@ -436,7 +436,7 @@ async def asyncio(
         limit (int | Unset):  Default: 100.
         cursor (None | str | Unset):
         model (list[str] | None | Unset):
-        all_models (bool | Unset):  Default: False.
+        cached (bool | Unset):  Default: False.
         ready (bool | None | Unset):
         fits_fleet (bool | None | Unset):
         assess (bool | Unset):  Default: True.
@@ -462,7 +462,7 @@ async def asyncio(
 limit=limit,
 cursor=cursor,
 model=model,
-all_models=all_models,
+cached=cached,
 ready=ready,
 fits_fleet=fits_fleet,
 assess=assess,

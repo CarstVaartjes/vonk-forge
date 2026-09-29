@@ -380,7 +380,8 @@ class LibraryProjection:
         raw = snapshot.get(digest, {})
         if not isinstance(raw, Mapping):
             raise LibraryProjectionError(f"{kind} local state is not a mapping")
-        candidate = raw.get("controller", "unknown")
+        # No record of the asset in the local state means it is not cached.
+        candidate = raw.get("controller", "not_cached")
         if not isinstance(candidate, str) or candidate not in _LOCAL_STATE_PRIORITY:
             raise LibraryProjectionError(f"{kind} local state is invalid")
         controller = cast(LibraryControllerState, candidate)
@@ -931,7 +932,7 @@ class LibraryProjection:
         search: str | None = None,
         updated_since: datetime | None = None,
         sort: Literal["updated", "name"] = "updated",
-        local_only: bool = False,
+        cached: bool = False,
     ) -> ModelLibraryResponse:
         if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
             raise RequestFault("model library limit is invalid")
@@ -953,7 +954,7 @@ class LibraryProjection:
             )
             for row in model_rows
         ]
-        if local_only:
+        if cached:
             entries = [
                 item
                 for item in entries
@@ -995,7 +996,7 @@ class LibraryProjection:
                     "updated_since": None
                     if updated_since is None
                     else _utc(updated_since).isoformat(),
-                    "local_only": local_only,
+                    "cached": cached,
                     # Bind a continuation to the same matching identities and
                     # immutable documents. A changed catalog restarts the read;
                     # the Controller does not retain another snapshot store.
@@ -1067,7 +1068,7 @@ class LibraryProjection:
                 if updated_since is None
                 else _utc(updated_since).isoformat(),
                 sort=sort,
-                local_only=local_only,
+                cached=cached,
             ),
             freshness_policy=self._freshness,
         )
@@ -1196,7 +1197,7 @@ class LibraryProjection:
         limit: int = 100,
         cursor: str | None = None,
         model_selectors: Sequence[str] = (),
-        all_models: bool = False,
+        cached: bool = False,
         ready: bool | None = None,
         fits_fleet: bool | None = None,
         assess: bool = True,
@@ -1237,7 +1238,7 @@ class LibraryProjection:
         ]
         selected_keys: set[tuple[str, str, str]] | None = None
         local_recipe_digests: set[str] = set()
-        if model_selectors and not all_models:
+        if model_selectors:
             # Every requested selector must resolve; the union is the scope.
             selected_keys = set()
             for selector in model_selectors:
@@ -1254,8 +1255,8 @@ class LibraryProjection:
                         selected.identity.content_sha256,
                     )
                 )
-        elif not all_models:
-            selected_keys = {
+        if cached:
+            cached_keys = {
                 (
                     item.identity.publisher,
                     item.identity.slug,
@@ -1265,7 +1266,12 @@ class LibraryProjection:
                 if item.local.controller in {"cached", "preparing"}
                 or item.local.running_on
             }
-            local_recipe_digests = set(snapshot)
+            if selected_keys is None:
+                # A recipe with local state of its own counts as cached too.
+                local_recipe_digests = set(snapshot)
+                selected_keys = cached_keys
+            else:
+                selected_keys &= cached_keys
         entries = [
             self._recipe_projection(row, _canonical_recipe(row), model_by_key, snapshot)
             for row in recipe_rows
@@ -1334,7 +1340,7 @@ class LibraryProjection:
             "f": _filter_digest(
                 {
                     "model": list(model_selectors),
-                    "all_models": all_models,
+                    "cached": cached,
                     "ready": ready,
                     "fits_fleet": fits_fleet,
                     "assess": assess,
@@ -1409,7 +1415,7 @@ class LibraryProjection:
             next_cursor=None,
             filters=LibraryFilterValues(
                 model=list(model_selectors),
-                all_models=all_models,
+                cached=cached,
                 ready=ready,
                 fits_fleet=fits_fleet,
                 usage=list(usage),

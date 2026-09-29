@@ -13,6 +13,7 @@ import type {
 import {formatBytes} from "../lib/fleet";
 import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 import {StatusPill} from "./status-pill";
+import {Time} from "./time";
 import {hashArtifactBlob} from "./artifact-hash";
 import "./artifact-job-workspace.css";
 
@@ -114,11 +115,6 @@ function jobTone(state: ArtifactJob["state"]): "healthy" | "warning" | "danger" 
   return "warning";
 }
 
-function formatDate(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "short"}).format(date);
-}
-
 function filename(value: string): string {
   const clean = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   return (clean || "input").slice(0, 128);
@@ -199,7 +195,7 @@ function JobHistory({api, busyJobId, cancelCandidate, job, onCancel, onConfirmCa
 }) {
   const active = !TERMINAL_STATES.has(job.state);
   return <article className="artifact-job-history-row" aria-label={`Artifact job ${job.id}, ${job.state}`}>
-    <header><div><StatusPill tone={jobTone(job.state)}>{humanizeIdentifier(job.state)}</StatusPill><strong>{humanizeIdentifier(job.interface)}</strong><span>{formatDate(job.created_at)}</span></div><span>{formatBytes(job.input_total_bytes)} input</span></header>
+    <header><div><StatusPill tone={jobTone(job.state)}>{humanizeIdentifier(job.state)}</StatusPill><strong>{humanizeIdentifier(job.interface)}</strong><span><Time value={job.created_at}/></span></div><span>{formatBytes(job.input_total_bytes)} input</span></header>
     {active && <div className="artifact-job-progress" role="status" aria-live="polite"><span className="artifact-job-progress-track"><span/></span><p>{job.state === "running" ? "The Spark is producing artifacts." : job.state === "queued" ? "Waiting for the assigned Spark." : "Preparing the immutable job request."}</p></div>}
     {job.status_reason && <p className="artifact-job-reason" role={job.state === "failed" ? "alert" : undefined}>{job.status_reason}</p>}
     {job.result_evidence && <dl className="artifact-job-evidence">
@@ -742,7 +738,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
   function prepareRetry(job: ArtifactJob) {
     setFilesBySlot({});
     setSubmitError("");
-    setRetryNotice(`Retry prepared from ${formatDate(job.created_at)}. Review parameters and reselect local inputs; browsers do not retain file access after submission.`);
+    setRetryNotice(`Retry prepared from the earlier job. Review parameters and reselect local inputs; browsers do not retain file access after submission.`);
     heading.current?.scrollIntoView?.({block: "start"});
     queueMicrotask(() => heading.current?.focus());
   }
@@ -804,7 +800,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
               open ? next.add(job.id) : next.delete(job.id);
               return next;
             });
-          }}><summary><span><StatusPill tone={jobTone(job.state)}>{humanizeIdentifier(job.state)}</StatusPill><strong>{humanizeIdentifier(job.interface)}</strong></span><span>{formatDate(job.created_at)}<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round"/></svg></span></summary>{history}</details>;
+          }}><summary><span><StatusPill tone={jobTone(job.state)}>{humanizeIdentifier(job.state)}</StatusPill><strong>{humanizeIdentifier(job.interface)}</strong></span><span><Time value={job.created_at}/><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round"/></svg></span></summary>{history}</details>;
         })}
       </section>
     </div>
