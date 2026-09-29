@@ -34,18 +34,20 @@ BUILTINS = (
     "tensorrt-llm",
     "llama-cpp",
     "ds4",
+    "tensorfold",
     "diffusers",
     "comfyui",
     "pytorch-pipeline",
 )
 
-OPENAI_BUILTINS = {"vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4"}
+OPENAI_BUILTINS = {"vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4", "tensorfold"}
 ENTRYPOINTS = {
     "vllm": ["/opt/vonk/bin/vllm", "serve", "/models"],
     "sglang": ["/opt/vonk/bin/sglang-serve", "serve", "/models"],
     "tensorrt-llm": ["/opt/vonk/bin/trtllm-serve", "serve", "/models"],
     "llama-cpp": ["/opt/vonk/bin/llama-server", "/models"],
     "ds4": ["/opt/vonk/bin/ds4-serve", "/models"],
+    "tensorfold": ["/opt/vonk/bin/tensorfold-serve"],
     "diffusers": ["/opt/vonk/bin/diffusers-job"],
     "comfyui": ["/opt/vonk/bin/comfyui-job"],
     "pytorch-pipeline": ["/opt/vonk/bin/pytorch-pipeline"],
@@ -78,6 +80,12 @@ ARGS = {
         {"name": "model", "value": "/models/target.gguf"},
         {"name": "draft-model", "value": "/models/drafter.gguf"},
         {"name": "ctx-size", "value": 32768},
+    ],
+    "tensorfold": [
+        {"name": "host", "value": "0.0.0.0"},
+        {"name": "port", "value": 8000},
+        {"name": "parallel", "value": 5},
+        {"name": "context", "value": 32768},
     ],
     "diffusers": [
         {"name": "pipeline", "value": "text-to-image"},

@@ -101,6 +101,7 @@ _ENGINE_PATHS: dict[str, tuple[RuntimeWritablePath, ...]] = {
     "tensorrt-llm": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "llama-cpp": _COMMON_PATHS,
     "ds4": (*_COMMON_PATHS, *_PYTHON_PATHS),
+    "tensorfold": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "diffusers": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "comfyui": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "pytorch-pipeline": (*_COMMON_PATHS, *_PYTHON_PATHS),
@@ -126,6 +127,10 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
     "llama-cpp": EngineTelemetryContract("llama-cpp", "/metrics"),
     "ds4": EngineTelemetryContract(
         "ds4", "/metrics", (("HF_HUB_DISABLE_TELEMETRY", "1"),)
+    ),
+    # TensorFold serves no /metrics; like TensorRT-LLM it is unsupported.
+    "tensorfold": EngineTelemetryContract(
+        "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),
     "diffusers": EngineTelemetryContract(
         "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
@@ -172,7 +177,14 @@ _ENGINE_ENVIRONMENT: dict[str, dict[str, str]] = {
         "TRITON_CACHE_DIR": "/outputs/cache/triton",
     },
 }
-for _slug in ("tensorrt-llm", "ds4", "diffusers", "comfyui", "pytorch-pipeline"):
+for _slug in (
+    "tensorrt-llm",
+    "ds4",
+    "tensorfold",
+    "diffusers",
+    "comfyui",
+    "pytorch-pipeline",
+):
     _ENGINE_ENVIRONMENT[_slug] = dict(_ENGINE_ENVIRONMENT["sglang"])
 for _name in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR"):
     _ENGINE_ENVIRONMENT["llama-cpp"] = {
