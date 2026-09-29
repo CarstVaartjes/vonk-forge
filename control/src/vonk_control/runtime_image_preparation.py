@@ -334,6 +334,13 @@ class _ReceiptDocumentRejected(Exception):
         super().__init__(detail)
 
 
+# Schema-2 fields this contract retired without a version bump. A receipt
+# whose only unknown fields are these is this Controller's own older document.
+_RETIRED_RECEIPT_FIELDS = frozenset(
+    {"local_image_reference", "platform_manifest_digest"}
+)
+
+
 def _receipt_may_be_newer(value: object, error: BaseException | None) -> bool:
     """Whether a rejected receipt document may come from a newer contract."""
 
@@ -347,7 +354,11 @@ def _receipt_may_be_newer(value: object, error: BaseException | None) -> bool:
     if version < 2:
         return False
     if isinstance(error, ValidationError):
-        return any(item.get("type") == "extra_forbidden" for item in error.errors())
+        return any(
+            item.get("type") == "extra_forbidden"
+            and item.get("loc", ("",))[0] not in _RETIRED_RECEIPT_FIELDS
+            for item in error.errors()
+        )
     return False
 
 

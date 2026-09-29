@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -25,6 +26,7 @@ from .agent_jobs import AgentJobService
 from .bounded_json import sequence
 from .distribution import DistributionError, DistributionService
 from .distribution_assignment import NodeDistributionAssignment
+from .logging import redact_text
 from .model_cache import ModelCacheNotFound
 from .model_cache_contract import ModelCacheDownloadResult
 from .models import (
@@ -55,6 +57,8 @@ from .runtime_image_preparation import (
     prefixed_image_digest,
 )
 from .strict_json import read_stored_model
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1206,7 +1210,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             max_workers=1, thread_name_prefix="runtime-image-preparation"
         )
         self._runtime_image_futures: dict[
-            tuple[str, int, int], Future[Mapping[str, object] | None]
+            tuple[str, int, int], tuple[Future[Mapping[str, object] | None], str]
         ] = {}
 
     def close(self) -> None:
@@ -1231,17 +1235,20 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             # present.  Target-copy only consumes the persisted evidence.
             if self._async_runtime_image_preparation:
                 key = (request_key, phase.index, item_index)
-                future = self._runtime_image_futures.get(key)
-                if future is None:
-                    self._runtime_image_futures[key] = self._runtime_image_pool.submit(
-                        self._prepare_runtime_image,
-                        plan,
-                        phase,
-                        item_index=item_index,
-                        actor=actor,
-                        request_key=request_key,
-                        progress=progress,
-                        wait_for_busy_owner=True,
+                submitted = self._runtime_image_futures.get(key)
+                if submitted is None:
+                    self._runtime_image_futures[key] = (
+                        self._runtime_image_pool.submit(
+                            self._prepare_runtime_image,
+                            plan,
+                            phase,
+                            item_index=item_index,
+                            actor=actor,
+                            request_key=request_key,
+                            progress=progress,
+                            wait_for_busy_owner=True,
+                        ),
+                        self._clock().isoformat(),
                     )
                     return PhaseExecution(
                         waiting=True,
@@ -1250,14 +1257,28 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                             "the durable checkpoint will be resumed after a restart."
                         ),
                     )
+                future, started_at = submitted
                 if not future.done():
+                    # Bounded by the transport's subprocess timeout; the start
+                    # time makes a slow or stuck preparation visible.
                     return PhaseExecution(
                         waiting=True,
                         status_reason=(
-                            "Runtime image preparation is still running in the background."
+                            "Runtime image preparation is still running in the "
+                            f"background (started {started_at})."
                         ),
                     )
                 del self._runtime_image_futures[key]
+                error = future.exception()
+                if error is not None:
+                    # The tick decides retry or failure; record every cause here
+                    # so no background failure is ever silent.
+                    _LOGGER.warning(
+                        "runtime image preparation for run/switch phase %s failed: %s: %s",
+                        request_key,
+                        getattr(error, "code", type(error).__name__),
+                        redact_text(getattr(error, "detail", error)),
+                    )
                 runtime_result = future.result()
             else:
                 runtime_result = self._prepare_runtime_image(
