@@ -9,7 +9,7 @@ type AdminMenuProps = {
   logoutError: string;
   loggingOut: boolean;
   navigationLocked?: boolean;
-  onNavigate(event: ReactMouseEvent<HTMLAnchorElement>, route: "activity" | "keys"): void;
+  onNavigate(event: ReactMouseEvent<HTMLAnchorElement>, route: "keys"): void;
   onLogout(): void;
   role: string;
   subject: string;
@@ -97,14 +97,14 @@ export function AdminMenu({
     </button>
     {menuOpen && <div ref={menu} id={menuId} role="group" aria-label="Operator actions" className="admin-menu-panel" onKeyDown={handleMenuKeyDown}>
       <button type="button" className="secondary-button" disabled={navigationLocked || downloading} onClick={() => void downloadCliToken()}>{downloading ? "Preparing CLI token…" : "Download CLI token"}</button>
-      {([["/keys", "keys", "API keys"], ["/activity", "activity", "Open Activity"]] as const).map(([href, route, label]) => <a key={route} href={href} className="secondary-button" aria-disabled={navigationLocked || undefined} tabIndex={navigationLocked ? -1 : undefined} onClick={event => {
+      <a href="/keys" className="secondary-button" aria-disabled={navigationLocked || undefined} tabIndex={navigationLocked ? -1 : undefined} onClick={event => {
         if (navigationLocked) {
           event.preventDefault();
           return;
         }
         setMenuOpen(false);
-        onNavigate(event, route);
-      }}>{label}</a>)}
+        onNavigate(event, "keys");
+      }}>API keys</a>
       <a href={DOCS_URL} className="secondary-button" target="_blank" rel="noreferrer">Documentation<span className="sr-only"> (opens in a new tab)</span></a>
       <button type="button" className="logout" aria-disabled={loggingOut || navigationLocked || undefined} disabled={loggingOut || navigationLocked} onClick={onLogout}>{loggingOut ? "Signing out…" : "Logout"}</button>
       {logoutError && <p role="alert">{logoutError}</p>}

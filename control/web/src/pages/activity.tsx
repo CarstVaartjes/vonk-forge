@@ -5,7 +5,7 @@ import type {SyntheticEvent} from "react";
 import type {ActivityFilters, ControlApi, JobDetail, OperationDetail, VisualFleetSnapshot} from "../api/types";
 import {EmptyState} from "../components/empty-state";
 import {PageHeader} from "../components/page-header";
-import {SkeletonRows} from "../components/skeleton";
+import {SkeletonBlock, SkeletonRows} from "../components/skeleton";
 import {StatusPill} from "../components/status-pill";
 import {nodeDisplayName} from "../lib/fleet";
 import {exactTime, relativeTime} from "../lib/time";
@@ -357,7 +357,7 @@ function JobProgressDetails({
   return <details className="activity-job" onToggle={toggle}>
     <summary>{detail ? "Operation progress" : "View operation progress"}</summary>
     <div className="activity-job-body">
-      {loading && !detail && <p role="status">Loading current operation details…</p>}
+      {loading && !detail && <SkeletonBlock label="Loading current operation details"/>}
       {error && <div className="activity-job-message is-error" role="alert"><p>Current operation details could not be loaded. {error}</p><button type="button" className="button secondary" disabled={loading} onClick={() => void loadDetail()}>{loading ? "Retrying…" : "Try again"}</button></div>}
       {detail && <>
         <header className="activity-job-header">

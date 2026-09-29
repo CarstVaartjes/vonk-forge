@@ -8,3 +8,9 @@ export function safeErrorText(value: string, maximum = 512): string {
     .trim();
   return text.length > maximum ? `${text.slice(0, maximum - 15)}…<truncated>` : text;
 }
+
+/** Failure notice text that always names the request, so support can find the call. */
+export function failureNotice(message: string, requestId: string): string {
+  const text = safeErrorText(message, 256);
+  return /request ID/i.test(text) ? text : `${text} (request ID ${requestId})`;
+}

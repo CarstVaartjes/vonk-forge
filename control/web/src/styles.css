@@ -587,3 +587,4 @@ progress{width:min(36rem,100%);height:1rem;accent-color:#71e6b1}
 .skeleton{display:inline-block;height:.9rem;border-radius:.3rem;background:linear-gradient(90deg,var(--surface-raised),var(--border),var(--surface-raised));background-size:200% 100%;animation:skeleton-shimmer 1.4s linear infinite}@keyframes skeleton-shimmer{to{background-position:-200% 0}}@media(prefers-reduced-motion:reduce){.skeleton{animation:none}}
 .empty-state .button{margin-top:.75rem}
 .waiting-for{display:grid;gap:.25rem;margin:.2rem 0 0;padding:0;list-style:none;color:var(--text-muted);font-size:.72rem;line-height:1.4;overflow-wrap:anywhere}.waiting-for strong{color:var(--text);font-weight:750}.waiting-for small{color:var(--text-subtle)}.library-profile-plain-note{margin:0!important;padding:.6rem .7rem;border:1px solid var(--border-strong);border-radius:.55rem;background:#10231d;color:var(--text)!important}
+.skeleton-block{display:grid;gap:.7rem;padding:.5rem 0}

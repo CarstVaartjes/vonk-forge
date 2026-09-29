@@ -44,8 +44,6 @@ test("supports disclosure keyboard navigation and restores trigger focus on Esca
   await user.keyboard("{ArrowDown}");
   expect(screen.getByRole("link", {name: "API keys"})).toHaveFocus();
   await user.keyboard("{ArrowDown}");
-  expect(screen.getByRole("link", {name: "Open Activity"})).toHaveFocus();
-  await user.keyboard("{ArrowDown}");
   expect(screen.getByRole("link", {name: /Documentation/})).toHaveFocus();
   await user.keyboard("{ArrowDown}");
   expect(screen.getByRole("button", {name: "Logout"})).toHaveFocus();
@@ -57,13 +55,13 @@ test("supports disclosure keyboard navigation and restores trigger focus on Esca
   expect(trigger).toHaveFocus();
 });
 
-test("closes the menu before navigating to the top-level Activity page", async () => {
+test("closes the menu before navigating to API keys", async () => {
   const user = userEvent.setup();
   const onNavigate = vi.fn(event => event.preventDefault());
   renderMenu({onNavigate});
 
   await user.click(screen.getByRole("button", {name: /admin/i}));
-  await user.click(screen.getByRole("link", {name: "Open Activity"}));
+  await user.click(screen.getByRole("link", {name: "API keys"}));
 
   expect(onNavigate).toHaveBeenCalledOnce();
   expect(screen.queryByRole("group", {name: "Operator actions"})).not.toBeInTheDocument();

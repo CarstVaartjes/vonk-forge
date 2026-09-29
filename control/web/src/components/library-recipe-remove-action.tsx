@@ -1,5 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {CacheRemovalReview, ControlApi} from "../api/types";
+import {failureNotice} from "../lib/error-display";
+import {useToast} from "./toast";
 import {CacheRemovalProgress} from "./cache-removal-progress";
 import {
   CacheRemovalOutcomeUnknown,
@@ -26,6 +28,7 @@ export function LibraryRecipeRemoveAction({api, selector, onRemoved}: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const abort = useRef<AbortController | undefined>(undefined);
+  const toast = useToast();
 
   useEffect(() => {
     setReview(null);
@@ -75,9 +78,11 @@ export function LibraryRecipeRemoveAction({api, selector, onRemoved}: {
       setConfirming(false);
       setReview(null);
       if (result.state === "succeeded") {
+        toast.success("Recipe removed from the cache.");
         onRemoved();
         return;
       }
+      toast.info("Recipe removal queued.");
       setRemoval({intent, initial: result});
     } catch (value) {
       if (controller.signal.aborted) return;
@@ -87,10 +92,12 @@ export function LibraryRecipeRemoveAction({api, selector, onRemoved}: {
         setConfirming(false);
         setRemoval({intent, initial: null, initialError: value.message});
       } else {
-        setError(value instanceof Error ? value.message : "Recipe removal failed; review again before retrying.");
+        const failed = value instanceof Error ? value.message : "Recipe removal failed; review again before retrying.";
+        setError(failed);
+        toast.error(failureNotice(failed, intent.requestKey));
       }
     }
-  }, [api, onRemoved, review, selector]);
+  }, [api, onRemoved, review, selector, toast]);
 
   if (removal) return <CacheRemovalProgress api={api} intent={removal.intent} initial={removal.initial}
     initialError={removal.initialError}

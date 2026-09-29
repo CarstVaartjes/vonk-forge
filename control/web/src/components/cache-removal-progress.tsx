@@ -8,6 +8,8 @@ import {
   type CacheRemovalIntent,
   type CacheRemovalReceipt,
 } from "./cache-removal-operations";
+import {failureNotice} from "../lib/error-display";
+import {useToast} from "./toast";
 import {CacheRemovalReviewDetails} from "./cache-removal-review";
 
 /** An accepted removal remains an observable operation until its owner settles. */
@@ -25,13 +27,15 @@ export function CacheRemovalProgress({api, intent, initial, initialError, onComp
   const [error, setError] = useState(initialError ?? "");
   const [requestMissing, setRequestMissing] = useState(initial === null);
   const abort = useRef<AbortController | undefined>(undefined);
+  const toast = useToast();
   useEffect(() => () => abort.current?.abort(), []);
 
   function accept(current: CacheRemovalReceipt) {
     setReceipt(current);
     setRequestMissing(false);
     setError("");
-    if (current.state === "succeeded") onComplete();
+    if (current.state === "succeeded") { toast.success(`${intent.kind === "model" ? "Model" : "Recipe"} removed from the cache.`); onComplete(); }
+    else if (current.state === "failed") toast.error(failureNotice(current.failure ? `${current.failure.code}: ${current.failure.detail}` : "Cache removal failed", intent.requestKey));
   }
 
   async function refresh() {

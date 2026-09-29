@@ -23,13 +23,22 @@ export function ConfirmDialog({title, consequence, confirmLabel, typeName, comma
   const [typed, setTyped] = useState("");
   const ids = useId();
   const dialog = useRef<HTMLFormElement>(null);
+  const backdrop = useRef<HTMLDivElement>(null);
   const ready = !typeName || typed === typeName;
 
+  // The rest of the page cannot be reached (pointer, keyboard, assistive tech) while the dialog is open.
+  // Notifications stay live so an outcome is never hidden behind the modal.
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const disabled = [...document.body.children].filter((element): element is HTMLElement =>
+      element instanceof HTMLElement && element !== backdrop.current && !element.inert && !element.classList.contains("toast-region"));
+    for (const element of disabled) element.inert = true;
     const first = dialog.current?.querySelector<HTMLElement>(typeName ? "input" : "[data-cancel]");
     first?.focus();
-    return () => { if (opener?.isConnected) opener.focus(); };
+    return () => {
+      for (const element of disabled) element.inert = false;
+      if (opener?.isConnected) opener.focus();
+    };
   }, [typeName]);
 
   function keyDown(event: KeyboardEvent<HTMLFormElement>) {
@@ -52,7 +61,7 @@ export function ConfirmDialog({title, consequence, confirmLabel, typeName, comma
     if (ready && !busy) onConfirm();
   }
 
-  return createPortal(<div className="modal-backdrop">
+  return createPortal(<div ref={backdrop} className="modal-backdrop">
     <form ref={dialog} className="modal" role="alertdialog" aria-modal="true" aria-labelledby={`${ids}-title`} aria-describedby={`${ids}-consequence`} onSubmit={submit} onKeyDown={keyDown}>
       <h2 id={`${ids}-title`}>{title}</h2>
       <p id={`${ids}-consequence`}>{consequence}</p>
