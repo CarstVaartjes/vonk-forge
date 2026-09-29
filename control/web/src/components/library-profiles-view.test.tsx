@@ -119,3 +119,28 @@ test("a load waiting for preparation is offered, and a waiting application says 
   expect(within(list).getByText("run-switch.inventory-unknown")).toBeVisible();
   expect(within(list).getByText(/Next attempt/)).toBeVisible();
 });
+
+test("a profile running an older recipe revision shows an update badge and reloads only after confirmation", async () => {
+  const user = userEvent.setup();
+  const detail = "Update available: running Qwen Code 1.6.0, newest 1.7.0 (2026-09-28). Reload to apply.";
+  const outdated = {...profile, assignments: profile.assignments.map(item => ({...item, recipe_update: {code: "recipe.update_available", severity: "info", running_revision_id: "r1", newest_revision_id: "r2", detail}}))} as unknown as FleetProfile;
+  const api = apiFor({profiles: vi.fn(async () => ({generated_at: "2026-09-10T00:00:00Z", profiles: [outdated]}))});
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+
+  const notice = await screen.findByRole("region", {name: "Recipe updates available"});
+  expect(within(notice).getByText("update available")).toBeVisible();
+  expect(within(notice).getByText(detail)).toBeVisible();
+  expect(api.loadProfile).not.toHaveBeenCalled();
+
+  await user.click(within(notice).getByRole("button", {name: "Reload profile"}));
+  expect(api.loadProfile).not.toHaveBeenCalled();
+  const dialog = await screen.findByRole("alertdialog");
+  await user.click(within(dialog).getByRole("button", {name: "Reload profile"}));
+  expect(api.loadProfile).toHaveBeenCalledWith(2, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+});
+
+test("a current profile shows no update notice", async () => {
+  render(<LibraryProfilesView api={apiFor()} entries={[]} onNavigate={vi.fn()}/>);
+  await screen.findAllByText("Profile 2 · Coding");
+  expect(screen.queryByRole("region", {name: "Recipe updates available"})).toBeNull();
+});

@@ -38,6 +38,12 @@ from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
+from .recipe_update_notice import (
+    RECIPE_UPDATE_AVAILABLE,
+    RecipeUpdateNotice,
+    newest_active_revisions,
+    recipe_update_notice,
+)
 from .strict_json import StrictJSONModel
 from .telemetry import TelemetryRepository, TelemetrySampleView
 
@@ -203,6 +209,7 @@ class ProjectionReason(_StrictModel):
         "telemetry.stale",
         "install.partial",
         "run.degraded",
+        "recipe.update_available",
     ]
     detail: Text256
     severity: Literal["info", "warning", "error"]
@@ -303,6 +310,8 @@ class RunPresence(_StrictModel):
     group_state: Literal["healthy", "degraded"]
     healthy: bool
     degraded_reason: RunDegradedReason | None = None
+    # Set when a newer revision of this recipe exists; informational only.
+    recipe_update: RecipeUpdateNotice | None = None
 
 
 class CapacityReservations(_StrictModel):
@@ -489,8 +498,9 @@ class FleetProjection:
             installed = self._installed_presence(
                 installation_rows, mapping_nodes, frozenset(node_ids)
             )
+            newest = newest_active_revisions(session, {row[5].id for row in run_rows})
             loaded = self._loaded_presence(
-                run_rows, mapping_nodes, frozenset(node_ids), current
+                run_rows, mapping_nodes, frozenset(node_ids), current, newest
             )
             reservations = self._reservations(session, node_ids)
         return FleetSnapshot(
@@ -797,6 +807,7 @@ class FleetProjection:
         mapping_rows: Sequence[ClusterMappingNode],
         fleet_node_ids: frozenset[str],
         current: datetime,
+        newest: Mapping[str, CatalogDocumentRevision] | None = None,
     ) -> dict[str, tuple[RunPresence, ...]]:
         mappings = self._mapping_members(mapping_rows)
         grouped: dict[str, list[RunPresenceRow]] = {}
@@ -846,6 +857,9 @@ class FleetProjection:
                 reason = "route-not-published"
             present_ranks = [node.rank for node in visible_nodes]
             member_node_ids = sorted(node.node_id for node in visible_nodes)
+            update = recipe_update_notice(
+                recipe.title, revision, (newest or {}).get(recipe.id)
+            )
             for node in visible_nodes:
                 rank_age, rank_fresh = freshness[node.id]
                 by_node.setdefault(node.node_id, []).append(
@@ -869,6 +883,7 @@ class FleetProjection:
                         group_state="healthy" if reason is None else "degraded",
                         healthy=reason is None,
                         degraded_reason=reason,
+                        recipe_update=update,
                     )
                 )
         return {
@@ -1042,6 +1057,15 @@ class FleetProjection:
                     severity="warning",
                 )
             )
+        for value in loaded:
+            if value.recipe_update is not None:
+                warnings.append(
+                    ProjectionReason(
+                        code=RECIPE_UPDATE_AVAILABLE,
+                        detail=value.recipe_update.detail,
+                        severity="info",
+                    )
+                )
         labels = {} if profile is None else profile.labels
         if not isinstance(labels, Mapping):
             raise TypeError("Fleet node profile labels are invalid")

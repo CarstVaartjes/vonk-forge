@@ -1,7 +1,7 @@
 import {useEffect, useState} from "react";
 import type {ControlApi, EnrollmentGrantResponse, FleetLogResponse, VisualFleetNode} from "../api/types";
 import {safeErrorText} from "../lib/error-display";
-import {nodeDisplayName, nodeStatus} from "../lib/fleet";
+import {nodeDisplayName, nodeRecipeUpdates, nodeStatus} from "../lib/fleet";
 import {ConfirmDialog} from "./confirm-dialog";
 import {EnrollmentGrant} from "./enrollment-grant";
 import {InstallationReconcile} from "./installation-reconcile";
@@ -77,6 +77,7 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
           <div><dt>Recipes</dt><dd>{node.loaded.filter(item => item.healthy).length} running · {node.installed.filter(item => item.complete).length} installed</dd></div>
         </dl>
         {status.reasons.length > 0 && <ul className="spark-warnings" aria-label="Needs attention">{status.reasons.map((reason, index) => <li key={index}><StatusPill tone="warning">{status.status === "offline" ? "offline" : "attention"}</StatusPill> {reason}</li>)}</ul>}
+        {nodeRecipeUpdates(node).length > 0 && <ul className="spark-warnings" aria-label="Updates available">{nodeRecipeUpdates(node).map(update => <li key={update.runId}><StatusPill tone="info">update available</StatusPill> {update.detail}</li>)}</ul>}
         {node.installed.some(item => !item.complete) && <ul className="spark-warnings" aria-label="Incomplete installations">{node.installed.filter(item => !item.complete).map(item => <li key={item.installation_id}><StatusPill tone="warning">{item.group_state}</StatusPill> {item.title} · {item.present_ranks.length} of {item.expected_rank_count} ranks <InstallationReconcile api={api} installationId={item.installation_id}/></li>)}</ul>}
       </>}
       {tab === "settings" && <>

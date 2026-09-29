@@ -4883,6 +4883,16 @@
             "title": "Recipe Selector",
             "type": "string"
           },
+          "recipe_update": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeUpdateNotice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "required_sparks": {
             "anyOf": [
               {
@@ -11912,7 +11922,8 @@
               "telemetry.delayed",
               "telemetry.stale",
               "install.partial",
-              "run.degraded"
+              "run.degraded",
+              "recipe.update_available"
             ],
             "title": "Code",
             "type": "string"
@@ -15011,6 +15022,101 @@
         "title": "RecipeUpdateFailure",
         "type": "object"
       },
+      "RecipeUpdateNotice": {
+        "additionalProperties": false,
+        "description": "A running workload uses an older revision than the newest active one.",
+        "properties": {
+          "code": {
+            "default": "recipe.update_available",
+            "pattern": "^recipe\\.update_available$",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "newest_released_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest Released At"
+          },
+          "newest_revision_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Newest Revision Id",
+            "type": "string"
+          },
+          "newest_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest Version"
+          },
+          "running_released_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running Released At"
+          },
+          "running_revision_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Running Revision Id",
+            "type": "string"
+          },
+          "running_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running Version"
+          },
+          "severity": {
+            "default": "info",
+            "pattern": "^info$",
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "running_revision_id",
+          "newest_revision_id",
+          "detail"
+        ],
+        "title": "RecipeUpdateNotice",
+        "type": "object"
+      },
       "RecipeUpdateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15830,6 +15936,16 @@
             "minLength": 1,
             "title": "Recipe Revision Id",
             "type": "string"
+          },
+          "recipe_update": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeUpdateNotice"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "role": {
             "maxLength": 64,

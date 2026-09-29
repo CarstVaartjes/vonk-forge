@@ -21,6 +21,8 @@ from ..models.run_presence_run_state import RunPresenceRunState
 from ..types import UNSET, Unset
 from typing import cast
 
+if TYPE_CHECKING:
+  from ..models.recipe_update_notice import RecipeUpdateNotice
 
 
 
@@ -53,6 +55,7 @@ class RunPresence:
             run_state (RunPresenceRunState):
             title (str):
             degraded_reason (None | RunPresenceDegradedReasonType0 | Unset):
+            recipe_update (None | RecipeUpdateNotice | Unset):
      """
 
     alias: str
@@ -74,12 +77,14 @@ class RunPresence:
     run_state: RunPresenceRunState
     title: str
     degraded_reason: None | RunPresenceDegradedReasonType0 | Unset = UNSET
+    recipe_update: None | RecipeUpdateNotice | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.recipe_update_notice import RecipeUpdateNotice # noqa: PLC0415
         alias = self.alias
 
         expected_rank_count = self.expected_rank_count
@@ -128,6 +133,14 @@ class RunPresence:
         else:
             degraded_reason = self.degraded_reason
 
+        recipe_update: dict[str, Any] | None | Unset
+        if isinstance(self.recipe_update, Unset):
+            recipe_update = UNSET
+        elif isinstance(self.recipe_update, RecipeUpdateNotice):
+            recipe_update = self.recipe_update.to_dict()
+        else:
+            recipe_update = self.recipe_update
+
 
         field_dict: dict[str, Any] = {}
 
@@ -153,6 +166,8 @@ class RunPresence:
         })
         if degraded_reason is not UNSET:
             field_dict["degraded_reason"] = degraded_reason
+        if recipe_update is not UNSET:
+            field_dict["recipe_update"] = recipe_update
 
         return field_dict
 
@@ -160,6 +175,7 @@ class RunPresence:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.recipe_update_notice import RecipeUpdateNotice # noqa: PLC0415
         d = dict(src_dict)
         alias = d.pop("alias")
 
@@ -231,6 +247,26 @@ class RunPresence:
         degraded_reason = _parse_degraded_reason(d.pop("degraded_reason", UNSET))
 
 
+        def _parse_recipe_update(data: object) -> None | RecipeUpdateNotice | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                recipe_update_type_0 = RecipeUpdateNotice.from_dict(data)
+
+
+
+                return recipe_update_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | RecipeUpdateNotice | Unset, data)
+
+        recipe_update = _parse_recipe_update(d.pop("recipe_update", UNSET))
+
+
         run_presence = cls(
             alias=alias,
             expected_rank_count=expected_rank_count,
@@ -251,6 +287,7 @@ class RunPresence:
             run_state=run_state,
             title=title,
             degraded_reason=degraded_reason,
+            recipe_update=recipe_update,
         )
 
         return run_presence
