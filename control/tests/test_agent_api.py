@@ -46,7 +46,6 @@ from vonk_control.agent_api import (
     AgentApiServices,
     EnrollmentRateLimiter,
     _bounded_enrollment_body,
-    _read_chunks,
 )
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
@@ -351,6 +350,8 @@ def make_agent_system(tmp_path, *, engine=None):
         clock=clock,
         presence=presence,
         artifact_root=tmp_path / "artifacts",
+        # The edge mounts one fixed root; tests keep objects in temporary directories.
+        served_root=Path("/"),
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
         fabric_policy=ManagementAddressPolicy.parse("192.168.100.0/24"),
         bootstrap=EnrollmentBootstrapConfig(
@@ -3272,11 +3273,14 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
         f"/agent/artifacts/{digest}",
         headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=1-3"},
     )
-    assert (
-        response.status_code,
-        response.content,
-        response.headers["content-range"],
-    ) == (206, b"rti", "bytes 1-3/8")
+    # The Controller only authorizes: the edge reads the named file and
+    # answers the range, so this response carries no bytes and no range.
+    assert response.status_code == 200
+    assert response.content == b""
+    assert response.headers["x-vonk-file"] == (
+        (storage.root / digest).relative_to("/").as_posix()
+    )
+    assert response.headers["etag"] == f'"sha256:{digest}"'
     assert (
         client.get(
             f"/agent/artifacts/{digest}", headers=agent_headers(NODE_B, "serial-b")
@@ -3320,15 +3324,15 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
     )
 
 
-def test_artifact_range_is_served_without_hashing_or_copying_the_file(
+def test_artifact_is_named_to_the_edge_without_hashing_or_reading_the_file(
     agent_system,
 ) -> None:
     from .package_upgrade_fixtures import source_transport
 
     client, services, _, clock = agent_system
     payload = b"stored package bytes"
-    # Same size, different content than the name says: served as stored, which
-    # only holds if the route does not re-hash the object.
+    # Same size, different content than the name says: authorized as stored,
+    # which only holds if the route does not re-hash the object.
     digest = hashlib.sha256(b"a different payload").hexdigest()
     (services.artifact_root / digest).write_bytes(payload)
     services.operations.enqueue(
@@ -3355,11 +3359,8 @@ def test_artifact_range_is_served_without_hashing_or_copying_the_file(
         headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=1-3"},
     )
 
-    assert (
-        response.status_code,
-        response.content,
-        response.headers["content-range"],
-    ) == (206, payload[1:4], f"bytes 1-3/{len(payload)}")
+    assert response.status_code == 200
+    assert response.headers["x-vonk-file"].endswith("/" + digest)
 
 
 def test_retired_agent_update_tuf_routes_are_absent(agent_system) -> None:
@@ -3379,47 +3380,6 @@ def test_retired_agent_update_tuf_routes_are_absent(agent_system) -> None:
         ).status_code
         == 404
     )
-
-
-def test_invalid_ranges_do_not_leak_artifact_descriptors(agent_system) -> None:
-    client, services, _, clock = agent_system
-    digest = hashlib.sha256(b"artifact").hexdigest()
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-
-    storage = FilesystemRuntimeImageStorage(services.artifact_root)
-    (storage.root / digest).write_bytes(b"artifact")
-    services.operations.enqueue(
-        parent(services.sessions, clock).id,
-        NODE_A,
-        "recipe.image.import.v1",
-        "a" * 64,
-        image_import_payload(digest),
-    )
-    fd_directory = "/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd"
-    before = len(os.listdir(fd_directory))
-    for _ in range(25):
-        assert (
-            client.get(
-                f"/agent/artifacts/{digest}",
-                headers={
-                    **agent_headers(NODE_A, "serial-a"),
-                    "Range": "bytes=" + "9" * 5000 + "-1",
-                },
-            ).status_code
-            == 416
-        )
-    assert len(os.listdir(fd_directory)) <= before + 1
-
-
-def test_artifact_stream_close_releases_its_descriptor(tmp_path) -> None:
-    artifact = tmp_path / "artifact"
-    artifact.write_bytes(b"artifact")
-    descriptor = os.open(artifact, os.O_RDONLY)
-    stream = _read_chunks(descriptor, 0, 8)
-    assert next(stream) == b"artifact"
-    stream.close()
-    with pytest.raises(OSError):
-        os.fstat(descriptor)
 
 
 def test_protected_agent_routes_gate_untrusted_invalid_bodies_before_parsing(

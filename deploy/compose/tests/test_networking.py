@@ -180,6 +180,7 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
         "/supervisor",
         "/state",
         "/state/agent-artifacts",
+        "/state/model-cache",
         "/run/vonk-normalized-secrets",
     }
     assert "VONK_REPOSITORY_PATH" not in worker["environment"]
@@ -288,6 +289,22 @@ def test_recipe_images_use_a_dedicated_persistent_volume() -> None:
     assert api_volumes["/state/agent-artifacts"] == expected_artifact_volume
     assert worker_volumes["/state/agent-artifacts"] == expected_artifact_volume
     assert "agent-artifacts" in rendered["volumes"]
+
+
+def test_caddy_reads_only_the_object_stores_and_never_controller_state() -> None:
+    rendered = _rendered()
+    services = rendered["services"]
+    caddy_volumes = {item["target"]: item for item in services["caddy"]["volumes"]}
+    for name in ("agent-artifacts", "model-cache"):
+        mount = caddy_volumes[f"/srv/state/{name}"]
+        assert (mount["source"], mount["read_only"]) == (name, True)
+        # The same volume the Controller writes, so served paths agree.
+        for service in ("control-api", "control-worker"):
+            assert any(
+                item["source"] == name and item["target"] == f"/state/{name}"
+                for item in services[service]["volumes"]
+            )
+    assert "control-state" not in {item["source"] for item in caddy_volumes.values()}
 
 
 def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:

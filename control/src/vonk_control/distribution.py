@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Lock
 from time import monotonic
 from typing import BinaryIO, Protocol
@@ -59,6 +60,9 @@ class OpenedObject:
     stream: BinaryIO
     size: int
     sha256: str
+    # Where the object sits in Controller storage. The edge serves the bytes
+    # from this path once the Controller has authorized the request.
+    path: Path
 
 
 class ObjectSource(Protocol):
@@ -162,7 +166,7 @@ class FilesystemObjectSource:
             # The name is the digest and the object entered the store through an
             # ingress that verified it; serving checks identity and size only.
             source = os.fdopen(fd, "rb", closefd=True)
-            return OpenedObject(source, expected_bytes, digest)
+            return OpenedObject(source, expected_bytes, digest, root / digest)
         except DistributionError:
             raise
         except OSError as error:
@@ -354,7 +358,7 @@ class ModelCacheObjectSource:
                     "distribution.object_unavailable",
                     "NAS cache object identity changed",
                 )
-            return OpenedObject(verified_path.open("rb"), size, digest)
+            return OpenedObject(verified_path.open("rb"), size, digest, verified_path)
         except DistributionError:
             raise
         except Exception as error:
@@ -453,13 +457,19 @@ class MemoryObjectSource:
     """Small deterministic fixture source used by Controller integration tests."""
 
     def __init__(self, objects: dict[str, bytes] | None = None) -> None:
+        # Objects also live as files, because the edge serves stored bytes by path.
+        self._directory = TemporaryDirectory(prefix="vonk-objects-")
+        self.root = Path(self._directory.name)
         self.objects = dict(objects or {})
+        for digest, payload in self.objects.items():
+            (self.root / digest).write_bytes(payload)
         self.artifact_manifests: dict[str, tuple[DistributionObject, ...]] = {}
         self.runtime_images: dict[str, str] = {}
 
     def put(self, payload: bytes) -> str:
         digest = hashlib.sha256(payload).hexdigest()
         self.objects[digest] = bytes(payload)
+        (self.root / digest).write_bytes(payload)
         return digest
 
     def register_runtime_image(self, image_digest: str, archive_sha256: str) -> None:
@@ -494,7 +504,7 @@ class MemoryObjectSource:
             raise DistributionError(
                 "distribution.object_unavailable", "verified object digest mismatch"
             )
-        return OpenedObject(BytesIO(payload), len(payload), digest)
+        return OpenedObject(BytesIO(payload), len(payload), digest, self.root / digest)
 
 
 _AUTHORIZATION_CACHE_ENTRIES = 1024

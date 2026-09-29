@@ -1079,3 +1079,113 @@ def test_control_api_has_no_repository_or_git_runtime_mounts() -> None:
     )
     assert "VONK_REPOSITORY_PATH" not in api.get("environment", {})
     assert "VONK_GIT_SIGNING_KEY_FILE" not in api.get("environment", {})
+
+
+def _stored_file_snippet() -> str:
+    text = (ROOT / "deploy/compose/Caddyfile").read_text()
+    match = re.search(
+        r"^\(stored_file_from_controller\) \{\n.*?^\}\n", text, re.DOTALL | re.MULTILINE
+    )
+    assert match is not None
+    return match.group(0)
+
+
+@pytest.mark.slow(30)
+def test_caddy_serves_the_file_the_controller_names_and_nothing_else(
+    tmp_path: Path,
+) -> None:
+    """The real snippet in front of a stub Controller and a real object store.
+
+    Catches: a client-visible internal header, Caddy's own ETag replacing the
+    Controller's, a path outside the two content-addressed layouts, and ranges
+    that are not honoured.
+    """
+    import http.client
+    import time
+
+    _require_docker_runtime()
+    digest = "ab" + "0" * 62
+    payload = bytes(range(256)) * 16
+    objects = tmp_path / "state"
+    (objects / "model-cache/objects/ab").mkdir(parents=True)
+    (objects / "model-cache/objects/ab" / digest).write_bytes(payload)
+    (objects / "secret").write_bytes(b"controller state")
+    caddyfile = tmp_path / "Caddyfile"
+    caddyfile.write_text(
+        "{\n\tadmin off\n\tauto_https off\n}\n"
+        + _stored_file_snippet()
+        + ":8080 {\n\treverse_proxy 127.0.0.1:9000 {\n\t\timport stored_file_from_controller\n\t}\n}\n"
+        # Stub Controller: it names whatever the request's ?file= asks for.
+        + ":9000 {\n\t@denied query denied=1\n\thandle @denied {\n\t\trespond 403\n\t}\n"
+        '\thandle {\n\t\theader X-Vonk-File {query.file}\n\t\theader ETag "\\"sha256:controller\\""\n'
+        "\t\theader Cache-Control no-store\n\t\trespond 200\n\t}\n}\n"
+    )
+    container = f"vonk-stored-file-{os.getpid()}"
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            container,
+            "-p",
+            "127.0.0.1::8080",
+            "-v",
+            f"{caddyfile}:/etc/caddy/Caddyfile:ro",
+            "-v",
+            f"{objects}:/srv/state:ro",
+            DEV_CADDY_IMAGE,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        port = int(
+            subprocess.run(
+                ["docker", "port", container, "8080/tcp"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            .stdout.splitlines()[0]
+            .rsplit(":", 1)[1]
+        )
+
+        def get(query: str, **headers: str) -> http.client.HTTPResponse:
+            for _ in range(50):
+                try:
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", port, timeout=5
+                    )
+                    connection.request("GET", "/x?" + query, headers=headers)
+                    response = connection.getresponse()
+                    response.body = response.read()  # type: ignore[attr-defined]
+                    return response
+                except (ConnectionError, http.client.RemoteDisconnected):
+                    time.sleep(0.1)
+            raise AssertionError("caddy did not start")
+
+        stored = f"file=model-cache/objects/ab/{digest}"
+        ranged = get(stored, Range="bytes=10-19", **{"If-Range": '"sha256:controller"'})
+        assert ranged.status == 206
+        assert ranged.body == payload[10:20]
+        assert ranged.getheader("Content-Range") == f"bytes 10-19/{len(payload)}"
+        # The Controller's identity for the object, not the file server's.
+        assert ranged.getheader("ETag") == '"sha256:controller"'
+        assert ranged.getheader("X-Vonk-File") is None
+        assert get(stored).body == payload
+        for refused in (
+            "file=secret",
+            "file=model-cache/objects/ab/../../../secret",
+            f"file=%2E%2E/{digest}",
+            f"file=model-cache/objects/cd/{digest}",
+        ):
+            response = get(refused)
+            assert response.status == 404, refused
+            assert response.getheader("X-Vonk-File") is None
+        assert get("denied=1").status == 403
+    finally:
+        subprocess.run(
+            ["docker", "rm", "-f", container], capture_output=True, check=False
+        )

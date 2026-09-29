@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import array
+import logging
 import os
 import secrets
 import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+_LOGGER = logging.getLogger(__name__)
 _MAX_PRIVATE_KEY_BYTES = 16 * 1024
 _MAX_RUNTIME_FILE_BYTES = 64 * 1024
 
@@ -24,6 +27,7 @@ class SharedRuntimePaths:
     """Shared named-volume roots initialized by the control API pre-exec."""
 
     agent_artifacts: Path = Path("/state/agent-artifacts")
+    model_cache: Path = Path("/state/model-cache")
     routes: Path = Path("/routes")
     supervisor: Path = Path("/supervisor")
     state: Path = Path("/state")
@@ -382,11 +386,48 @@ def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:
             os.close(descriptor)
 
 
+# ioctl request numbers and flag from <linux/fs.h> (64-bit Linux).
+_FS_IOC_GETFLAGS = 0x80086601
+_FS_IOC_SETFLAGS = 0x40086602
+_FS_NOCOW_FL = 0x00800000
+
+
+def _disable_copy_on_write(directory: Path) -> None:
+    """Best effort ``chattr +C``: files created later in it are not copy-on-write.
+
+    Only new files inherit the attribute; existing files keep theirs. A
+    filesystem without the flag (anything but Btrfs) is left as it is.
+    """
+    try:
+        descriptor = os.open(
+            directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
+    except OSError:
+        return
+    try:
+        import fcntl
+
+        flags = array.array("L", [0])
+        fcntl.ioctl(descriptor, _FS_IOC_GETFLAGS, flags, True)
+        if not flags[0] & _FS_NOCOW_FL:
+            flags[0] |= _FS_NOCOW_FL
+            fcntl.ioctl(descriptor, _FS_IOC_SETFLAGS, flags)
+    except (OSError, ImportError):
+        # ENOTTY/EOPNOTSUPP on other filesystems, EPERM without the capability.
+        _LOGGER.info("copy-on-write stays enabled for %s", directory)
+    finally:
+        os.close(descriptor)
+
+
 def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
     """Apply the existing per-consumer ownership contract to shared volumes."""
     paths = SharedRuntimePaths() if paths is None else paths
     _directory(paths.state, 10001, 10001, 0o750)
-    _directory(paths.agent_artifacts, 10001, 10001, 0o750)
+    # Model and image objects are large, already-compressed, written once and
+    # read whole: on Btrfs, copy-on-write and compression only cost CPU and
+    # fragmentation, so new files created below these roots skip them.
+    for objects in (paths.agent_artifacts, paths.model_cache):
+        _disable_copy_on_write(_directory(objects, 10001, 10001, 0o750))
     routes = _directory(paths.routes, 10001, 10001, 0o750)
     _directory(routes / "generations", 10001, 10001, 0o750)
     _directory(paths.supervisor, 10002, 10001, 0o750)

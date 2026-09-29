@@ -488,7 +488,9 @@ and archive checksum; the Controller inspects the exported config and platform
 before use. Docker-save does not retain the original manifest, so its
 reconstructed manifest digest is never compared with the builder's original.
 Model files live under `/state/model-cache`; image archives live under
-`/state/agent-artifacts/image-cache`, shared by the API and worker. Both caches
+`/state/agent-artifacts/image-cache`, shared by the API and worker. Each is its
+own Compose volume, mounted read-only into Caddy, which serves the bytes of a
+download the Controller has authorized (`X-Vonk-File`, never sent to agents). Both caches
 reuse successful content verification while device, inode, size, timestamps,
 ownership, and mode remain unchanged. Changes trigger a new byte scan. The
 verification cache is bounded and process-local; authorization is still checked
