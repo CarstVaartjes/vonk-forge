@@ -137,6 +137,18 @@ CLI is reconnecting; a local watch timeout is not a claim that the Controller's
 operation failed. Offline build information and signed update checks are
 described in [CLI updates](../operators/cli-updates.md).
 
+## Runs whose local metadata is unreadable
+
+A retained run whose managed metadata cannot be read (an older agent's format,
+a retired field, no run generation) is settled from its run id and the
+Controller alone. The agent asks for the run's disposition. An unowned run has
+its lifecycle claim retired. A known running run comes back with its accepted
+generation; when the root helper proves the exact `vonk-<run_id>` container is
+absent or stopped, the agent reports that absence at that generation and the
+Controller recovers the run through its normal singleton recovery. A running
+container is never reported from unreadable metadata. Each skip is logged once
+per process.
+
 ## Validation boundaries
 
 Connected Linux tests exercise process death, journal replay, fresh Controller

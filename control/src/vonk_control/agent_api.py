@@ -116,6 +116,9 @@ _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 #: no record of; the agent then retires that run's local lifecycle.
 RECIPE_RUN_DISPOSITION_HEADER = "x-vonk-recipe-run-disposition"
 RECIPE_RUN_UNOWNED = "unowned"
+# Present on a known run that is currently running: its accepted generation,
+# so an agent that cannot read its own metadata can still report the run.
+RECIPE_RUN_GENERATION_HEADER = "x-vonk-recipe-run-generation"
 _UUID4_TEXT = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -1196,7 +1199,13 @@ def install_agent_routes(
                     RECIPE_RUN_DISPOSITION_HEADER: {
                         "description": "Present only as `unowned`.",
                         "schema": {"type": "string", "enum": [RECIPE_RUN_UNOWNED]},
-                    }
+                    },
+                    RECIPE_RUN_GENERATION_HEADER: {
+                        "description": (
+                            "The accepted run generation of a known running run."
+                        ),
+                        "schema": {"type": "integer", "minimum": 1},
+                    },
                 },
             }
         },
@@ -1215,9 +1224,17 @@ def install_agent_routes(
             raise HTTPException(status_code=422, detail="recipe run id is invalid")
         with _require_services(services).sessions() as session:
             known = recipe_run_known(session, run_id)
+            run = session.get(RecipeRun, run_id) if known else None
+            generation = (
+                run.run_generation
+                if run is not None and run.state == "running"
+                else None
+            )
         response = Response(status_code=status.HTTP_204_NO_CONTENT)
         if not known:
             response.headers[RECIPE_RUN_DISPOSITION_HEADER] = RECIPE_RUN_UNOWNED
+        elif generation is not None:
+            response.headers[RECIPE_RUN_GENERATION_HEADER] = str(generation)
         return response
 
     @agent.get(
