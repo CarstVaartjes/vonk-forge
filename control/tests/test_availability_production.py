@@ -189,7 +189,9 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
     resolved = builds.resolve(revision.id)
     assert resolved.cached
     assert resolved.oci_layout_sha256 == stored_receipt.oci_archive_sha256
-    assert storage.verify_existing(archive_digest, len(archive)).read_bytes() == archive
+    assert (
+        storage.existing_archive(archive_digest, len(archive)).read_bytes() == archive
+    )
 
     class NoNetworkTransport:
         def inspect_archive(self, *_args, **_kwargs):

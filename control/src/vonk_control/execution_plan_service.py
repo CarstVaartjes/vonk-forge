@@ -22,7 +22,7 @@ from .compiled_execution_plan import (
     compile_verified_execution_plan,
     execution_identity_sha256,
 )
-from .distribution import ModelCacheVerifiedObjectSource
+from .distribution import ModelCacheObjectSource
 from .models import CatalogDocumentRevision, ClusterMappingNode, RecipeBuild
 from .recipe_runtime_specs import (
     OPTION_CHOICES_KEY,
@@ -200,7 +200,7 @@ class ControllerExecutionPlanService:
             model_objects: Sequence[object]
             if callable(direct_receipts):
                 # The production ModelCacheService exposes the persisted
-                # manifest through ModelCacheVerifiedObjectSource.  A bound
+                # manifest through ModelCacheObjectSource.  A bound
                 # canonical cache adapter may expose the already validated
                 # receipt sequence directly; it is still required to carry
                 # selection/file identity and exact distribution objects.
@@ -211,9 +211,7 @@ class ControllerExecutionPlanService:
                     raise TypeError("verified model object receipts are unavailable")
                 model_objects = direct_objects
             else:
-                model_source = ModelCacheVerifiedObjectSource.from_service(
-                    self._model_cache
-                )
+                model_source = ModelCacheObjectSource.from_service(self._model_cache)
                 model_objects = model_source.verified_model_objects_for_set(
                     artifact_set_sha256
                 )

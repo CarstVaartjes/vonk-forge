@@ -1,4 +1,4 @@
-//! Exact OCI archive verification before the privileged runtime boundary.
+//! Exact OCI archive custody and size checks before the privileged runtime boundary.
 
 use std::{
     fs,
@@ -7,7 +7,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 use vonk_agent_protocol::{RecipeImageImportEvidence, RecipeImageImportRequest};
@@ -41,22 +40,25 @@ impl ImageImporter<'_> {
         Ok(self.data_root.join("oci-archives").join(archive_sha256))
     }
 
-    pub fn verified_cached_archive(
+    pub fn cached_archive(
         &self,
         request: &RecipeImageImportRequest,
     ) -> Result<Option<PathBuf>, ImageImportError> {
         let path = self.cached_archive_path(&request.oci_layout_sha256)?;
-        if !path.exists() {
-            return Ok(None);
-        }
-        match self.verify(request, &path) {
+        // The digest is the cache key and the entry was placed by this agent
+        // from an already-trusted transfer, so identity is name, size and
+        // private custody; the bytes are not hashed again.
+        match self.check_archive(request, &path) {
             Ok(_) => Ok(Some(path)),
             Err(ImageImportError::Digest) => Ok(None),
+            Err(ImageImportError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(None)
+            }
             Err(error) => Err(error),
         }
     }
 
-    pub fn retain_verified_archive(
+    pub fn retain_archive(
         &self,
         request: &RecipeImageImportRequest,
         archive: &Path,
@@ -67,19 +69,14 @@ impl ImageImporter<'_> {
         }
         let destination = self.cached_archive_path(&request.oci_layout_sha256)?;
         if destination.exists() {
-            self.verify(request, &destination)?;
+            validate_archive_metadata(&destination, request.image_bytes, true)?;
             return Ok(destination);
         }
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)?;
             ensure_private_directory(parent, self.data_root)?;
         }
-        copy_archive_atomic(
-            archive,
-            &destination,
-            request.image_bytes,
-            Some(&request.oci_layout_sha256),
-        )?;
+        copy_archive_atomic(archive, &destination, request.image_bytes)?;
         validate_archive_metadata(&destination, request.image_bytes, true)?;
         Ok(destination)
     }
@@ -87,7 +84,7 @@ impl ImageImporter<'_> {
     /// Retain a Controller-distributed archive using its assignment identity.
     /// This path is independent of recipe build IDs because the Controller
     /// plan, archive digest, and image digest are the authority for delivery.
-    pub fn retain_verified_distribution_archive(
+    pub fn retain_distribution_archive(
         &self,
         archive_sha256: &str,
         image_digest: &str,
@@ -136,7 +133,7 @@ impl ImageImporter<'_> {
                 sync_directory(destination.parent().ok_or(ImageImportError::Digest)?)?;
             }
             Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => {
-                copy_archive_atomic(archive, &destination, image_bytes, None)?;
+                copy_archive_atomic(archive, &destination, image_bytes)?;
             }
             Err(error) => return Err(error.into()),
         }
@@ -154,7 +151,7 @@ impl ImageImporter<'_> {
     ) -> Result<PathBuf, ImageImportError> {
         plan.validate().map_err(|_| ImageImportError::Digest)?;
         let image = &plan.runtime_image;
-        self.retain_verified_distribution_archive(
+        self.retain_distribution_archive(
             &image.oci_layout_sha256,
             &image.image_digest,
             image.image_bytes,
@@ -188,16 +185,16 @@ impl ImageImporter<'_> {
         Ok(root.join("image.docker.tar"))
     }
 
-    pub fn verify(
+    /// Check the archive's custody, location and size. Its content is not
+    /// hashed here: the archive came from the Controller over mTLS and is
+    /// named by its digest.
+    pub fn check_archive(
         &self,
         request: &RecipeImageImportRequest,
         archive: &Path,
     ) -> Result<RecipeImageImportEvidence, ImageImportError> {
         validate_archive_metadata(archive, request.image_bytes, false)?;
         if !path_within_root(archive, self.data_root)? {
-            return Err(ImageImportError::Digest);
-        }
-        if sha256_file(archive)? != request.oci_layout_sha256 {
             return Err(ImageImportError::Digest);
         }
         Ok(RecipeImageImportEvidence {})
@@ -220,37 +217,6 @@ impl ImageImporter<'_> {
             ),
         ]
     }
-}
-
-fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
-    let mut file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
-        .open(path)?;
-    let before = file.metadata()?;
-    if !before.is_file() || before.nlink() != 1 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "OCI archive is not a regular single-link file",
-        ));
-    }
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    let after = file.metadata()?;
-    if before.dev() != after.dev() || before.ino() != after.ino() || before.len() != after.len() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "OCI archive changed while hashing",
-        ));
-    }
-    Ok(hex::encode(digest.finalize()))
 }
 
 fn valid_sha256(value: &str) -> bool {
@@ -321,7 +287,6 @@ fn copy_archive_atomic(
     source: &Path,
     destination: &Path,
     expected_bytes: u64,
-    expected_sha256: Option<&str>,
 ) -> Result<(), ImageImportError> {
     let source_metadata = fs::symlink_metadata(source)?;
     if !validate_archive_metadata_value(&source_metadata, expected_bytes, false) {
@@ -348,7 +313,6 @@ fn copy_archive_atomic(
                 (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32,
             )
             .open(&temporary)?;
-        let mut digest = expected_sha256.map(|_| Sha256::new());
         let mut copied = 0_u64;
         let mut buffer = [0_u8; 1024 * 1024];
         loop {
@@ -357,16 +321,11 @@ fn copy_archive_atomic(
                 break;
             }
             output.write_all(&buffer[..read])?;
-            if let Some(digest) = digest.as_mut() {
-                digest.update(&buffer[..read]);
-            }
             copied = copied
                 .checked_add(read as u64)
                 .ok_or(ImageImportError::Digest)?;
         }
-        let observed_digest = digest.map(|digest| hex::encode(digest.finalize()));
         if copied != expected_bytes
-            || observed_digest.as_deref() != expected_sha256
             || !validate_archive_metadata_value(&output.metadata()?, expected_bytes, true)
             || input.metadata()?.ino() != source_metadata.ino()
             || input.metadata()?.len() != expected_bytes

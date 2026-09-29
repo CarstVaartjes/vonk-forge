@@ -11,7 +11,7 @@ use vonk_agent::image_importer::ImageImporter;
 use vonk_agent_protocol::{RecipeImageImportRequest, hex_sha256};
 
 #[test]
-fn exact_layout_is_verified_before_requesting_host_import() {
+fn exact_layout_is_checked_before_requesting_host_import() {
     let root = tempdir().unwrap();
     let archive = root.path().join("image.docker.tar");
     fs::write(&archive, b"exact oci layout").unwrap();
@@ -27,7 +27,7 @@ fn exact_layout_is_verified_before_requesting_host_import() {
     ImageImporter {
         data_root: root.path(),
     }
-    .verify(&request, &archive)
+    .check_archive(&request, &archive)
     .unwrap();
     assert_eq!(
         ImageImporter {
@@ -66,13 +66,13 @@ fn staging_uses_the_docker_load_archive_name() {
 }
 
 #[test]
-fn changed_archive_is_rejected_before_host_authority() {
+fn wrong_size_archive_is_rejected_before_host_authority() {
     let root = tempdir().unwrap();
     let archive = root.path().join("image.docker.tar");
     fs::write(&archive, b"changed").unwrap();
     let request = RecipeImageImportRequest {
         build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
-        image_bytes: 7,
+        image_bytes: 8,
         image_digest: format!("sha256:{}", "d".repeat(64)),
         mapping_generation: 1,
         mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
@@ -83,13 +83,13 @@ fn changed_archive_is_rejected_before_host_authority() {
         ImageImporter {
             data_root: root.path(),
         }
-        .verify(&request, &archive)
+        .check_archive(&request, &archive)
         .is_err()
     );
 }
 
 #[test]
-fn verified_archive_is_reused_by_its_immutable_digest() {
+fn retained_archive_is_reused_by_its_immutable_digest() {
     let root = tempdir().unwrap();
     let archive = root.path().join("image.docker.tar");
     let payload = b"shared image archive";
@@ -113,25 +113,20 @@ fn verified_archive_is_reused_by_its_immutable_digest() {
         .with_extension(format!("partial.{}", std::process::id()));
     fs::create_dir_all(stale_partial.parent().unwrap()).unwrap();
     fs::write(&stale_partial, b"stale failed copy").unwrap();
-    let cached = importer
-        .retain_verified_archive(&request, &archive)
-        .unwrap();
+    let cached = importer.retain_archive(&request, &archive).unwrap();
     assert!(stale_partial.exists());
-    assert_eq!(
-        importer.verified_cached_archive(&request).unwrap(),
-        Some(cached)
-    );
+    assert_eq!(importer.cached_archive(&request).unwrap(), Some(cached));
 }
 
 #[test]
-fn external_retention_verifies_before_publishing_cache() {
+fn retention_rejects_wrong_size_before_publishing_cache() {
     let root = tempdir().unwrap();
     let archive = root.path().join("image.docker.tar");
     let payload = b"external archive payload";
     fs::write(&archive, payload).unwrap();
     let request = RecipeImageImportRequest {
         build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
-        image_bytes: payload.len() as u64,
+        image_bytes: payload.len() as u64 + 1,
         image_digest: format!("sha256:{}", "d".repeat(64)),
         mapping_generation: 1,
         mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
@@ -142,20 +137,17 @@ fn external_retention_verifies_before_publishing_cache() {
         data_root: root.path(),
     };
 
-    assert!(
-        importer
-            .retain_verified_archive(&request, &archive)
-            .is_err()
-    );
+    assert!(importer.retain_archive(&request, &archive).is_err());
 
     let cache = root.path().join("oci-archives");
     assert!(!cache.join(&request.oci_layout_sha256).exists());
-    assert!(
-        fs::read_dir(cache)
-            .unwrap()
-            .flatten()
-            .all(|entry| !entry.file_name().to_string_lossy().contains(".partial."))
-    );
+    if let Ok(entries) = fs::read_dir(cache) {
+        assert!(
+            entries
+                .flatten()
+                .all(|entry| !entry.file_name().to_string_lossy().contains(".partial."))
+        );
+    }
 }
 
 #[test]
@@ -170,7 +162,7 @@ fn trusted_distribution_retention_reuses_final_metadata_without_hashing() {
     let retained = ImageImporter {
         data_root: root.path(),
     }
-    .retain_verified_distribution_archive(
+    .retain_distribution_archive(
         &digest,
         &format!("sha256:{}", "b".repeat(64)),
         fs::metadata(&archive).unwrap().len(),
@@ -195,12 +187,7 @@ fn trusted_distribution_retention_renames_and_rejects_symlink_sources() {
         data_root: root.path(),
     };
     importer
-        .retain_verified_distribution_archive(
-            &digest,
-            &format!("sha256:{}", "d".repeat(64)),
-            15,
-            &source,
-        )
+        .retain_distribution_archive(&digest, &format!("sha256:{}", "d".repeat(64)), 15, &source)
         .unwrap();
     assert!(!source.exists());
     assert!(destination.is_file());
@@ -209,7 +196,7 @@ fn trusted_distribution_retention_renames_and_rejects_symlink_sources() {
     symlink(&destination, &symlink_source).unwrap();
     assert!(
         importer
-            .retain_verified_distribution_archive(
+            .retain_distribution_archive(
                 &"e".repeat(64),
                 &format!("sha256:{}", "f".repeat(64)),
                 15,
@@ -217,4 +204,32 @@ fn trusted_distribution_retention_renames_and_rejects_symlink_sources() {
             )
             .is_err()
     );
+}
+
+#[test]
+fn cached_archive_is_reused_without_hashing_its_bytes() {
+    let root = tempdir().unwrap();
+    let payload = b"same size cached archive";
+    let request = RecipeImageImportRequest {
+        build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+        image_bytes: payload.len() as u64,
+        image_digest: format!("sha256:{}", "d".repeat(64)),
+        mapping_generation: 1,
+        mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
+        // Not the digest of the bytes below: identity is the name, and a
+        // cache hit does not read the file.
+        oci_layout_sha256: "f".repeat(64),
+        source_node_id: format!("spk_{}", "1".repeat(32)),
+    };
+    let importer = ImageImporter {
+        data_root: root.path(),
+    };
+    let cached = importer
+        .cached_archive_path(&request.oci_layout_sha256)
+        .unwrap();
+    fs::create_dir_all(cached.parent().unwrap()).unwrap();
+    fs::write(&cached, payload).unwrap();
+    fs::set_permissions(&cached, fs::Permissions::from_mode(0o600)).unwrap();
+
+    assert_eq!(importer.cached_archive(&request).unwrap(), Some(cached));
 }

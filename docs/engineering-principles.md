@@ -223,10 +223,14 @@ recipes reproducible rather than to restrict them.
 - The NAS/Controller cache is the authority for what a profile may place.
   Missing assets are actionable blockers with a prepare-cache action; they are
   never deferred to a Spark.
-- Profile admission trusts the durable verification receipt for an immutable
-  object in managed NAS storage, checking file presence, type and length.
-  It does not rehash model weights on each read or after a Controller restart;
-  publication, transfer and explicit verification retain their content checks.
+- Content digests are verified once, where bytes enter from outside the
+  environment (upstream model download into the NAS cache, registry image
+  import, upload into the Controller store). Inside our own environment (NAS
+  cache, Controller, Spark over TLS, local caches, build outputs) a digest is a
+  name, and admission, serving, transfer, adoption and reuse check identity,
+  existence and length only, trusting the durable receipt. Nothing rehashes
+  model weights on read, serve or after a restart. Signed release, package and
+  installer verification is a separate trust boundary and stays.
 - Run admission enforces the recipe's declared system memory reserve alongside
   its workload demand and existing reservations. It does not impose an
   additional fixed platform reserve that prevents a fitting recipe from running.

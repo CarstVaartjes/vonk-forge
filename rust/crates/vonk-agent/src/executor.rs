@@ -987,7 +987,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     let importer = ImageImporter {
                         data_root: self.runtime.data_root,
                     };
-                    let archive = match importer.retain_verified_distribution_archive(
+                    let archive = match importer.retain_distribution_archive(
                         &evidence.oci_archive_sha256,
                         &evidence.oci_image_digest,
                         evidence.oci_archive_bytes,
@@ -1217,7 +1217,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         let _ = (ImageImporter {
                             data_root: self.runtime.data_root,
                         })
-                        .retain_verified_distribution_archive(
+                        .retain_distribution_archive(
                             &evidence.oci_layout_sha256,
                             &evidence.image_digest,
                             evidence.image_bytes,
@@ -1248,7 +1248,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let importer = ImageImporter {
                     data_root: self.runtime.data_root,
                 };
-                let archive = match importer.verified_cached_archive(&request) {
+                let archive = match importer.cached_archive(&request) {
                     Ok(Some(path)) => path,
                     Ok(None) => {
                         let staging = match importer.staging_path(claim.fence) {
@@ -1282,7 +1282,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         if !downloaded {
                             return failed("exact OCI image archive is unavailable");
                         }
-                        match importer.retain_verified_archive(&request, &staging) {
+                        match importer.retain_archive(&request, &staging) {
                             Ok(path) => path,
                             Err(_) => {
                                 return failed("verified OCI image archive could not be retained");
@@ -1292,7 +1292,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Err(_) => return failed("OCI image archive cache is invalid"),
                 };
                 self.report_phase(claim, "verifying").await;
-                match importer.verify(&request, &archive) {
+                match importer.check_archive(&request, &archive) {
                     Ok(evidence) => match self
                         .execute_host_runtime(
                             claim,

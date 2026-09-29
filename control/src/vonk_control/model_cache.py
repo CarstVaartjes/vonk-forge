@@ -3880,7 +3880,7 @@ class ModelCacheService:
         # A retry of the same idempotency key must return the original
         # operation even when its partial checkpoint has changed the current
         # preview's remaining-byte estimate.
-        with self._lock, self._session() as session:
+        with self._session() as session:
             replay = self._download_replay(
                 session,
                 request_key,
@@ -4206,7 +4206,7 @@ class ModelCacheService:
                     if (
                         digest in cached
                         if cached is not None
-                        else self._object_is_verified(spec)
+                        else self._object_is_stored(spec)
                     )
                     else self._partial_bytes(manifest.digest, spec)
                 )
@@ -4545,7 +4545,7 @@ class ModelCacheService:
                 else None
             )
             repaired = checkpoint.completed_objects if checkpoint is not None else []
-        if (not force or spec.sha256 in repaired) and self._object_is_verified(spec):
+        if (not force or spec.sha256 in repaired) and self._object_is_stored(spec):
             self._mark_artifact_verified(spec, set_digest)
             return
         self._download_artifact(
@@ -5647,13 +5647,18 @@ class ModelCacheService:
             return False
         return verified_files.verify_path(path, spec.sha256, spec.expected_bytes)
 
-    def _object_is_verified(self, spec: ArtifactSpec) -> bool:
-        return self._verify_file(self._object_path(spec.sha256), spec)
+    def _object_is_stored(self, spec: ArtifactSpec) -> bool:
+        """Whether the object is in the cache: receipt plus exact size.
+
+        Bytes are hashed once, where they enter from Hugging Face, before the
+        object is published and its receipt written. Reuse trusts that.
+        """
+        return self._object_is_available(spec.sha256, spec.expected_bytes)
 
     def _manifest_coverage_complete(self, manifest: ArtifactSetManifest) -> bool:
-        """Verify every unique object in a manifest, including empty objects."""
+        """Whether every unique object is stored (receipt and size), including empty ones."""
         return all(
-            self._object_is_verified(spec)
+            self._object_is_stored(spec)
             for spec in _unique_artifacts(manifest.artifacts).values()
         )
 
@@ -6025,7 +6030,7 @@ class ModelCacheService:
                 row.verified_bytes = self._verified_bytes(session, set_digest)
                 manifest_document = manifest.document()
                 all_valid = all(
-                    self._object_is_verified(
+                    self._object_is_stored(
                         ArtifactSpec.from_manifest(
                             require_mapping(item, "artifact manifest entry")
                         )
@@ -7907,15 +7912,17 @@ class ModelCacheService:
                 "cache artifact set is not completely verified",
             )
 
-    def verified_artifact_file(
+    def cached_artifact_file(
         self,
         artifact_set_sha256: str,
         artifact_sha256: str,
         artifact_path: str,
     ) -> tuple[Path, int, str]:
-        """Verify the requested object's bytes in the managed cache.
+        """Return the requested cache object's path after identity and size checks.
 
-        This is the Controller-to-agent serving seam.  The caller receives a
+        The bytes are not re-hashed: they were verified on ingress from the
+        upstream and the cache is our own storage. This is the
+        Controller-to-agent serving seam.  The caller receives a
         content-addressed path and must stream it from the returned file
         descriptor/path; no caller-controlled filesystem path is accepted.
         """
@@ -7951,7 +7958,6 @@ class ModelCacheService:
             not self._object_is_available(spec.sha256, spec.expected_bytes)
             or path.is_symlink()
             or not path.is_file()
-            or not self._verify_file(path, spec)
         ):
             raise ModelCacheConflict(
                 "model_cache.artifact_unverified",
@@ -8016,7 +8022,7 @@ class ModelCacheService:
             or not 0 < maximum_bytes <= 8 * 1024 * 1024
         ):
             raise ValueError("verified artifact read bounds are invalid")
-        path, size, _digest = self.verified_artifact_file(
+        path, size, _digest = self.cached_artifact_file(
             artifact_set_sha256, artifact_sha256, artifact_path
         )
         if offset >= size:
@@ -8143,7 +8149,7 @@ class ModelCacheService:
     def reconcile_storage(self) -> dict[str, object]:
         with self._lock:
             # Object availability lives in managed storage. Reconciliation
-            # repairs a receipt from verified bytes, and removes the receipt of
+            # rewrites a lost receipt for a same-size object, and removes the receipt of
             # an object whose bytes are gone so admission cannot admit it.
             with self._session() as session:
                 sets = list(session.scalars(select(ModelCacheSet)))
@@ -8167,11 +8173,7 @@ class ModelCacheService:
                 available = self._object_is_available(sha256, spec.expected_bytes)
                 if not available:
                     self._receipt_path(sha256).unlink(missing_ok=True)
-                if (
-                    not available
-                    and metadata.st_size == spec.expected_bytes
-                    and verified_files.verify_path(path, sha256, spec.expected_bytes)
-                ):
+                if not available and metadata.st_size == spec.expected_bytes:
                     self._write_object_receipt(spec, self._clock())
             with self._session(write=True) as session:
                 sets = list(session.scalars(select(ModelCacheSet)))

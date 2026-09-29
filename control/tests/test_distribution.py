@@ -6,11 +6,12 @@ from uuid import uuid4
 import pytest
 from vonk_agent_protocol import DistributionAssignment, DistributionObject
 from vonk_control.distribution import (
-    CompositeVerifiedObjectSource,
+    CompositeObjectSource,
     DistributionError,
     DistributionService,
-    MemoryVerifiedObjectSource,
-    ModelCacheVerifiedObjectSource,
+    FilesystemObjectSource,
+    MemoryObjectSource,
+    ModelCacheObjectSource,
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 
@@ -60,7 +61,7 @@ def _assignment(
 
 def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) -> None:
     client, services, _, clock = agent_system
-    source = MemoryVerifiedObjectSource()
+    source = MemoryObjectSource()
     model_digest = source.put(b"model payload")
     config_digest = source.put(b"config!")
     archive_digest = source.put(b"oci archive")
@@ -125,7 +126,7 @@ def test_distribution_rejects_unassigned_wrong_node_and_corrupt_object(
     agent_system,
 ) -> None:
     client, services, _, clock = agent_system
-    source = MemoryVerifiedObjectSource()
+    source = MemoryObjectSource()
     model_digest = source.put(b"model payload")
     archive_digest = source.put(b"oci archive")
     service = DistributionService(source, clock=clock)
@@ -164,7 +165,7 @@ def test_distribution_assignment_survives_controller_service_restart(
 ) -> None:
     _client, _services, _tokens, clock = agent_system
     sessions = _services.sessions
-    source = MemoryVerifiedObjectSource()
+    source = MemoryObjectSource()
     assignment = _assignment(
         NODE_A,
         source.put(b"model payload"),
@@ -196,7 +197,7 @@ def test_separate_api_process_serves_worker_registered_model_files(
     agent_system, tmp_path
 ) -> None:
     client, services, _, clock = agent_system
-    image_source = MemoryVerifiedObjectSource()
+    image_source = MemoryObjectSource()
     model_digest = image_source.put(b"model payload")
     config_digest = image_source.put(b"config!")
     archive_digest = image_source.put(b"oci archive")
@@ -227,7 +228,7 @@ def test_separate_api_process_serves_worker_registered_model_files(
                 for item in model_objects
             )
 
-        def verified_artifact_file(self, set_digest, digest, path):
+        def cached_artifact_file(self, set_digest, digest, path):
             assert set_digest == assignment.model_artifact_set_sha256
             item = next(
                 item
@@ -238,8 +239,8 @@ def test_separate_api_process_serves_worker_registered_model_files(
 
     def process_service():
         # Each process has a new adapter and no shared in-memory path index.
-        source = CompositeVerifiedObjectSource(
-            ModelCacheVerifiedObjectSource.from_service(Cache()), image_source
+        source = CompositeObjectSource(
+            ModelCacheObjectSource.from_service(Cache()), image_source
         )
         return DistributionService(source, clock=clock, sessions=services.sessions)
 
@@ -262,7 +263,7 @@ def test_separate_api_process_serves_worker_registered_model_files(
 
 def test_distribution_binds_opaque_cache_and_image_identities(agent_system) -> None:
     _client, _services, _tokens, clock = agent_system
-    source = MemoryVerifiedObjectSource()
+    source = MemoryObjectSource()
     assignment = _assignment(
         NODE_A,
         source.put(b"model payload"),
@@ -302,7 +303,7 @@ def test_model_cache_adapter_consumes_service_manifest_identity(tmp_path) -> Non
                 },
             )
 
-        def verified_artifact_file(self, set_digest, object_digest, object_path):
+        def cached_artifact_file(self, set_digest, object_digest, object_path):
             assert (
                 set_digest == "b" * 64
                 and object_digest == digest
@@ -310,10 +311,67 @@ def test_model_cache_adapter_consumes_service_manifest_identity(tmp_path) -> Non
             )
             return path, len(payload), digest
 
-    source = ModelCacheVerifiedObjectSource.from_service(Cache())
+    source = ModelCacheObjectSource.from_service(Cache())
     obj = DistributionObject(
         name="weights/model.bin", sha256=digest, bytes=len(payload), kind="model"
     )
     assert source.verify_artifact_set("b" * 64, (obj,))
-    opened = source.open_verified(digest, len(payload))
+    opened = source.open_object(digest, len(payload))
     assert opened.stream.read() == payload
+
+
+def test_stored_object_is_served_by_name_and_size_without_hashing(tmp_path) -> None:
+    # The name is the digest; the bytes were verified where they entered. A
+    # same-size file under that name is served as stored, which only holds if
+    # nothing re-hashes it. A wrong size is still refused.
+    digest = "c" * 64
+    (tmp_path / digest).write_bytes(b"12345678")
+    tmp_path.chmod(0o700)
+    (tmp_path / digest).chmod(0o640)
+    source = FilesystemObjectSource(tmp_path)
+
+    with source.open_object(digest, 8).stream as stream:
+        assert stream.read() == b"12345678"
+    with pytest.raises(DistributionError) as caught:
+        source.open_object(digest, 9)
+    assert caught.value.code == "distribution.object_unavailable"
+
+
+def test_authorization_is_decided_once_per_assignment_not_per_range(
+    agent_system,
+) -> None:
+    from sqlalchemy import event
+
+    _client, services, _tokens, clock = agent_system
+    source = MemoryObjectSource()
+    assignment = _assignment(
+        NODE_A,
+        source.put(b"model payload"),
+        source.put(b"config!"),
+        source.put(b"oci archive"),
+    )
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    source.register_runtime_image(
+        assignment.oci_image_digest, assignment.oci_archive_sha256
+    )
+    service = DistributionService(source, clock=clock, sessions=services.sessions)
+    service.register(assignment)
+    statements: list[str] = []
+    engine = services.sessions.kw["bind"]
+
+    def count(_conn, _cursor, statement, *_rest):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        for _ in range(5):
+            service.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+
+    assert len(statements) == 1
+    service.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
+    with pytest.raises(DistributionError):
+        service.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
