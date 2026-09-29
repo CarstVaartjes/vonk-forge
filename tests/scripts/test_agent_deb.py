@@ -3605,3 +3605,27 @@ def test_repair_runtime_binds_recursive_preinst_and_postinst_to_same_contract() 
         assert "--force-confold" in script
         assert "candidate.deb" in script
         assert "0::/system.slice/$" in script
+
+
+def test_helper_sandbox_lets_dpkg_maintainer_scripts_record_unit_enablement() -> None:
+    """dpkg runs deb-systemd-helper inside the helper unit's sandbox.
+
+    Catches a strict sandbox that leaves Debian's enablement state read-only,
+    which made every upgrade's postinst fail on "Read-only file system" while
+    the package itself installed.
+    """
+
+    unit = (
+        Path(__file__).resolve().parents[2]
+        / "packaging/systemd/vonk-forge-package-helper.service"
+    ).read_text()
+    assert "ProtectSystem=strict" in unit.splitlines()
+    writable = {
+        path.lstrip("-")
+        for line in unit.splitlines()
+        if line.startswith("ReadWritePaths=")
+        for path in line.partition("=")[2].split()
+    }
+    assert "/var/lib/systemd/deb-systemd-helper-enabled" in writable
+    assert "/var/lib/systemd/deb-systemd-helper-masked" in writable
+    assert "/var/lib/systemd" not in writable

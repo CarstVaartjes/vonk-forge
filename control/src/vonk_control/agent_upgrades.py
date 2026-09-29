@@ -59,6 +59,27 @@ def _summary(skipped: Mapping[str, str]) -> str | None:
     return f"skipped: {listed}{more}"[:1024]
 
 
+def _failure_detail(result: object) -> str | None:
+    """The failed attempt's own explanation, for the operator-visible reason."""
+
+    if not isinstance(result, Mapping):
+        return None
+    parts: list[str] = []
+    for key in ("reason", "error_code"):
+        value = result.get(key)
+        if isinstance(value, str) and value:
+            parts.append(value)
+            break
+    for key in ("helper_error_code", "diagnostic"):
+        value = result.get(key)
+        if isinstance(value, str) and value and value not in " ".join(parts):
+            parts.append(f"{key}={value}")
+    exit_code = result.get("helper_exit_code")
+    if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+        parts.append(f"helper_exit_code={exit_code}")
+    return "; ".join(parts)[:256] or None
+
+
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
@@ -678,6 +699,9 @@ class AgentUpgradeService:
             operation.updated_at = self._clock()
         else:
             schedule_agent_upgrade_retry(operation, attempt, self._clock())
+            detail = _failure_detail(attempt.result)
+            if detail is not None:
+                operation.status_reason = (f"{detail}; {operation.status_reason}")[:512]
         self._advance(session, parent)
 
     def advance_node(self, node_id: str) -> None:
@@ -701,8 +725,45 @@ class AgentUpgradeService:
                 )
                 if parent is None or parent.state not in _ACTIVE_ROLLOUT_STATES:
                     continue
+                self._settle_at_target(session, parent, node_id, now)
                 self._retry_parked(session, parent, now)
                 self._advance(session, parent)
+
+    def _settle_at_target(
+        self, session: Session, parent: Job, node_id: str, now: datetime
+    ) -> None:
+        """Resolve an attempted upgrade whose Spark reports the target build.
+
+        Authenticated contact is the authority on what runs.  An install that
+        was attempted and then reported a failure, or that expired, is
+        converged by that identity alone; it never waits for a retry, a
+        rollback receipt, or an operator.
+        """
+
+        package = parent.payload.get("package")
+        if not isinstance(package, dict):
+            return
+        node = session.get(AgentNode, node_id)
+        if node is None or not self._at_target(node, package):
+            return
+        for operation in session.scalars(
+            select(AgentOperation)
+            .where(
+                AgentOperation.parent_job_id == parent.id,
+                AgentOperation.node_id == node_id,
+                AgentOperation.state == "waiting-for-operator",
+                AgentOperation.current_attempt >= 1,
+            )
+            .with_for_update(of=AgentOperation)
+        ):
+            operation.state = "succeeded"
+            operation.status_reason = (
+                "Spark reports it already runs the requested agent build"
+            )
+            operation.retry_disposition = None
+            operation.retry_disposition_attempt = None
+            operation.retry_due_at = None
+            operation.updated_at = now
 
     def _retry_parked(self, session: Session, parent: Job, now: datetime) -> None:
         """Turn a parked order into an automatic, fenced retry."""
