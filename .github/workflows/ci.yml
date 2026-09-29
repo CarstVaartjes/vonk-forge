@@ -44,6 +44,8 @@ jobs:
       web: ${{ steps.areas.outputs.web }}
       compose: ${{ steps.areas.outputs.compose }}
       generated: ${{ steps.areas.outputs.generated }}
+      nas_install: ${{ steps.areas.outputs.nas_install }}
+      agent_package: ${{ steps.areas.outputs.agent_package }}
       repository_timings: ${{ steps.timings.outputs.repository }}
       control_timings: ${{ steps.timings.outputs.control }}
     steps:
@@ -467,6 +469,215 @@ jobs:
       - name: Run the complete Compose suite
         run: scripts/test compose
 
+  nas-install:
+    # Problems that only release acceptance used to catch (installer output,
+    # bundle layout, secret modes and owners, first Controller start, upgrade)
+    # fail the pull request instead. It builds the images and the installer
+    # from this source and runs the same acceptance code as the release lanes,
+    # with no GHCR, R2, signatures or tailnet.
+    name: Clean NAS install from source
+    needs: changes
+    if: needs.changes.outputs.nas_install == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      IMAGE_PREFIX: ghcr.io/carstvaartjes/vonk-forge
+      IMAGE_TAG: ci-local
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Install pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          rustup toolchain install 1.98.1
+          rustup default 1.98.1
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build the installer from this source
+        run: cargo build --locked --release --package vonk-nas-setup --bin vonk-nas-setup
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the Controller API image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: control/Dockerfile
+          target: api
+          load: true
+          tags: ${{ env.IMAGE_PREFIX }}-api:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=ci-test-vonk-forge-api
+      - name: Build the Controller worker image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: control/Dockerfile
+          target: worker
+          load: true
+          tags: ${{ env.IMAGE_PREFIX }}-worker:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=ci-test-vonk-forge-worker
+      - name: Build the LiteLLM image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/compose/litellm/Dockerfile
+          load: true
+          tags: ${{ env.IMAGE_PREFIX }}-litellm:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=vonk-forge-litellm
+      - name: Build the Hermes image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/compose/hermes-agent
+          target: managed
+          load: true
+          tags: ${{ env.IMAGE_PREFIX }}-hermes:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=vonk-forge-hermes
+      - name: Render the installer payload and the local image overlay
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/nas-local"
+          install -d -m 0700 "$out"
+          scripts/render-dev-compose --channel pinned \
+            --output "$out/docker-compose.pinned.yml" \
+            --api-image "$IMAGE_PREFIX-api:$IMAGE_TAG" \
+            --worker-image "$IMAGE_PREFIX-worker:$IMAGE_TAG" \
+            --hermes-image "$IMAGE_PREFIX-hermes:$IMAGE_TAG" \
+            --litellm-image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
+          uv run --project control --frozen python scripts/build-nas-compose-bundle \
+            --compose "$out/docker-compose.pinned.yml" --channel dev \
+            --output "$out/payload.json"
+          # The payload follows the :dev channel and pulls its Vonk images.
+          # Point those services at the images just built, never at GHCR.
+          {
+            echo services:
+            for pair in control-api:api control-worker:worker hermes-agent:hermes \
+              litellm:litellm hermes-litellm-key-provisioner:litellm; do
+              printf '  %s:\n    image: %s-%s:%s\n    pull_policy: never\n' \
+                "${pair%%:*}" "$IMAGE_PREFIX" "${pair##*:}" "$IMAGE_TAG"
+            done
+          } > "$out/overlay.yml"
+      - name: Download verified Compose parser fixtures
+        shell: bash
+        env:
+          COMPOSE_LOWER_SHA256: eca30ae32dc451f9e6d6c8ddce078a76f23b355c3ca0ab391d58f59e87c0d310
+          COMPOSE_UGREEN_SHA256: a0298760c9772d2c06888fc8703a487c94c3c3b0134adeef830742a2fc7647b4
+        run: |
+          set -euo pipefail
+          fixture_dir="$RUNNER_TEMP/compose-fixtures"
+          mkdir -p "$fixture_dir"
+          curl --fail --location --silent --show-error \
+            https://github.com/docker/compose/releases/download/v5.1.3/docker-compose-linux-x86_64 \
+            --output "$fixture_dir/docker-compose-v5.1.3"
+          printf '%s  %s\n' "$COMPOSE_UGREEN_SHA256" \
+            "$fixture_dir/docker-compose-v5.1.3" | sha256sum --check --status
+          curl --fail --location --silent --show-error \
+            https://github.com/docker/compose/releases/download/v2.24.6/docker-compose-linux-x86_64 \
+            --output "$fixture_dir/docker-compose-v2.24.6"
+          printf '%s  %s\n' "$COMPOSE_LOWER_SHA256" \
+            "$fixture_dir/docker-compose-v2.24.6" | sha256sum --check --status
+          chmod 0755 "$fixture_dir/docker-compose-v5.1.3" \
+            "$fixture_dir/docker-compose-v2.24.6"
+      - name: Install, start, restart and upgrade a clean NAS bundle
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
+          VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
+          VONK_ACCEPTANCE_REFERENCE_COMPOSE: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
+          VONK_ACCEPTANCE_COMPOSE_OVERLAY: ${{ runner.temp }}/nas-local/overlay.yml
+          VONK_ACCEPTANCE_LOCAL_SETUP: ${{ github.workspace }}/target/release/vonk-nas-setup
+          VONK_ACCEPTANCE_LOCAL_PAYLOAD: ${{ runner.temp }}/nas-local/payload.json
+          # Not a real key: it only has to be accepted by the installer.
+          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: sk-pull-request-placeholder
+          VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
+          VONK_ACCEPTANCE_NAS_IP: 127.0.0.1
+          VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: acceptance.invalid
+          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard
+          VONK_ACCEPTANCE_TAILSCALE_MODE: disabled
+          VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
+        run: uv run --project control --frozen python tests/acceptance/test_fresh_nas_install.py
+
+  agent-package:
+    # The package lifecycle script only ran after merge, on push to main.
+    # It reads what the agent and the packaging ship, so a change to either
+    # can break it. This builds the two packages from this source, signed
+    # with a throwaway key, and runs the same script on a native ARM64 runner.
+    name: Native ARM64 agent package lifecycle
+    needs: changes
+    if: needs.changes.outputs.agent_package == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          rustup set profile minimal
+          rustup toolchain install 1.98.1
+          rustup default 1.98.1
+          rustup target add aarch64-unknown-linux-gnu
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-arm64
+          add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install lifecycle test dependencies
+        uses: ./.github/actions/apt-install
+        with:
+          packages: crun fuse-overlayfs iproute2 iptables podman shellcheck slirp4netns uidmap
+      - name: Materialize pinned package tools
+        run: scripts/materialize-agent-tools --output-root target
+      - name: Build the baseline and candidate packages
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r name value; do
+            declare "$name=$value"
+          done < <(scripts/agent-package-metadata development branch main \
+            "$GITHUB_SHA" "$GITHUB_RUN_NUMBER")
+          key="$RUNNER_TEMP/throwaway-agent-key.pem"
+          openssl genpkey -algorithm ed25519 -out "$key"
+          # These packages are never published, so their bytes need not be
+          # reproducible: any fixed epoch will do.
+          epoch=1700000000
+          lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
+          digest() {
+            printf '%s\0%s\0%s\0%s\0%s' "$1" "$GITHUB_SHA" linux-arm64 "$lock_digest" "$2" \
+              | sha256sum | cut -d' ' -f1
+          }
+          export VONK_SOURCE_REVISION="$GITHUB_SHA"
+          export VONK_SOURCE_REPOSITORY="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          scripts/build-agent-deb --version "$version" --architecture linux-arm64 \
+            --build-digest "sha256:$(digest vonk-agent-build-v2 "$version")" \
+            --release-private-key "$key" --source-date-epoch "$epoch" \
+            --output-dir dist
+          scripts/build-agent-deb --acceptance-baseline \
+            --version "$baseline_version" --architecture linux-arm64 \
+            --build-digest "sha256:$(digest vonk-agent-acceptance-baseline-v1 "$baseline_version")" \
+            --release-private-key "$key" --source-date-epoch "$epoch" \
+            --output-dir baseline
+          rm -f "$key"
+          {
+            echo "VERSION=$version"
+            echo "BASELINE_VERSION=$baseline_version"
+          } >> "$GITHUB_ENV"
+      - name: Run the native package lifecycle
+        run: |
+          set -euo pipefail
+          sudo scripts/test-agent-package-native-lifecycle linux-arm64 \
+            "$(realpath "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb")" \
+            "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
+            "$BASELINE_VERSION" "$VERSION"
+
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})
     needs: changes
@@ -705,7 +916,7 @@ jobs:
 
   ci-gate:
     name: CI gate
-    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-suite, control-suite, control-image-build, web-suite]
+    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -724,6 +935,8 @@ jobs:
           SELECTED_WEB: ${{ needs.changes.outputs.web }}
           SELECTED_GENERATED: ${{ needs.changes.outputs.generated }}
           SELECTED_COMPOSE: ${{ needs.changes.outputs.compose }}
+          SELECTED_NAS_INSTALL: ${{ needs.changes.outputs.nas_install }}
+          SELECTED_AGENT_PACKAGE: ${{ needs.changes.outputs.agent_package }}
           LINT_RESULT: ${{ needs.lint.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           RUST_QUALITY_RESULT: ${{ needs.rust-quality.result }}
@@ -736,6 +949,8 @@ jobs:
           WEB_RESULT: ${{ needs.web-suite.result }}
           GENERATED_RESULT: ${{ needs.generated-clients.result }}
           COMPOSE_RESULT: ${{ needs.compose-integration.result }}
+          NAS_INSTALL_RESULT: ${{ needs.nas-install.result }}
+          AGENT_PACKAGE_RESULT: ${{ needs.agent-package.result }}
         run: |
           set -euo pipefail
           scripts/verify-ci-gate \
@@ -746,6 +961,8 @@ jobs:
             --selected "web=$SELECTED_WEB" \
             --selected "generated=$SELECTED_GENERATED" \
             --selected "compose=$SELECTED_COMPOSE" \
+            --selected "nas-install=$SELECTED_NAS_INSTALL" \
+            --selected "agent-package=$SELECTED_AGENT_PACKAGE" \
             --result "lint=$LINT_RESULT" \
             --result "supply-chain=$SUPPLY_CHAIN_RESULT" \
             --result "rust-quality=$RUST_QUALITY_RESULT" \
@@ -757,7 +974,9 @@ jobs:
             --result "control-image-build=$CONTROL_IMAGE_BUILD_RESULT" \
             --result "web=$WEB_RESULT" \
             --result "generated=$GENERATED_RESULT" \
-            --result "compose=$COMPOSE_RESULT"
+            --result "compose=$COMPOSE_RESULT" \
+            --result "nas-install=$NAS_INSTALL_RESULT" \
+            --result "agent-package=$AGENT_PACKAGE_RESULT"
 
   main-ci-summary:
     name: Main branch CI status summary

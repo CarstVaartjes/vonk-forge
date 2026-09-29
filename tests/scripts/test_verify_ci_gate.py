@@ -28,6 +28,8 @@ def _valid(**overrides: str):
         "web": "true",
         "generated": "false",
         "compose": "true",
+        "nas-install": "true",
+        "agent-package": "true",
     }
     results = {
         "lint": "success",
@@ -41,6 +43,8 @@ def _valid(**overrides: str):
         "web": "success",
         "generated": "skipped",
         "compose": "success",
+        "nas-install": "success",
+        "agent-package": "success",
         "supply-chain": "success",
     }
     selected.update({key: value for key, value in overrides.items() if key in selected})
@@ -68,6 +72,8 @@ def test_docs_only_change_allows_unselected_jobs_to_skip() -> None:
         "web",
         "generated",
         "compose",
+        "nas-install",
+        "agent-package",
     ):
         results[job] = "skipped"
     assert _module().verify("success", selected, results) == []
@@ -116,3 +122,11 @@ def test_controller_image_build_tests_are_required_with_the_control_suite() -> N
     assert _module().verify("success", selected, results) == [
         "control-image-build result is 'skipped', expected 'success'"
     ]
+
+
+@pytest.mark.parametrize("job", ["nas-install", "agent-package"])
+@pytest.mark.parametrize("result", ["skipped", "failure", "cancelled", None])
+def test_installed_system_proofs_block_the_gate_when_selected(job, result) -> None:
+    selected, results = _valid()
+    results[job] = result
+    assert any(job in error for error in _module().verify("success", selected, results))
