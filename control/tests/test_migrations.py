@@ -352,6 +352,45 @@ def test_postgres_startup_relaxes_changed_nullable_column_and_accepts_insert(
     assert inserted_id > 1
 
 
+def test_postgres_startup_replaces_check_on_a_removed_column(postgres_engine) -> None:
+    """An old check naming a column the model dropped must not block startup."""
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _upgrade(database_url)
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE node_telemetry_samples "
+                "ADD COLUMN cpu_utilization_percent DOUBLE PRECISION"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE node_telemetry_samples "
+                "DROP CONSTRAINT ck_telemetry_utilization"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE node_telemetry_samples ADD CONSTRAINT ck_telemetry_utilization "
+                "CHECK (cpu_utilization_percent IS NULL OR "
+                "cpu_utilization_percent BETWEEN 0 AND 100)"
+            )
+        )
+
+    _initialize_source_checkout(database_url)
+
+    with postgres_engine.connect() as connection:
+        verify_schema_is_current(connection)
+        check = next(
+            item
+            for item in inspect(connection).get_check_constraints(
+                "node_telemetry_samples"
+            )
+            if item["name"] == "ck_telemetry_utilization"
+        )
+    assert "cpu_utilization_percent" not in check["sqltext"]
+
+
 def test_postgres_reconciliation_skips_lossy_type_narrowing_without_data_loss(
     postgres_engine,
 ) -> None:
