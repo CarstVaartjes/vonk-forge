@@ -20,6 +20,7 @@ from .preparation_contract import (
     RolloutPreparation,
     RuntimeImageIdentity,
 )
+from .recipe_update_notice import RecipeUpdateNotice
 from .run_switch_contract import (
     ConditionalPostStopMemoryCheck,
     EffectiveSettingsSelection,
@@ -332,6 +333,9 @@ class FleetProfileAssignmentView(_StrictModel):
     # The effective choice for every option of the recipe (defaults included).
     option_choices: OptionChoices = Field(default_factory=dict)
     observed_state: str = "Not loaded"
+    # Set when the loaded workload runs an older revision than the newest one;
+    # informational, a reload applies it.
+    recipe_update: RecipeUpdateNotice | None = None
 
     @model_validator(mode="after")
     def validate_spark_projection(self) -> FleetProfileAssignmentView:

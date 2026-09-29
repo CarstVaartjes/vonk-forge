@@ -39,8 +39,19 @@ from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
+from .recipe_update_notice import (
+    RECIPE_UPDATE_AVAILABLE,
+    RecipeUpdateNotice,
+    newest_active_revisions,
+    recipe_update_notice,
+)
 from .strict_json import StrictJSONModel
-from .telemetry import TelemetryRepository, TelemetrySampleView
+from .telemetry import (
+    CPU_LOW_CLOCK_MIN_SECONDS,
+    TelemetryRepository,
+    TelemetrySampleView,
+    sustained_low_cpu_clock,
+)
 
 _REVISION_PATTERN = r"^[0-9a-f]{64}$"
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
@@ -194,6 +205,25 @@ class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
+# Extra history beyond the one-minute rule, so a slightly late sample still
+# leaves an unbroken run to measure.
+_LOW_CLOCK_LOOKBACK_SLACK = 30
+
+
+def _low_clock_detail(sample: TelemetrySampleView) -> str:
+    average = sample.cpu_frequency_avg_mhz
+    maximum = sample.cpu_frequency_max_mhz
+    context = (
+        f"{sample.gpu_temperature_c} °C"
+        if sample.gpu_temperature_c is not None
+        else f"{sample.gpu_utilization_percent:.0f}% GPU load"
+    )
+    return (
+        f"CPU clock is low while hot or busy: {average} of {maximum} MHz at "
+        f"{context}. Thermal or power throttling is possible."
+    )
+
+
 class ProjectionReason(_StrictModel):
     code: Literal[
         "node.offline",
@@ -204,6 +234,8 @@ class ProjectionReason(_StrictModel):
         "telemetry.stale",
         "install.partial",
         "run.degraded",
+        "recipe.update_available",
+        "cpu.low-clock",
     ]
     detail: Text256
     severity: Literal["info", "warning", "error"]
@@ -259,6 +291,10 @@ class TelemetryPoint(_StrictModel):
     gpu_memory_free_bytes: int | None = Field(
         default=None, ge=0, le=_MAX_TELEMETRY_BYTES
     )
+    gpu_temperature_c: int | None = Field(default=None, ge=0, le=150)
+    cpu_frequency_avg_mhz: int | None = Field(default=None, ge=1, le=20_000)
+    cpu_frequency_min_mhz: int | None = Field(default=None, ge=1, le=20_000)
+    cpu_frequency_max_mhz: int | None = Field(default=None, ge=1, le=20_000)
 
 
 class TelemetryState(_StrictModel):
@@ -307,6 +343,8 @@ class RunPresence(_StrictModel):
     # The recipe option choices this run was started with; empty when the
     # recipe declares none.
     option_choices: dict[Text64, Text64] = Field(default_factory=dict, max_length=16)
+    # Set when a newer revision of this recipe exists; informational only.
+    recipe_update: RecipeUpdateNotice | None = None
 
 
 class CapacityReservations(_StrictModel):
@@ -364,6 +402,10 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
         gpu_utilization_percent=value.gpu_utilization_percent,
         gpu_memory_total_bytes=value.gpu_memory_total_bytes,
         gpu_memory_free_bytes=value.gpu_memory_free_bytes,
+        gpu_temperature_c=value.gpu_temperature_c,
+        cpu_frequency_avg_mhz=value.cpu_frequency_avg_mhz,
+        cpu_frequency_min_mhz=value.cpu_frequency_min_mhz,
+        cpu_frequency_max_mhz=value.cpu_frequency_max_mhz,
     )
 
 
@@ -479,6 +521,14 @@ class FleetProjection:
             certificates = self._current_certificates(session, node_ids, current)
             inventories = self._latest_inventory(session, node_ids)
             telemetry = self._telemetry.latest_in_session(session, node_ids)
+            recent_telemetry = self._telemetry.recent_in_session(
+                session,
+                node_ids,
+                current
+                - timedelta(
+                    seconds=CPU_LOW_CLOCK_MIN_SECONDS + _LOW_CLOCK_LOOKBACK_SLACK
+                ),
+            )
             installation_rows = self._installation_rows(session, node_ids)
             run_rows = self._run_rows(session, node_ids)
             mapping_ids = {row[2].id for row in (*installation_rows, *run_rows)}
@@ -493,8 +543,9 @@ class FleetProjection:
             installed = self._installed_presence(
                 installation_rows, mapping_nodes, frozenset(node_ids)
             )
+            newest = newest_active_revisions(session, {row[5].id for row in run_rows})
             loaded = self._loaded_presence(
-                run_rows, mapping_nodes, frozenset(node_ids), current
+                run_rows, mapping_nodes, frozenset(node_ids), current, newest
             )
             reservations = self._reservations(session, node_ids)
         return FleetSnapshot(
@@ -511,6 +562,7 @@ class FleetProjection:
                     certificate=certificates.get(node_id),
                     inventory=inventories.get(node_id),
                     telemetry=telemetry.get(node_id),
+                    recent_telemetry=recent_telemetry.get(node_id, ()),
                     installed=installed.get(node_id, ()),
                     loaded=loaded.get(node_id, ()),
                     reservations=reservations.get(node_id, {}),
@@ -801,6 +853,7 @@ class FleetProjection:
         mapping_rows: Sequence[ClusterMappingNode],
         fleet_node_ids: frozenset[str],
         current: datetime,
+        newest: Mapping[str, CatalogDocumentRevision] | None = None,
     ) -> dict[str, tuple[RunPresence, ...]]:
         mappings = self._mapping_members(mapping_rows)
         grouped: dict[str, list[RunPresenceRow]] = {}
@@ -850,6 +903,9 @@ class FleetProjection:
                 reason = "route-not-published"
             present_ranks = [node.rank for node in visible_nodes]
             member_node_ids = sorted(node.node_id for node in visible_nodes)
+            update = recipe_update_notice(
+                recipe.title, revision, (newest or {}).get(recipe.id)
+            )
             for node in visible_nodes:
                 rank_age, rank_fresh = freshness[node.id]
                 by_node.setdefault(node.node_id, []).append(
@@ -874,6 +930,7 @@ class FleetProjection:
                         healthy=reason is None,
                         degraded_reason=reason,
                         option_choices=mapping_option_choices(mapping.parameters),
+                        recipe_update=update,
                     )
                 )
         return {
@@ -975,6 +1032,7 @@ class FleetProjection:
         certificate: AgentCertificate | None,
         inventory: NodeInventorySnapshot | None,
         telemetry: TelemetrySampleView | None,
+        recent_telemetry: Sequence[TelemetrySampleView],
         installed: Sequence[RecipePresence],
         loaded: Sequence[RunPresence],
         reservations: Mapping[str, tuple[int, int]],
@@ -1031,6 +1089,16 @@ class FleetProjection:
                     severity="warning",
                 )
             )
+        if telemetry_state is not None and telemetry_state.freshness != "stale":
+            low_clock = sustained_low_cpu_clock(recent_telemetry)
+            if low_clock is not None:
+                warnings.append(
+                    ProjectionReason(
+                        code="cpu.low-clock",
+                        detail=_low_clock_detail(low_clock),
+                        severity="warning",
+                    )
+                )
         if any(not value.complete for value in installed):
             warnings.append(
                 ProjectionReason(
@@ -1047,6 +1115,15 @@ class FleetProjection:
                     severity="warning",
                 )
             )
+        for value in loaded:
+            if value.recipe_update is not None:
+                warnings.append(
+                    ProjectionReason(
+                        code=RECIPE_UPDATE_AVAILABLE,
+                        detail=value.recipe_update.detail,
+                        severity="info",
+                    )
+                )
         labels = {} if profile is None else profile.labels
         if not isinstance(labels, Mapping):
             raise TypeError("Fleet node profile labels are invalid")

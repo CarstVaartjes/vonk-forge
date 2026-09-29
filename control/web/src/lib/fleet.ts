@@ -44,8 +44,21 @@ export function nodeStatus(node: VisualFleetNode, now: Date): {status: NodeStatu
   const warnings = node.telemetry?.sample
     ? reconcileTelemetryWarnings(node.warnings, telemetryFreshnessAt(node.telemetry.sample.observed_at, now))
     : node.warnings;
-  const reasons = warnings.map(warning => warning.detail);
+  // Informational notices (a newer recipe revision exists) are not attention.
+  const reasons = warnings.filter(warning => warning.severity !== "info").map(warning => warning.detail);
   return {status: reasons.length > 0 ? "needs attention" : "online", reasons};
+}
+
+/** Running workloads on an older recipe revision, once per run; informational and never an error. */
+export function nodeRecipeUpdates(node: VisualFleetNode): {runId: string; title: string; detail: string}[] {
+  const seen = new Set<string>();
+  const updates: {runId: string; title: string; detail: string}[] = [];
+  for (const run of node.loaded) {
+    if (!run.recipe_update || seen.has(run.run_id)) continue;
+    seen.add(run.run_id);
+    updates.push({runId: run.run_id, title: run.title, detail: run.recipe_update.detail});
+  }
+  return updates;
 }
 
 const OFFLINE_REASON_LABELS: Record<NonNullable<VisualFleetNode["connection"]["offline_reason"]>, string> = {
@@ -132,4 +145,18 @@ export function nodeMemory(node: VisualFleetNode): {usedPercent: number; totalBy
 
 export function nodeDiskFreeBytes(node: VisualFleetNode): number | null {
   return node.inventory?.disk_free_bytes ?? node.telemetry?.sample.disk_free_bytes ?? null;
+}
+
+/** Average current CPU clock against the hardware maximum, with the temperature it runs at. */
+export function nodeCpuClock(node: VisualFleetNode): {clock: string; temperature: string | null; lowClock: boolean} | null {
+  const sample = node.telemetry?.sample;
+  const current = sample?.cpu_frequency_avg_mhz;
+  if (!sample || node.telemetry?.freshness === "stale" || typeof current !== "number") return null;
+  const maximum = sample.cpu_frequency_max_mhz;
+  const ghz = (mhz: number) => (mhz / 1000).toFixed(1);
+  return {
+    clock: typeof maximum === "number" ? `${ghz(current)} of ${ghz(maximum)} GHz` : `${ghz(current)} GHz`,
+    temperature: typeof sample.gpu_temperature_c === "number" ? `${sample.gpu_temperature_c} °C` : null,
+    lowClock: node.warnings.some(warning => warning.code === "cpu.low-clock"),
+  };
 }

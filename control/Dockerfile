@@ -84,7 +84,7 @@ COPY control/uv.lock ./uv.lock
 COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
 # The repository image build runs scripts/build-control-wheel before invoking
 # Docker so this local dependency exists and has the digest pinned in uv.lock.
-COPY inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl /wheels/
+COPY inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl /wheels/
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends git \
     && public_contracts_revision="$(sed -n 's/^revision = "//p' packaging/public-contracts.lock | tr -d '"')" \
@@ -94,7 +94,7 @@ RUN apt-get update \
     && git -C /public-contracts checkout --detach "$public_contracts_revision" \
     && python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels \
         /public-contracts/contracts \
-    && python -c 'import hashlib, pathlib, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256(pathlib.Path("/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl").read_bytes()).hexdigest()' \
+    && python -c 'import hashlib, pathlib, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256(pathlib.Path("/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl").read_bytes()).hexdigest()' \
     && test "$(sha256sum /wheels/vonk_forge_public_contracts-2.1.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && rm -rf /public-contracts /var/lib/apt/lists/*
 # Third-party dependencies resolve to the newest allowed release, so this layer
@@ -123,7 +123,7 @@ COPY --from=web /web/dist ./src/vonk_control/web
 # path, so the dependency layer above is reused instead of downloaded again.
 RUN PYTHONPATH="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib", vars={"base": "/install", "platbase": "/install"}))')" \
     python -m pip install --no-cache-dir --prefix=/install \
-    /wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl \
+    /wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl \
     /wheels/vonk_forge_public_contracts-2.1.0-py3-none-any.whl \
     /vonk-cluster-profiles .
 

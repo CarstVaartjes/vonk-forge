@@ -2590,6 +2590,7 @@ export interface components {
             recipe_id?: string | null;
             /** Recipe Selector */
             recipe_selector: string;
+            recipe_update?: components["schemas"]["RecipeUpdateNotice"] | null;
             /** Required Sparks */
             required_sparks?: number | null;
             /** Resources */
@@ -4795,7 +4796,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "run.degraded";
+            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "run.degraded" | "recipe.update_available" | "cpu.low-clock";
             /** Detail */
             detail: string;
             /**
@@ -5784,6 +5785,36 @@ export interface components {
             /** Retryable */
             retryable: boolean;
         };
+        /**
+         * RecipeUpdateNotice
+         * @description A running workload uses an older revision than the newest active one.
+         */
+        RecipeUpdateNotice: {
+            /**
+             * Code
+             * @default recipe.update_available
+             */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Newest Released At */
+            newest_released_at?: string | null;
+            /** Newest Revision Id */
+            newest_revision_id: string;
+            /** Newest Version */
+            newest_version?: string | null;
+            /** Running Released At */
+            running_released_at?: string | null;
+            /** Running Revision Id */
+            running_revision_id: string;
+            /** Running Version */
+            running_version?: string | null;
+            /**
+             * Severity
+             * @default info
+             */
+            severity: string;
+        };
         /** RecipeUpdateRequest */
         RecipeUpdateRequest: {
             /**
@@ -6062,6 +6093,7 @@ export interface components {
             recipe_id: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
+            recipe_update?: components["schemas"]["RecipeUpdateNotice"] | null;
             /** Role */
             role: string;
             /**
@@ -7427,6 +7459,12 @@ export interface components {
         TelemetryPoint: {
             /** Boot Id */
             boot_id: string;
+            /** Cpu Frequency Avg Mhz */
+            cpu_frequency_avg_mhz?: number | null;
+            /** Cpu Frequency Max Mhz */
+            cpu_frequency_max_mhz?: number | null;
+            /** Cpu Frequency Min Mhz */
+            cpu_frequency_min_mhz?: number | null;
             /** Disk Free Bytes */
             disk_free_bytes?: number | null;
             /** Disk Total Bytes */
@@ -7435,6 +7473,8 @@ export interface components {
             gpu_memory_free_bytes?: number | null;
             /** Gpu Memory Total Bytes */
             gpu_memory_total_bytes?: number | null;
+            /** Gpu Temperature C */
+            gpu_temperature_c?: number | null;
             /** Gpu Utilization Percent */
             gpu_utilization_percent?: number | null;
             /** Id */

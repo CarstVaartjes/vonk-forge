@@ -55,6 +55,20 @@ class TelemetrySample(TelemetryWireModel):
     gpu_utilization_percent: float | None = Field(ge=0, le=100, allow_inf_nan=False)
     gpu_memory_total_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
     gpu_memory_free_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    # Optional additions (protocol 4.1): older agents omit them. CPU clocks are
+    # whole MHz from cpufreq; max is the hardware limit, not the current cap.
+    gpu_temperature_c: int | None = Field(
+        default=None, ge=0, le=150, exclude_if=lambda value: value is None
+    )
+    cpu_frequency_avg_mhz: int | None = Field(
+        default=None, ge=1, le=20_000, exclude_if=lambda value: value is None
+    )
+    cpu_frequency_min_mhz: int | None = Field(
+        default=None, ge=1, le=20_000, exclude_if=lambda value: value is None
+    )
+    cpu_frequency_max_mhz: int | None = Field(
+        default=None, ge=1, le=20_000, exclude_if=lambda value: value is None
+    )
     _parse_observed_at = field_validator("observed_at", mode="before")(
         _rfc3339_datetime
     )
@@ -77,6 +91,12 @@ class TelemetrySample(TelemetryWireModel):
                 total is not None and available is not None and available > total
             ):
                 raise ValueError("telemetry capacity values are inconsistent")
+        if (
+            self.cpu_frequency_avg_mhz is not None
+            and self.cpu_frequency_min_mhz is not None
+            and self.cpu_frequency_min_mhz > self.cpu_frequency_avg_mhz
+        ):
+            raise ValueError("telemetry CPU frequencies are inconsistent")
         return self
 
 

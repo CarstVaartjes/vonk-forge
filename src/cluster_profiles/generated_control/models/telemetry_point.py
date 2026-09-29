@@ -30,10 +30,14 @@ class TelemetryPoint:
             node_id (str):
             observed_at (datetime.datetime):
             received_at (datetime.datetime):
+            cpu_frequency_avg_mhz (int | None | Unset):
+            cpu_frequency_max_mhz (int | None | Unset):
+            cpu_frequency_min_mhz (int | None | Unset):
             disk_free_bytes (int | None | Unset):
             disk_total_bytes (int | None | Unset):
             gpu_memory_free_bytes (int | None | Unset):
             gpu_memory_total_bytes (int | None | Unset):
+            gpu_temperature_c (int | None | Unset):
             gpu_utilization_percent (float | None | Unset):
             memory_available_bytes (int | None | Unset):
             memory_total_bytes (int | None | Unset):
@@ -44,10 +48,14 @@ class TelemetryPoint:
     node_id: str
     observed_at: datetime.datetime
     received_at: datetime.datetime
+    cpu_frequency_avg_mhz: int | None | Unset = UNSET
+    cpu_frequency_max_mhz: int | None | Unset = UNSET
+    cpu_frequency_min_mhz: int | None | Unset = UNSET
     disk_free_bytes: int | None | Unset = UNSET
     disk_total_bytes: int | None | Unset = UNSET
     gpu_memory_free_bytes: int | None | Unset = UNSET
     gpu_memory_total_bytes: int | None | Unset = UNSET
+    gpu_temperature_c: int | None | Unset = UNSET
     gpu_utilization_percent: float | None | Unset = UNSET
     memory_available_bytes: int | None | Unset = UNSET
     memory_total_bytes: int | None | Unset = UNSET
@@ -66,6 +74,24 @@ class TelemetryPoint:
         observed_at = self.observed_at.isoformat()
 
         received_at = self.received_at.isoformat()
+
+        cpu_frequency_avg_mhz: int | None | Unset
+        if isinstance(self.cpu_frequency_avg_mhz, Unset):
+            cpu_frequency_avg_mhz = UNSET
+        else:
+            cpu_frequency_avg_mhz = self.cpu_frequency_avg_mhz
+
+        cpu_frequency_max_mhz: int | None | Unset
+        if isinstance(self.cpu_frequency_max_mhz, Unset):
+            cpu_frequency_max_mhz = UNSET
+        else:
+            cpu_frequency_max_mhz = self.cpu_frequency_max_mhz
+
+        cpu_frequency_min_mhz: int | None | Unset
+        if isinstance(self.cpu_frequency_min_mhz, Unset):
+            cpu_frequency_min_mhz = UNSET
+        else:
+            cpu_frequency_min_mhz = self.cpu_frequency_min_mhz
 
         disk_free_bytes: int | None | Unset
         if isinstance(self.disk_free_bytes, Unset):
@@ -90,6 +116,12 @@ class TelemetryPoint:
             gpu_memory_total_bytes = UNSET
         else:
             gpu_memory_total_bytes = self.gpu_memory_total_bytes
+
+        gpu_temperature_c: int | None | Unset
+        if isinstance(self.gpu_temperature_c, Unset):
+            gpu_temperature_c = UNSET
+        else:
+            gpu_temperature_c = self.gpu_temperature_c
 
         gpu_utilization_percent: float | None | Unset
         if isinstance(self.gpu_utilization_percent, Unset):
@@ -119,6 +151,12 @@ class TelemetryPoint:
             "observed_at": observed_at,
             "received_at": received_at,
         })
+        if cpu_frequency_avg_mhz is not UNSET:
+            field_dict["cpu_frequency_avg_mhz"] = cpu_frequency_avg_mhz
+        if cpu_frequency_max_mhz is not UNSET:
+            field_dict["cpu_frequency_max_mhz"] = cpu_frequency_max_mhz
+        if cpu_frequency_min_mhz is not UNSET:
+            field_dict["cpu_frequency_min_mhz"] = cpu_frequency_min_mhz
         if disk_free_bytes is not UNSET:
             field_dict["disk_free_bytes"] = disk_free_bytes
         if disk_total_bytes is not UNSET:
@@ -127,6 +165,8 @@ class TelemetryPoint:
             field_dict["gpu_memory_free_bytes"] = gpu_memory_free_bytes
         if gpu_memory_total_bytes is not UNSET:
             field_dict["gpu_memory_total_bytes"] = gpu_memory_total_bytes
+        if gpu_temperature_c is not UNSET:
+            field_dict["gpu_temperature_c"] = gpu_temperature_c
         if gpu_utilization_percent is not UNSET:
             field_dict["gpu_utilization_percent"] = gpu_utilization_percent
         if memory_available_bytes is not UNSET:
@@ -155,6 +195,36 @@ class TelemetryPoint:
         received_at = datetime.datetime.fromisoformat(d.pop("received_at"))
 
 
+
+
+        def _parse_cpu_frequency_avg_mhz(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        cpu_frequency_avg_mhz = _parse_cpu_frequency_avg_mhz(d.pop("cpu_frequency_avg_mhz", UNSET))
+
+
+        def _parse_cpu_frequency_max_mhz(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        cpu_frequency_max_mhz = _parse_cpu_frequency_max_mhz(d.pop("cpu_frequency_max_mhz", UNSET))
+
+
+        def _parse_cpu_frequency_min_mhz(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        cpu_frequency_min_mhz = _parse_cpu_frequency_min_mhz(d.pop("cpu_frequency_min_mhz", UNSET))
 
 
         def _parse_disk_free_bytes(data: object) -> int | None | Unset:
@@ -197,6 +267,16 @@ class TelemetryPoint:
         gpu_memory_total_bytes = _parse_gpu_memory_total_bytes(d.pop("gpu_memory_total_bytes", UNSET))
 
 
+        def _parse_gpu_temperature_c(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        gpu_temperature_c = _parse_gpu_temperature_c(d.pop("gpu_temperature_c", UNSET))
+
+
         def _parse_gpu_utilization_percent(data: object) -> float | None | Unset:
             if data is None:
                 return data
@@ -233,10 +313,14 @@ class TelemetryPoint:
             node_id=node_id,
             observed_at=observed_at,
             received_at=received_at,
+            cpu_frequency_avg_mhz=cpu_frequency_avg_mhz,
+            cpu_frequency_max_mhz=cpu_frequency_max_mhz,
+            cpu_frequency_min_mhz=cpu_frequency_min_mhz,
             disk_free_bytes=disk_free_bytes,
             disk_total_bytes=disk_total_bytes,
             gpu_memory_free_bytes=gpu_memory_free_bytes,
             gpu_memory_total_bytes=gpu_memory_total_bytes,
+            gpu_temperature_c=gpu_temperature_c,
             gpu_utilization_percent=gpu_utilization_percent,
             memory_available_bytes=memory_available_bytes,
             memory_total_bytes=memory_total_bytes,

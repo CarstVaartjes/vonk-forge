@@ -114,7 +114,7 @@ def test_local_verification_needs_no_generated_files_or_mutation(
     assert _result(result)["ok"] is True
     assert not (repository / "inventory/sbom").exists()
     assert not (
-        repository / "inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl"
+        repository / "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
     ).exists()
 
 
@@ -200,7 +200,7 @@ def test_verifier_rejects_protocol_version_drift(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
     project = repository / "agent_protocol/pyproject.toml"
     project.write_text(
-        project.read_text().replace('version = "4.0.0"', 'version = "4.0.1"', 1)
+        project.read_text().replace('version = "4.1.0"', 'version = "4.1.1"', 1)
     )
 
     result = _run(repository)
@@ -227,7 +227,7 @@ def test_malformed_runtime_image_lock_values_fail_closed(
 
 def test_generated_protocol_spdx_binds_built_wheel_checksum(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
-    wheel = repository / "inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl"
+    wheel = repository / "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
     wheel.parent.mkdir(parents=True, exist_ok=True)
     wheel.write_bytes(b"built wheel bytes")
     output = tmp_path / "evidence"
@@ -251,7 +251,7 @@ def test_dockerfile_must_copy_and_install_the_protocol_wheel(tmp_path: Path) -> 
     source = dockerfile.read_text()
     dockerfile.write_text(
         source.replace(
-            "/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl",
+            "/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl",
             "/wheels/missing.whl",
             1,
         )

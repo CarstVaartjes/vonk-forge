@@ -142,6 +142,7 @@ from .recipe_runtime_specs import (
     recipe_topology,
     resolve_recipe_entities,
 )
+from .recipe_update_notice import RecipeUpdateNotice, recipe_update_notice
 from .recovery_policy import RecoveryPolicy
 from .run_switch_contract import (
     RunSwitchApplyRequest,
@@ -7932,6 +7933,9 @@ class FleetProfileService:
             warnings.extend(
                 f"{recipe.publisher}/{recipe.slug}: {note}" for note in choice_notes
             )
+            recipe_update = self._loaded_recipe_update(
+                session, loaded_assignments, recipe, revision, choice.spark_ids
+            )
             assignments.append(
                 FleetProfileAssignmentView(
                     selector=assignment_selector,
@@ -7966,6 +7970,7 @@ class FleetProfileService:
                         recipe_id=recipe.id,
                         spark_ids=choice.spark_ids,
                     ),
+                    recipe_update=recipe_update,
                 )
             )
         roster = tuple(
@@ -8057,6 +8062,39 @@ class FleetProfileService:
             created_at=_aware(row.created_at),
             updated_at=_aware(row.updated_at),
         )
+
+    @staticmethod
+    def _loaded_recipe_update(
+        session: Session,
+        loaded_assignments: Sequence[FleetProfileAssignment] | None,
+        recipe: CatalogDocument,
+        newest: CatalogDocumentRevision,
+        spark_ids: Sequence[str],
+    ) -> RecipeUpdateNotice | None:
+        """Say when the loaded workload runs an older revision than `newest`.
+
+        Load and run always resolve the newest revision, so this only ever
+        describes what is already running; it never restarts anything.
+        """
+
+        if loaded_assignments is None:
+            return None
+        nodes = set(spark_ids)
+        loaded = next(
+            (
+                assignment
+                for assignment in loaded_assignments
+                if assignment.recipe_id == recipe.id
+                and {node.node_id for node in assignment.nodes} == nodes
+            ),
+            None,
+        )
+        if loaded is None or loaded.recipe_revision_id == newest.id:
+            return None
+        running = session.get(CatalogDocumentRevision, loaded.recipe_revision_id)
+        if running is None:
+            return None
+        return recipe_update_notice(recipe.title, running, newest)
 
     @classmethod
     def _observed_assignment_state(

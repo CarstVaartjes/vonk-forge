@@ -26,6 +26,7 @@ from .recipe_library_types import (
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
 )
+from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_RESULT_ITEMS = 256
@@ -446,6 +447,31 @@ class ManagedRecipeCatalogSyncService:
                             "catalog.sync_revision_changed",
                             "recipe changed while the exact library snapshot was applied",
                         )
+                    if previous is not None and previous.node_count is not None:
+                        try:
+                            incoming_count = recipe_topology(
+                                hydrated.document
+                            ).node_count
+                        except (RecipeRuntimeSpecError, TypeError, ValueError):
+                            incoming_count = None
+                        if (
+                            incoming_count is not None
+                            and incoming_count != previous.node_count
+                        ):
+                            # A different Spark count is a different recipe.
+                            # Keep the current revision; running profiles are
+                            # untouched and the next sync retries by itself.
+                            self._record_problem(
+                                result,
+                                item,
+                                "recipe.topology_changed",
+                                f"new revision needs {incoming_count} Spark(s) but "
+                                f"the current one needs {previous.node_count}; "
+                                "a different Spark count needs a new recipe id, "
+                                "so the revision was not imported",
+                            )
+                            self._progress(run_id, result)
+                            continue
                     self._store_source_bundle(hydrated, actor)
                     self._catalog.import_recipe_library(
                         actor,

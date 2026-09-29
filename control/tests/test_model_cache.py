@@ -2288,7 +2288,7 @@ def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(
         == data
     )
     target.write_bytes(b"tampered!!!")
-    with pytest.raises(ModelCacheConflict, match="not completely verified"):
+    with pytest.raises(ModelCacheConflict, match="no longer verified"):
         service.read_verified_artifact(
             set_digest, str(artifact["sha256"]), "weights.bin"
         )
@@ -2442,6 +2442,33 @@ def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeyp
         restarted.read_verified_artifact(digest, artifact_digest, "weights.bin") == data
     )
     restarted.close()
+
+
+def test_serving_one_object_does_not_inspect_the_rest_of_the_set(cache, tmp_path):
+    service, _ = cache
+    first = _artifact(tmp_path, b"served", artifact_id="a", path="a.bin")
+    second = _artifact(tmp_path, b"other", artifact_id="b", path="b.bin")
+    digest = _download(
+        service,
+        [first, second],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000001004",
+    ).artifact_set_sha256
+    inspected = []
+    original = service._object_is_available
+
+    def spy(object_digest, expected_bytes):
+        inspected.append(object_digest)
+        return original(object_digest, expected_bytes)
+
+    service._object_is_available = spy
+    path, size, _ = service.verified_artifact_file(digest, first["sha256"], "a.bin")
+    assert path.read_bytes() == b"served" and size == 6
+    assert inspected == [first["sha256"]]
+    # A damaged object is still refused when it is the one being served.
+    service._object_path(second["sha256"]).unlink()
+    with pytest.raises(ModelCacheConflict):
+        service.verified_artifact_file(digest, second["sha256"], "b.bin")
 
 
 def test_atomic_repair_keeps_path_and_open_reader_available(

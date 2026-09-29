@@ -189,6 +189,10 @@ def _reasons(value: object, *, subject: object = None) -> None:
     if not isinstance(value, list):
         raise TypeError("reasons are not a list")
     for item in value:
+        if _is_update_notice(item):
+            # Informational: the recipe's own sentence says what to do.
+            _warn(f"Note: {_text(item.get('detail'))}")
+            continue
         if isinstance(item, Mapping):
             message = f"{_text(item.get('code'))}: {_text(item.get('detail'))}"
         else:
@@ -248,6 +252,12 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
     _field("Telemetry", telemetry.get("freshness"))
     _field("Memory free", _bytes(inventory.get("host_memory_free_bytes")))
     _field("Disk free", _bytes(inventory.get("disk_free_bytes")))
+    temperature = _optional(telemetry.get("sample"), "telemetry sample").get(
+        "gpu_temperature_c"
+    )
+    if telemetry.get("freshness") == "live" and type(temperature) is int:
+        _field("Temperature", f"{temperature} °C")
+    _field("CPU", _cpu_clock(node))
     loaded = _records(node, "loaded")
     if not loaded:
         print("Running workloads: none")
@@ -311,6 +321,26 @@ def _gpu(node: Mapping[str, object]) -> str:
     return f"{round(value)}%"
 
 
+def _cpu_clock(node: Mapping[str, object]) -> str:
+    """Average current CPU clock against the hardware maximum, when reported."""
+    telemetry = _optional(node.get("telemetry"), "telemetry")
+    sample = _optional(telemetry.get("sample"), "telemetry sample")
+    current = sample.get("cpu_frequency_avg_mhz")
+    maximum = sample.get("cpu_frequency_max_mhz")
+    if telemetry.get("freshness") != "live" or type(current) is not int:
+        return "unavailable"
+    text = f"{current / 1000:.1f} GHz"
+    if type(maximum) is int:
+        text = f"{current / 1000:.1f} of {maximum / 1000:.1f} GHz"
+    warnings = node.get("warnings")
+    if isinstance(warnings, list) and any(
+        isinstance(item, Mapping) and item.get("code") == "cpu.low-clock"
+        for item in warnings
+    ):
+        text += " (throttled?)"
+    return text
+
+
 def _status(node: Mapping[str, object]) -> str:
     connection = _object(node.get("connection"), "connection")
     state = _text(connection.get("online_state"))
@@ -318,6 +348,26 @@ def _status(node: Mapping[str, object]) -> str:
     if connection.get("online_state") == "online" and telemetry not in {None, "live"}:
         return f"{state}, telemetry {_text(telemetry)}"
     return state
+
+
+_UPDATE_CODE = "recipe.update_available"
+
+
+def _is_update_notice(value: object) -> bool:
+    return isinstance(value, Mapping) and value.get("code") == _UPDATE_CODE
+
+
+def _fleet_updates(nodes: Sequence[Mapping[str, object]]) -> list[str]:
+    """Runs on an older recipe revision: informational, one line per notice."""
+    notes: list[str] = []
+    for node in nodes:
+        warnings = node.get("warnings")
+        for warning in warnings if isinstance(warnings, list) else []:
+            if _is_update_notice(warning):
+                detail = _text(warning.get("detail"))
+                if detail not in notes:
+                    notes.append(detail)
+    return notes
 
 
 def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
@@ -344,6 +394,8 @@ def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
         if not isinstance(warnings, list):
             warnings = []
         for warning in warnings:
+            if _is_update_notice(warning):
+                continue
             if isinstance(warning, Mapping):
                 notes.append(
                     f"{name}: {_text(warning.get('detail') or warning.get('code'))}"
@@ -474,6 +526,7 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
     print()
     labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "GPU", "RUNNING"]
     if wide:
+        labels[5:5] = ["CPU"]
         labels.append("ID")
     rows = []
     for node in nodes:
@@ -490,6 +543,7 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
             else f"{len(loaded)} workload" + ("s" if len(loaded) > 1 else ""),
         ]
         if wide:
+            row.insert(5, _cpu_clock(node))
             row.append(node.get("id"))
         rows.append(row)
     _table(labels, rows)
@@ -501,6 +555,12 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
             print(f"  {note}")
     else:
         print("Nothing needs attention.")
+    updates = _fleet_updates(nodes)
+    if updates:
+        print()
+        print("Updates available")
+        for note in updates:
+            print(f"  {note}")
     if wide:
         _field("Observed", _time(payload.get("generated_at")))
     print()
@@ -793,6 +853,9 @@ def _profile(payload: Mapping[str, object]) -> None:
         _field("Desired", assignment.get("desired_state"))
         _option_choices(assignment.get("option_choices"))
         _field("Observed", match.get("observed_state") if match is not None else None)
+        update = match.get("recipe_update") if match is not None else None
+        if isinstance(update, Mapping):
+            _field("Update", update.get("detail"))
     _reasons(payload.get("warnings"))
     _actions(payload.get("next_actions"))
 

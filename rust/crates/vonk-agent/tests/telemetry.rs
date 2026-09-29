@@ -76,6 +76,7 @@ fn collector(
         FakeFileSystem,
         TelemetryPaths {
             meminfo: path,
+            cpu_root: directory.join("cpu"),
             store: directory.to_path_buf(),
         },
         Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
@@ -88,7 +89,7 @@ const MEMINFO: &[u8] = b"MemTotal:       1000 kB\nMemAvailable:    400 kB\n";
 #[test]
 fn unified_memory_accelerator_reports_host_memory_only() {
     let directory = tempdir().unwrap();
-    let runner = runner(b"NVIDIA GB10, 25, [N/A], [N/A]\n");
+    let runner = runner(b"NVIDIA GB10, 25, [N/A], [N/A], 61\n");
     let collector = collector(directory.path(), MEMINFO, runner.clone());
 
     let sample = collector.sample_at(Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap());
@@ -98,6 +99,7 @@ fn unified_memory_accelerator_reports_host_memory_only() {
     assert_eq!(sample.disk_total_bytes, Some(10_000));
     assert_eq!(sample.disk_free_bytes, Some(4_000));
     assert_eq!(sample.gpu_utilization_percent, Some(25.0));
+    assert_eq!(sample.gpu_temperature_c, Some(61));
     assert_eq!(sample.gpu_memory_total_bytes, None);
     assert_eq!(sample.gpu_memory_free_bytes, None);
     assert!(valid_report_batch(std::slice::from_ref(&sample)));
@@ -112,12 +114,13 @@ fn dedicated_accelerator_reports_its_own_memory() {
     let collector = collector(
         directory.path(),
         MEMINFO,
-        runner(b"NVIDIA H100, 50, 100, 90\n"),
+        runner(b"NVIDIA H100, 50, 100, 90, [N/A]\n"),
     );
 
     let sample = collector.sample_at(Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap());
 
     assert_eq!(sample.gpu_utilization_percent, Some(50.0));
+    assert_eq!(sample.gpu_temperature_c, None);
     assert_eq!(sample.gpu_memory_total_bytes, Some(100 * 1024 * 1024));
     assert_eq!(sample.gpu_memory_free_bytes, Some(90 * 1024 * 1024));
 }
@@ -153,4 +156,50 @@ fn report_batches_must_be_ordered_and_bounded() {
     let mut inconsistent = first;
     inconsistent.memory_available_bytes = Some(u64::MAX);
     assert!(!valid_report_batch(&[inconsistent]));
+}
+
+fn cpu(directory: &Path, index: u32, current_khz: Option<&str>, max_khz: Option<&str>) {
+    let cpufreq = directory
+        .join("cpu")
+        .join(format!("cpu{index}"))
+        .join("cpufreq");
+    fs::create_dir_all(&cpufreq).unwrap();
+    if let Some(value) = current_khz {
+        fs::write(cpufreq.join("scaling_cur_freq"), value).unwrap();
+    }
+    if let Some(value) = max_khz {
+        fs::write(cpufreq.join("cpuinfo_max_freq"), value).unwrap();
+    }
+}
+
+#[test]
+fn cpu_frequency_is_summarized_from_sysfs_and_tolerates_missing_entries() {
+    let directory = tempdir().unwrap();
+    cpu(directory.path(), 0, Some("2000000\n"), Some("3900000\n"));
+    cpu(directory.path(), 1, Some("2400000\n"), Some("3900000\n"));
+    // No cpufreq readings, and unrelated entries, must not fail the sample.
+    cpu(directory.path(), 2, None, None);
+    cpu(directory.path(), 3, Some("garbage"), None);
+    fs::create_dir_all(directory.path().join("cpu/cpufreq")).unwrap();
+    let collector = collector(directory.path(), MEMINFO, runner(b""));
+
+    let sample = collector.sample_at(Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap());
+
+    assert_eq!(sample.cpu_frequency_avg_mhz, Some(2200));
+    assert_eq!(sample.cpu_frequency_min_mhz, Some(2000));
+    assert_eq!(sample.cpu_frequency_max_mhz, Some(3900));
+    assert_eq!(sample.gpu_temperature_c, None);
+    assert!(valid_report_batch(std::slice::from_ref(&sample)));
+}
+
+#[test]
+fn cpu_frequency_is_null_without_cpufreq() {
+    let directory = tempdir().unwrap();
+    let collector = collector(directory.path(), MEMINFO, runner(b""));
+
+    let sample = collector.sample_at(Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap());
+
+    assert_eq!(sample.cpu_frequency_avg_mhz, None);
+    assert_eq!(sample.cpu_frequency_min_mhz, None);
+    assert_eq!(sample.cpu_frequency_max_mhz, None);
 }

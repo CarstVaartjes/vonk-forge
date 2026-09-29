@@ -462,6 +462,10 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                         "gpu_utilization_percent": 12.5,
                         "gpu_memory_total_bytes": 2000,
                         "gpu_memory_free_bytes": 1300,
+                        "gpu_temperature_c": None,
+                        "cpu_frequency_avg_mhz": None,
+                        "cpu_frequency_min_mhz": None,
+                        "cpu_frequency_max_mhz": None,
                     },
                 },
                 "installed": [],
@@ -530,7 +534,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
         ],
     }
     selects = [statement for statement in statements if statement.startswith("select")]
-    assert len(selects) == 11
+    assert len(selects) == 12
     certificate_reads = [
         statement for statement in selects if "agent_certificates" in statement
     ]
@@ -542,8 +546,10 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
     telemetry_reads = [
         statement for statement in selects if "node_telemetry_samples" in statement
     ]
-    assert len(telemetry_reads) == 1
+    # The latest pointer, plus one bounded window for the sustained CPU clock rule.
+    assert len(telemetry_reads) == 2
     assert "node_telemetry_latest" in telemetry_reads[0]
+    assert "observed_at >=" in telemetry_reads[1]
     inventory_reads = [
         statement for statement in selects if "node_inventory_snapshots" in statement
     ]
@@ -2029,3 +2035,70 @@ def test_presence_does_not_fire_the_byte_reason_without_a_persisted_expectation(
     )
     presence = _installed_presence(sessions, installation_id)
     assert (presence.complete, presence.degraded_reason) == (True, None)
+
+
+def _cpu_clock_codes(
+    *,
+    span_seconds: int,
+    avg_mhz: int = 2_000,
+    temperature: int | None = 85,
+    gpu_util: float = 5.0,
+    recover_at: int | None = None,
+) -> tuple[list[str], list[str]]:
+    """Feed one node a 2-second sample series ending at NOW; return its warnings."""
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="active",
+                architecture="linux-arm64",
+                last_seen_at=NOW - timedelta(seconds=1),
+            )
+        )
+        session.flush()
+        session.add(_certificate(NODE_A, "cpu-clock"))
+        session.add(_inventory(NODE_A, NOW - timedelta(seconds=1), free_bytes=700))
+        latest = None
+        for index, age in enumerate(range(span_seconds, -1, -2), start=1):
+            sample = _telemetry(
+                NODE_A,
+                f"00000000-0000-4000-8000-{index:012d}",
+                NOW - timedelta(seconds=age),
+                sequence=index,
+                cpu=gpu_util,
+            )
+            healthy_clock = recover_at is not None and age > recover_at
+            sample.cpu_frequency_avg_mhz = 3_900 if healthy_clock else avg_mhz
+            sample.cpu_frequency_min_mhz = 1_000
+            sample.cpu_frequency_max_mhz = 3_900
+            sample.gpu_temperature_c = temperature
+            session.add(sample)
+            latest = sample
+        session.flush()
+        assert latest is not None
+        session.add(NodeTelemetryLatest(node_id=NODE_A, sample_id=latest.id))
+    node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+    return [w.code for w in node.warnings], [w.detail for w in node.warnings]
+
+
+def test_low_cpu_clock_is_raised_only_when_sustained_and_hot_or_loaded() -> None:
+    codes, details = _cpu_clock_codes(span_seconds=80)
+    assert codes == ["cpu.low-clock"]
+    assert "2000 of 3900 MHz" in details[0] and "85" in details[0]
+
+    # Loaded but cool also counts.
+    assert _cpu_clock_codes(span_seconds=80, temperature=50, gpu_util=90.0)[0] == [
+        "cpu.low-clock"
+    ]
+    # Not for a full minute yet.
+    assert _cpu_clock_codes(span_seconds=40)[0] == []
+    # A clock that only recently dropped has not been low for a minute.
+    assert _cpu_clock_codes(span_seconds=80, recover_at=40)[0] == []
+    # Low but idle and cool is normal.
+    assert _cpu_clock_codes(span_seconds=80, temperature=45)[0] == []
+    # At or above 70% of the maximum is fine, and unreported temperature is not hot.
+    assert _cpu_clock_codes(span_seconds=80, avg_mhz=2_800)[0] == []
+    assert _cpu_clock_codes(span_seconds=80, temperature=None)[0] == []

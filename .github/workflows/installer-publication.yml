@@ -131,16 +131,24 @@ jobs:
             printf 'ready=false\n' >> "$GITHUB_OUTPUT"
             exit 0
           }
+          # The last producer's own run can still look incomplete to the API
+          # when its workflow_run event fires. Retry "not ready" (exit 2) until
+          # a fixed shared deadline; any other failure is real and is not retried.
+          deadline=$((SECONDS + 180))
           development_run() {
             local workflow=$1 variable=$2 result status
-            if result=$(uv run --frozen --only-group dev \
-              scripts/resolve-publication-producer "$workflow" "$SOURCE_SHA"); then
-              printf -v "$variable" '%s' "$result"
-            else
-              status=$?
-              if [[ "$status" == 2 ]]; then not_ready; fi
-              return "$status"
-            fi
+            while true; do
+              if result=$(uv run --frozen --only-group dev \
+                scripts/resolve-publication-producer "$workflow" "$SOURCE_SHA"); then
+                printf -v "$variable" '%s' "$result"
+                return 0
+              else
+                status=$?
+              fi
+              if [[ "$status" != 2 ]]; then return "$status"; fi
+              if (( SECONDS + 15 > deadline )); then not_ready; fi
+              sleep 15
+            done
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$TRIGGER_RUN_ID" =~ ^[1-9][0-9]*$ ]]

@@ -1721,6 +1721,10 @@ class NodeTelemetrySample(Base):
     gpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
     gpu_memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     gpu_memory_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    gpu_temperature_c: Mapped[int | None] = mapped_column(Integer)
+    cpu_frequency_avg_mhz: Mapped[int | None] = mapped_column(Integer)
+    cpu_frequency_min_mhz: Mapped[int | None] = mapped_column(Integer)
+    cpu_frequency_max_mhz: Mapped[int | None] = mapped_column(Integer)
 
 
 class NodeTelemetryLatest(Base):
