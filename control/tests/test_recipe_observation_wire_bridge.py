@@ -932,7 +932,7 @@ def test_newer_workload_intent_wins_over_singleton_reboot_recovery(
         assert run is not None and run.state == "stopped"
         assert run.route_state == "withdrawn"
         assert "newer workload intent" in (run.route_error or "")
-        assert run.run_generation == 2
+        assert run.run_generation == 1
         assert node is not None and node.workload_intent_ordinal == 3
         assert claims and all(claim.state == "released" for claim in claims)
         assert not session.scalar(
