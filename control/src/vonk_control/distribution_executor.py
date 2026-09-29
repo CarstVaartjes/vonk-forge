@@ -54,6 +54,7 @@ from .runtime_image_preparation import (
     RuntimeImageStorage,
     prefixed_image_digest,
 )
+from .strict_json import read_stored_model
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,8 +121,8 @@ def _child_receipt(
         normalized.setdefault("phase", "transfer")
         normalized.setdefault("subphase", "target-copy")
     try:
-        receipt = RunSwitchDistributionChildResult.model_validate(
-            normalized, strict=True
+        receipt = read_stored_model(
+            RunSwitchDistributionChildResult, normalized, strict=True
         )
     except (TypeError, ValueError) as error:
         raise RuntimeError("distribution child receipt is invalid") from error
@@ -133,7 +134,8 @@ def _evidence_projection(
 ) -> ArtifactVerificationEvidence:
     """Keep the high-level evidence fields from an agent handoff receipt."""
 
-    return ArtifactVerificationEvidence.model_validate(
+    return read_stored_model(
+        ArtifactVerificationEvidence,
         {
             "node_id": node_id,
             **{
@@ -147,7 +149,7 @@ def _evidence_projection(
                 )
                 if key in value
             },
-        }
+        },
     )
 
 
@@ -427,7 +429,7 @@ class DurableDistributionPhaseExecutor:
                 )
                 if raw:
                     measured = project_progress(
-                        OperationProgress.model_validate(raw), self._clock()
+                        read_stored_model(OperationProgress, raw), self._clock()
                     )
                     values = {
                         key: value
@@ -448,7 +450,7 @@ class DurableDistributionPhaseExecutor:
                         total_bytes=members[-1]["total_bytes"],
                     )
                     measured_members.append(
-                        OperationMemberProgress.model_validate(values)
+                        read_stored_model(OperationMemberProgress, values)
                     )
                 else:
                     measured_members.append(
@@ -1599,7 +1601,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         from .model_cache_contract import ModelCacheOperationProgress
         from .model_cache_progress import project_cache_progress
 
-        cache = ModelCacheOperationProgress.model_validate(view.progress)
+        cache = read_stored_model(ModelCacheOperationProgress, view.progress)
         progress = project_cache_progress(view.progress)
         downloaded, expected = cache.downloaded_bytes, cache.expected_bytes
         result: dict[str, object] = {
@@ -1625,8 +1627,8 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             else:
                 dump = getattr(view.result, "model_dump", None)
                 evidence = dump(mode="json") if callable(dump) else {}
-            parsed_evidence = ModelCacheDownloadResult.model_validate(
-                evidence, strict=True
+            parsed_evidence = read_stored_model(
+                ModelCacheDownloadResult, evidence, strict=True
             )
             if parsed_evidence.artifact_set_sha256 != view.artifact_set_sha256:
                 raise RuntimeError("model-cache completion identity is not exact")

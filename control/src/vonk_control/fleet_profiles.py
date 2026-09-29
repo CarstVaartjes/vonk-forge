@@ -154,7 +154,12 @@ from .run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationService,
 )
-from .strict_json import read_stored_document, stored_document_detail
+from .strict_json import (
+    read_stored_document,
+    read_stored_model,
+    stored_document_detail,
+    warn_unreadable_once,
+)
 from .user_authority import serialize_user_authority
 
 if TYPE_CHECKING:
@@ -1574,8 +1579,11 @@ class RunSwitchFleetProfileAdapter:
             progress = _persisted_profile_progress(application)
             progress_data = progress.model_dump(mode="json")
             progress_data["cancellation"]["state"] = "cancelled"
-            application.progress = FleetProfileApplicationProgress.model_validate_json(
-                canonical_message(progress_data), strict=True
+            application.progress = read_stored_model(
+                FleetProfileApplicationProgress,
+                canonical_message(progress_data),
+                strict=True,
+                from_json=True,
             ).model_dump(mode="json")
         session.flush()
         return self._view_from_state(application, state)
@@ -1636,8 +1644,11 @@ class RunSwitchFleetProfileAdapter:
                 )
             raw_scope = item.get("profile_stop_scope")
             profile_stop_scope = (
-                RunSwitchProfileStopScope.model_validate_json(
-                    canonical_message(raw_scope), strict=True
+                read_stored_model(
+                    RunSwitchProfileStopScope,
+                    canonical_message(raw_scope),
+                    strict=True,
+                    from_json=True,
                 )
                 if isinstance(raw_scope, Mapping)
                 else None
@@ -1808,8 +1819,11 @@ class RunSwitchFleetProfileAdapter:
                 )
             raw_plan = job.payload.get("plan")
             try:
-                plan = RunSwitchPlan.model_validate_json(
-                    canonical_message(raw_plan), strict=True
+                plan = read_stored_model(
+                    RunSwitchPlan,
+                    canonical_message(raw_plan),
+                    strict=True,
+                    from_json=True,
                 )
             except (TypeError, ValueError) as error:
                 raise FleetProfileConflict(
@@ -1834,8 +1848,11 @@ class RunSwitchFleetProfileAdapter:
             elif kind == "stop":
                 raw_scope = item.get("profile_stop_scope")
                 expected_scope = (
-                    RunSwitchProfileStopScope.model_validate_json(
-                        canonical_message(raw_scope), strict=True
+                    read_stored_model(
+                        RunSwitchProfileStopScope,
+                        canonical_message(raw_scope),
+                        strict=True,
+                        from_json=True,
                     )
                     if isinstance(raw_scope, Mapping)
                     else None
@@ -1850,8 +1867,11 @@ class RunSwitchFleetProfileAdapter:
                     )
                 )
             else:
-                receipt = RunSwitchOperationResult.model_validate_json(
-                    canonical_message(job.result), strict=True
+                receipt = read_stored_model(
+                    RunSwitchOperationResult,
+                    canonical_message(job.result),
+                    strict=True,
+                    from_json=True,
                 )
                 if receipt.profile_application_id != application_id:
                     raise FleetProfileConflict(
@@ -1957,8 +1977,11 @@ class RunSwitchFleetProfileAdapter:
         # declares tuples, which makes Pydantic's smart union pick a different
         # phase-result variant and loses the receipt entirely.
         try:
-            progress = FleetProfileApplicationProgress.model_validate_json(
-                canonical_message(application.progress), strict=True
+            progress = read_stored_model(
+                FleetProfileApplicationProgress,
+                canonical_message(application.progress),
+                strict=True,
+                from_json=True,
             )
         except ValidationError as error:
             raise FleetProfileConflict(
@@ -1989,11 +2012,17 @@ class RunSwitchFleetProfileAdapter:
         application: FleetProfileApplication,
         state: Mapping[str, object],
     ) -> None:
-        typed = FleetProfileSwitchAdapterState.model_validate_json(
-            canonical_message(state), strict=True
+        typed = read_stored_model(
+            FleetProfileSwitchAdapterState,
+            canonical_message(state),
+            strict=True,
+            from_json=True,
         )
-        progress = FleetProfileApplicationProgress.model_validate_json(
-            canonical_message(application.progress), strict=True
+        progress = read_stored_model(
+            FleetProfileApplicationProgress,
+            canonical_message(application.progress),
+            strict=True,
+            from_json=True,
         )
         application.progress = {
             **progress.model_dump(mode="json"),
@@ -2023,7 +2052,9 @@ class RunSwitchFleetProfileAdapter:
                 "profile switch child has no assignment snapshot"
             )
         try:
-            values = tuple(FleetProfileAssignment.model_validate(item) for item in raw)
+            values = tuple(
+                read_stored_model(FleetProfileAssignment, item) for item in raw
+            )
         except ValueError as error:
             raise FleetProfileConflict(
                 "profile switch child assignment snapshot is invalid"
@@ -2041,8 +2072,11 @@ class RunSwitchFleetProfileAdapter:
         try:
             return FleetProfileSwitchChildResult(
                 run_switch_operation_id=child.operation_id,
-                run_switch=RunSwitchOperationResult.model_validate_json(
-                    canonical_message(child.result), strict=True
+                run_switch=read_stored_model(
+                    RunSwitchOperationResult,
+                    canonical_message(child.result),
+                    strict=True,
+                    from_json=True,
                 ),
             )
         except (TypeError, ValueError) as error:
@@ -2098,7 +2132,9 @@ class RunSwitchFleetProfileAdapter:
             # Python mode refuses the ISO string this same model serializes for
             # ``start_deadline``, which failed a whole live application after
             # its distribution and install had already succeeded.
-            FleetProfileChildProgress.model_validate_json(json.dumps(raw_progress))
+            read_stored_model(
+                FleetProfileChildProgress, json.dumps(raw_progress), from_json=True
+            )
             if isinstance(raw_progress, Mapping)
             else FleetProfileChildProgress(
                 phase="final-verify" if child_state == "succeeded" else "prepare",
@@ -2134,13 +2170,19 @@ def _state_receipt(state: Mapping[str, object]) -> FleetProfileChildResult | Non
             continue
         receipt = raw.get("result")
         if isinstance(receipt, Mapping):
-            return FleetProfileSwitchChildResult.model_validate_json(
-                canonical_message(receipt), strict=True
+            return read_stored_model(
+                FleetProfileSwitchChildResult,
+                canonical_message(receipt),
+                strict=True,
+                from_json=True,
             )
     summary = state.get("result")
     return (
-        FleetProfileSwitchAdapterResult.model_validate_json(
-            canonical_message(summary), strict=True
+        read_stored_model(
+            FleetProfileSwitchAdapterResult,
+            canonical_message(summary),
+            strict=True,
+            from_json=True,
         )
         if isinstance(summary, Mapping)
         else None
@@ -3060,13 +3102,15 @@ class FleetProfileService:
 
     @staticmethod
     def _definition(row: FleetProfile) -> FleetProfileDefinition:
-        return FleetProfileDefinition.model_validate_json(
+        return read_stored_model(
+            FleetProfileDefinition,
             canonical_message(
                 {
                     name: getattr(row, name)
                     for name in FleetProfileDefinition.model_fields
                 }
-            )
+            ),
+            from_json=True,
         )
 
     def definition_number(self, number: int) -> FleetProfileDefinitionView:
@@ -3911,17 +3955,8 @@ class FleetProfileService:
                     # narrower cleanup scope from a damaged document.
                     scope = _persisted_profile_scope(pending)
                     if scope is None:
-                        reasons.append(
-                            FleetProfileReason(
-                                code="profile.pending_record_unreadable",
-                                detail=(
-                                    "A queued profile change cannot be read and "
-                                    "must be reconciled before this profile is "
-                                    "applied."
-                                ),
-                                severity="error",
-                            )
-                        )
+                        # An unreadable record never blocks new work.
+                        warn_unreadable_once("profile application", pending.id)
                         continue
                     members = set(scope)
                 else:
@@ -4370,8 +4405,11 @@ class FleetProfileService:
             progress_data["admission_pending"] = True
             progress_data["admission_attempt"] = attempt
             progress_data["admission_retry_at"] = next_retry.isoformat()
-            row.progress = FleetProfileApplicationProgress.model_validate_json(
-                canonical_message(progress_data), strict=True
+            row.progress = read_stored_model(
+                FleetProfileApplicationProgress,
+                canonical_message(progress_data),
+                strict=True,
+                from_json=True,
             ).model_dump(mode="json")
             # Admission retries itself at ``admission_retry_at``; no operator
             # action is required, so the row stays queued with its next due time.
@@ -4551,8 +4589,11 @@ class FleetProfileService:
                 progress_data = progress.model_dump(mode="json")
                 if progress.workload_intent_ordinal is None:
                     progress_data["workload_intent_ordinal"] = ordinal
-                row.progress = FleetProfileApplicationProgress.model_validate_json(
-                    canonical_message(progress_data), strict=True
+                row.progress = read_stored_model(
+                    FleetProfileApplicationProgress,
+                    canonical_message(progress_data),
+                    strict=True,
+                    from_json=True,
                 ).model_dump(mode="json")
                 row.updated_at = now
         except AdmissionLockBusy as error:
@@ -5570,11 +5611,12 @@ class FleetProfileService:
                             progress.attempt
                         )
                         progress_data["retry_due_at"] = due.isoformat()
-                        row.progress = (
-                            FleetProfileApplicationProgress.model_validate_json(
-                                canonical_message(progress_data), strict=True
-                            ).model_dump(mode="json")
-                        )
+                        row.progress = read_stored_model(
+                            FleetProfileApplicationProgress,
+                            canonical_message(progress_data),
+                            strict=True,
+                            from_json=True,
+                        ).model_dump(mode="json")
                         row.status_reason = (
                             "Retrying after current Fleet conditions change; "
                             f"next attempt at {due.isoformat()}"
@@ -5750,6 +5792,7 @@ class FleetProfileService:
             plan = _persisted_profile_plan(row)
             result = _persisted_profile_result(row)
         except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+            warn_unreadable_once("profile application", row.id)
             return cls._unreadable_operation_item(row)
         cancellation = _application_cancellation_view(row, plan, typed_progress)
         state = _profile_activity_state(row.state, typed_progress.cancellation)
@@ -5825,14 +5868,8 @@ class FleetProfileService:
                 "id": row.id,
                 "request_id": row.request_key,
             },
-            "failure": OperationFailureEvidence(
-                error_code="fleet_profile_application_unreadable",
-                summary="Profile application record is unreadable",
-                detail="Persisted Fleet profile plan, progress, or result is invalid",
-                retryable=False,
-                uncertain=False,
-            ).model_dump(mode="json"),
             "result": None,
+            "status_reason": "Stored profile application record is unreadable.",
         }
 
     def application(self, application_id: str) -> FleetProfileApplicationView:
@@ -6030,8 +6067,11 @@ class FleetProfileService:
                 )
                 progress_data = progress.model_dump(mode="json")
                 progress_data["cancellation"] = cancellation.model_dump(mode="json")
-                row.progress = FleetProfileApplicationProgress.model_validate_json(
-                    canonical_message(progress_data), strict=True
+                row.progress = read_stored_model(
+                    FleetProfileApplicationProgress,
+                    canonical_message(progress_data),
+                    strict=True,
+                    from_json=True,
                 ).model_dump(mode="json")
                 row.state = "running"
                 row.status_reason = (
@@ -6298,11 +6338,12 @@ class FleetProfileService:
                         progress_data["attempt"] = progress.attempt + 1
                         due = now + _cache_recovery_delay(progress.attempt)
                         progress_data["retry_due_at"] = due.isoformat()
-                        row.progress = (
-                            FleetProfileApplicationProgress.model_validate_json(
-                                canonical_message(progress_data), strict=True
-                            ).model_dump(mode="json")
-                        )
+                        row.progress = read_stored_model(
+                            FleetProfileApplicationProgress,
+                            canonical_message(progress_data),
+                            strict=True,
+                            from_json=True,
+                        ).model_dump(mode="json")
                         row.status_reason = (
                             f"{error}; next attempt at {due.isoformat()}"
                         )[:512]
@@ -6406,8 +6447,11 @@ class FleetProfileService:
                         mode="json"
                     )
                 if progress_data != progress.model_dump(mode="json"):
-                    progress = FleetProfileApplicationProgress.model_validate_json(
-                        canonical_message(progress_data), strict=True
+                    progress = read_stored_model(
+                        FleetProfileApplicationProgress,
+                        canonical_message(progress_data),
+                        strict=True,
+                        from_json=True,
                     )
                     row.progress = progress.model_dump(mode="json")
                 if child.state in _CHILD_PENDING_STATES:
@@ -6454,8 +6498,11 @@ class FleetProfileService:
                 )
                 results[str(row.current_step)] = child_result.model_dump(mode="json")
                 progress_data["step_results"] = results
-                progress = FleetProfileApplicationProgress.model_validate_json(
-                    canonical_message(progress_data), strict=True
+                progress = read_stored_model(
+                    FleetProfileApplicationProgress,
+                    canonical_message(progress_data),
+                    strict=True,
+                    from_json=True,
                 )
                 row.progress = progress.model_dump(mode="json")
                 row.current_operation_id = None
@@ -6463,7 +6510,8 @@ class FleetProfileService:
             if row.current_step >= len(steps):
                 self._set_application_state(session, row, "succeeded")
                 row.status_reason = None
-                progress = FleetProfileApplicationProgress.model_validate_json(
+                progress = read_stored_model(
+                    FleetProfileApplicationProgress,
                     canonical_message(
                         {
                             **progress.model_dump(mode="json"),
@@ -6472,6 +6520,7 @@ class FleetProfileService:
                         }
                     ),
                     strict=True,
+                    from_json=True,
                 )
                 row.progress = progress.model_dump(mode="json")
                 row.result = {"changed": bool(steps), "completed_steps": len(steps)}
@@ -6484,7 +6533,8 @@ class FleetProfileService:
                 row.updated_at = now
                 return True
             self._set_application_state(session, row, "running")
-            progress = FleetProfileApplicationProgress.model_validate_json(
+            progress = read_stored_model(
+                FleetProfileApplicationProgress,
                 canonical_message(
                     {
                         **progress.model_dump(mode="json"),
@@ -6494,6 +6544,7 @@ class FleetProfileService:
                     }
                 ),
                 strict=True,
+                from_json=True,
             )
             row.progress = progress.model_dump(mode="json")
             row.updated_at = now
@@ -6564,8 +6615,11 @@ class FleetProfileService:
                         progress_data["child_progress"] = child.progress.model_dump(
                             mode="json"
                         )
-                current.progress = FleetProfileApplicationProgress.model_validate_json(
-                    canonical_message(progress_data), strict=True
+                current.progress = read_stored_model(
+                    FleetProfileApplicationProgress,
+                    canonical_message(progress_data),
+                    strict=True,
+                    from_json=True,
                 ).model_dump(mode="json")
             except FleetProfileConflict as error:
                 self._set_application_state(session, current, "failed")
@@ -6693,8 +6747,11 @@ class FleetProfileService:
             progress_data = progress.model_dump(mode="json")
             progress_data["admission_pending"] = False
             progress_data["admission_retry_at"] = None
-            row.progress = FleetProfileApplicationProgress.model_validate_json(
-                canonical_message(progress_data), strict=True
+            row.progress = read_stored_model(
+                FleetProfileApplicationProgress,
+                canonical_message(progress_data),
+                strict=True,
+                from_json=True,
             ).model_dump(mode="json")
             row.state = state
             row.status_reason = reason[:512]
@@ -6819,8 +6876,11 @@ class FleetProfileService:
         cancellation_data = dict(progress_data["cancellation"])
         cancellation_data["observation_due_at"] = due.isoformat()
         progress_data["cancellation"] = cancellation_data
-        row.progress = FleetProfileApplicationProgress.model_validate_json(
-            canonical_message(progress_data), strict=True
+        row.progress = read_stored_model(
+            FleetProfileApplicationProgress,
+            canonical_message(progress_data),
+            strict=True,
+            from_json=True,
         ).model_dump(mode="json")
 
     def _advance_cancellation_in_session(
@@ -6852,8 +6912,11 @@ class FleetProfileService:
             progress_data = progress.model_dump(mode="json")
             if child.progress is not None:
                 progress_data["child_progress"] = child.progress.model_dump(mode="json")
-            row.progress = FleetProfileApplicationProgress.model_validate_json(
-                canonical_message(progress_data), strict=True
+            row.progress = read_stored_model(
+                FleetProfileApplicationProgress,
+                canonical_message(progress_data),
+                strict=True,
+                from_json=True,
             ).model_dump(mode="json")
             progress = _persisted_profile_progress(row)
             if child.state == "cancelled" or (
@@ -6938,8 +7001,11 @@ class FleetProfileService:
                     }
                 )
                 progress_data["cancellation"] = cancellation_data
-                row.progress = FleetProfileApplicationProgress.model_validate_json(
-                    canonical_message(progress_data), strict=True
+                row.progress = read_stored_model(
+                    FleetProfileApplicationProgress,
+                    canonical_message(progress_data),
+                    strict=True,
+                    from_json=True,
                 ).model_dump(mode="json")
                 owner = (
                     "waiting for issued agent cancellation receipts"
@@ -6978,8 +7044,11 @@ class FleetProfileService:
             }
         )
         progress_data["cancellation"] = cancellation_data
-        row.progress = FleetProfileApplicationProgress.model_validate_json(
-            canonical_message(progress_data), strict=True
+        row.progress = read_stored_model(
+            FleetProfileApplicationProgress,
+            canonical_message(progress_data),
+            strict=True,
+            from_json=True,
         ).model_dump(mode="json")
         row.current_operation_id = None
         self._set_application_state(session, row, "cancelled")
@@ -7128,7 +7197,9 @@ class FleetProfileService:
                 raise FleetProfileConflict(
                     "Fleet profile switch adapter is unavailable"
                 )
-            execution_scope = tuple(FleetProfilePlanStep.model_validate(step).node_ids)
+            execution_scope = tuple(
+                read_stored_model(FleetProfilePlanStep, step).node_ids
+            )
             if not execution_scope:
                 raise FleetProfileConflict("Profile switch effect scope is empty")
             assignments = tuple(

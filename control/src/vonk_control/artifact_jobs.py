@@ -60,7 +60,7 @@ from .recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
-from .strict_json import StrictJSONModel
+from .strict_json import StrictJSONModel, read_stored_model
 
 MAX_INPUT_FILES = 32
 MAX_INPUT_FILE_BYTES = 512 * 1024**2
@@ -133,8 +133,10 @@ class ArtifactJobResultEvidence(ArtifactJobContractModel):
 
 def _input_manifest(job: ArtifactJob) -> RecipeJobInputManifest:
     try:
-        manifest = RecipeJobInputManifest.model_validate_json(
-            canonical_message(job.input_manifest)
+        manifest = read_stored_model(
+            RecipeJobInputManifest,
+            canonical_message(job.input_manifest),
+            from_json=True,
         )
     except (TypeError, ValueError) as error:
         raise ArtifactJobError("stored artifact input manifest is invalid") from error
@@ -151,8 +153,8 @@ def _result_evidence(value: object) -> dict[str, object] | None:
     if value is None:
         return None
     try:
-        evidence = ArtifactJobResultEvidence.model_validate_json(
-            canonical_message(value)
+        evidence = read_stored_model(
+            ArtifactJobResultEvidence, canonical_message(value), from_json=True
         )
     except (TypeError, ValueError) as error:
         raise ArtifactJobError("stored artifact result evidence is invalid") from error

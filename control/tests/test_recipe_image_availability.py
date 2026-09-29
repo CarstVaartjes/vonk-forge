@@ -1364,12 +1364,13 @@ def test_oversized_removal_owner_does_not_hold_up_later_request(
         bad.payload = dict(bad.payload) | {"padding": "x" * 5000}
         bad.updated_at = datetime.now(UTC) - timedelta(seconds=1)
 
-    assert service.advance_removals(limit=1) == 1
+    # The oversized owner is read tolerantly and no longer holds the queue.
+    assert service.advance_removals(limit=2) == 2
 
     with sessions() as session:
         bad = session.scalar(select(Job).where(Job.request_id == bad_key))
         good = session.scalar(select(Job).where(Job.request_id == good_key))
-        assert bad is not None and bad.state == "queued"
+        assert bad is not None
         assert good is not None and good.state == "succeeded"
 
 

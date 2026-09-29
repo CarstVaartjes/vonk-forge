@@ -27,7 +27,7 @@ from .recipe_image_availability import (
 )
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import RecipeUpdateRequest, RecipeUpdateResponse
-from .strict_json import StrictJSONModel
+from .strict_json import StrictJSONModel, read_stored_model
 
 # One named type per closed set, shared by the contract field and every
 # helper that produces the value, so the vocabulary cannot drift apart.
@@ -220,8 +220,9 @@ def _progress(value: object) -> OperationProgress:
         raw["total_bytes"] = raw["expected_bytes"]
     raw.setdefault("phase", "download")
     raw.setdefault("total_bytes_known", raw.get("total_bytes") is not None)
-    return OperationProgress.model_validate(
-        {key: raw[key] for key in OperationProgress.model_fields if key in raw}
+    return read_stored_model(
+        OperationProgress,
+        {key: raw[key] for key in OperationProgress.model_fields if key in raw},
     )
 
 
@@ -291,7 +292,7 @@ def _view_document(
             "children": children,
             "result": result_model,
             "failure": (
-                AvailabilityOperationFailure.model_validate(failure)
+                read_stored_model(AvailabilityOperationFailure, failure)
                 if isinstance(failure, dict)
                 else None
             ),
@@ -405,7 +406,7 @@ def install_recipe_operator_routes(
         failure = (
             None
             if failure_value is None
-            else AvailabilityOperationFailure.model_validate(failure_value)
+            else read_stored_model(AvailabilityOperationFailure, failure_value)
         )
         return RecipeOperatorResponse.model_validate(
             {

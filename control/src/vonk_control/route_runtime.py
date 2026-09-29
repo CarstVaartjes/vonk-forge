@@ -25,6 +25,8 @@ from vonk_agent_protocol.route_activation import (
     SupervisorAcknowledgement,
 )
 
+from .strict_json import read_stored_model
+
 # A publication claim is a short critical section, so a bounded nonblocking
 # claim is enough: the reconciler retries the whole publication, which is safer
 # than parking a worker thread on a contended file lock.
@@ -445,7 +447,7 @@ def _read_active_route_bundle(
     except (OSError, json.JSONDecodeError) as error:
         raise RouteRuntimeError("route activation marker is unreadable") from error
     try:
-        marker = ActivationMarker.model_validate(raw)
+        marker = read_stored_model(ActivationMarker, raw)
     except ValidationError as error:
         raise RouteRuntimeError("route activation marker fields are invalid") from error
     AtomicRouteBundlePublisher._validate_marker(marker)

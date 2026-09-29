@@ -371,9 +371,11 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
         "total_bytes_known": False,
         "members": [],
     }
+    # Fields a newer Controller retired are ignored, never a read failure.
     for retired in ("bytes_done", "bytes_completed", "bytes_total", "rate"):
-        with pytest.raises(ValueError):
-            operation_api._progress_projection({"phase": "download", retired: 1})
+        assert operation_api._progress_projection(
+            {"phase": "download", retired: 1}
+        ) == operation_api._progress_projection({"phase": "download"})
 
 
 def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:
@@ -723,11 +725,11 @@ def test_activity_page_survives_one_unreadable_profile_application(tmp_path) -> 
     items = {item["id"]: item for item in page.json()["operations"]}
     assert items[valid_id].get("failure") is None
     assert items[valid_id]["node_ids"] == [NODE_ID]
-    assert items[damaged_id]["failure"] is not None
-    assert items[damaged_id]["recovery"]["actions"] == ["inspect"]
+    assert items[damaged_id].get("failure") is None
+    assert items[damaged_id]["status_reason"] is not None
     assert detail.status_code == 200
     assert detail.json()["id"] == damaged_id
-    assert detail.json()["failure"] is not None
+    assert detail.json().get("failure") is None
 
 
 def test_fleet_exposes_typed_visual_state() -> None:
@@ -1748,9 +1750,7 @@ def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None
     assert listed.status_code == 200
     assert listed.json()["operations"][0]["id"] == value["id"]
     assert listed.json()["operations"][0]["kind"] == "unreadable"
-    assert listed.json()["operations"][0]["failure"]["error_code"] == (
-        "operation_history_unreadable"
-    )
+    assert listed.json()["operations"][0].get("failure") is None
 
 
 def test_agent_upgrade_diagnostics_distinguish_absent_from_corrupt() -> None:

@@ -22,6 +22,7 @@ from .models import (
     AgentOperationAttempt,
 )
 from .operation_progress import project_progress
+from .strict_json import read_stored_model
 
 if TYPE_CHECKING:
     from .fleet_projection import FleetSnapshot
@@ -688,7 +689,7 @@ class OperationalMetricsCollector:
         for kind, progress in progress_rows:
             try:
                 projected = project_progress(
-                    OperationProgress.model_validate(progress), now
+                    read_stored_model(OperationProgress, progress), now
                 )
             except (TypeError, ValueError):
                 continue

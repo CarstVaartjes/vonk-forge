@@ -212,7 +212,11 @@ from .runtime_image_preparation import (
 from .runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,
 )
-from .strict_json import read_stored_document
+from .strict_json import (
+    read_stored_document,
+    read_stored_model,
+    warn_unreadable_once,
+)
 
 # Persisted progress and catalog documents arrive as decoded JSON, so the
 # contract's closed value sets are read back through the declared alias instead
@@ -972,8 +976,10 @@ class RecipeLifecyclePhaseExecutor:
             phase_index=phase.index,
             request_key=request_key,
             actor=actor,
-            previous=LifecyclePreflightCheckpoint.model_validate_json(
-                canonical_message(previous)
+            previous=read_stored_model(
+                LifecyclePreflightCheckpoint,
+                canonical_message(previous),
+                from_json=True,
             )
             if previous
             else None,
@@ -3313,7 +3319,8 @@ class RunSwitchOperationService:
             )
             retry_job_id = str(uuid.uuid4())
             if prior_image_intent is not None:
-                rebound_intent = RunSwitchRuntimeImageReferenceIntent.model_validate(
+                rebound_intent = read_stored_model(
+                    RunSwitchRuntimeImageReferenceIntent,
                     {
                         **prior_image_intent.model_dump(mode="json"),
                         "operation_id": retry_job_id,
@@ -5169,7 +5176,8 @@ class RunSwitchOperationService:
             excluded_profile_application_ids=excluded_profile_application_ids,
         )
         blockers.extend(resources.blockers)
-        return RunSwitchAssessment.model_validate(
+        return read_stored_model(
+            RunSwitchAssessment,
             {
                 **{
                     name: getattr(reviewed, name)
@@ -5185,7 +5193,7 @@ class RunSwitchOperationService:
                 else None,
                 "stop_before_prepare": resources.stop_before_prepare,
                 "stop_before_transfer": resources.stop_before_transfer,
-            }
+            },
         )
 
     def _resource_fits(
@@ -6160,7 +6168,7 @@ class RunSwitchOperationService:
 
     @staticmethod
     def _finalize_plan(data: Mapping[str, object]) -> RunSwitchPlan:
-        plan = RunSwitchPlan.model_validate(dict(data))
+        plan = read_stored_model(RunSwitchPlan, dict(data))
         identity = _plan_identity(plan.model_dump(mode="json"))
         return plan.model_copy(update={"plan_digest": _digest(identity)})
 
@@ -6401,8 +6409,10 @@ class RunSwitchOperationService:
                 refreshed = self.preview_stop(
                     str(intent["run_id"]),
                     actor=actor,
-                    profile_stop_scope=RunSwitchProfileStopScope.model_validate(
-                        intent["profile_stop_scope"], strict=True
+                    profile_stop_scope=read_stored_model(
+                        RunSwitchProfileStopScope,
+                        intent["profile_stop_scope"],
+                        strict=True,
                     ),
                 )
             else:
@@ -8024,6 +8034,7 @@ class RunSwitchOperationProvider:
             ValueError,
             ValidationError,
         ):
+            warn_unreadable_once("run-switch job", job.id)
             return {
                 "id": job.id,
                 "job_id": job.id,
@@ -8040,11 +8051,7 @@ class RunSwitchOperationProvider:
                 "created_at": _aware(job.created_at).isoformat(),
                 "updated_at": _aware(job.updated_at).isoformat(),
                 "supported_actions": [],
-                "failure": {
-                    "error_code": "operation_history_unreadable",
-                    "summary": "Stored Run/Switch history is malformed",
-                    "retryable": False,
-                },
+                "status_reason": "Stored Run/Switch history is unreadable.",
             }
         endpoint_node = node_ids[0]
         raw_plan = job.payload.get("plan") if isinstance(job.payload, Mapping) else None
@@ -8850,9 +8857,9 @@ def _merge_progress_evidence(
 
     canonical = _progress_mapping(payload.get("operation"))
     if canonical is not None:
-        progress["operation"] = OperationProgress.model_validate(canonical).model_dump(
-            mode="json", exclude_none=True
-        )
+        progress["operation"] = read_stored_model(
+            OperationProgress, canonical
+        ).model_dump(mode="json", exclude_none=True)
         progress["operation_phase_index"] = phase.index
 
     current_completed = _progress_int(progress.get("completed_bytes")) or 0
@@ -8899,7 +8906,7 @@ def _merge_progress_evidence(
             values["total_bytes_known"] = False
         # Child receipts may report phase-local bytes. Keep the nested measurement
         # phase-local too: an ETA for future build/start work would be invented.
-        current = OperationProgress.model_validate(values).model_dump(
+        current = read_stored_model(OperationProgress, values).model_dump(
             mode="json", exclude_none=True
         )
         if prior is not None and prior.get("phase") == phase.kind:
@@ -9151,7 +9158,7 @@ def _progress_view(
         # report the operation's durable failure.
         raise RunSwitchOperationConflict("run-switch operation has no target members")
     measurement = (
-        OperationProgress.model_validate(raw["operation"])
+        read_stored_model(OperationProgress, raw["operation"])
         if raw.get("operation")
         else None
     )
@@ -9210,8 +9217,8 @@ def _validate_artifact_execution(
         )
     if phase.kind == "prepare" and phase.subphase == "runtime-image":
         try:
-            receipt = RuntimeImageReceiptDocument.model_validate(
-                result.get("runtime_image"), strict=True
+            receipt = read_stored_model(
+                RuntimeImageReceiptDocument, result.get("runtime_image"), strict=True
             )
         except (TypeError, ValidationError) as error:
             raise RunSwitchOperationConflict(
@@ -9289,7 +9296,9 @@ def _validate_artifact_execution(
             normalized = dict(result)
             normalized.setdefault("phase", "verify")
             normalized.setdefault("subphase", "target-copy")
-            verification = RunSwitchVerifyResult.model_validate(normalized, strict=True)
+            verification = read_stored_model(
+                RunSwitchVerifyResult, normalized, strict=True
+            )
         except (TypeError, ValidationError) as error:
             if (
                 plan.recipe_build_id is not None
@@ -9534,8 +9543,8 @@ def _persist_run_switch_runtime_image_reference(
         )
 
     try:
-        parsed_receipt = RuntimeImageReceiptDocument.model_validate(
-            receipt, strict=True
+        parsed_receipt = read_stored_model(
+            RuntimeImageReceiptDocument, receipt, strict=True
         )
     except (TypeError, ValueError) as error:
         raise identity_invalid("verified runtime image receipt is invalid") from error
@@ -9800,8 +9809,8 @@ def _persist_run_switch_runtime_image_reference(
         prior_intent = current.get("runtime_image_reference_intent")
         if prior_intent is not None:
             try:
-                parsed_prior = RunSwitchRuntimeImageReferenceIntent.model_validate(
-                    prior_intent, strict=True
+                parsed_prior = read_stored_model(
+                    RunSwitchRuntimeImageReferenceIntent, prior_intent, strict=True
                 )
             except (TypeError, ValueError) as error:
                 raise identity_invalid(

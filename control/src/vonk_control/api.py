@@ -118,7 +118,7 @@ from .operation_api import (
     job_response,
     operation_detail_response,
 )
-from .operation_contract import OperationFailureEvidence, OperationRecoveryAction
+from .operation_contract import OperationRecoveryAction
 from .operator_projection_api import (
     FleetOperatorServices,
     build_fleet_operator_services,
@@ -145,7 +145,11 @@ from .settings import (
     Settings,
 )
 from .source_bundles import DatabaseSourceBundleStore
-from .strict_json import ControllerAPIRoute
+from .strict_json import (
+    ControllerAPIRoute,
+    read_stored_model,
+    warn_unreadable_once,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -954,6 +958,7 @@ def create_app(
                 or len(created_at) > 64
             ):
                 raise
+            warn_unreadable_once("operation", operation_id)
             raw_nodes = item.get("node_ids")
             node_ids = (
                 [
@@ -968,7 +973,7 @@ def create_app(
             owner = None
             if isinstance(raw_owner, Mapping):
                 try:
-                    owner = OperationOwnerReference.model_validate(raw_owner)
+                    owner = read_stored_model(OperationOwnerReference, raw_owner)
                 except ValueError:
                     owner = None
             return OperationDetailResponse(
@@ -978,11 +983,6 @@ def create_app(
                 state="unavailable",
                 attempt=0,
                 created_at=created_at,
-                failure=OperationFailureEvidence(
-                    error_code="operation_history_unreadable",
-                    summary="Historical operation details are unavailable",
-                    retryable=False,
-                ),
                 owner=owner,
                 status_reason="Stored operation history is malformed.",
             )

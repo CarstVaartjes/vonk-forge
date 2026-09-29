@@ -29,7 +29,7 @@ from .models import (
     ModelCacheOperation,
 )
 from .operation_contract import OperationEvidenceDownload
-from .strict_json import StrictJSONModel
+from .strict_json import StrictJSONModel, read_stored_model
 
 MAX_LOG_BYTES = 2048
 MAX_LOG_LINES = 32
@@ -251,7 +251,7 @@ def _required_node_ids(value: object) -> list[str]:
 
 
 def sanitize_diagnostics(value: object) -> FailureDiagnostics:
-    diagnostics = FailureDiagnostics.model_validate(value)
+    diagnostics = read_stored_model(FailureDiagnostics, value)
     document = diagnostics.model_dump(mode="json")
     for field in ("stdout", "stderr"):
         # The agent already retained this tail from the whole stream, so the
@@ -278,7 +278,7 @@ def sanitize_diagnostics(value: object) -> FailureDiagnostics:
     document["collector_errors"] = [
         safe_text(error)[:256] for error in document["collector_errors"]
     ]
-    diagnostics = FailureDiagnostics.model_validate(document)
+    diagnostics = read_stored_model(FailureDiagnostics, document)
     return diagnostics
 
 
