@@ -1533,6 +1533,7 @@ pub fn apply_setup_from_with_authority(
             if config.enrollment_url != enrollment_url || config.ca_sha256 != ca_sha256 {
                 return Err(SetupError::PrivilegedInput);
             }
+            refresh_configuration(paths, &config, owner)?;
             ensure_package_installed(
                 paths,
                 runner,
@@ -1562,6 +1563,7 @@ pub fn apply_setup_from_with_authority(
             if config.enrollment_url != enrollment_url || config.ca_sha256 != ca_sha256 {
                 return Err(SetupError::PrivilegedInput);
             }
+            refresh_configuration(paths, &config, owner)?;
             ensure_package_installed(
                 paths,
                 runner,
@@ -1579,6 +1581,7 @@ pub fn apply_setup_from_with_authority(
             let config = paired_configuration(&paths.config, paths)?;
             let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
             verify_ca(&ca, &config.ca_sha256)?;
+            refresh_configuration(paths, &config, owner)?;
             ensure_package_installed(
                 paths,
                 runner,
@@ -1594,6 +1597,7 @@ pub fn apply_setup_from_with_authority(
             let config = paired_configuration(&paths.config, paths)?;
             let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
             verify_ca(&ca, &config.ca_sha256)?;
+            refresh_configuration(paths, &config, owner)?;
             upgrade_existing(
                 paths,
                 runner,
@@ -1725,6 +1729,33 @@ fn install_configuration(
         owner,
         0o644,
     )
+}
+
+/// Rewrite the validated `agent.toml` in the current canonical form so keys
+/// retired by newer releases disappear, and drop files left by removed features.
+fn refresh_configuration(
+    paths: &InstallPaths,
+    config: &WrittenConfig,
+    owner: u32,
+) -> Result<(), SetupError> {
+    let canonical = GeneratedConfig {
+        enrollment_url: config.enrollment_url.clone(),
+        controller_url: config.controller_url.clone(),
+        ca_path: config.ca_path.clone(),
+        ca_sha256: config.ca_sha256.clone(),
+        node_id: config.node_id.clone(),
+        fabric_address: config.fabric_address,
+        fabric_bandwidth_mbps: config.fabric_bandwidth_mbps,
+    };
+    atomic_root_write(&paths.config, canonical.to_toml().as_bytes(), owner, 0o644)?;
+    if let Some(directory) = paths.config.parent() {
+        match fs::remove_file(directory.join("observation-receipt.pub")) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(SetupError::PrivilegedWrite(error)),
+        }
+    }
+    Ok(())
 }
 
 const HOSTS_BEGIN: &str = "# BEGIN VONK FORGE MANAGED HOSTS";
@@ -3009,8 +3040,9 @@ impl GeneratedConfig {
     }
 }
 
+// Unknown keys are tolerated so keys retired by a newer release do not make an
+// existing install look unsafe; `refresh_configuration` drops them on rerun.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct WrittenConfig {
     enrollment_url: Url,
     controller_url: Url,
@@ -3714,6 +3746,46 @@ mod tests {
             install_state(&paths, StateValidation::Complete),
             Err(SetupError::ExistingInstall)
         ));
+    }
+
+    #[test]
+    fn rerun_accepts_retired_config_keys_and_rewrites_canonical_config() {
+        let temporary = tempdir().unwrap();
+        let configuration = temporary.path().join("etc/vonk-forge-agent");
+        fs::create_dir_all(&configuration).unwrap();
+        let paths = InstallPaths {
+            config: configuration.join("agent.toml"),
+            ca: configuration.join("controller-ca.pem"),
+            firewall_config: configuration.join("docker-firewall.conf"),
+            helper_authority: configuration.join("host-helper-authority.pub"),
+            hosts: temporary.path().join("etc/hosts"),
+            agent: temporary.path().join("vonk-agent"),
+            staging_root: temporary.path().join("var/tmp"),
+            sudo: PathBuf::from("/usr/bin/sudo"),
+            service: SERVICE.to_owned(),
+            required_owner: None,
+        };
+        let legacy = format!(
+            "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"{}\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\nfabric_address = \"192.168.100.10\"\nfabric_bandwidth_mbps = 200000\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
+            paths.ca.display(),
+            "0".repeat(64),
+            DATA_DIR,
+        );
+        fs::write(&paths.config, &legacy).unwrap();
+        let receipt = configuration.join("observation-receipt.pub");
+        fs::write(&receipt, b"stale").unwrap();
+
+        let config = paired_configuration(&paths.config, &paths).unwrap();
+        let owner = rustix::process::geteuid().as_raw();
+        refresh_configuration(&paths, &config, owner).unwrap();
+
+        let rewritten = fs::read_to_string(&paths.config).unwrap();
+        assert!(!rewritten.contains("poll_"));
+        assert_eq!(rewritten, legacy.split("poll_min_seconds").next().unwrap());
+        assert!(paired_configuration(&paths.config, &paths).is_ok());
+        assert!(!receipt.exists());
+        // A second rerun with nothing stale left still succeeds.
+        refresh_configuration(&paths, &config, owner).unwrap();
     }
 
     #[test]
