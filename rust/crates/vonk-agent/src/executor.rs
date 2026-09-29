@@ -253,6 +253,16 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
     }
 }
 
+/// True the first time this process reports on `key`; keeps a permanent
+/// per-run condition from filling the journal every sweep.
+fn first_report_of_run(key: &str) -> bool {
+    static SEEN: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
+        std::sync::Mutex::new(None);
+    let mut seen = SEEN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    seen.get_or_insert_with(Default::default)
+        .insert(key.to_owned())
+}
+
 /// A collection failure is unknown evidence for its run, not for another
 /// successfully inspected run. Nonempty partial reports preserve omitted ranks
 /// on the Controller. Only a successfully collected empty set reports absence.
@@ -305,22 +315,21 @@ impl<R> RecipeExecutor<'_, R> {
         Ok(self.runtime.recipe_run_inspection_results()?.len())
     }
 
-    /// Retire a retained run whose managed metadata cannot be parsed, once
-    /// the Controller confirms it has no record of that run.
+    /// Retire a retained run whose managed metadata cannot be read or
+    /// parsed, once the Controller confirms it has no record of that run.
     ///
-    /// Such metadata (for example a lifecycle written by an older agent)
-    /// can never be inspected or stopped, so skipping it only repeats the
-    /// same diagnostic every sweep.  A run the Controller knows keeps its
-    /// integrity failure visible, and any other local error (storage,
-    /// bounds, binding mismatch) is never retired.
-    async fn retire_unparseable_unowned_run(&self, run_id: &str, error: &OciError) -> bool
+    /// Such metadata (for example a lifecycle written by an older agent, or
+    /// one that no longer binds to its installation) can never be inspected
+    /// or stopped, so skipping it only repeats the same diagnostic every
+    /// sweep and leaves the claim in place forever.  The Controller's answer
+    /// is authoritative: whatever the local failure, an unowned run is
+    /// retired.  A run the Controller knows keeps its failure visible (once
+    /// per process), and an unreachable Controller changes nothing.
+    async fn retire_unparseable_unowned_run(&self, run_id: &str, _error: &OciError) -> bool
     where
         R: ProcessRunner,
     {
-        if !matches!(error, OciError::Json(_)) {
-            return false;
-        }
-        self.retire_unowned_run(run_id, "unparseable managed metadata")
+        self.retire_unowned_run(run_id, "unreadable managed metadata")
             .await
     }
 
@@ -352,9 +361,11 @@ impl<R> RecipeExecutor<'_, R> {
             },
             Ok(RecipeRunDisposition::Known) => false,
             Err(lookup) => {
-                eprintln!(
-                    "vonk-agent: exact recipe run {run_id} disposition is unavailable ({lookup})"
-                );
+                if first_report_of_run(&format!("{run_id}/disposition")) {
+                    eprintln!(
+                        "vonk-agent: exact recipe run {run_id} disposition is unavailable ({lookup}); logged once per process"
+                    );
+                }
                 false
             }
         }
@@ -379,10 +390,12 @@ impl<R> RecipeExecutor<'_, R> {
                         if self.retire_unparseable_unowned_run(&run_id, &error).await {
                             return Some(Err(RecipeObservationError::UnownedRun));
                         }
-                        eprintln!(
-                            "vonk-agent: skipping exact recipe run {run_id}: invalid managed metadata ({})",
-                            error.safe_category()
-                        );
+                        if first_report_of_run(&run_id) {
+                            eprintln!(
+                                "vonk-agent: skipping exact recipe run {run_id}: invalid managed metadata ({}); logged once per process",
+                                error.safe_category()
+                            );
+                        }
                         Some(Err(RecipeObservationError::SkippedRun))
                     }
                 }
@@ -3585,10 +3598,11 @@ mod tests {
         LoopClient, ReadinessOutcome, RecipeExecutor, RecipeObservationError, RejectingExecutor,
         RunOncePolicy, classify_heartbeat_failure, controller_denial_diagnostic,
         distribution_failure_result, distribution_success_evidence, exact_stop_plan_from_claim,
-        normalize_execution_result, output_media_type, parse_compiled_execution_plan,
-        readiness_identity, recipe_build_client_failure_result, recipe_install_success_body,
-        report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
-        run_once_with_heartbeat_interval, runtime_observation_failure, temporary_observation_error,
+        first_report_of_run, normalize_execution_result, output_media_type,
+        parse_compiled_execution_plan, readiness_identity, recipe_build_client_failure_result,
+        recipe_install_success_body, report_complete_recipe_run_observations,
+        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
+        runtime_observation_failure, temporary_observation_error,
         temporary_runtime_observation_failure, wait_for_launch_stability,
         wait_ready_with_runtime_guard_and_cancellation,
     };
@@ -4153,6 +4167,43 @@ mod tests {
         assert!(!metadata.join("lifecycle.json").exists());
         assert!(metadata.join("runtime.json").exists());
         assert!(data.path().join("runs").join(run_id).is_dir());
+    }
+
+    #[tokio::test]
+    async fn unreadable_lifecycle_of_an_unowned_run_is_retired_whatever_the_local_error() {
+        // An oversized lifecycle is an artifact error, not a parse error.
+        use std::os::unix::fs::PermissionsExt;
+        let data = tempdir().unwrap();
+        let runtime = tempdir().unwrap();
+        let run_id = "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c";
+        fs::create_dir_all(data.path().join("runs").join(run_id)).unwrap();
+        let metadata = data.path().join("run-metadata").join(run_id);
+        fs::create_dir_all(&metadata).unwrap();
+        fs::set_permissions(&metadata, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(metadata.join("lifecycle.json"), vec![b' '; 20 * 1024]).unwrap();
+        let runner = NoProcess;
+        let server = ObservationServer::with_disposition(Some(204), Some("unowned"));
+        let executor = RecipeExecutor {
+            client: &server.client,
+            runtime: OciRuntime {
+                runner: &runner,
+                data_root: data.path(),
+            },
+            runtime_root: runtime.path(),
+        };
+        executor
+            .report_exact_recipe_run_observations()
+            .await
+            .unwrap();
+        server.finish();
+        assert!(!metadata.join("lifecycle.json").exists());
+    }
+
+    #[test]
+    fn a_run_is_reported_once_per_process() {
+        let key = "test-once/4f6c2a1e";
+        assert!(first_report_of_run(key));
+        assert!(!first_report_of_run(key));
     }
 
     #[test]

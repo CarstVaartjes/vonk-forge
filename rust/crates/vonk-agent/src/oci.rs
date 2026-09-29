@@ -237,8 +237,9 @@ struct RuntimePolicyLabel {
     value: String,
 }
 
+// Tolerant of fields an older or newer agent wrote: an unknown field must not
+// make a retained run unreadable.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RunLifecycle {
     installation_id: String,
     placement: CompiledRuntimePlacement,
