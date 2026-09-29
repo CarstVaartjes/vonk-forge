@@ -1,9 +1,9 @@
 import {useEffect, useRef} from "react";
 import type {MouseEvent, ReactNode} from "react";
 import {AdminMenu} from "./admin-menu";
-import {FleetIcon, LibraryIcon} from "./icons";
+import {FleetIcon, KeyIcon, LibraryIcon} from "./icons";
 
-export type AppRoute = "fleet" | "library" | "activity";
+export type AppRoute = "fleet" | "library" | "keys" | "activity";
 
 type Operator = {
   onDownloadCliToken(): Promise<{expiresAt: string}>;
@@ -49,6 +49,7 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
       <nav className="primary-navigation" aria-label="Primary">
         <a href="/fleet" className="nav-link nav-link-primary" aria-current={activeRoute === "fleet" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "fleet")}><FleetIcon/><span>Fleet</span></a>
         <a href="/library" className="nav-link nav-link-primary" aria-current={activeRoute === "library" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "library")}><LibraryIcon/><span>Library</span></a>
+        <a href="/keys" className="nav-link nav-link-primary" aria-current={activeRoute === "keys" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "keys")}><KeyIcon/><span>Keys</span></a>
       </nav>
       <div className="header-utility">
         <span className="authority-note">Local Controller</span>

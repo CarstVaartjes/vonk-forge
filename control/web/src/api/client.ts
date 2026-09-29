@@ -12,11 +12,19 @@ import type {
   FleetProfile,
   FleetProfileApplicationView,
   FleetProfileLoadInput,
+  EnrollmentGrantStatus,
+  FleetActionResponse,
+  FleetLogResponse,
+  FleetNodeIdentity,
+  GatewayKeyCreated,
+  GatewayKeyList,
+  GatewayKeyRevoked,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
   OperationsResponse,
   OperationDetail,
+  VisualFleetNode,
   VisualFleetSnapshot,
   ArtifactJob,
   ArtifactJobCapabilities,
@@ -208,6 +216,50 @@ export class ApiClient implements ControlApi {
 
   async enrollFleetNode(input: {name: string; request_key: string}, signal?: AbortSignal) {
     return resultData(await this.generated.POST("/api/fleet/enroll", {body: input, signal}));
+  }
+
+  async fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode> {
+    return resultData(await this.generated.GET("/api/fleet/{selector}", {params: {path: {selector}}, signal}));
+  }
+
+  async renameFleetNode(selector: string, displayName: string): Promise<FleetNodeIdentity> {
+    return resultData(await this.generated.POST("/api/fleet/{selector}/rename", {params: {path: {selector}}, body: {display_name: displayName}}));
+  }
+
+  async removeFleetNode(selector: string): Promise<FleetActionResponse> {
+    return resultData(await this.generated.POST("/api/fleet/{selector}/remove", {params: {path: {selector}}}));
+  }
+
+  async reenrollFleetNode(selector: string, requestKey: string): Promise<FleetActionResponse> {
+    return resultData(await this.generated.POST("/api/fleet/{selector}/re-enroll", {params: {path: {selector}}, body: {request_key: requestKey}}));
+  }
+
+  async fleetLogs(selector: string, signal?: AbortSignal): Promise<FleetLogResponse> {
+    return resultData(await this.generated.GET("/api/fleet/{selector}/loginfo", {params: {path: {selector}, query: {lines: 100}}, signal}));
+  }
+
+  async upgradeFleet(all: boolean, selectors: string[], requestKey: string): Promise<FleetActionResponse> {
+    return resultData(await this.generated.POST("/api/fleet/upgrade", {body: {all, selectors: selectors.length ? selectors : null, request_key: requestKey}}));
+  }
+
+  async enrollmentStatus(grantId: string, signal?: AbortSignal): Promise<EnrollmentGrantStatus> {
+    return resultData(await this.generated.GET("/api/fleet/enrollments/{grant_id}", {params: {path: {grant_id: grantId}}, signal}));
+  }
+
+  async revokeEnrollment(grantId: string): Promise<EnrollmentGrantStatus> {
+    return resultData(await this.generated.POST("/api/fleet/enrollments/{grant_id}/revoke", {params: {path: {grant_id: grantId}}}));
+  }
+
+  async gatewayKeys(signal?: AbortSignal): Promise<GatewayKeyList> {
+    return resultData(await this.generated.GET("/api/key", {signal}));
+  }
+
+  async createGatewayKey(name: string, models: string[], expires?: string): Promise<GatewayKeyCreated> {
+    return resultData(await this.generated.POST("/api/key", {body: {name, models, expires: expires || null}}));
+  }
+
+  async revokeGatewayKey(name: string): Promise<GatewayKeyRevoked> {
+    return resultData(await this.generated.POST("/api/key/{name}/revoke", {params: {path: {name}}}));
   }
 
   async profiles(signal?: AbortSignal): Promise<FleetProfileList> {
