@@ -6,6 +6,7 @@ import time
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 import httpx2
 from sqlalchemy import create_engine
@@ -135,7 +136,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     storage = FilesystemRuntimeImageStorage(tmp_path / "image-cache")
     image_builds: list[str] = []
 
-    def builder(*_args: object, claim: object, **_kwargs: object):
+    def builder(*_args: object, claim: Any, **_kwargs: object):
         # The production builder reuses a verified archive; only a missing
         # archive is built.
         archive = storage.root / image_archive_sha256

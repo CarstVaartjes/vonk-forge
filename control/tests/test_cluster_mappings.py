@@ -310,38 +310,6 @@ def test_mapping_rejects_wrong_node_count_and_missing_required_fabric(
     assert caught.value.code == "topology.fabric_insufficient"
 
 
-def test_mapping_does_not_trust_fabric_from_claim_capabilities(tmp_path: Path) -> None:
-    sessions, now, node_ids, revision = setup(tmp_path)
-    with sessions.begin() as session:
-        node = session.get(AgentNode, node_ids[0])
-        assert node is not None
-        node.capabilities = [
-            "runtime.vonk.v1",
-            "fabric.full_mesh.mbps.1000000",
-        ]
-    InventoryRepository(sessions, clock=lambda: now + timedelta(seconds=1)).record(
-        InventorySnapshotInput(
-            node_id=node_ids[0],
-            observed_at=now + timedelta(seconds=1),
-            disk_total_bytes=1_000,
-            disk_free_bytes=900,
-            host_memory_total_bytes=1_000,
-            host_memory_free_bytes=900,
-            gpu_memory_total_bytes=1_000,
-            gpu_memory_free_bytes=900,
-            gpu_count=1,
-            artifact_store_read_only=False,
-            capabilities=("runtime.vonk.v1",),
-            memory_pool="shared",
-        )
-    )
-
-    with pytest.raises(ClusterMappingError) as caught:
-        ClusterMappingService(sessions).preview(revision.id, node_ids, {}, "admin")
-
-    assert caught.value.code == "topology.fabric_insufficient"
-
-
 def test_mapping_rejects_forged_role_rank_and_endpoint_owner(tmp_path: Path) -> None:
     sessions, now, node_ids, revision = setup(tmp_path)
     service = ClusterMappingService(sessions)

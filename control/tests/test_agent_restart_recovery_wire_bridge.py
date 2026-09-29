@@ -24,7 +24,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult
+from vonk_agent_protocol import AgentResult, ArtifactDistributionResult
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
@@ -482,5 +482,6 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         == large_digest
     )
     assert hashlib.sha256(small.read_bytes()).hexdigest() == small_digest
+    assert isinstance(completed.result, ArtifactDistributionResult)
     assert completed.result.downloaded_bytes > 0
     assert not partial.exists()

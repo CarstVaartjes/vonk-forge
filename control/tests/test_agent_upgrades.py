@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 
 import httpx2
@@ -1488,7 +1489,7 @@ def _claim_upgrade(
     operations: AgentJobService,
     node_id: str,
     certificate_serial: str,
-    runtime_identity: dict[str, object],
+    runtime_identity: Mapping[str, object],
 ):
     claim = operations.claim(
         node_id,

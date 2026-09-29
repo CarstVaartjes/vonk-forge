@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
@@ -335,14 +336,14 @@ class _CanonicalModelCache:
         )
 
 
-def _placement(payload: object) -> dict[str, object]:
+def _placement(payload: object) -> dict[str, Any]:
     """The compiled placement a Start/Stop/job payload carries."""
 
     document = json.loads(canonical_message(payload))
     return document["compiled_execution_plan"]["runtime"]["placement"]
 
 
-def start_evidence(payload: object) -> dict[str, object]:
+def start_evidence(payload: Mapping[str, object]) -> dict[str, object]:
     """The serving rank reports its ready endpoint; every other rank reports {}."""
 
     placement = _placement(payload)
@@ -2267,10 +2268,7 @@ def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(
             for phase in _job_phases(job.payload)
             for entry in phase
         ]
-    placements = [
-        payload["compiled_execution_plan"]["runtime"]["placement"]
-        for payload in payloads
-    ]
+    placements = [_placement(payload) for payload in payloads]
     assert {item["master_address"] for item in placements} == {"192.168.100.3"}
     assert {item["master_port"] for item in placements} == {29500}
     with sessions() as session:
@@ -3653,9 +3651,7 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
             start_payload.compiled_execution_plan.runtime.placement.memory_floor_bytes
             == expected_floor
         )
-        child_placement = child.payload["compiled_execution_plan"]["runtime"][
-            "placement"
-        ]
+        child_placement = _placement(child.payload)
         assert child_placement["endpoint_address"] == "192.168.1.211"
         assert child_placement["world_size"] == 1
         assert child_placement["master_address"] is None
@@ -5158,7 +5154,8 @@ def test_multinode_start_is_bound_to_authenticated_fabric_rendezvous(
             _placement(entry["payload"])
             for phase in _job_phases(job.payload)
             for entry in phase
-            if entry["payload"]["phase"] == "rank-launch"
+            if require_mapping(entry["payload"], "phase payload")["phase"]
+            == "rank-launch"
         ]
         assert [child["local_address"] for child in children] == [
             "192.168.100.3",

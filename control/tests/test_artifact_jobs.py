@@ -36,6 +36,7 @@ from vonk_control.artifact_jobs import (
     _effective_parameters,
     _validate_parameter_definition,
 )
+from vonk_control.bounded_json import require_mapping
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -713,12 +714,16 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         )
         assert operation is not None
         assert operation.kind == "recipe.job.run.v1"
-        assert (
-            operation.payload["compiled_execution_plan"]["runtime"]["placement"][
-                "reserved_memory_bytes"
-            ]
-            == 225
+        placement = require_mapping(
+            require_mapping(
+                require_mapping(
+                    operation.payload["compiled_execution_plan"], "compiled plan"
+                )["runtime"],
+                "compiled runtime",
+            )["placement"],
+            "compiled placement",
         )
+        assert placement["reserved_memory_bytes"] == 225
         run = session.get(RecipeRun, run_id)
         assert run is not None
         planned_floor = next(
@@ -727,12 +732,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
             if item.node_id == node_id
         )
         assert planned_floor == 107
-        assert (
-            operation.payload["compiled_execution_plan"]["runtime"]["placement"][
-                "memory_floor_bytes"
-            ]
-            == planned_floor
-        )
+        assert placement["memory_floor_bytes"] == planned_floor
         assert operation.payload["input_manifest_sha256"] == job.input_manifest_sha256
         compiled_plan = _mapping(operation.payload["compiled_execution_plan"])
         plan_runtime = _mapping(compiled_plan["runtime"])

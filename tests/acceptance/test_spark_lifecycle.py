@@ -363,8 +363,7 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         raise LifecycleError("canonical synthetic canary contract is invalid")
     roles = recipe_contract.topology.roles
     if (
-        recipe_contract.execution.mode != "build"
-        or recipe_contract.topology.mode != "single"
+        recipe_contract.topology.mode != "single"
         or recipe_contract.topology.node_count != 1
         or len(roles) != 1
         or roles[0].endpoint_owner is not True

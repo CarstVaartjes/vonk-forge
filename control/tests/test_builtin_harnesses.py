@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 from importlib.resources import files
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -94,7 +95,7 @@ ARGS = {
 }
 
 
-def _example(name: str) -> dict[str, object]:
+def _example(name: str) -> dict[str, Any]:
     return json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", name)

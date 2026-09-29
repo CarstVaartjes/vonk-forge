@@ -475,6 +475,7 @@ def test_install_admission_reads_mapping_parameters_through_typed_boundary(
         **_unused: object,
     ) -> dict[str, dict[str, object]]:
         captured["parameters"] = parameters
+        assert build is not None
         return _compiled_plan_provider(
             mapping_nodes=mapping_nodes,
             revision=revision,

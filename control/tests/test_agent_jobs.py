@@ -635,6 +635,7 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
             "serial-a",
             runtime_identity=old_identity,
         )
+        assert older is not None
         assert resumed is not None and fenced_operation(sessions, resumed).id == (
             older.id
         )

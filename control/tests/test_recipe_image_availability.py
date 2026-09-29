@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine, select, update
@@ -107,14 +107,14 @@ def _build_id(revision_id: str) -> str:
 
 
 def _builder(
-    storage: FilesystemRuntimeImageStorage,
+    storage: Any,
     *,
     payload: bytes = ARCHIVE,
     calls: list[bool] | None = None,
 ):
     """A builder that leaves the revision's recorded build archive in storage."""
 
-    def build(*_args: object, claim: object, force: bool = False, **_: object):
+    def build(*_args: object, claim: Any, force: bool = False, **_: object):
         if calls is not None:
             calls.append(force)
         digest = hashlib.sha256(payload).hexdigest()

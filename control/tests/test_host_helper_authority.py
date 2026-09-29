@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -288,7 +289,7 @@ def runtime_service(
     *,
     lease_seconds: int = 60,
     operation_kind: str = "recipe.start",
-    operation_payload: dict[str, object] | None = None,
+    operation_payload: Mapping[str, object] | None = None,
     cancel_requested: bool = False,
     node_intent: int = 1,
 ) -> HostRuntimeAuthorityService:
@@ -936,7 +937,7 @@ def test_job_run_stop_rejects_wrong_runtime_target() -> None:
 
 def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
     service = runtime_service(operation_payload={"phase": "collective-readiness"})
-    common = {
+    common: dict[str, Any] = {
         "node_id": "spk_" + "1" * 32,
         "fence": "40000000-0000-4000-8000-000000000004",
         "request_sha256": "e" * 64,
@@ -964,7 +965,7 @@ def test_cancellation_permits_only_stop_under_the_original_live_fence(
         node_intent=node_intent,
     )
 
-    arguments = {
+    arguments: dict[str, Any] = {
         "node_id": "spk_" + "1" * 32,
         "fence": "40000000-0000-4000-8000-000000000004",
         "request_sha256": "e" * 64,
@@ -1010,7 +1011,7 @@ def test_collective_cancellation_can_stop_but_cannot_extend_old_work() -> None:
         cancel_requested=True,
         node_intent=2,
     )
-    arguments = {
+    arguments: dict[str, Any] = {
         "node_id": "spk_" + "1" * 32,
         "fence": "40000000-0000-4000-8000-000000000004",
         "request_sha256": "e" * 64,
@@ -1065,7 +1066,7 @@ def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> Non
 
 
 def test_runtime_preflight_grant_is_bound_to_its_own_fenced_operation() -> None:
-    arguments = {
+    arguments: dict[str, Any] = {
         "node_id": "spk_" + "1" * 32,
         "fence": "40000000-0000-4000-8000-000000000004",
         "action": ContainerRuntimeAction.RUNTIME_PREFLIGHT,

@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 import pytest
 import vonk_forge_contracts as contracts
@@ -38,7 +39,7 @@ _BUILT_IMAGE: dict[str, object] = {
 
 def _compile(
     recipe: dict[str, object],
-    models: object,
+    models: dict[str, Any] | list[dict[str, Any]],
     *,
     package_handle: object = _BUILT_IMAGE,
     role: str = "entrypoint",
