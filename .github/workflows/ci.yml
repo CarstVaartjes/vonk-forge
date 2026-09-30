@@ -255,6 +255,20 @@ jobs:
         uses: ./.github/actions/python-env
       - name: Build recipe library index and packages
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Exercise the installed protocol wheel on adapter Python
+        run: |
+          set -euo pipefail
+          consumer="$RUNNER_TEMP/protocol-consumer"
+          uv venv --python 3.12 "$consumer"
+          uv pip install --python "$consumer/bin/python" \
+            inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl \
+            'pytest==9.1.1'
+          "$consumer/bin/python" -c 'import pathlib, sys, vonk_agent_protocol; assert pathlib.Path(vonk_agent_protocol.__file__).is_relative_to(sys.prefix)'
+          # Disable the producer's source pythonpath: these checks must consume
+          # the installed wheel. Rust peers run in the connected lane below.
+          "$consumer/bin/python" -m pytest -q -c /dev/null -p no:cacheprovider agent_protocol/tests \
+            --ignore=agent_protocol/tests/test_schema2_recipe_wire.py \
+            --ignore=agent_protocol/tests/test_schema2_recipe_rust_compat.py
       - name: Install pinned Rust toolchain
         run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal --component rustfmt
       - name: Restore Rust dependency cache
