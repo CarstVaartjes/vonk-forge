@@ -339,7 +339,9 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - 'until [ -f /run/vonk-runtime-assets/registry/config.yml ]; do sleep 1; done; exec /entrypoint.sh /run/vonk-runtime-assets/registry/config.yml'
+      - >-
+        until [ -f /run/vonk-runtime-assets/registry/config.yml ]; do sleep 1;
+        done; exec /entrypoint.sh /run/vonk-runtime-assets/registry/config.yml
     volumes:
       - runtime-assets:/run/vonk-runtime-assets:ro
       - registry-data:/var/lib/registry
@@ -415,7 +417,8 @@ networks:
   litellm-edge: {internal: true}
   registry-edge: {internal: true}
   # No standing service joins this network. A Docker-daemon administrator may
-  # attach a version-pinned one-shot ORAS publisher as documented in registry/README.md.
+  # attach a version-pinned one-shot ORAS publisher as documented in
+  # registry/README.md.
   registry-publisher: {internal: true}
   ca: {internal: true}
 
