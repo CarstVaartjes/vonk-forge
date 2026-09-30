@@ -330,6 +330,10 @@ services:
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
+    # Serves the internal high port 5000; no capability from the default set
+    # is needed to serve or write its volume.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
       OTEL_TRACES_EXPORTER: none
     entrypoint:
