@@ -6,7 +6,9 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
+from typing import cast
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -359,3 +361,140 @@ def test_build_identity_binds_the_resolved_runtime_adapter() -> None:
     # the prepared-image cache key identical and reuses an unadapted image.
     assert identity(adapter) == identity(adapter)
     assert identity(adapter) != identity(changed)
+
+
+@pytest.mark.parametrize("cached_by", ["earlier-revision-set", "objects-only"])
+def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
+    tmp_path: Path, monkeypatch, cached_by: str
+) -> None:
+    """Same bytes, new model revision: compile binds the cached set as-is.
+
+    The set is keyed by its bytes, so model revision 2 resolves to the set
+    revision 1 cached, whose row keeps revision 1's model identities. The
+    compiler looks model files up by the requesting revision's identity; it
+    must get the shared verified objects described with that identity, with
+    no download and no re-hash.
+    """
+
+    from vonk_control import execution_plan_service
+    from vonk_control.distribution import ModelCacheObjectSource
+    from vonk_control.execution_plan_service import (
+        ControllerExecutionPlanService,
+        ExecutionPlanCompilationError,
+    )
+
+    sessions = _sessions()
+    data = b"model bytes!"
+    file_digest = hashlib.sha256(data).hexdigest()
+    first_model = _model_document(
+        path="weights/model.safetensors", file_digest=file_digest, roles=["weights"]
+    )
+    second_model = json.loads(json.dumps(first_model))
+    second_model["metadata"]["description"] = "Revised model card."
+    first_digest, second_digest = _digest(first_model), _digest(second_model)
+    assert first_digest != second_digest
+    with sessions.begin() as session:
+        _add_active(
+            session,
+            root_id="00000000-0000-4000-8000-000000000001",
+            revision_id="00000000-0000-4000-8000-000000000002",
+            kind="model",
+            publisher="owner",
+            slug="model",
+            document=first_model,
+        )
+        _add_active(
+            session,
+            root_id="00000000-0000-4000-8000-000000000001",
+            revision_id="00000000-0000-4000-8000-000000000003",
+            kind="model",
+            publisher="owner",
+            slug="model",
+            document=second_model,
+            revision_number=2,
+        )
+        first_recipe = _add_active(
+            session,
+            root_id="00000000-0000-4000-8000-000000000004",
+            revision_id="00000000-0000-4000-8000-000000000005",
+            kind="recipe",
+            publisher="owner",
+            slug="recipe",
+            document=_recipe_document(first_digest),
+        )
+        second_recipe = _add_active(
+            session,
+            root_id="00000000-0000-4000-8000-000000000004",
+            revision_id="00000000-0000-4000-8000-000000000006",
+            kind="recipe",
+            publisher="owner",
+            slug="recipe",
+            document=_recipe_document(second_digest),
+            revision_number=2,
+        )
+
+    service = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    first = service.resolve_artifact_set(recipe_revision_id=first_recipe.id)
+    second = service.resolve_artifact_set(recipe_revision_id=second_recipe.id)
+    assert second.digest == first.digest
+    # Revision 1 downloaded and verified these bytes at ingress.
+    spec = first.artifacts[0]
+    service._object_path(spec.sha256).parent.mkdir(parents=True, exist_ok=True)
+    service._object_path(spec.sha256).write_bytes(data)
+    service._write_object_receipt(spec, NOW)
+    if cached_by == "earlier-revision-set":
+        with sessions.begin() as session:
+            row = service._ensure_set(session, first)
+            row.state, row.verified_bytes = "cached", len(data)
+    preview = service.download_preview(recipe_revision_id=second_recipe.id)
+    assert preview["artifact_set_sha256"] == second.digest
+    assert preview["new_bytes"] == 0
+
+    if cached_by == "earlier-revision-set":
+        # The stored row speaks for revision 1 only.
+        stored = ModelCacheObjectSource.from_service(service)
+        assert {
+            item["model_content_sha256"]
+            for item in stored.verified_model_objects_for_set(first.digest)
+        } == {first_digest}
+    # Revision 2 gets the same verified objects under its own identity.
+    receipts = ModelCacheObjectSource.from_service(
+        service
+    ).verified_model_objects_for_set(second.digest, second)
+    assert [
+        (item["model_content_sha256"], item["file_id"], item["sha256"])
+        for item in receipts
+    ] == [(second_digest, "weights", file_digest)]
+    # The set is recorded as cached for every consumer, never downloaded.
+    assert service.get_entry(second.digest)["coverage"] == "complete"
+
+    # Profile loads and the library see revision 2's model as cached.
+    status = service.resolve_latest_cached(recipe_identity=second_recipe.id)
+    assert "model-not-cached" not in cast(list[str], status["blockers"])
+
+    # Compilation asks for exactly that: capture what it binds.
+    bound: list[tuple[dict[str, object], ...]] = []
+    original = ModelCacheObjectSource.verified_model_objects_for_set
+
+    def capture(self, digest, manifest=None):
+        result = original(self, digest, manifest)
+        bound.append(result)
+        return result
+
+    monkeypatch.setattr(
+        execution_plan_service.ModelCacheObjectSource,
+        "verified_model_objects_for_set",
+        capture,
+    )
+    with sessions() as session:
+        revision = session.get(CatalogDocumentRevision, second_recipe.id)
+        assert revision is not None
+        with pytest.raises(ExecutionPlanCompilationError, match="build receipt"):
+            ControllerExecutionPlanService(service).compile_installation(
+                session,
+                revision=revision,
+                build=None,
+                mapping_nodes=(),
+                parameters=None,
+            )
+    assert [item["model_content_sha256"] for item in bound[0]] == [second_digest]

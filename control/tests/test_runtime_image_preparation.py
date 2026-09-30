@@ -286,6 +286,63 @@ def test_non_schema_two_receipt_is_discarded_by_scans_and_re_derived(
     assert storage.read_receipt(receipt.oci_archive_sha256) == restored
 
 
+@pytest.mark.parametrize("stale", ["retired-fields", "missing-adapter"])
+def test_stale_receipt_that_cannot_be_discarded_is_reported_once_with_its_cause(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, stale: str
+) -> None:
+    """Both old receipt shapes are ours; a failed discard names its cause once."""
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    receipt = _prepare(storage=storage, transport=TinyTransport())
+    receipt_path = storage.root / f"{receipt.oci_archive_sha256}.receipt.json"
+    value = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if stale == "retired-fields":
+        value |= {
+            "platform_manifest_digest": receipt.image_digest,
+            "local_image_reference": None,
+        }
+    else:
+        del value["runtime_adapter"], value["runtime_adapter_sha256"]
+    receipt_path.write_text(json.dumps(value), encoding="utf-8")
+
+    def denied(_archive: str):
+        raise RuntimeImagePreparationError(
+            "runtime_image.lock_unavailable",
+            "managed image publication lock file is unavailable",
+        ) from PermissionError(13, "Permission denied", "lock")
+
+    original_lock = storage.publication_lock
+    storage.publication_lock = denied  # type: ignore[method-assign]
+
+    def scan() -> None:
+        assert (
+            storage.find_verified(
+                BUILT_IMAGE_DIGEST,
+                expected_architecture="linux/arm64",
+                expected_runtime_interface="vonk.runtime.v1",
+            )
+            is None
+        )
+
+    with caplog.at_level("WARNING"):
+        scan()
+        scan()
+    reports = [
+        record.getMessage()
+        for record in caplog.records
+        if receipt.oci_archive_sha256 in record.getMessage()
+    ]
+    assert len(reports) == 1, reports
+    assert reports[0].startswith("could not discard stale runtime image receipt")
+    assert "runtime_image.lock_unavailable: [Errno 13] Permission denied" in reports[0]
+    assert receipt_path.exists()
+
+    # Once the lock is usable again the next scan removes it.
+    storage.publication_lock = original_lock  # type: ignore[method-assign]
+    scan()
+    assert not receipt_path.exists()
+
+
 def test_receipt_with_retired_schema_two_fields_is_own_stale_and_replaced(
     tmp_path: Path,
 ) -> None:

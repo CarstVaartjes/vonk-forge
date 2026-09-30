@@ -1350,6 +1350,75 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     ) + len(b"tokenizer auxiliary bytes")
 
 
+def test_upstream_revision_downloads_only_new_files_and_reuses_the_rest(
+    cache, tmp_path: Path
+) -> None:
+    """A model updated upstream shares most files with the cached revision.
+
+    Unchanged objects are reused by digest without fetching or re-hashing
+    them; only the changed and added files are downloaded, and the new set
+    is complete and describable for the compiler.
+    """
+
+    service, _sessions = cache
+    model = "a" * 64
+    shard = _artifact(tmp_path, b"unchanged shard bytes", model_content_sha256=model)
+    config = _artifact(
+        tmp_path,
+        b"old config",
+        artifact_id="config",
+        path="config.json",
+        model_content_sha256=model,
+    )
+    first = _download(
+        service,
+        [shard, config],
+        model_content_sha256=model,
+        request_key="00000000-0000-4000-8000-000000000031",
+    )
+    assert first.state == "succeeded"
+    # The unchanged shard cannot be fetched again: its source is gone.
+    Path(str(shard["source"]).removeprefix("file://")).unlink()
+
+    updated = "b" * 64
+    (tmp_path / "update").mkdir()
+    new_config = _artifact(
+        tmp_path / "update",
+        b"new config!",
+        artifact_id="config",
+        path="config.json",
+        model_content_sha256=updated,
+    )
+    added = _artifact(
+        tmp_path / "update",
+        b"added tokenizer",
+        artifact_id="tokenizer",
+        path="tokenizer.json",
+        model_content_sha256=updated,
+    )
+    files = [dict(shard, model_content_sha256=updated), new_config, added]
+    preview = service.download_preview(model_content_sha256=updated, artifacts=files)
+    assert preview["artifact_set_sha256"] != first.artifact_set_sha256
+    assert preview["new_bytes"] == len(b"new config!") + len(b"added tokenizer")
+    second = _download(
+        service,
+        files,
+        model_content_sha256=updated,
+        request_key="00000000-0000-4000-8000-000000000032",
+    )
+    assert second.state == "succeeded", second.last_error
+    entry = service.get_entry(second.artifact_set_sha256 or "")
+    assert entry["coverage"] == "complete"
+    receipts = ModelCacheObjectSource.from_service(
+        service
+    ).verified_model_objects_for_set(second.artifact_set_sha256 or "")
+    assert {(item["model_content_sha256"], item["file_id"]) for item in receipts} == {
+        (updated, "weights"),
+        (updated, "config"),
+        (updated, "tokenizer"),
+    }
+
+
 @pytest.mark.parametrize(
     "invalid_result",
     [

@@ -1391,6 +1391,12 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         if type(expected_bytes) is not int or expected_bytes < 1:
             raise RuntimeError("model-cache download total is unavailable")
         if preview.get("new_bytes") == 0:
+            # Every object is already verified (perhaps cached by another
+            # revision's set): record this set as cached for every consumer,
+            # without a download or a re-hash.
+            adopt = getattr(self._model_cache, "adopt_verified_set", None)
+            if callable(adopt):
+                adopt(manifest)
             return PhaseExecution(
                 result=_phase_receipt(
                     {

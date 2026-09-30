@@ -1887,6 +1887,22 @@ class ModelCacheService:
                     )
                 )
             )
+            # A set is keyed by its bytes and keeps the provenance of the
+            # revision that cached it first: a later model revision with the
+            # same files is cached under that row, as compilation sees it.
+            try:
+                shared = session.get(
+                    ModelCacheSet,
+                    self.resolve_artifact_set(recipe_revision_id=revision.id).digest,
+                )
+            except ModelCacheError:
+                shared = None
+            if (
+                shared is not None
+                and shared.state == "cached"
+                and shared not in model_rows
+            ):
+                model_rows.append(shared)
 
             def model_set_available(row: ModelCacheSet) -> bool:
                 manifest = ArtifactSetManifest.from_document(row.manifest)
@@ -7965,8 +7981,36 @@ class ModelCacheService:
             )
         return path, spec.expected_bytes, spec.sha256
 
+    def adopt_verified_set(self, manifest: ArtifactSetManifest) -> None:
+        """Record a set whose every object is already verified in storage.
+
+        A new model or recipe revision can select files that other sets
+        already cached. Their ingress receipts are the evidence: nothing is
+        fetched or re-hashed, and the set becomes cached for every consumer.
+        """
+
+        with self._lock, self._session(write=True) as session:
+            now = self._clock()
+            self._require_model_sets_open(
+                session,
+                (manifest.digest,),
+                now=now,
+                object_digests=tuple(spec.sha256 for spec in manifest.artifacts),
+            )
+            row = self._ensure_set(session, manifest)
+            if row.state != "cached":
+                row.state = "cached"
+                row.verified_bytes = manifest.expected_bytes
+                row.verified_at = now
+                row.updated_at = now
+                row.last_accessed_at = now
+                row.last_error = None
+
     def resolve_verified_artifact_set(
-        self, artifact_set_sha256: str
+        self,
+        artifact_set_sha256: str,
+        *,
+        manifest: ArtifactSetManifest | None = None,
     ) -> tuple[dict[str, object], ...]:
         """Describe every verified object in a complete immutable set.
 
@@ -7974,14 +8018,34 @@ class ModelCacheService:
         check managed file metadata once. Serving an object separately verifies
         that object's bytes; describing a set must not scan every model file.
         No source URL or caller-controlled path is exposed by this adapter.
+
+        The set is keyed by its bytes, so every model or recipe revision that
+        selects the same files shares it, while the stored row keeps the
+        provenance of whichever revision cached it first. A caller passing its
+        own resolved ``manifest`` gets the same verified objects described with
+        its model identities; nothing is re-hashed or downloaded.
         """
         digest = _optional_digest(artifact_set_sha256)
         if digest is None:
             raise ModelCacheNotFound(
                 "model_cache.entry_missing", "cache entry was not found"
             )
-        manifest = self._manifest_for_set(digest)
+        if manifest is not None and manifest.digest != digest:
+            raise ModelCacheConflict(
+                "model_cache.identity_conflict",
+                "requested manifest does not name this artifact set",
+            )
+        try:
+            stored: ArtifactSetManifest | None = self._manifest_for_set(digest)
+        except ModelCacheNotFound:
+            if manifest is None:
+                raise
+            stored = None
+        manifest = manifest or stored
+        assert manifest is not None
         self._require_managed_cache_coverage(manifest)
+        if stored is None:
+            self.adopt_verified_set(manifest)
         descriptors = []
         for spec in manifest.artifacts:
             path = self._object_path(spec.sha256)
