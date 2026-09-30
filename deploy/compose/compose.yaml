@@ -248,6 +248,9 @@ services:
     logging: *bounded-logging
     read_only: true
     user: "472:472"
+    # Binds the internal high port 3000 as uid 472; no capabilities needed.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     entrypoint:
       - /bin/sh
       - -c
