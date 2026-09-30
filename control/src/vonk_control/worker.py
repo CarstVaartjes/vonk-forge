@@ -508,6 +508,9 @@ def assemble_production_worker(
         fleet_profiles.bind_preparation_starter(
             image_production.service.ensure_preparation
         )
+        fleet_profiles.bind_preparation_canceller(
+            image_production.service.cancel_profile_preparation
+        )
         worker_background_services += (image_production.scheduler.tick,)
         worker_background_closers += (image_production.close,)
     telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)
