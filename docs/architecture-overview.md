@@ -474,6 +474,14 @@ path. `slirp4netns` is never treated as an allowlist. The Controller requires
 fresh `recipe.build.egress-proxy.v1` capability evidence before dispatching a
 public build, while networkless builds remain `--network=none`.
 
+Most recipe images never build on a Spark: CI prebuilds them per distinct
+executable build key and the signed catalog pins the GHCR digest. When the
+Controller derives the same key, the build is executed by pulling that digest
+into the image cache (verified once, at ingress) instead of admitting Spark
+build memory, so updating a running recipe does not need the Spark it runs on.
+The Spark build described above is the fallback; see
+[image transfer and cache](image-transfer-cache.md).
+
 Installation maps a resolved recipe revision to exact node identities and ranks.
 The controller transfers that one verified Docker-loadable archive over the
 authenticated agent channel and each target re-verifies it before import, so a

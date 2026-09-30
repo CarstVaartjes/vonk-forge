@@ -96,6 +96,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .prebuilt_images import policy_prebuilt_reference, prebuilt_reference
 from .profile_stop_authority import (
     ProfileJobRunStopAuthorization,
     ProfileJobRunStopJob,
@@ -939,6 +940,19 @@ class RecipeOperationService:
     ) -> Job:
         if self._builds is None:
             raise RecipeOperationConflict("recipe build service is unavailable")
+        prebuilt = policy_prebuilt_reference(build.policy_report)
+        if prebuilt is not None:
+            return self._queue_prebuilt_build_in_session(
+                session,
+                build,
+                plan,
+                prebuilt,
+                actor=actor,
+                request_id=request_id,
+                now=now,
+                intent=intent,
+                force=force,
+            )
         self._builds.reserve_in_session(session, plan, now=now, request_id=request_id)
         build.state = "building"
         build.error = None
@@ -959,6 +973,72 @@ class RecipeOperationService:
                 **({"force_rebuild": True} if force else {}),
             },
         )
+
+    def _queue_prebuilt_build_in_session(
+        self,
+        session: Session,
+        build: RecipeBuild,
+        plan: RecipeBuildPlan,
+        reference: str,
+        *,
+        actor: str,
+        request_id: str,
+        now: datetime,
+        intent: RecipeBuildIntent,
+        force: bool,
+    ) -> Job:
+        """Queue a build the Controller executes by pulling a prebuilt image.
+
+        It is an ordinary ``recipe.build.v1`` job that no Spark claims: no
+        Spark operation or reservation is created. The prebuilt
+        importer pulls the pinned digest and records the same evidence a Spark
+        upload records, under the nominal builder named in the plan.
+        """
+        try:
+            acquire_admission_keys(session, (job_request_key(request_id),))
+        except AdmissionLockBusy as error:
+            raise RecipeBuildAdmissionBusy() from error
+        existing = self._idempotent_job_in_session(
+            session,
+            request_id,
+            "recipe.build.v1",
+            plan.build_input_sha256,
+            owner_kind="recipe-build",
+            owner_id=build.id,
+        )
+        if existing is not None:
+            return existing
+        build.state = "building"
+        build.error = None
+        build.updated_at = now
+        payload: dict[str, object] = {
+            "schema_version": 1,
+            "owner_kind": "recipe-build",
+            "owner_id": build.id,
+            "plan_digest": plan.build_input_sha256,
+            "build_intent": intent.model_dump(mode="json"),
+            "prebuilt_image": reference,
+            "prebuilt_node_id": build.builder_node_id,
+            **({"force_rebuild": True} if force else {}),
+        }
+        job = Job(
+            id=str(uuid.uuid4()),
+            request_id=request_id,
+            kind="recipe.build.v1",
+            state="running",
+            actor=actor,
+            authority_revision=plan.build_input_sha256,
+            # The nominal builder, like any build child; no Spark operation
+            # is created, so no agent ever claims this job.
+            targets=[build.builder_node_id],
+            payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+            payload=payload,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(job)
+        session.flush()
+        return job
 
     @staticmethod
     def _successful_build_job_in_session(
@@ -4126,7 +4206,7 @@ class RecipeOperationService:
                 return False
             force_rebuild = job.payload.get("force_rebuild") is True
             if succeeded:
-                _record_build_evidence(
+                record_build_evidence(
                     session,
                     build,
                     evidence,
@@ -5195,6 +5275,65 @@ class RecipeOperationService:
                 "build.consumer_busy: build ownership is changing; retry cancellation"
             ) from error
 
+    def _cancel_prebuilt_build(
+        self,
+        job_id: str,
+        *,
+        actor: str,
+        request_id: str,
+        reason: str,
+        only_if_unneeded: bool,
+    ) -> bool:
+        """Cancel a Controller pull; nothing on a Spark needs cleaning up.
+
+        An in-flight pull finds its job no longer running and discards its
+        result; its partial file is removed by the importer.
+        """
+        now = self._clock()
+        with self._sessions.begin() as session:
+            job = session.get(Job, job_id, with_for_update={"nowait": True})
+            if job is None or job.state == "cancelled":
+                return False
+            if job.state not in {"queued", "running", "waiting-for-operator"}:
+                raise RecipeOperationConflict("recipe build is not cancellable")
+            build = session.get(
+                RecipeBuild,
+                _required_string(job.payload, "owner_id"),
+                with_for_update={"nowait": True},
+            )
+            if build is None:
+                raise RecipeOperationConflict("recipe build authority changed")
+            if build_cancellation(job) is None:
+                if only_if_unneeded and read_build_intent(job).kind == "independent":
+                    return False
+                try:
+                    consumers = current_build_consumers(session, build)
+                except BuildConsumerError as error:
+                    raise RecipeOperationConflict(f"{error.code}: {error}") from error
+                if consumers:
+                    if only_if_unneeded:
+                        return False
+                    raise RecipeOperationConflict(
+                        "build.shared_consumers: accepted preparation still needs this build; "
+                        "cancel its parent intent first"
+                    )
+            cancellation = request_build_cancellation(
+                job, actor=actor, request_id=request_id, reason=reason, now=_aware(now)
+            )
+            if build.state == "building":
+                build.state = (
+                    "succeeded"
+                    if job.payload.get("force_rebuild") is True
+                    else "failed"
+                )
+            build.error = cancellation.reason
+            build.updated_at = now
+            job.state = "cancelled"
+            job.result = cancellation.model_copy(update={"cancelled": True}).model_dump(
+                mode="json", exclude_none=True
+            )
+            return True
+
     def _cancel_current_build(
         self,
         job_id: str,
@@ -5207,6 +5346,18 @@ class RecipeOperationService:
         # Use the claim/result lock order: node, parent job, operation, build.
         with self._sessions() as session:
             hinted = session.get(Job, job_id)
+            if (
+                hinted is not None
+                and hinted.kind == "recipe.build.v1"
+                and prebuilt_reference(hinted) is not None
+            ):
+                return self._cancel_prebuilt_build(
+                    job_id,
+                    actor=actor,
+                    request_id=request_id,
+                    reason=reason,
+                    only_if_unneeded=only_if_unneeded,
+                )
             if (
                 hinted is None
                 or hinted.kind != "recipe.build.v1"
@@ -7309,7 +7460,7 @@ def _valid_image_import_payload(value: object, expected_build_id: str) -> bool:
     )
 
 
-def _record_build_evidence(
+def record_build_evidence(
     session: Session,
     build: RecipeBuild,
     evidence: Mapping[str, object],

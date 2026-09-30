@@ -32,8 +32,8 @@ from vonk_control.models import (
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_operations import (
     RecipeOperationService,
-    _record_build_evidence,
     _record_image_import_evidence,
+    record_build_evidence,
 )
 from vonk_control.run_admission import RunAdmissionService
 
@@ -100,7 +100,7 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
     with sessions.begin() as session:
         build = session.get(RecipeBuild, plan.build_id)
         assert build is not None
-        _record_build_evidence(
+        record_build_evidence(
             session,
             build,
             build_evidence.model_dump(mode="json"),

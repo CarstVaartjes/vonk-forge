@@ -29,6 +29,7 @@ from vonk_forge_contracts import (
 from vonk_forge_contracts.resolver import validate_recipe_models
 
 from .bounded_json import integer, require_integer
+from .catalog_revision_contract import read_prebuilt_image
 from .recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
@@ -752,6 +753,7 @@ class RecipePackageClient:
                     "description": document.metadata.description,
                     "tags": document.metadata.tags,
                     "document": dict(recipe["document"]),
+                    "prebuilt_image": recipe.get("prebuilt_image"),
                 }
             )
         packages: dict[str, dict[str, object]] = {}
@@ -829,6 +831,10 @@ class RecipePackageClient:
                     content_sha256=str(digest),
                     uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}",
                     document=dict(document),
+                    # Optional; an unreadable entry only means no prebuilt image.
+                    prebuilt_image=read_prebuilt_image(
+                        package_entry.get("prebuilt_image")
+                    ),
                 )
             )
         if [(item.publisher, item.slug) for item in items] != sorted(

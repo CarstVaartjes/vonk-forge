@@ -26,7 +26,7 @@ from vonk_control.models import (
     RecipeBuild,
     RecipeInstallation,
 )
-from vonk_control.recipe_operations import _record_build_evidence
+from vonk_control.recipe_operations import record_build_evidence
 from vonk_control.run_switch_contract import RunSwitchPlan
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
@@ -58,7 +58,7 @@ def _complete_rebuild(sessions, storage, *, archive: bytes, image_digest: str) -
     with sessions.begin() as session:
         build = session.get(RecipeBuild, build_id)
         assert build is not None
-        _record_build_evidence(
+        record_build_evidence(
             session,
             build,
             {

@@ -183,6 +183,9 @@ class StoredBuildPolicyReport(_PersistedModel):
     findings: list[StoredPolicyFinding]
     builder_binary_digest: Digest | None = None
     artifact_format: str = Field(min_length=1, max_length=64)
+    # Set when the Controller pulls the catalog's prebuilt image instead of
+    # the builder building it; the digest above is then that image's digest.
+    prebuilt_image: str | None = Field(default=None, min_length=1, max_length=512)
 
 
 def _validate_json[ModelT: _PersistedModel](

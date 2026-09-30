@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
-from vonk_control.catalog_entities import _build_projection
+from vonk_control.catalog_entities import build_policy_projection
 from vonk_control.compiled_execution_plan import CompiledRuntimeImage
 from vonk_control.execution_plan_service import _runtime_receipt_mapping
 from vonk_control.models import (
@@ -72,7 +72,7 @@ def _projection(recipe: RecipeDefinition) -> dict[str, object]:
         "runtime_engine": recipe.runtime.engine,
         "topology": recipe.topology.model_dump(mode="json"),
     }
-    value.update(_build_projection(recipe))
+    value.update(build_policy_projection(recipe))
     return value
 
 

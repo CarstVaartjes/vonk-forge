@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_control.catalog_entities import _build_projection
+from vonk_control.catalog_entities import build_policy_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
@@ -128,7 +128,7 @@ def _add_active(
             "runtime_engine": parsed.runtime.engine,
             "topology": parsed.topology.model_dump(mode="json"),
         }
-        projected.update(_build_projection(parsed))
+        projected.update(build_policy_projection(parsed))
     root = CatalogDocument(
         id=root_id,
         kind=kind,

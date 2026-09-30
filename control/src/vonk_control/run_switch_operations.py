@@ -100,6 +100,7 @@ from .operation_blockers import (
     read_blockers,
 )
 from .operation_progress import observe_progress, project_progress
+from .prebuilt_images import policy_prebuilt_reference
 from .preparation_contract import (
     ControllerAssetState,
     ModelArtifactPreparation,
@@ -3930,6 +3931,9 @@ class RunSwitchOperationService:
                     and build_candidate is not None
                     and build_candidate.state in {"planned", "building"}
                     and build_candidate.builder_node_id in node_ids
+                    # A prebuilt image is pulled by the Controller; the
+                    # nominal builder Spark does no work and needs no memory.
+                    and policy_prebuilt_reference(build_candidate.policy_report) is None
                 ),
             )
             if (
@@ -3975,6 +3979,8 @@ class RunSwitchOperationService:
                         and build_candidate is not None
                         and build_candidate.state in {"planned", "building"}
                         and build_candidate.builder_node_id in node_ids
+                        and policy_prebuilt_reference(build_candidate.policy_report)
+                        is None
                     ),
                 )
             preparation = self._preparation(
@@ -6199,7 +6205,8 @@ class RunSwitchOperationService:
                 "Stop conflicting workloads before memory-consuming runtime preparation.",
             )
             stop_added = True
-        if build_required and stop_before_prepare:
+        if build_required and build_on_target and stop_before_prepare:
+            # A build outside the group was already placed first above.
             # This remains a ``prepare`` phase for the shared lifecycle
             # vocabulary; the subphase makes Controller OCI preparation
             # explicit and gives clients a stable progress label.
