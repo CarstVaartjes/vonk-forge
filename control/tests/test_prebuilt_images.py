@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import vonk_control.availability_production as availability_production_module
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
+from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
@@ -48,6 +50,7 @@ from vonk_control.run_switch_operations import (
 from vonk_control.runtime_image_preparation import (
     IMAGE_CACHE_DIRECTORY,
     FilesystemRuntimeImageStorage,
+    PulledImageEvidence,
 )
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
@@ -358,3 +361,117 @@ def test_off_target_build_runs_once_before_an_early_memory_stop() -> None:
     kinds = [(phase.kind, phase.subphase) for phase in phases]
     assert kinds.count(("prepare", "container-build")) == 1
     assert kinds.index(("prepare", "container-build")) < kinds.index(("stop", None))
+
+
+class _Transport:
+    """Inspects the pulled archive the way skopeo reports a runtime image."""
+
+    def inspect_archive(
+        self,
+        archive: Path,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+        expected_archive_sha256: str,
+        expected_archive_bytes: int,
+    ) -> PulledImageEvidence:
+        assert archive.read_bytes() == ARCHIVE
+        return PulledImageEvidence(
+            manifest_digest=REFERENCE.rsplit("@", 1)[1],
+            config_id="sha256:" + "c" * 64,
+            local_reference=f"docker-archive:{archive}",
+            architecture=expected_architecture,
+            runtime_interface=expected_runtime_interface,
+            archive_sha256=expected_archive_sha256,
+            archive_bytes=expected_archive_bytes,
+        )
+
+
+def _availability(sessions, tmp_path: Path, monkeypatch, clock):
+    builds, operations = _services(sessions, tmp_path)
+    monkeypatch.setattr(
+        availability_production_module, "SkopeoOCIImageTransport", _Transport
+    )
+    production = build_recipe_image_availability(
+        sessions,
+        artifact_root=tmp_path,
+        managed_catalog_sync=None,
+        recipe_builds=builds,
+        recipe_operations=operations,
+        clock=clock,
+    )
+    return production, builds
+
+
+def test_image_preparation_pulls_the_prebuilt_image_without_a_spark_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions, revision_id = _published_library(tmp_path)
+    now = [NOW]
+    production, _builds = _availability(sessions, tmp_path, monkeypatch, lambda: now[0])
+    operation = production.service.start(
+        revision_id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-00000000a001",
+    )
+    assert production.service.run_pending() == 1
+    waiting = production.service.get(operation.id)
+    assert waiting.state != "succeeded"
+
+    importer = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: now[0], puller=_pull
+    )
+    assert importer.run_pending() == 1
+    now[0] += timedelta(minutes=5)
+    assert production.service.run_pending() == 1
+
+    completed = production.service.get(operation.id)
+    assert completed.state == "succeeded", completed.failure
+    assert completed.result is not None
+    assert completed.result["image_digest"] == REFERENCE.rsplit("@", 1)[1]
+    with sessions() as session:
+        assert session.scalars(select(AgentOperation)).all() == []
+    production.close()
+
+
+def test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions, revision_id = _published_library(tmp_path)
+    now = [NOW]
+    production, _builds = _availability(sessions, tmp_path, monkeypatch, lambda: now[0])
+    operation = production.service.start(
+        revision_id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-00000000a002",
+    )
+    assert production.service.run_pending() == 1
+
+    def unavailable(reference: str, destination: Path, *, local_name: str) -> None:
+        raise PrebuiltImagePullError("prebuilt_image_pull_failed", "denied")
+
+    importer = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: now[0], puller=unavailable
+    )
+    assert importer.run_pending() == 1
+    for _ in range(3):
+        now[0] += timedelta(minutes=16)
+        production.service.run_pending()
+
+    view = production.service.get(operation.id)
+    assert view.state != "succeeded"
+    with sessions() as session:
+        builds = session.scalars(select(RecipeBuild)).all()
+        prebuilt_jobs = [
+            job
+            for job in session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
+            if job.payload.get("prebuilt_image") is not None
+        ]
+    # The pull ran once; the retry planned a Spark build, which waits for
+    # this Spark's build inventory instead of pulling the same digest again.
+    assert len(prebuilt_jobs) == 1
+    assert [build.state for build in builds] == ["failed"]
+    assert view.failure is not None
+    assert view.failure["code"] == "recipe_image.build_capacity_wait"
+    assert "build.inventory_missing" in {blocker.code for blocker in view.blockers}
+    production.close()

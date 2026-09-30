@@ -1063,11 +1063,15 @@ def _capacity_wait(
 def _build_planning_error(error: Exception) -> RecipeImageAvailabilityError:
     code = str(getattr(error, "code", ""))
     if code in _BUILDER_ADMISSION_CODES:
+        # Keep the builder's own reason visible: "full" and "no fresh
+        # inventory" need different operator attention.
         return RecipeImageAvailabilityError(
             "recipe_image.build_capacity_wait",
-            "selected Recipe builder is currently unavailable or full",
+            f"selected Recipe builder is currently unavailable or full ({code}: "
+            f"{str(error)[:200]})",
             retryable=True,
             recovery_actions=("resume", "retry"),
+            blockers=[make_blocker(code, str(error)[:200])],
         )
     return RecipeImageAvailabilityError(
         code or "recipe_image.build_unavailable", str(error)[:512]

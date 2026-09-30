@@ -990,7 +990,7 @@ class RecipeOperationService:
         """Queue a build the Controller executes by pulling a prebuilt image.
 
         It is an ordinary ``recipe.build.v1`` job that no Spark claims: no
-        Spark operation, reservation or target is created. The prebuilt
+        Spark operation or reservation is created. The prebuilt
         importer pulls the pinned digest and records the same evidence a Spark
         upload records, under the nominal builder named in the plan.
         """
@@ -1028,7 +1028,9 @@ class RecipeOperationService:
             state="running",
             actor=actor,
             authority_revision=plan.build_input_sha256,
-            targets=[],
+            # The nominal builder, like any build child; no Spark operation
+            # is created, so no agent ever claims this job.
+            targets=[build.builder_node_id],
             payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
             payload=payload,
             created_at=now,

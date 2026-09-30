@@ -538,7 +538,12 @@ class PrebuiltImageImporter:
         with self._sessions.begin() as session:
             candidates = session.scalars(
                 select(Job)
-                .where(Job.kind == PREBUILT_BUILD_KIND, Job.state == "running")
+                .where(
+                    Job.kind == PREBUILT_BUILD_KIND,
+                    Job.state == "running",
+                    # Only Controller pulls; Spark builds are never touched.
+                    Job.payload["prebuilt_image"].as_string().is_not(None),
+                )
                 .order_by(Job.created_at, Job.id)
                 .with_for_update(skip_locked=True)
             )
