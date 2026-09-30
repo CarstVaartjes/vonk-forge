@@ -280,6 +280,15 @@ class ModelCacheObjectSource:
         return adapter
 
     def _load_manifest(self, digest: str) -> tuple[DistributionObject, ...]:
+        objects, receipts = self._describe(digest)
+        self._manifests[digest] = objects
+        if len(receipts) == len(objects):
+            self._receipts[digest] = receipts
+        return objects
+
+    def _describe(
+        self, digest: str, requested: object = None
+    ) -> tuple[tuple[DistributionObject, ...], tuple[dict[str, object], ...]]:
         try:
             # ModelCacheService validates its opaque digest against the full
             # canonical ArtifactSetManifest before exposing descriptors.
@@ -293,10 +302,16 @@ class ModelCacheObjectSource:
                 descriptor_provider, Callable
             ):
                 raise TypeError("NAS cache manifest provider is unavailable")
-            manifest = manifest_provider(digest)
-            if manifest.digest != digest:
+            # The caller's own resolved manifest may name a set no row
+            # records yet; the cache checks it covers verified objects.
+            manifest = requested if requested is not None else manifest_provider(digest)
+            if getattr(manifest, "digest", None) != digest:
                 raise ValueError("cache manifest identity changed")
-            descriptors = descriptor_provider(digest)
+            descriptors = (
+                descriptor_provider(digest)
+                if requested is None
+                else descriptor_provider(digest, manifest=requested)
+            )
         except Exception as error:
             raise DistributionError(
                 "distribution.model_set_mismatch", "NAS cache manifest is unavailable"
@@ -333,11 +348,7 @@ class ModelCacheObjectSource:
                         "distribution_object": item.to_mapping(),
                     }
                 )
-        result = tuple(objects)
-        self._manifests[digest] = result
-        if len(receipts) == len(result):
-            self._receipts[digest] = tuple(receipts)
-        return result
+        return tuple(objects), tuple(receipts)
 
     def _open_cache_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         entry = self._paths.get(digest)
@@ -384,10 +395,22 @@ class ModelCacheObjectSource:
         )
 
     def verified_model_objects_for_set(
-        self, artifact_set_sha256: str
+        self, artifact_set_sha256: str, manifest: object = None
     ) -> tuple[dict[str, object], ...]:
-        """Return receipts keyed by canonical model identity and file ID."""
+        """Return receipts keyed by canonical model identity and file ID.
+
+        With the caller's resolved ``manifest``, the shared verified set is
+        described with that caller's model identities (see the model cache).
+        """
         digest = artifact_set_sha256
+        if manifest is not None and hasattr(self, "_service"):
+            objects, receipts = self._describe(digest, manifest)
+            if len(receipts) != len(objects):
+                raise DistributionError(
+                    "distribution.model_set_identity_unavailable",
+                    "NAS cache manifest lacks canonical model-file identity",
+                )
+            return receipts
         if digest not in self._receipts:
             if hasattr(self, "_service"):
                 try:
@@ -431,7 +454,7 @@ class CompositeObjectSource:
         return self.oci_source.verify_runtime_image(image_digest, archive_sha256)
 
     def verified_model_objects_for_set(
-        self, artifact_set_sha256: str
+        self, artifact_set_sha256: str, manifest: object = None
     ) -> tuple[dict[str, object], ...]:
         resolver = getattr(self.model_source, "verified_model_objects_for_set", None)
         if resolver is None:
@@ -439,7 +462,9 @@ class CompositeObjectSource:
                 "distribution.model_set_identity_unavailable",
                 "NAS cache source lacks canonical model-file identity",
             )
-        return resolver(artifact_set_sha256)
+        if manifest is None:
+            return resolver(artifact_set_sha256)
+        return resolver(artifact_set_sha256, manifest)
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         # Both sources are content addressed. Probe the model cache first so a

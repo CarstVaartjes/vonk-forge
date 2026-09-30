@@ -212,8 +212,10 @@ class ControllerExecutionPlanService:
                 model_objects = direct_objects
             else:
                 model_source = ModelCacheObjectSource.from_service(self._model_cache)
+                # Describe the shared verified bytes with this revision's
+                # model identities, whichever revision cached them first.
                 model_objects = model_source.verified_model_objects_for_set(
-                    artifact_set_sha256
+                    artifact_set_sha256, manifest
                 )
         except Exception as error:
             raise ExecutionPlanCompilationError(

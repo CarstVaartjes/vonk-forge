@@ -679,9 +679,11 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
             return Manifest()
 
         def resolve_verified_artifact_set(
-            self, digest: str
+            self, digest: str, *, manifest: Manifest | None = None
         ) -> tuple[dict[str, object], ...]:
             assert digest == artifact_set_digest
+            # Compilation describes the set in its own requested terms.
+            assert isinstance(manifest, Manifest)
             return (
                 {
                     "path": "model.safetensors",

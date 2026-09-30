@@ -835,6 +835,9 @@ class FilesystemRuntimeImageStorage:
         self.root = root / IMAGE_CACHE_DIRECTORY
         self.maximum_bytes = maximum_bytes
         self.root.mkdir(parents=True, exist_ok=True)
+        # Receipts this process already reported, so a scan does not repeat
+        # the same warning for a file it could not change.
+        self._reported_receipts: set[tuple[str, int]] = set()
 
     @contextmanager
     def publication_lock(self, archive_sha256: str) -> Iterator[None]:
@@ -1326,7 +1329,8 @@ class FilesystemRuntimeImageStorage:
 
         archive_sha256 = receipt_path.name.removesuffix(".receipt.json")
         if not rejection.own_stale or _SHA256.fullmatch(archive_sha256) is None:
-            _log_rejected_receipt(receipt_path, rejection)
+            if self._first_report(receipt_path):
+                _log_rejected_receipt(receipt_path, rejection)
             return
         try:
             with self.publication_lock(archive_sha256):
@@ -1337,8 +1341,20 @@ class FilesystemRuntimeImageStorage:
                     if not current.own_stale:
                         return
                 receipt_path.unlink(missing_ok=True)
-        except (RuntimeImagePreparationError, OSError):
-            _log_rejected_receipt(receipt_path, rejection)
+        except (RuntimeImagePreparationError, OSError) as error:
+            # Say why the stale file stays, once: the cause (a lock or file
+            # this process may not change) is the operator's next action.
+            if self._first_report(receipt_path):
+                cause = error.__cause__ if error.__cause__ is not None else error
+                _LOGGER.warning(
+                    "could not discard stale runtime image receipt %s rejected by "
+                    "%s: %s; %s: %s",
+                    archive_sha256,
+                    rejection.code,
+                    rejection.detail[:_MAX_RECEIPT_REJECTION_DETAIL],
+                    getattr(error, "code", type(error).__name__),
+                    cause,
+                )
             return
         _LOGGER.warning(
             "discarded runtime image receipt %s rejected by %s: %s",
@@ -1346,6 +1362,19 @@ class FilesystemRuntimeImageStorage:
             rejection.code,
             rejection.detail[:_MAX_RECEIPT_REJECTION_DETAIL],
         )
+
+    def _first_report(self, receipt_path: Path) -> bool:
+        """Whether this process has not yet reported this receipt version."""
+
+        try:
+            version = receipt_path.stat().st_mtime_ns
+        except OSError:
+            version = 0
+        key = (receipt_path.name, version)
+        if key in self._reported_receipts:
+            return False
+        self._reported_receipts.add(key)
+        return True
 
     def _archive_is_present(self, receipt: RuntimeImageReceipt) -> bool:
         """Report archive presence; clean absence is a miss, not a failure."""

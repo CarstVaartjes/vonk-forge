@@ -1469,3 +1469,54 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
     finally:
         release.set()
         executor.close()
+
+
+def test_zero_byte_model_download_records_the_already_verified_set() -> None:
+    """All objects cached (maybe by another revision): record the set, no fetch."""
+
+    adopted: list[object] = []
+    manifest = SimpleNamespace(digest="d" * 64, recipe_revision_sha256="b" * 64)
+
+    class Cache:
+        def download_preview(self, **_kwargs):
+            return {
+                "artifact_set_sha256": "d" * 64,
+                "plan_digest": "e" * 64,
+                "expected_bytes": 15,
+                "artifact_count": 2,
+                "new_bytes": 0,
+                "blockers": [],
+                "_manifest": manifest,
+            }
+
+        def start_download(self, **_kwargs):
+            raise AssertionError("nothing is missing, so nothing is downloaded")
+
+        def adopt_verified_set(self, value):
+            adopted.append(value)
+
+    plan = _plan(
+        preparation=SimpleNamespace(
+            model=SimpleNamespace(
+                artifact_set_sha256="d" * 64,
+                model_content_sha256="a" * 64,
+                recipe_revision_sha256="b" * 64,
+                artifact_count=2,
+                artifact_set_bytes=15,
+            )
+        ),
+        recipe_revision_id=str(uuid4()),
+    )
+    result = CompositeDistributionPhaseExecutor(
+        None, None, None, model_cache=Cache(), clock=lambda: datetime.now(UTC)
+    ).execute(
+        plan,
+        _phase(kind="transfer", subphase="model-download", index=0),
+        item_index=0,
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000000001",
+        progress={},
+    )
+    assert result.operation_id is None
+    assert result.result is not None and result.result["skipped"] is True
+    assert adopted == [manifest]
