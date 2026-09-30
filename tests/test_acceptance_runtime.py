@@ -198,7 +198,7 @@ def test_bundle_contract_is_exact_and_contains_no_secret_values_in_compose(
     (bundle / "docker-compose.yaml").write_text(
         "services:\n  api:\n    secrets: [token]\nsecrets:\n  token:\n    file: ./secrets/token\n"
     )
-    (bundle / ".env").write_text("COMPOSE_PROJECT_NAME=vonk-forge-control\n")
+    (bundle / ".env").write_text("COMPOSE_PROFILES=secure-remote\n")
     (secrets / "token").write_text("do-not-embed\n")
     (bundle / "docker-compose.yaml").chmod(0o644)
     (bundle / ".env").chmod(0o600)
@@ -238,7 +238,7 @@ def test_bundle_contract_allows_empty_optional_hugging_face_token(
     (bundle / "docker-compose.yaml").write_text(
         "services: {}\nsecrets:\n  hf-token:\n    file: ./secrets/hf-token\n"
     )
-    (bundle / ".env").write_text("COMPOSE_PROJECT_NAME=vonk-forge-control\n")
+    (bundle / ".env").write_text("COMPOSE_PROFILES=secure-remote\n")
     (secrets / "hf-token").write_text("\n")
     (bundle / "docker-compose.yaml").chmod(0o644)
     (bundle / ".env").chmod(0o600)
@@ -281,7 +281,7 @@ def test_compose_compatibility_exercises_every_declared_parser_fixture(
     bundle = tmp_path / "vonk-forge"
     bundle.mkdir()
     (bundle / "docker-compose.yaml").write_text("services: {}\n")
-    (bundle / ".env").write_text("COMPOSE_PROJECT_NAME=vonk-forge\n")
+    (bundle / ".env").write_text("COMPOSE_PROFILES=secure-remote\n")
     log = tmp_path / "fixtures.log"
     fixtures = []
     for name in ("ugreen-compose-5.1.3", "lower-compose-2.24.6"):
@@ -308,7 +308,7 @@ def test_compose_compatibility_rejects_all_parser_diagnostics(
     bundle = tmp_path / "vonk-forge"
     bundle.mkdir()
     (bundle / "docker-compose.yaml").write_text("services: {}\n")
-    (bundle / ".env").write_text("COMPOSE_PROJECT_NAME=vonk-forge\n")
+    (bundle / ".env").write_text("COMPOSE_PROFILES=secure-remote\n")
     fixture = tmp_path / "compose-v5"
     fixture.write_text(
         "#!/bin/sh\n"

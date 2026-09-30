@@ -38,6 +38,11 @@ pub enum SetupError {
     InputEnded,
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+    #[error(
+        "permission denied for {}: {source}; existing bundle files belong to root, so run the installer with sudo",
+        path.display()
+    )]
+    PermissionDenied { path: PathBuf, source: io::Error },
     #[error(transparent)]
     SecretGeneration(#[from] SecretGenerationError),
     #[error("generated secret material is invalid: {0}")]
@@ -891,9 +896,31 @@ pub fn prepare<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
 ) -> Result<SetupOutcome, SetupError> {
     let output_root = ensure_safe_output_root(&request.output_root)?;
     let bundle = output_root.join("vonk-forge");
-    match request.mode {
+    let result = match request.mode {
         SetupMode::Install => install(payload, &bundle, request.hermes_enabled, prompt, generator),
         SetupMode::Upgrade => upgrade(payload, &bundle, request.hermes_enabled, prompt, generator),
+    };
+    // A bare permission error names no file; point at the bundle at least.
+    match result {
+        Err(SetupError::Io(source)) if source.kind() == io::ErrorKind::PermissionDenied => {
+            Err(SetupError::PermissionDenied {
+                path: bundle,
+                source,
+            })
+        }
+        other => other,
+    }
+}
+
+/// Attach the path to a permission failure so the operator sees what to fix.
+fn at_path(path: &Path, error: io::Error) -> SetupError {
+    if error.kind() == io::ErrorKind::PermissionDenied {
+        SetupError::PermissionDenied {
+            path: path.to_path_buf(),
+            source: error,
+        }
+    } else {
+        SetupError::Io(error)
     }
 }
 
@@ -1949,7 +1976,7 @@ fn read_existing_secret(root: &Path, relative: &str) -> Result<String, SetupErro
 }
 
 fn parse_environment(path: &Path) -> Result<Vec<(String, String)>, SetupError> {
-    let document = fs::read_to_string(path)?;
+    let document = fs::read_to_string(path).map_err(|error| at_path(path, error))?;
     if document.len() > 256 * 1024 || document.contains('\0') {
         return Err(SetupError::UnsafeDestination(
             "existing .env is too large or malformed".to_owned(),
@@ -2471,7 +2498,7 @@ fn atomic_replace(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupErr
         }
         Err(error) => {
             let _ = fs::remove_file(temporary);
-            Err(error.into())
+            Err(at_path(path, error))
         }
     }
 }
@@ -2519,8 +2546,8 @@ fn set_open_mode(_options: &mut OpenOptions, _mode: u32) {}
 #[cfg(unix)]
 fn set_directory_mode(path: &Path) -> Result<(), SetupError> {
     use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-    Ok(())
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        .map_err(|error| at_path(path, error))
 }
 
 #[cfg(not(unix))]
@@ -2531,8 +2558,8 @@ fn set_directory_mode(_path: &Path) -> Result<(), SetupError> {
 #[cfg(unix)]
 fn set_file_mode(path: &Path, mode: u32) -> Result<(), SetupError> {
     use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
-    Ok(())
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+        .map_err(|error| at_path(path, error))
 }
 
 #[cfg(not(unix))]

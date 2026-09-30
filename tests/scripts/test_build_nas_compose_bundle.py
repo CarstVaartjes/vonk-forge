@@ -87,8 +87,10 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     assert result.returncode == 0, result.stderr
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 2
+    # The project name lives only in the Compose file, never in .env.
+    assert yaml.safe_load(payload["docker_compose_yaml"])["name"] == "vonk-forge"
+    assert all(v["env"] != "COMPOSE_PROJECT_NAME" for v in payload["internal_values"])
     assert payload["internal_values"] == [
-        {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"},
         {"env": "VONK_INSTALL_CHANNEL", "value": "stable"},
     ]
     # Only these lack a fixed default (the management CIDRs then derive from the
@@ -146,7 +148,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     assert required_compose_environment <= installer_environment
     assert set(compose["services"]) == SERVICES
     assert "include" not in compose
-    assert "name" not in compose
+    assert compose["name"] == "vonk-forge"
     assert "version" not in compose
     assert all("build" not in service for service in compose["services"].values())
     assert compose["services"]["hermes-agent"]["profiles"] == ["hermes"]
