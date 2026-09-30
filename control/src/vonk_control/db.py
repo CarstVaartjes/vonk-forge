@@ -48,6 +48,8 @@ def build_engine(database_url: str) -> Engine:
 
     budgets = DATABASE_WAIT_BUDGETS
     if "postgres" in database_url:
+        # transaction_timeout exists only on PostgreSQL 17+; the deployed
+        # Compose service pins postgres:18.6, so the server accepts it.
         connect_args = {
             "options": " ".join(
                 (
