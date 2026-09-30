@@ -9,7 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
-DEVELOPMENT_APT_WORKFLOW = ROOT / ".github/workflows/agent-apt-development.yml"
+RELEASE_WORKFLOW = ROOT / ".github/workflows/installer-publication.yml"
 UNIFIED_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 PACKAGE_WORKFLOW = ROOT / ".github/actions/agent-package-build/action.yml"
 COMPILE_WORKFLOW = ROOT / ".github/actions/agent-package-compile/action.yml"
@@ -96,6 +96,10 @@ def package_step(step_name: str) -> str:
 
 def package_step_run(step_name: str) -> str:
     return workflow_step_run(PACKAGE_WORKFLOW.read_text(), step_name)
+
+
+def development_apt_job() -> str:
+    return workflow_job(RELEASE_WORKFLOW.read_text(), "apt")
 
 
 def test_package_reruns_bind_distinct_binary_identities_and_consumers_agree():
@@ -495,7 +499,7 @@ def test_package_build_publishes_arm64_lower_acceptance_baseline() -> None:
             f"vonk-forge-agent_${{{{ inputs.baseline_version }}}}_{architecture}.deb"
             in upload
         )
-    assert "retention-days: 7" in upload
+    assert "retention-days: 90" in upload
     assert "overwrite: false" in upload
 
 
@@ -607,10 +611,10 @@ def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_
     baseline = workflow_step(text, "Upload immutable acceptance baseline packages")
 
     assert "name: ${{ inputs.artifact_name }}" in accepted
-    assert "retention-days: 30" in accepted
+    assert "retention-days: 90" in accepted
     assert "path: dist/*" in accepted
     assert "name: ${{ inputs.baseline_artifact_name }}" in baseline
-    assert "retention-days: 7" in baseline
+    assert "retention-days: 90" in baseline
     for architecture in ("arm64",):
         package = (
             f"vonk-forge-agent_${{{{ inputs.baseline_version }}}}_{architecture}.deb"
@@ -627,12 +631,16 @@ def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     text = WORKFLOW.read_text()
     metadata = text.split("\n  compile-arm64-candidate:\n", 1)[0]
 
-    assert "  push:\n    branches: [main]\n    paths:" in text
-    assert "rust/crates/vonk-agent/**" in text.split("  workflow_dispatch:", 1)[0]
-    assert "paths-ignore:" not in text.split("  workflow_dispatch:", 1)[0]
-    dispatch = text.split("  workflow_dispatch:", 1)[1].split("\n\npermissions:", 1)[0]
-    assert "inputs:" not in dispatch
-    assert "version:" not in dispatch
+    triggers = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+    release = workflow_job(RELEASE_WORKFLOW.read_text(), "agent")
+
+    # Only the release run on main calls it, and only for changed inputs.
+    assert triggers.startswith("  workflow_call:\n")
+    assert "push:" not in triggers
+    assert "workflow_dispatch:" not in triggers
+    assert "uses: ./.github/workflows/agent-release.yml" in release
+    assert "needs.changes.outputs.channel == 'dev'" in release
+    assert "needs.changes.outputs.agent == ''" in release
     assert metadata.count("fetch-depth: 0") == 1
     assert metadata.count("git fetch --no-tags --prune origin") == 1
     assert metadata.count('test "$GITHUB_REF" = "refs/heads/main"') == 1
@@ -648,32 +656,17 @@ def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     assert "verify-main-for-apt:" not in text
 
 
-def test_development_cancels_only_stale_keyless_and_package_build_work() -> None:
+def test_development_cancellation_is_owned_by_the_release_run() -> None:
     text = WORKFLOW.read_text()
-    workflow_header = text.split("\njobs:\n", 1)[0]
-    package = text.split("\n  build-test-sign:\n", 1)[1].split(
-        "\n  security-gates:\n", 1
-    )[0]
-    security = text.split("\n  security-gates:\n", 1)[1].split(
-        "\n  native-arm64-lifecycle:\n", 1
-    )[0]
-    native = text.split("\n  native-arm64-lifecycle:\n", 1)[1]
-    publisher = DEVELOPMENT_APT_WORKFLOW.read_text()
+    release = RELEASE_WORKFLOW.read_text()
+    caller = workflow_job(release, "agent")
+    publisher = development_apt_job()
 
-    assert "concurrency:" not in workflow_header
-    for architecture in ("arm64",):
-        for binary_set in ("candidate", "baseline"):
-            compiler = workflow_job(text, f"compile-{architecture}-{binary_set}")
-            assert (
-                "group: vonk-forge-agent-development-compile-"
-                f"{architecture}-{binary_set}"
-            ) in compiler
-            assert "cancel-in-progress: true" in compiler
-    assert "group: vonk-forge-agent-development-package" in package
-    assert "cancel-in-progress: true" in package
-    assert "group: vonk-forge-agent-development-security" in security
-    assert "cancel-in-progress: true" in security
-    assert "cancel-in-progress: true" in native
+    # A newer main push cancels this run's package work from the caller; no
+    # inner group can cancel another release run's jobs.
+    assert "concurrency:" not in text
+    assert "group: vonk-forge-release-agent-${{ github.ref }}" in caller
+    assert "cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}" in caller
     assert "group: vonk-forge-agent-apt-dev" in publisher
     assert "cancel-in-progress: false" in publisher
 
@@ -771,9 +764,7 @@ def test_development_compiler_fanout_is_role_complete_and_collision_free() -> No
     assert text.count("needs: [package-metadata]") == 3
     for compiler_name in compiler_names:
         compiler = workflow_job(text, compiler_name)
-        assert f"group: vonk-forge-agent-development-{compiler_name}" in compiler
-        for other_name in compiler_names - {compiler_name}:
-            assert f"group: vonk-forge-agent-development-{other_name}" not in compiler
+        assert "needs: [package-metadata]" in compiler
 
 
 def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() -> None:
@@ -898,7 +889,7 @@ def test_development_metadata_uses_actions_publication_sequence() -> None:
 def test_development_workflows_bind_both_literal_environment_boundaries() -> None:
     text = WORKFLOW.read_text()
     jobs = text.split("\njobs:\n", 1)[1]
-    publisher = DEVELOPMENT_APT_WORKFLOW.read_text()
+    publisher = development_apt_job()
 
     assert "uses: ./.github/actions/agent-package-build" in text
     assert "channel: ${{ needs.package-metadata.outputs.channel }}" in text
@@ -913,15 +904,15 @@ def test_development_workflows_bind_both_literal_environment_boundaries() -> Non
     assert "R2_SECRET_ACCESS_KEY" not in text
     assert "uses: ./.github/actions/agent-apt-publish" in publisher
     assert "environment: apt-development" in publisher
-    assert "source_sha: ${{ needs.authority.outputs.source_sha }}" in publisher
+    assert "source_sha: ${{ github.sha }}" in publisher
     assert "tag_name: ''" in publisher
     assert "tag_oid: ''" in publisher
-    assert "needs: [authority]" in publisher
-    assert "artifact_name: ${{ needs.authority.outputs.artifact_name }}" in publisher
+    assert "needs: [agent]" in publisher
+    assert "artifact_name: ${{ needs.agent.outputs.artifact_name }}" in publisher
     for architecture in ("arm64",):
         assert (
             f"{architecture}_package: "
-            f"${{{{ needs.authority.outputs.{architecture}_package }}}}" in publisher
+            f"${{{{ needs.agent.outputs.{architecture}_package }}}}" in publisher
         )
     assert "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}" in text
     assert "apt_gpg_passphrase: ${{ secrets.APT_GPG_PASSPHRASE }}" in publisher
@@ -937,7 +928,7 @@ def test_development_workflows_bind_both_literal_environment_boundaries() -> Non
 def test_development_publication_requires_native_arm64_lifecycle() -> None:
     text = WORKFLOW.read_text()
     lifecycle = text.split("\n  native-arm64-lifecycle:\n", 1)[1]
-    publisher = DEVELOPMENT_APT_WORKFLOW.read_text()
+    publisher = development_apt_job()
 
     assert "needs: [package-metadata, build-test-sign]" in lifecycle
     assert "runs-on: ubuntu-24.04-arm" in lifecycle
@@ -946,71 +937,39 @@ def test_development_publication_requires_native_arm64_lifecycle() -> None:
     assert "podman shellcheck slirp4netns uidmap" in lifecycle
     assert 'scripts/verify-agent-deb --json "accepted/$ARM64_PACKAGE"' in lifecycle
     assert "scripts/test-agent-package-native-lifecycle" in lifecycle
-    assert "'Lifecycle-test accepted ARM64 package on ARM64'" in publisher
+    # The lifecycle job belongs to the called agent workflow, so apt dev
+    # publishes only after it, and every other agent gate, succeeded.
+    assert "if: needs.agent.result == 'success'" in publisher
 
 
-def test_development_apt_publication_is_exact_run_bound() -> None:
+def test_development_apt_publication_is_bound_to_this_release_run() -> None:
     upstream = WORKFLOW.read_text()
-    publisher = DEVELOPMENT_APT_WORKFLOW.read_text()
-    authority = workflow_job(publisher, "authority")
-    publication = workflow_job(publisher, "publish-apt")
-    resolve = workflow_step(authority, "Resolve exact successful upstream agent run")
-    accepted = workflow_step(
-        authority, "Verify exact gates and immutable package artifacts"
-    )
+    release = RELEASE_WORKFLOW.read_text()
+    publication = development_apt_job()
+    producers = workflow_job(release, "producers")
+    authority = workflow_job(release, "authority")
 
     assert "publish-apt:" not in upstream
-    assert (
-        "workflow_run:\n    workflows: [Rust Vonk Forge agent development]" in publisher
-    )
-    assert "workflow_dispatch:" in publisher
-    assert "upstream_run_id:" in publisher
-    assert "upstream_run_number:" in publisher
-    assert "actions: read" in publisher
-    assert "contents: read" in publisher
-    assert "contents: write" not in publisher
-    assert "environment:" not in authority
-    assert "secrets." not in authority
-    for binding in (
-        ".github/workflows/agent-release.yml",
-        "Rust Vonk Forge agent development",
-        '.head_branch == "main"',
-        ".head_repository.full_name == $repository",
-        ".repository.full_name == $repository",
-        '.event == "push" or .event == "workflow_dispatch"',
-        '.status == "completed" and .conclusion == "success"',
-    ):
-        assert binding in resolve
-    assert "/actions/runs/$REQUESTED_RUN_ID" in resolve
-    assert "/actions/workflows/agent-release.yml" in resolve
-    assert 'test "$EVENT_RUN_ID" = "$REQUESTED_RUN_ID"' in resolve
-    assert 'test "$EVENT_RUN_NUMBER" = "$REQUESTED_RUN_NUMBER"' in resolve
-    assert 'test "$EVENT_HEAD_SHA" = "$source_sha"' in resolve
-    assert "scripts/agent-package-metadata" in accepted
-    assert "+refs/heads/main:refs/remotes/origin/main" in accepted
-    assert 'git merge-base --is-ancestor "$SOURCE_SHA"' in accepted
-    assert "jobs?filter=latest&per_page=100" in accepted
-    assert "artifacts?per_page=100" in accepted
-    for gate in (
-        "Derive development package metadata",
-        "Compile ARM64 candidate package binaries",
-        "Compile ARM64 baseline package binaries",
-        "Build, sign, and lifecycle-test ARM64 Spark agent",
-        "Run Rust and package security gates",
-        "Lifecycle-test accepted ARM64 package on ARM64",
-    ):
-        assert f"'{gate}'" in accepted
-    assert "(.workflow_run.id | tostring) == $run_id" in accepted
-    assert ".workflow_run.head_sha == $source_sha" in accepted
-    assert ".size_in_bytes > 0" in accepted
-    assert "needs: [authority]" in publication
+    for output in ("version", "arm64_package", "artifact_name"):
+        assert f"value: ${{{{ jobs.build-test-sign.outputs.{output} }}}}" in upstream
+    assert "needs: [agent]" in publication
+    assert "if: needs.agent.result == 'success'" in publication
     assert "environment: apt-development" in publication
     assert "group: vonk-forge-agent-apt-dev" in publication
     assert "cancel-in-progress: false" in publication
-    assert "ref: ${{ needs.authority.outputs.source_sha }}" in publication
-    assert "artifact_run_id: ${{ needs.authority.outputs.run_id }}" in publication
-    assert "artifact_token: ${{ github.token }}" in publication
-    assert "source_sha: ${{ needs.authority.outputs.source_sha }}" in publication
+    assert "contents: write" not in publication
+    # The package comes from this run, never from another run.
+    assert "artifact_run_id" not in publication
+    assert "artifact_token" not in publication
+    assert "source_sha: ${{ github.sha }}" in publication
+    assert "version: ${{ needs.agent.outputs.version }}" in publication
+    # Later releases reuse the package only after apt dev published it, and
+    # the installer generation waits for the apt publication.
+    assert (
+        "if: needs.agent.result == 'success' && needs.apt.result == 'success'"
+        in producers
+    )
+    assert "needs: [changes, ci, agent, apt, images, setups, producers]" in authority
 
 
 def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() -> None:
@@ -1125,7 +1084,7 @@ def test_apt_publish_action_has_a_strict_channel_boundary() -> None:
     assert "stable:apt-release" in text
     assert "secrets." not in text
     assert "vars." not in text
-    development = DEVELOPMENT_APT_WORKFLOW.read_text()
+    development = development_apt_job()
     production = UNIFIED_WORKFLOW.read_text()
     assert "environment: apt-development" in development
     assert "environment: apt-release" in production
@@ -1201,7 +1160,7 @@ def test_reusable_apt_publisher_rechecks_dev_authority_inside_protected_job() ->
     step_names = re.findall(r"^\s+- name: (.+)$", text, re.MULTILINE)
     authority_index = step_names.index("Reverify accepted development source authority")
 
-    assert "environment: apt-development" in DEVELOPMENT_APT_WORKFLOW.read_text()
+    assert "environment: apt-development" in development_apt_job()
     assert "environment: apt-release" in UNIFIED_WORKFLOW.read_text()
     assert "CALLER_SHA: ${{ github.sha }}" in authority
     assert "CHANNEL: ${{ inputs.channel }}" in authority
@@ -1389,7 +1348,7 @@ def test_reusable_apt_publisher_supports_bucket_scoped_r2_tokens() -> None:
 
 def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() -> None:
     agent_text = WORKFLOW.read_text()
-    development_apt_text = DEVELOPMENT_APT_WORKFLOW.read_text()
+    development_apt_text = development_apt_job()
     unified_text = UNIFIED_WORKFLOW.read_text()
     package_text = PACKAGE_WORKFLOW.read_text()
     apt_text = APT_WORKFLOW.read_text()
@@ -1453,10 +1412,10 @@ def test_action_pin_guard_scans_yaml_and_keeps_local_calls_exempt(
 def test_development_agent_workflow_has_no_production_authority() -> None:
     text = WORKFLOW.read_text()
     jobs = text.split("\njobs:\n", 1)[1]
-    publisher = DEVELOPMENT_APT_WORKFLOW.read_text()
+    publisher = development_apt_job()
 
     assert "publish-apt:" not in text
-    assert "publish-apt:" in publisher
+    assert "uses: ./.github/actions/agent-apt-publish" in publisher
     assert "apt-development" in publisher
     assert "apt-release" not in publisher
     assert "apt-release" not in text

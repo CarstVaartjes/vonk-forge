@@ -1,33 +1,21 @@
 name: Rust Vonk Forge agent development
 
+# Called by the release workflow (installer-publication.yml), which owns the
+# trigger, concurrency and the decision whether this producer must run. The
+# development package version ends in ~dev.<run_number>: github.run_number is
+# the calling release workflow's counter.
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/actions/agent-package-build/**
-      - .github/actions/agent-package-compile/**
-      - .github/actions/agent-package-security/**
-      - .github/workflows/agent-release.yml
-      - Cargo.lock
-      - Cargo.toml
-      - packaging/**
-      - rust/crates/vonk-agent/**
-      - rust/crates/vonk-monitor/**
-      - rust/crates/vonk-agent-helper/**
-      - rust/crates/vonk-agent-protocol/**
-      - rust/crates/vonk-build-egress/**
-      - rust/crates/vonk-repair-helper-probe/**
-      - scripts/agent-package-metadata
-      - scripts/build-agent-deb
-      - scripts/materialize-agent-tools
-      - scripts/test-agent-package-native-lifecycle
-      - tests/scripts/test_agent_deb.py
-      - tests/scripts/test_docker_firewall.sh
-      - scripts/verify-agent-binaries
-      - scripts/verify-agent-deb
-      - scripts/verify-agent-systemd
-      - scripts/verify-release-tag-authority
-  workflow_dispatch:
+  workflow_call:
+    outputs:
+      version:
+        description: Exact accepted development package version
+        value: ${{ jobs.build-test-sign.outputs.version }}
+      arm64_package:
+        description: Exact accepted ARM64 Debian package filename
+        value: ${{ jobs.build-test-sign.outputs.arm64_package }}
+      artifact_name:
+        description: Immutable accepted package artifact name
+        value: ${{ jobs.build-test-sign.outputs.artifact_name }}
 
 permissions:
   contents: read
@@ -81,9 +69,6 @@ jobs:
     needs: [package-metadata]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
-    concurrency:
-      group: vonk-forge-agent-development-compile-arm64-candidate
-      cancel-in-progress: true
     permissions:
       contents: read
     steps:
@@ -110,9 +95,6 @@ jobs:
     needs: [package-metadata]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
-    concurrency:
-      group: vonk-forge-agent-development-compile-arm64-baseline
-      cancel-in-progress: true
     permissions:
       contents: read
     steps:
@@ -146,9 +128,6 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     environment: agent-development
-    concurrency:
-      group: vonk-forge-agent-development-package
-      cancel-in-progress: true
     permissions:
       artifact-metadata: write
       attestations: write
@@ -202,9 +181,6 @@ jobs:
     needs: [package-metadata]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
-    concurrency:
-      group: vonk-forge-agent-development-security
-      cancel-in-progress: true
     permissions:
       contents: read
     steps:
@@ -250,9 +226,6 @@ jobs:
     needs: [package-metadata, build-test-sign]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
-    concurrency:
-      group: vonk-forge-agent-development-native-lifecycle
-      cancel-in-progress: true
     permissions:
       contents: read
     steps:

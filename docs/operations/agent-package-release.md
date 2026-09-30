@@ -23,6 +23,51 @@ curl -fsSL https://install.vonkforge.ai/spark | sh
 Development and stable releases run the same topology and lifecycle. Only the
 immutable image, package, setup-program, and manifest identities differ.
 
+## The release workflow
+
+`.github/workflows/installer-publication.yml` (named `Release`) is the only
+release entry point. A push to `main` releases the `dev` channel; a push of a
+signed `vX.Y.Z` tag releases `stable`. A manual dispatch on `main` re-runs the
+release for the current tip. Each run is one fan-in:
+
+1. `changes` selects the development producers this source needs.
+2. `ci` calls `ci.yml`, the same suite pull requests run. For a tag it also
+   validates the signed tag and builds the stable agent package, images,
+   GitHub Release and stable apt publication.
+3. The development producers, `agent` (`agent-release.yml`), `images`
+   (`dev-images.yml`) and `setups` (`installer-setups.yml`), run only when
+   `changes` found no reusable evidence. A stable release always builds its
+   setup programs; it never runs the development producers.
+4. `apt` publishes a freshly built development agent package to apt dev.
+5. `authority` starts once all of the above have settled, and only if none
+   failed or was cancelled. It verifies the exact evidence and hands it to
+   candidate, NAS and Spark acceptance, acceptance signing and promotion.
+
+A development producer is skipped when the newest release run that completed
+it, on an ancestor of the source, saw the same producer inputs and its
+artifacts are still available. `scripts/resolve-publication-producer` owns the
+input paths of each producer. Every release records the producers it completed
+as `release-producer-<name>` marker artifacts, so the lookup needs no walk over
+runs that reused. An agent package counts only after apt dev published it; a
+failed apt publication is therefore healed by the next release building again.
+Producer artifacts, markers, acceptance and promotion receipts are kept for 90
+days, the repository maximum, which bounds how long evidence can be reused.
+
+Development agent packages are versioned `X.Y.Z~dev.<run_number>+g<sha>`, where
+`<run_number>` is the `Release` workflow's run number of the run that built the
+package. The workflow keeps its historical file path so that counter continues
+from the retired installer publication runs and stays above every development
+version already published to apt.
+
+A newer `main` push cancels the older release's CI, producers and acceptance
+jobs. It never interrupts candidate publication, promotion or an apt
+publication; those R2 writers wait for each other in their own concurrency
+groups. Before any R2 write, a superseded development run cancels itself. Tag
+releases never cancel.
+
+`.github/workflows/installer-maintenance.yml` refreshes both channel manifests
+daily and, when dispatched, removes stale disposable CI tailnets.
+
 ## One-time publication authority setup
 
 The workflow separates candidate signing, behavioral canaries, acceptance
@@ -99,8 +144,8 @@ when a `Vonk Forge CI ...` child older than the maximum job lifetime exists. It
 reports only the exact child ID and display name and creates nothing new.
 
 Remove that residual with the sanctioned cleanup rather than by hand. Dispatch
-`.github/workflows/installer-publication.yml` with the `tailnet_cleanup` input
-enabled, optionally passing the exact child id in `child_id`; the job runs
+`.github/workflows/installer-maintenance.yml` on `main`, optionally passing the
+exact child id in `child_id`; the job runs
 `scripts/tailscale-acceptance-tailnet cleanup` under the `installer-canary-dev`
 environment, which is the only place the factory credential exists. Cleanup
 deletes only children whose display name matches the CI pattern, whose id and
@@ -165,13 +210,13 @@ publicly readable but the publication token is write-scoped only to this
 bucket. The stable and development channel endpoints embed the same public key;
 rotating it is an explicit endpoint rollout, not part of an ordinary release.
 
-The `Installer setup programs` workflow tests and builds the native setup
-executables. Publication downloads those exact workflow artifacts by source SHA
+The `setups` producer (`installer-setups.yml`) tests and builds the native
+setup executables. Publication downloads those exact artifacts by source SHA
 and run ID. It never rebuilds them. Release JSON is signed, and one signed,
 expiring `current.manifest` atomically advances both `/nas` and `/spark` for a
 channel. Stable publication rejects an older semantic version.
 
-The publication workflow refreshes both channel manifests daily. Refresh first
+The maintenance workflow refreshes both channel manifests daily. Refresh first
 verifies the existing manifest signature, every referenced immutable object and
 digest, and the detached release signature; only then does it extend the signed
 expiry. A quiet release channel therefore remains installable without

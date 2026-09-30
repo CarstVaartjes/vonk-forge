@@ -1156,14 +1156,15 @@ def test_release_builds_are_per_version_and_alias_jobs_reconcile_globally() -> N
     text = workflow()
     publisher = job("publish-images")
 
+    # Only a newer PR or merge-group commit cancels CI; a release run that
+    # calls CI has a group of its own and owns its cancellation.
     assert (
         "github.event.pull_request.number || github.event.merge_group.head_sha "
-        "|| github.ref" in text
+        "|| github.run_id" in text
     )
     assert (
         "cancel-in-progress: ${{ github.event_name == 'pull_request' "
-        "|| github.event_name == 'merge_group' || (github.event_name == 'push' "
-        "&& github.ref == 'refs/heads/main') }}" in text
+        "|| github.event_name == 'merge_group' }}" in text
     )
     assert "group: vonk-forge-container-publication-${{" in publisher
     assert "needs.release-metadata.outputs.version" in publisher

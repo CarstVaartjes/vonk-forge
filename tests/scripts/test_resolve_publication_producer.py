@@ -2,20 +2,18 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
-import json
 import subprocess
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = "b" * 40
-BASE = "a" * 40
+REPO = "owner/repo"
 
 
 def module():
     loader = importlib.machinery.SourceFileLoader(
-        "producer_ready", str(ROOT / "scripts/resolve-publication-producer")
+        "producer_evidence", str(ROOT / "scripts/resolve-publication-producer")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec
@@ -24,189 +22,223 @@ def module():
     return result
 
 
+def git(*args: str) -> str:
+    return subprocess.check_output(["git", *args], text=True).strip()
+
+
+def commit(root: Path, path: str, content: str) -> str:
+    target = root / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content)
+    git("add", "-A")
+    git("commit", "-qm", path)
+    return git("rev-parse", "HEAD")
+
+
+@pytest.fixture
+def history(tmp_path, monkeypatch):
+    """main: base -> docs -> packaging change; plus an unrelated branch."""
+    monkeypatch.chdir(tmp_path)
+    git("init", "-q", "-b", "main")
+    git("config", "user.name", "CI test")
+    git("config", "user.email", "ci@example.invalid")
+    git("config", "commit.gpgsign", "false")
+    shas = {"base": commit(tmp_path, "packaging/input", "one\n")}
+    shas["docs"] = commit(tmp_path, "docs/guide.md", "words\n")
+    shas["changed"] = commit(tmp_path, "packaging/input", "two\n")
+    git("checkout", "-q", "-b", "side", shas["base"])
+    shas["side"] = commit(tmp_path, "docs/side.md", "elsewhere\n")
+    git("checkout", "-q", "main")
+    return shas
+
+
+class FakeGitHub:
+    """Serves the three REST reads the resolver makes."""
+
+    def __init__(self, resolver) -> None:
+        self.resolver = resolver
+        self.markers: list[dict] = []
+        self.runs: dict[int, dict] = {}
+        self.artifacts: dict[int, list[dict]] = {}
+        self.calls: list[str] = []
+
+    def release(
+        self,
+        run_id: int,
+        sha: str,
+        producer: str,
+        *,
+        artifacts: bool = True,
+        path: str | None = None,
+        branch: str = "main",
+    ) -> None:
+        self.runs[run_id] = {
+            "id": run_id,
+            "run_number": run_id + 1000,
+            "path": path or self.resolver.RELEASE_WORKFLOW,
+            "head_branch": branch,
+            "head_sha": sha,
+            "event": "push",
+        }
+        spec = self.resolver.PRODUCERS[producer]
+        names = spec.artifact_names(sha) if artifacts else set()
+        self.artifacts[run_id] = [
+            {"name": name, "expired": False} for name in sorted(names)
+        ]
+        # The artifacts API lists the newest markers first.
+        self.markers.insert(
+            0,
+            {
+                "name": self.resolver.marker_name(producer),
+                "expired": False,
+                "workflow_run": {"id": run_id, "head_sha": sha, "head_branch": branch},
+            },
+        )
+
+    def __call__(self, endpoint: str) -> dict:
+        self.calls.append(endpoint)
+        path, _, query = endpoint.partition("?")
+        parameters = dict(item.split("=", 1) for item in query.split("&") if item)
+        page = slice(
+            (int(parameters.get("page", "1")) - 1) * 100,
+            int(parameters.get("page", "1")) * 100,
+        )
+        if path == f"repos/{REPO}/actions/artifacts":
+            matching = [m for m in self.markers if m["name"] == parameters["name"]]
+            return {"artifacts": matching[page]}
+        run_id = int(path.split("/")[5])
+        if path.endswith("/artifacts"):
+            return {"artifacts": self.artifacts[run_id][page]}
+        return self.runs[run_id]
+
+
+@pytest.fixture
+def github(monkeypatch):
+    resolver = module()
+    fake = FakeGitHub(resolver)
+    monkeypatch.setattr(resolver, "api", fake)
+    return resolver, fake
+
+
 @pytest.mark.parametrize(
-    ("workflow", "changed", "expected"),
+    ("producer", "changed", "expected"),
     [
-        ("installer-setups.yml", "scripts/select-pytest-shard-files", False),
-        ("installer-setups.yml", "rust/crates/vonk-nas-setup/src/lib.rs", True),
-        ("agent-release.yml", "packaging/debian/postinst", True),
-        (
-            "dev-images.yml",
-            "control/src/vonk_control/harnesses/canonical_metadata.py",
-            True,
-        ),
-        ("dev-images.yml", "docs/something.md", False),
+        ("setups", "scripts/select-pytest-shard-files", False),
+        ("setups", "rust/crates/vonk-nas-setup/src/lib.rs", True),
+        ("agent", "packaging/debian/postinst", True),
+        ("agent", ".github/actions/agent-apt-publish/action.yml", True),
+        ("images", "control/src/vonk_control/harnesses/canonical_metadata.py", True),
+        ("images", "docs/something.md", False),
+        ("images", ".github/workflows/installer-publication.yml", True),
+        ("setups", "scripts/resolve-publication-producer", True),
     ],
 )
-def test_ancestor_reuse_checks_actual_producer_filters(
-    monkeypatch, workflow, changed, expected
+def test_reuse_checks_each_producer_input_filter(
+    monkeypatch, producer, changed, expected
 ):
     resolver = module()
 
     def command(*args):
-        if args[1] == "show":
-            return (ROOT / ".github/workflows" / workflow).read_text()
         assert "--no-renames" in args
         return changed
 
     monkeypatch.setattr(resolver, "run", command)
-    assert (
-        resolver.changed_matches(BASE, SOURCE, resolver.paths_at(SOURCE, workflow))
-        is expected
-    )
+    patterns = resolver.PRODUCERS[producer].paths
+    assert resolver.changed_matches("a" * 40, "b" * 40, patterns) is expected
 
 
-@pytest.mark.parametrize(
-    ("status", "conclusion", "expected"),
-    [
-        ("in_progress", "", 2),
-        ("completed", "failure", 1),
-        ("completed", "success", 0),
-    ],
-)
-@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
-def test_exact_producer_cannot_fall_back_while_running_or_failed(
-    monkeypatch, status, conclusion, expected, event
-):
+def test_renaming_an_input_out_of_its_area_is_a_change(history):
     resolver = module()
-
-    def command(*args):
-        assert "head_sha=" in args[-1]
-        assert "event=push" not in args[-1]
-        return json.dumps(
-            {
-                "workflow_runs": [
-                    {
-                        "id": 5,
-                        "run_number": 2,
-                        "head_sha": SOURCE,
-                        "head_branch": "main",
-                        "event": event,
-                        "status": status,
-                        "conclusion": conclusion,
-                    }
-                ]
-            }
-        )
-
-    monkeypatch.setattr(resolver, "run", command)
-    actual, evidence = resolver.resolve("dev-images.yml", SOURCE, "owner/repo")
-    assert actual == expected
-    assert evidence == ((5, 2, SOURCE) if expected == 0 else None)
-
-
-def test_latest_exact_dispatch_supersedes_older_push(monkeypatch):
-    resolver = module()
-    runs = [
-        {"id": 5, "run_number": 541, "event": "push"},
-        {"id": 9, "run_number": 542, "event": "workflow_dispatch"},
-        {"id": 10, "run_number": 543, "event": "pull_request"},
-    ]
-    for item in runs:
-        item.update(
-            head_sha=SOURCE,
-            head_branch="main",
-            status="completed",
-            conclusion="success",
-        )
-
-    def command(*args):
-        assert (
-            "head_sha=" in args[-1]
-        )  # No ancestor lookup may replace this exact producer.
-        return json.dumps({"workflow_runs": runs})
-
-    monkeypatch.setattr(resolver, "run", command)
-    assert resolver.resolve("agent-release.yml", SOURCE, "owner/repo") == (
-        0,
-        (9, 542, SOURCE),
-    )
-
-
-def test_renaming_an_input_out_of_its_area_is_a_change(tmp_path, monkeypatch):
-    resolver = module()
-    monkeypatch.chdir(tmp_path)
-
-    def git(*args):
-        return subprocess.check_output(["git", *args], text=True).strip()
-
-    git("init", "-q")
-    git("config", "user.name", "CI test")
-    git("config", "commit.gpgsign", "false")
-    git("config", "user.email", "ci@example.invalid")
-    (tmp_path / "packaging").mkdir()
-    (tmp_path / "packaging/input").write_text("artifact input\n")
-    git("add", ".")
-    git("commit", "-qm", "input")
     before = git("rev-parse", "HEAD")
-    (tmp_path / "docs").mkdir()
     git("mv", "packaging/input", "docs/input")
     git("commit", "-qm", "move input")
-    assert resolver.changed_matches(before, git("rev-parse", "HEAD"), ["packaging/**"])
+    assert resolver.changed_matches(before, git("rev-parse", "HEAD"), ("packaging/**",))
 
 
-@pytest.mark.parametrize(
-    ("status", "conclusion"),
-    [("completed", "failure"), ("in_progress", "")],
-)
-def test_later_failed_or_running_rerun_keeps_successful_exact_evidence(
-    monkeypatch, status, conclusion
-):
-    """A dispatch that raced the push build must not revoke its evidence."""
-    resolver = module()
-    runs = [
-        {
-            "id": 5,
-            "run_number": 541,
-            "event": "push",
-            "created_at": "2026-09-28T11:45:00Z",
-            "status": "completed",
-            "conclusion": "success",
-        },
-        {
-            "id": 9,
-            "run_number": 542,
-            "event": "workflow_dispatch",
-            "created_at": "2026-09-28T11:46:00Z",
-            "status": status,
-            "conclusion": conclusion,
-        },
-    ]
-    for item in runs:
-        item.update(head_sha=SOURCE, head_branch="main")
-
-    def command(*args):
-        assert "head_sha=" in args[-1]
-        return json.dumps({"workflow_runs": runs})
-
-    monkeypatch.setattr(resolver, "run", command)
-    assert resolver.resolve("dev-images.yml", SOURCE, "owner/repo") == (
+def test_unchanged_producer_reuses_the_newest_ancestor_release(history, github):
+    resolver, fake = github
+    fake.release(10, history["base"], "agent")
+    fake.release(11, history["docs"], "agent")
+    assert resolver.resolve("agent", history["docs"], REPO) == (
         0,
-        (5, 541, SOURCE),
+        (11, 1011, history["docs"]),
+    )
+    # A documentation-only child keeps reusing the package built for docs.
+    git("checkout", "-q", "-b", "later", history["docs"])
+    child = commit(Path.cwd(), "docs/more.md", "more\n")
+    assert resolver.resolve("agent", child, REPO) == (0, (11, 1011, history["docs"]))
+
+
+def test_changed_inputs_build_even_when_an_older_release_matched(history, github):
+    resolver, fake = github
+    fake.release(10, history["base"], "agent")
+    assert resolver.resolve("agent", history["changed"], REPO) == (2, None)
+    # A producer whose inputs did not change still reuses the same ancestor.
+    fake.release(12, history["base"], "setups")
+    assert resolver.resolve("setups", history["changed"], REPO) == (
+        0,
+        (12, 1012, history["base"]),
     )
 
 
-def test_exact_runs_that_all_failed_are_rejected_only_when_none_is_running(
-    monkeypatch,
-):
-    resolver = module()
-    runs = [
-        {"id": 5, "status": "completed", "conclusion": "failure"},
-        {"id": 9, "status": "in_progress", "conclusion": ""},
+def test_missing_evidence_falls_back_to_an_older_complete_release(history, github):
+    resolver, fake = github
+    fake.release(10, history["base"], "setups")
+    fake.release(11, history["docs"], "setups", artifacts=False)
+    assert resolver.resolve("setups", history["docs"], REPO) == (
+        0,
+        (10, 1010, history["base"]),
+    )
+
+
+def test_expired_foreign_and_non_ancestor_markers_are_ignored(history, github):
+    resolver, fake = github
+    fake.release(10, history["side"], "images")
+    fake.release(11, history["base"], "images", branch="feature")
+    fake.release(12, history["base"], "images", path=".github/workflows/other.yml")
+    fake.release(13, history["base"], "images")
+    fake.markers[0]["expired"] = True
+    assert resolver.resolve("images", history["docs"], REPO) == (2, None)
+
+
+def test_no_recorded_producer_means_build_here(history, github):
+    resolver, fake = github
+    assert resolver.resolve("images", history["docs"], REPO) == (2, None)
+    assert fake.calls == [
+        f"repos/{REPO}/actions/artifacts?name=release-producer-images&per_page=100&page=1"
     ]
-    for index, item in enumerate(runs):
-        item.update(
-            head_sha=SOURCE,
-            head_branch="main",
-            event="push",
-            run_number=index,
-            created_at=f"2026-09-28T11:4{index}:00Z",
-        )
 
-    def command(*args):
-        return json.dumps({"workflow_runs": runs})
 
-    monkeypatch.setattr(resolver, "run", command)
-    assert resolver.resolve("dev-images.yml", SOURCE, "owner/repo") == (2, None)
-    runs[1].update(status="completed", conclusion="failure")
-    assert resolver.resolve("dev-images.yml", SOURCE, "owner/repo") == (1, None)
+def test_markers_are_read_page_by_page_until_a_decision(history, github):
+    resolver, fake = github
+    fake.release(10, history["base"], "images")
+    for run_id in range(100, 200):
+        fake.release(run_id, history["side"], "images")
+    assert resolver.resolve("images", history["docs"], REPO) == (
+        0,
+        (10, 1010, history["base"]),
+    )
+    assert fake.calls[1].endswith("&page=2")
+
+
+@pytest.mark.parametrize(
+    ("arguments", "status"),
+    [
+        (["unknown", "a" * 40], 1),
+        (["agent", "not-a-sha"], 1),
+        (["agent"], 64),
+    ],
+)
+def test_invalid_requests_are_rejected(monkeypatch, arguments, status):
+    resolver = module()
+    monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
+    monkeypatch.setattr("sys.argv", ["resolve-publication-producer", *arguments])
+    assert resolver.main() == status
+
+
+def test_release_workflow_records_every_producer_the_resolver_reads():
+    resolver = module()
+    workflow = (ROOT / resolver.RELEASE_WORKFLOW).read_text()
+    assert f"for producer in {' '.join(resolver.PRODUCERS)}; do" in workflow
+    for producer in resolver.PRODUCERS:
+        assert f"name: {resolver.marker_name(producer)}\n" in workflow

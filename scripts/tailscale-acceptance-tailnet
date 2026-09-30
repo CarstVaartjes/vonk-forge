@@ -5,7 +5,7 @@
 run died before its runner-local state file could be used.  It cannot run on a
 developer machine: the factory credential that reaches the API-only children is
 an environment secret on the `installer-canary-dev` GitHub environment, so the
-`workflow_dispatch` path in `.github/workflows/installer-publication.yml` is the
+`workflow_dispatch` path in `.github/workflows/installer-maintenance.yml` is the
 primary interface rather than a convenience.  Running it locally fails on the
 missing credential, which is expected and not a broken script.
 """
