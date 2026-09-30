@@ -899,8 +899,9 @@ def initialize_database(
                     except SQLAlchemyError as error:
                         raise RuntimeError(
                             "Controller startup schema reconciliation failed and the "
-                            "transaction was rolled back. Startup will retry "
-                            f"reconciliation automatically; schema failure: {error}"
+                            "transaction was rolled back. This error class is not "
+                            "retryable, so startup aborts; schema failure: "
+                            f"{error}"
                         ) from error
                 finally:
                     if lock_connection.in_transaction():
