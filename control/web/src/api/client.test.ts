@@ -14,7 +14,14 @@ function stubFetch(body: unknown): string[] {
   return urls;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+function setCsrfCookie(): void {
+  document.cookie = "vonk_csrf=test-csrf-token; Path=/";
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  document.cookie = "vonk_csrf=; Max-Age=0; Path=/";
+});
 
 test("sends sort and updated_since to both library routes", async () => {
   // Break caught: the client accepts the server ordering arguments but drops
@@ -47,10 +54,12 @@ test("creates a Fleet enrollment grant through the current operator endpoint", a
       headers: {"Content-Type": "application/json"},
     });
   });
+  setCsrfCookie();
   const input = {name: "Spark home", request_key: "00000000-0000-4000-8000-000000000101"};
   await new ApiClient().enrollFleetNode(input);
   expect(requests).toHaveLength(1);
   expect(requests[0]!.method).toBe("POST");
+  expect(requests[0]!.headers.get("X-CSRF-Token")).toBe("test-csrf-token");
   expect(new URL(requests[0]!.url).pathname).toBe("/api/fleet/enroll");
   expect(await requests[0]!.json()).toEqual(input);
 });
@@ -62,6 +71,7 @@ test("sends caller-owned request identities on artifact create, submit and cance
     requests.push(request);
     return new Response(JSON.stringify({}), {status: 200, headers: {"Content-Type": "application/json"}});
   });
+  setCsrfCookie();
   const client = new ApiClient();
   const createKey = "00000000-0000-4000-8000-000000000101";
   const submitKey = "00000000-0000-4000-8000-000000000102";
@@ -105,4 +115,21 @@ test("a failed call carries the Controller's request ID on the error", async () 
   const failure = await new ApiClient().fleetNode("missing").then(() => null, error => error);
   expect(failure).toMatchObject({status: 404, requestId: id});
   expect(String(failure.message)).toContain(id);
+});
+
+test("refuses to send a mutating request when the CSRF token is missing", async () => {
+  // Break caught: a missing vonk_csrf cookie silently dropped the CSRF header,
+  // so the operator saw the Controller's generic 403 instead of the missing
+  // token that caused it. Every mutation transport must refuse up front.
+  vi.stubGlobal("fetch", async () => {
+    throw new Error("the request must not be sent");
+  });
+  const client = new ApiClient();
+  const outcomes = await Promise.all([
+    client.enrollFleetNode({name: "Spark home", request_key: "00000000-0000-4000-8000-000000000101"}),
+    client.logout(),
+    client.createArtifactJob("run/one", {} as never, "00000000-0000-4000-8000-000000000102"),
+    client.uploadArtifactJobInput("job/one", {name: "input.bin", media_type: "application/octet-stream"} as never, new Blob(["payload"])),
+  ].map(attempt => attempt.then(() => "sent", error => String(error.message))));
+  for (const message of outcomes) expect(message).toContain("CSRF token missing");
 });

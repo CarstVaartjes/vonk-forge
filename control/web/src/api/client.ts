@@ -55,6 +55,13 @@ function csrfToken(): string | undefined {
   return cookie?.slice(cookie.indexOf("=") + 1);
 }
 
+/** The token every mutating request must carry; the Controller refuses the request without it. */
+function requiredCsrfToken(): string {
+  const token = csrfToken();
+  if (token === undefined) throw new Error("CSRF token missing; request not sent");
+  return token;
+}
+
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 /** The Controller's correlation ID for a response, when it sent a well-formed one. */
@@ -128,10 +135,8 @@ export class ApiClient implements ControlApi {
     this.generated.use({
       onRequest({request}) {
         if (["GET", "HEAD"].includes(request.method)) return;
-        const csrf = csrfToken();
-        if (!csrf) return;
         const headers = new Headers(request.headers);
-        headers.set("X-CSRF-Token", csrf);
+        headers.set("X-CSRF-Token", requiredCsrfToken());
         return new Request(request, {headers});
       },
       onResponse: ({response}) => {
@@ -158,8 +163,9 @@ export class ApiClient implements ControlApi {
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
     if (init.body) headers.set("Content-Type", "application/json");
-    const csrf = csrfToken();
-    if (csrf && init.method && !["GET", "HEAD"].includes(init.method)) headers.set("X-CSRF-Token", csrf);
+    // Login is the one mutating call the Controller accepts without CSRF (it
+    // validates origin instead) and the call that issues the first token.
+    if (init.method && !["GET", "HEAD"].includes(init.method) && path !== "/api/auth/login") headers.set("X-CSRF-Token", requiredCsrfToken());
     const response = await fetch(path, {...init, headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (!response.ok) {
@@ -186,8 +192,7 @@ export class ApiClient implements ControlApi {
 
   async logout(): Promise<void> {
     const headers = new Headers({Accept: "application/json"});
-    const csrf = csrfToken();
-    if (csrf) headers.set("X-CSRF-Token", csrf);
+    headers.set("X-CSRF-Token", requiredCsrfToken());
     const response = await fetch("/api/auth/logout", {method: "POST", headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`, requestIdOf(response));
@@ -195,8 +200,7 @@ export class ApiClient implements ControlApi {
 
   async downloadCliToken(): Promise<CliTokenDownload> {
     const headers = new Headers({Accept: "text/plain"});
-    const csrf = csrfToken();
-    if (csrf) headers.set("X-CSRF-Token", csrf);
+    headers.set("X-CSRF-Token", requiredCsrfToken());
     const response = await fetch("/api/auth/cli-token", {method: "POST", headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (!response.ok) {
@@ -521,8 +525,7 @@ export class ApiClient implements ControlApi {
       request.setRequestHeader("Accept", "application/json");
       request.setRequestHeader("Content-Type", file.media_type);
       request.setRequestHeader("X-Content-SHA256", file.sha256);
-      const csrf = csrfToken();
-      if (csrf) request.setRequestHeader("X-CSRF-Token", csrf);
+      request.setRequestHeader("X-CSRF-Token", requiredCsrfToken());
       request.upload.onprogress = event => onProgress?.({loaded: event.loaded, total: event.lengthComputable ? event.total : content.size});
       request.onabort = () => { finish(); reject(new DOMException("Artifact upload cancelled", "AbortError")); };
       request.onerror = () => { finish(); reject(new ApiError(0, "Artifact upload failed before the controller responded")); };
