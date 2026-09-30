@@ -149,6 +149,9 @@ services:
     entrypoint: [step-ca]
     command: [/run/vonk-normalized-secrets/step-ca/ca.json, --password-file, /run/vonk-normalized-secrets/step-ca/password]
     user: "1000:1000"
+    # Serves on the internal high port 9000 as uid 1000; no capabilities needed.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     secrets: []
     volumes:
       - step-ca-data:/home/step
