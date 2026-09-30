@@ -157,7 +157,7 @@ export interface LibraryApi {
   cancelModelOperation(operationId: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   cancelRecipeOperation(operationId: string, requestKey: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
   previewInstallationReconcile(installationId: string, signal?: AbortSignal): Promise<ReconcilePlan>;
-  reconcileInstallation(installationId: string, requestKey: string, signal?: AbortSignal): Promise<unknown>;
+  reconcileInstallation(installationId: string, requestKey: string, planDigest: string, signal?: AbortSignal): Promise<unknown>;
 }
 export interface ControlApi extends LibraryApi {
   downloadCliToken(): Promise<CliTokenDownload>;

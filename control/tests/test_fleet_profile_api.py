@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from email.message import Message
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -69,6 +70,23 @@ def _client(
 def _headers(codec: TokenCodec, role: str = "viewer") -> dict[str, str]:
     token = codec.issue(Actor(role, role), ttl_seconds=100, now=0)
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.parametrize("role", ("viewer", "operator"))
+def test_profile_preview_requires_administrator_before_reading_profile(role):
+    # Break caught: preview skips the mutation-role matrix and exposes the
+    # administrator-only decision to a lesser role.
+    client, codec = _client()
+    assert (
+        client.post("/api/profile/1/preview", headers=_headers(codec, role)).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/api/profile/1/preview", headers=_headers(codec, "administrator")
+        ).status_code
+        == 404
+    )
 
 
 def test_profile_operator_routes_are_singular_and_unversioned() -> None:

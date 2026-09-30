@@ -182,6 +182,25 @@ def test_image_lock_rejects_floating_runtime_references(
     assert f"{image} image uses a floating tag" in " ".join(_errors(result))
 
 
+def test_platform_version_tags_without_digests_are_refused(tmp_path: Path) -> None:
+    # Break caught: replacing a reviewed platform image with a mutable tag
+    # still passed the supply-chain gate, despite the digest-pinning policy.
+    repository = _copy(tmp_path)
+    lock_path = repository / "deploy/compose/images.lock.json"
+    lock = json.loads(lock_path.read_text())
+    reference = lock["images"]["postgres"]
+    tag = reference.split("@", 1)[0]
+    lock["images"]["postgres"] = tag
+    lock_path.write_text(json.dumps(lock))
+    compose = repository / "deploy/compose/compose.yaml"
+    compose.write_text(compose.read_text().replace(reference, tag))
+    result = _run(repository)
+    assert result.returncode != 0
+    assert "postgres image requires an immutable SHA-256 digest" in " ".join(
+        _errors(result)
+    )
+
+
 @pytest.mark.parametrize("name", ("hermes", "litellm", "node", "python"))
 def test_image_lock_rejects_floating_build_bases(tmp_path: Path, name: str) -> None:
     repository = _copy(tmp_path)

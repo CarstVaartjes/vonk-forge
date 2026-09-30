@@ -1,11 +1,12 @@
 # Refresh the pinned container images
 
-Every upstream image this platform builds or runs is fixed by an explicit
-version tag. A digest is optional: an entry may be `NAME:TAG` or
-`NAME:TAG@sha256:<64 hex>`, and either form is accepted, because a recipe that
-declares a digest is implemented exactly as it was defined. What is refused is a
-bare or floating reference — one that pins no version at all. This runbook is
-the manual procedure for a human refreshing a pin deliberately.
+Every platform runtime image and release build base binds a reviewed SHA-256
+index digest. Keep the release tag alongside the digest for review and refresh:
+`NAME:TAG@sha256:<64 hex>`. A rebuild uses the reviewed bytes even when an
+upstream publisher moves a tag. This runbook describes an explicit pin refresh.
+
+Recipe build references remain owned by the canonical recipe contract and keep
+exactly the reference they declare; the platform lock does not rewrite recipes.
 
 `deploy/compose/images.lock.json` is the single inventory. Its `images` mapping
 holds the Compose runtime images and its `build_bases` mapping holds the images
@@ -74,30 +75,20 @@ them, but a refresh that touches their upstream must update them too:
 - `deploy/compose/tests/test.env` is a test fixture; its Vonk image values are
   obvious fakes.
 
-## The rule: an explicit version, digest optional
+## The rule: reviewed platform bytes
 
-A version tag and a digest both pin an explicit version; they differ only in how
-precisely. This repository pins the tag and leaves the digest optional:
+- **Platform dependencies require a digest.** The supply-chain gate rejects a
+  version tag without a valid SHA-256 digest, a missing lock entry, or a mismatch
+  between the lock and its Compose or Dockerfile consumer.
+- **Keep a non-floating release tag.** Tags aid review; the digest owns byte
+  identity. Refresh both deliberately after inspecting the new manifest.
+- **A recipe keeps whatever it declares.** Its canonical build contract owns
+  reference validation. A platform dependency refresh never changes a recipe's
+  declared runtime image or substitutes new bytes into an accepted workload.
 
-- **Require an explicit version.** `NAME:TAG`, `NAME:TAG@sha256:<index>` and
-  `NAME@sha256:<index>` are all accepted.
-- **A recipe keeps whatever it declares.** A recipe that pins a digest is
-  implemented exactly as it was defined, so a digest is never stripped and never
-  required. Recipes whose build instructions name a specific downloaded image
-  keep that image as written.
-- **Refuse a bare or floating reference.** `stable`, `latest`, `main`, and
-  `edge` pin nothing; `scripts/verify-supply-chain` rejects them.
-
-Digest pinning is not enough on its own if the tag is floating and later
-advances: registries garbage-collect superseded indexes, and the recorded digest
-then stops resolving even though the tag still exists. A digest only resolves as
-long as the registry still holds the manifest blob; a digest recorded against a
-tag the publisher subsequently moves is not durable. That is why the controller
-no longer follows `quay.io/skopeo/stable`: it now pins the publisher's
-`v1.22.3-immutable` tag together with the digest. Treat `-immutable` and full
-SemVer release tags as safe; treat rolling tags (`24-trixie-slim`,
-`3.14-slim-trixie`) and even some version tags that publishers re-push as
-mutable and re-check them when you refresh.
+A registry can delete a recorded manifest. A missing digest is an actionable
+cache/build blocker, not permission to fall back to the tag. Resolve and review
+a replacement through the normal pin-refresh and publication workflow.
 
 ## Find the current candidate
 
@@ -105,7 +96,7 @@ Public images need no credentials; `skopeo list-tags` and the registry HTTP APIs
 below are read-only. If `skopeo` is not on the host, run the pinned copy:
 
 ```bash
-SKOPEO="quay.io/skopeo/stable:v1.22.3-immutable"
+SKOPEO="quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5"
 docker run --rm "$SKOPEO" list-tags docker://docker.io/library/node
 ```
 
@@ -126,7 +117,7 @@ Read the index digest and every per-architecture child. `--raw` prints the exact
 manifest bytes, so their SHA-256 **is** the recorded index digest:
 
 ```bash
-reference=quay.io/skopeo/stable:v1.22.3-immutable
+reference=quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
 docker buildx imagetools inspect "$reference"                 # human summary
 docker buildx imagetools inspect --raw "$reference" | sha256sum   # must equal the digest below
 docker buildx imagetools inspect --raw "$reference" | python3 -m json.tool
@@ -161,13 +152,11 @@ Dockerfile and `scripts/verify-controller-skopeo` check them.
 ## Verify
 
 ```bash
-# 0. The lock and the deployment inputs still agree, and every recorded digest
-#    still resolves. `moved` and `unverified` findings are printed but do not
-#    fail; `missing` and `unlisted` do.
-scripts/check-image-pins
+# 0. The lock and deployment inputs agree and all platform pins carry digests.
+scripts/verify-supply-chain --json
 
 # 1. Re-derive the digest you recorded.
-docker buildx imagetools inspect --raw "quay.io/skopeo/stable:v1.22.3-immutable" | sha256sum
+docker buildx imagetools inspect --raw "quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5" | sha256sum
 
 # 2. Offline supply-chain gate, and confirm the regenerated manifest is current.
 scripts/verify-supply-chain --json

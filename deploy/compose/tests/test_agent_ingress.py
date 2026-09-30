@@ -6,12 +6,13 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from fnmatch import fnmatchcase
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 DEV_CADDYFILE = ROOT / "deploy/compose/Caddyfile"
-DEV_CADDY_IMAGE = "caddy:2.11.4"
+DEV_CADDY_IMAGE = "caddy:2.11.4@sha256:0c994536bddb66445885237f1a5dcc1916bccea922661c76b4e9fc24061f9b52"
 
 
 def _environment() -> dict[str, str]:
@@ -55,6 +56,32 @@ def _rendered(*files: str, environment: dict[str, str] | None = None) -> dict:
         env=environment or _environment(),
     )
     return json.loads(result.stdout)
+
+
+@pytest.mark.needs_docker
+def test_caddy_binary_executes_with_the_deployed_security_boundary() -> None:
+    # Break caught: the pinned Caddy executable carries NET_BIND_SERVICE;
+    # omitting it from the bounding set rejects exec, even on high ports.
+    _require_docker_runtime()
+    service = _rendered()["services"]["caddy"]
+    command = ["docker", "run", "--rm", "--network", "none", "--read-only"]
+    if "user" in service:
+        command.extend(("--user", service["user"]))
+    for option, field in (
+        ("--cap-drop", "cap_drop"),
+        ("--cap-add", "cap_add"),
+        ("--security-opt", "security_opt"),
+    ):
+        for value in service.get(field, []):
+            command.extend((option, value))
+    result = subprocess.run(
+        [*command, "--entrypoint", "caddy", service["image"], "version"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def _adapted_caddy(environment: dict[str, str], caddyfile: str | None = None) -> dict:
@@ -238,9 +265,11 @@ def _entrypoint_result(
     environment: dict[str, str],
     secret_source: str | None = None,
     entrypoint_arguments: tuple[str, ...] = (),
+    *,
+    runtime_options: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     _require_docker_runtime()
-    command = ["docker", "run", "--rm"]
+    command = ["docker", "run", "--rm", *runtime_options]
     for name, value in environment.items():
         command.extend(("-e", f"{name}={value}"))
     command.extend(
@@ -1002,6 +1031,91 @@ def test_caddy_proxy_auth_is_one_canonical_base64url_like_line(tmp_path: Path) -
         result = _entrypoint_result(environment, str(invalid_secret))
         assert result.returncode != 0
         assert "base64url-like" in result.stderr
+
+
+def test_caddy_entrypoint_reads_owner_protected_secrets_with_deployed_capabilities() -> (
+    None
+):
+    # Break caught: cap_drop ALL removed secret-read authority, restarting the
+    # installed Caddy container even though its listener uses a high port.
+    # A Docker volume preserves real Linux ownership; macOS bind mounts may
+    # project their owner as container root and hide this permission failure.
+    _require_docker_runtime()
+    volume = f"vonk-caddy-secret-regression-{uuid4().hex}"
+    subprocess.run(
+        ["docker", "volume", "create", volume], check=True, capture_output=True
+    )
+    try:
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "-v",
+                f"{volume}:/secrets",
+                "--entrypoint",
+                "/bin/sh",
+                DEV_CADDY_IMAGE,
+                "-c",
+                (
+                    "touch /secrets/controller-server-certificate /secrets/controller-server-key /secrets/agent-client-ca; "
+                    'printf "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\\n" > /secrets/agent-proxy-auth; '
+                    "chmod 600 /secrets/agent-proxy-auth; chown 10001:10001 /secrets/agent-proxy-auth"
+                ),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        service = _rendered()["services"]["caddy"]
+        options = [
+            "--read-only",
+            "--network",
+            "none",
+            "-v",
+            f"{volume}:/run/secrets:ro",
+        ]
+        for option, field in (
+            ("--cap-drop", "cap_drop"),
+            ("--cap-add", "cap_add"),
+            ("--security-opt", "security_opt"),
+        ):
+            for value in service.get(field, []):
+                options.extend((option, value))
+        result = _entrypoint_result(
+            {"VONK_CONTROL_HOSTNAME": "control.test.example"},
+            entrypoint_arguments=(
+                "/bin/sh",
+                "-c",
+                'test "${#VONK_AGENT_PROXY_AUTH}" -eq 32',
+            ),
+            runtime_options=tuple(options),
+        )
+        assert result.returncode == 0, result.stderr
+        # The exact original hardening boundary fails with these same bytes.
+        without_read_authority = [
+            "--read-only",
+            "--network",
+            "none",
+            "-v",
+            f"{volume}:/run/secrets:ro",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+        ]
+        refused = _entrypoint_result(
+            {"VONK_CONTROL_HOSTNAME": "control.test.example"},
+            entrypoint_arguments=("/bin/true",),
+            runtime_options=tuple(without_read_authority),
+        )
+        assert refused.returncode != 0 and "Permission denied" in refused.stderr
+    finally:
+        subprocess.run(
+            ["docker", "volume", "rm", volume], check=True, capture_output=True
+        )
 
 
 def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private() -> (

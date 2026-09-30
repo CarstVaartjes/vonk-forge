@@ -255,6 +255,8 @@ class ModelCacheObjectSource:
         manifests: dict[str, tuple[DistributionObject, ...]],
     ) -> None:
         self._open_object = open_object
+        self._metadata_guard = Lock()
+        self._paths = {}
         self._manifests = dict(manifests)
         self._receipts: dict[str, tuple[dict[str, object], ...]] = {}
 
@@ -273,6 +275,7 @@ class ModelCacheObjectSource:
     def _from_cache_service(cls, service: object) -> ModelCacheObjectSource:
         adapter = cls.__new__(cls)
         adapter._service = service
+        adapter._metadata_guard = Lock()
         adapter._manifests = {}
         adapter._receipts = {}
         adapter._paths = {}
@@ -280,15 +283,25 @@ class ModelCacheObjectSource:
         return adapter
 
     def _load_manifest(self, digest: str) -> tuple[DistributionObject, ...]:
-        objects, receipts = self._describe(digest)
-        self._manifests[digest] = objects
-        if len(receipts) == len(objects):
-            self._receipts[digest] = receipts
+        objects, receipts, paths = self._describe(digest)
+        # Stage every descriptor before making authorization visible. The guard
+        # protects only process-local metadata; cache/SQL/file IO occurs outside.
+        with self._metadata_guard:
+            self._paths.update(paths)
+            self._manifests[digest] = objects
+            if len(receipts) == len(objects):
+                self._receipts[digest] = receipts
+            else:
+                self._receipts.pop(digest, None)
         return objects
 
     def _describe(
         self, digest: str, requested: object = None
-    ) -> tuple[tuple[DistributionObject, ...], tuple[dict[str, object], ...]]:
+    ) -> tuple[
+        tuple[DistributionObject, ...],
+        tuple[dict[str, object], ...],
+        dict[str, tuple[str, str, object]],
+    ]:
         try:
             # ModelCacheService validates its opaque digest against the full
             # canonical ArtifactSetManifest before exposing descriptors.
@@ -318,6 +331,7 @@ class ModelCacheObjectSource:
             ) from error
         objects = []
         receipts = []
+        paths = {}
         for descriptor in descriptors:
             try:
                 item = DistributionObject(
@@ -332,7 +346,7 @@ class ModelCacheObjectSource:
                     "distribution.model_set_mismatch", "NAS cache manifest is malformed"
                 ) from error
             objects.append(item)
-            self._paths[item.sha256] = (digest, item.name, path)
+            paths[item.sha256] = (digest, item.name, path)
             file_id = descriptor.get("file_id")
             model_content_sha256 = descriptor.get("model_content_sha256")
             roles = descriptor.get("roles")
@@ -348,10 +362,11 @@ class ModelCacheObjectSource:
                         "distribution_object": item.to_mapping(),
                     }
                 )
-        return tuple(objects), tuple(receipts)
+        return tuple(objects), tuple(receipts), paths
 
     def _open_cache_object(self, digest: str, expected_bytes: int) -> OpenedObject:
-        entry = self._paths.get(digest)
+        with self._metadata_guard:
+            entry = self._paths.get(digest)
         if entry is None:
             raise DistributionError(
                 "distribution.object_unavailable", "NAS cache object was not authorized"
@@ -380,9 +395,7 @@ class ModelCacheObjectSource:
     def verify_artifact_set(
         self, artifact_set_sha256: str, objects: tuple[DistributionObject, ...]
     ) -> bool:
-        declared = self._manifests.get(artifact_set_sha256) or self._load_manifest(
-            artifact_set_sha256
-        )
+        declared = self.objects_for_set(artifact_set_sha256)
         expected = tuple(item for item in objects if item.kind == "model")
         return declared == expected
 
@@ -390,8 +403,10 @@ class ModelCacheObjectSource:
         self, artifact_set_sha256: str
     ) -> tuple[DistributionObject, ...]:
         """Return the verified complete model manifest for assignment creation."""
-        return self._manifests.get(artifact_set_sha256) or self._load_manifest(
-            artifact_set_sha256
+        with self._metadata_guard:
+            cached = self._manifests.get(artifact_set_sha256)
+        return (
+            cached if cached is not None else self._load_manifest(artifact_set_sha256)
         )
 
     def verified_model_objects_for_set(
@@ -404,14 +419,18 @@ class ModelCacheObjectSource:
         """
         digest = artifact_set_sha256
         if manifest is not None and hasattr(self, "_service"):
-            objects, receipts = self._describe(digest, manifest)
+            objects, receipts, paths = self._describe(digest, manifest)
             if len(receipts) != len(objects):
                 raise DistributionError(
                     "distribution.model_set_identity_unavailable",
                     "NAS cache manifest lacks canonical model-file identity",
                 )
+            with self._metadata_guard:
+                self._paths.update(paths)
             return receipts
-        if digest not in self._receipts:
+        with self._metadata_guard:
+            cached_receipts = self._receipts.get(digest)
+        if cached_receipts is None:
             if hasattr(self, "_service"):
                 try:
                     self._load_manifest(digest)
@@ -425,7 +444,8 @@ class ModelCacheObjectSource:
                     "distribution.model_set_identity_unavailable",
                     "NAS cache manifest lacks canonical model-file identity",
                 )
-        receipts = self._receipts.get(digest)
+        with self._metadata_guard:
+            receipts = self._receipts.get(digest)
         if receipts is None:
             raise DistributionError(
                 "distribution.model_set_identity_unavailable",
@@ -675,10 +695,14 @@ class DistributionService:
                 )
             except ArtifactLifecycleError as error:
                 raise DistributionError(error.code, error.detail) from error
+            if row is not None and row.id != assignment.assignment_id:
+                # Reclaim creates a new grant identity. Delete the expired or
+                # revoked grant under the plan/node lock, then insert its
+                # successor in this transaction; primary keys never change.
+                session.delete(row)
+                session.flush()
+                row = None
             if row is not None:
-                # The same plan's grant, renewed by the transfer that uses it
-                # now, or reclaimed from a switch that no longer holds it.
-                row.id = assignment.assignment_id
                 row.generation = assignment.generation
                 row.expires_at = assignment.expires_at
                 row.model_artifact_set_sha256 = assignment.model_artifact_set_sha256

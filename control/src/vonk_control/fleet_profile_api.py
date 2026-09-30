@@ -187,8 +187,9 @@ def install_fleet_profile_routes(
         operation_id="previewProfile",
     )
     def preview_profile(
-        number: Annotated[int, Path(ge=1)], _actor: Actor = authenticated
+        number: Annotated[int, Path(ge=1)], actor: Actor = authenticated
     ) -> FleetProfilePreview:
+        require_mutation(actor, "POST", "/api/profile/{number}/preview")
         try:
             profile = service().get_number(number)
             return service().preview(profile.id)

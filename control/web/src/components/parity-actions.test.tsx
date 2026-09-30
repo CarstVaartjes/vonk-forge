@@ -29,10 +29,11 @@ test("sync status treats a never-run sync as a state and lists problems", async 
 });
 
 test("reconcile submits only after the plan is reviewed", async () => {
-  const api = {previewInstallationReconcile: vi.fn().mockResolvedValue({allowed: true, phases: [{}], blockers: [], reclaimed_bytes: 0}), reconcileInstallation: vi.fn().mockResolvedValue({})};
+  const digest = "a".repeat(64);
+  const api = {previewInstallationReconcile: vi.fn().mockResolvedValue({allowed: true, plan_digest: digest, phases: [{}], blockers: [], reclaimed_bytes: 0}), reconcileInstallation: vi.fn().mockResolvedValue({})};
   render(<ToastProvider><InstallationReconcile api={api} installationId="i1"/></ToastProvider>);
   expect(screen.queryByRole("alertdialog")).toBeNull();
   await userEvent.click(screen.getByRole("button", {name: "Review reconcile"}));
   await userEvent.click(await screen.findByRole("button", {name: "Reconcile"}));
-  await waitFor(() => expect(api.reconcileInstallation).toHaveBeenCalledWith("i1", expect.any(String)));
+  await waitFor(() => expect(api.reconcileInstallation).toHaveBeenCalledWith("i1", expect.any(String), digest));
 });

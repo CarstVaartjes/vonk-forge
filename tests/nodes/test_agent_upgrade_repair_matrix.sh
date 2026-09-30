@@ -27,15 +27,21 @@ case "$mode" in
   *) printf 'unknown repair matrix mode: %s\n' "$mode" >&2; exit 64 ;;
 esac
 
+run_fixture() {
+  local label=$1 started=$SECONDS
+  shift
+  printf 'node repair matrix phase: %s\n' "$label"
+  env "$@" "$harness"
+  printf 'node repair matrix phase: %s PASS (%ss)\n' \
+    "$label" "$((SECONDS - started))"
+}
+
 for phase in "${phases[@]}"; do
-  printf 'node repair matrix phase: crash=%s\n' "$phase"
-  REPAIR_CRASH_PHASE=$phase "$harness"
+  run_fixture "crash=$phase" "REPAIR_CRASH_PHASE=$phase"
 done
-printf '%s\n' 'node repair matrix phase: standard-residue=exact-0755'
-REPAIR_STANDARD_RESIDUE=exact-0755 "$harness"
+run_fixture standard-residue=exact-0755 REPAIR_STANDARD_RESIDUE=exact-0755
 for fault in "${faults[@]}"; do
-  printf 'node repair matrix phase: fault=%s\n' "$fault"
-  REPAIR_FAULT=$fault "$harness"
+  run_fixture "fault=$fault" "REPAIR_FAULT=$fault"
 done
 
 printf 'node repair %s native matrix: PASS\n' "$mode"

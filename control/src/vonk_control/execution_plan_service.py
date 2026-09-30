@@ -42,6 +42,7 @@ def compile_job_invocation(
     parameters: Mapping[str, object],
     timeout_seconds: int,
     memory_floor_bytes: int,
+    reserved_memory_bytes: int,
     option_choices: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Compile invocation settings against the installation's exact receipts."""
@@ -57,12 +58,26 @@ def compile_job_invocation(
         raise ExecutionPlanCompilationError(
             "job recipe differs from the installed workload"
         )
-    if not any(
-        item.name == plan.runtime.placement.role for item in recipe.topology.roles
-    ):
+    role = next(
+        (
+            item
+            for item in recipe.topology.roles
+            if item.name == plan.runtime.placement.role
+        ),
+        None,
+    )
+    if role is None:
         raise ExecutionPlanCompilationError(
             "job role differs from the accepted canonical workload"
         )
+    if type(memory_floor_bytes) is not int or memory_floor_bytes < max(
+        role.resources.memory.reserve_bytes, plan.runtime.placement.memory_floor_bytes
+    ):
+        raise ExecutionPlanCompilationError(
+            "job memory floor is below the accepted system reserve"
+        )
+    if type(reserved_memory_bytes) is not int or reserved_memory_bytes <= 0:
+        raise ExecutionPlanCompilationError("job memory reservation is invalid")
     resolved = resolve_recipe_entities(session, revision.document)
     models = _canonical_models(resolved["models"])
     if build is None:
@@ -82,6 +97,20 @@ def compile_job_invocation(
         rank=plan.runtime.placement.rank,
     )
     runtime_spec = _bind_runtime_artifacts(runtime_spec, models)
+    runtime = runtime_spec.get("runtime")
+    compiled_image_digest = _image_digest(
+        runtime.get("image") if isinstance(runtime, Mapping) else None
+    )
+    # The installed plan binds the exact reviewed runtime image, and a
+    # repaired build row can acquire a different image digest after
+    # installation.  The stored plan carries no execution digest of its own
+    # (per-job parameters and timeout intentionally recompile it), so this
+    # exact image digest is the installed-identity comparison available on
+    # the apply path.
+    if compiled_image_digest != plan.runtime_image.image_digest:
+        raise ExecutionPlanCompilationError(
+            "job build differs from the installed workload"
+        )
     job = runtime_spec.get("job")
     if not isinstance(job, dict):
         raise ExecutionPlanCompilationError(
@@ -117,6 +146,9 @@ def compile_job_invocation(
     )
     placement = plan.runtime.placement.model_dump(mode="json")
     placement["memory_floor_bytes"] = memory_floor_bytes
+    # Installation carries the recipe's estimated envelope. The running
+    # assignment owns the accepted capacity promise used by every job.
+    placement["reserved_memory_bytes"] = reserved_memory_bytes
     return compiled.to_compiled_launch_payload(runtime_spec, placement=placement)
 
 

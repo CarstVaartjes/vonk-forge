@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import Any, cast
 from unittest.mock import Mock
 
+import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -180,6 +181,18 @@ def test_preview_delegates_reconcile_mode_to_existing_run_switch_owner() -> None
     assert operations.preview_cleanup.call_args.kwargs == {"actor": "test-actor"}
 
 
+@pytest.mark.parametrize("role", ("viewer", "operator"))
+def test_reconciliation_preview_refuses_non_administrators_before_planning(role):
+    # Break caught: the read-only preview bypasses its administrator role
+    # contract, even though apply enforces that contract.
+    operations = Mock()
+    response = _client(operations, role=role).post(
+        f"/api/recipe/installations/{INSTALLATION_ID}/reconcile/preview"
+    )
+    assert response.status_code == 403
+    operations.preview_cleanup.assert_not_called()
+
+
 def test_apply_is_administrator_only_and_preserves_request_identity() -> None:
     operations = Mock()
     operations.apply_cleanup.side_effect = RunSwitchOperationConflict(
@@ -262,7 +275,12 @@ def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
     plan_digest = preview["plan_digest"]
 
     apply_path = f"/api/recipe/installations/{installation.owner_id}/reconcile"
-    apply_body = {"request_key": request_key}
+    apply_body = {"request_key": request_key, "plan_digest": plan_digest}
+    # A stale preview is refused before an operation or child effect exists.
+    stale = client.post(
+        apply_path, json={**apply_body, "plan_digest": "0" * 64}, headers=headers
+    )
+    assert stale.status_code == 409 and "stale_plan" in stale.text
     accepted_response = client.post(apply_path, json=apply_body, headers=headers)
     assert accepted_response.status_code == 202, accepted_response.text
     accepted = accepted_response.json()
@@ -271,6 +289,12 @@ def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
     assert replay.status_code == 202, replay.text
     assert replay.json()["operation_id"] == accepted["operation_id"]
     assert replay.json()["request_key"] == request_key
+    changed = client.post(
+        apply_path, json={**apply_body, "plan_digest": "0" * 64}, headers=headers
+    )
+    assert (
+        changed.status_code == 409 and "request_key_reused_differently" in changed.text
+    )
 
     operation_id = accepted["operation_id"]
     assert service.tick() is True

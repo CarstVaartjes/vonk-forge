@@ -325,13 +325,15 @@ def image_errors(root: Path) -> list[str]:
         if not isinstance(reference, str):
             errors.append(f"{name} image is not pinned by version")
             continue
-        # A digest or a version tag both pin an explicit version; a bare or
-        # floating reference pins nothing.
+        # Platform dependencies bind reviewed bytes, not a mutable tag. Recipe
+        # references are owned by their separate canonical build contract.
         bare = reference.split("@", 1)[0]
         if "@sha256:" not in reference and VERSIONED_IMAGE.fullmatch(reference) is None:
             errors.append(f"{name} image is not pinned by an explicit version")
         elif bare.rsplit(":", 1)[-1].lower() in FLOATING_TAGS:
             errors.append(f"{name} image uses a floating tag: {reference}")
+        if re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", reference) is None:
+            errors.append(f"{name} image requires an immutable SHA-256 digest")
         if name in images and reference not in compose:
             errors.append(f"{name} Compose default is not the locked versioned image")
     if re.search(r"(?m)^\s*image:\s*[^$\n]*(?::latest|:main|:edge)(?:\s|$)", compose):
@@ -435,7 +437,7 @@ def image_errors(root: Path) -> list[str]:
     if (
         hermes_base is None
         or hermes_base.group(1) != locked_hermes
-        or VERSIONED_IMAGE.fullmatch(hermes_base.group(1)) is None
+        or re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", hermes_base.group(1)) is None
         or "FROM ${HERMES_IMAGE} AS managed" not in hermes_dockerfile
     ):
         errors.append("Hermes build base is not the exact versioned locked image")

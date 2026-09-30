@@ -10,7 +10,7 @@ cd control/web
 npm ci
 npm test -- --run
 npm run build
-npx playwright test e2e/fleet-library.spec.ts --project=chromium
+npx playwright test --project=chromium
 ```
 
 The fixture server is started by the Playwright configuration. To inspect a

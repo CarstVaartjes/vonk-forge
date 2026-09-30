@@ -443,6 +443,7 @@ def test_the_guard_names_stay_documented() -> None:
     assert GUARD_LOCK_NAMES == {
         "_identity_lock",
         "_identity_locks_guard",
+        "_metadata_guard",
         "_quota_lock",
     }
 

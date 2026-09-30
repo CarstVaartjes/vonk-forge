@@ -48,7 +48,10 @@ def test_wrapper_image_is_version_pinned_and_contains_no_ssh_stack() -> None:
         path.read_text(errors="replace") for path in HERMES.glob("*") if path.is_file()
     ).lower()
 
-    assert "nousresearch/hermes-agent:v2026.9.24" in dockerfile
+    assert (
+        "nousresearch/hermes-agent:v2026.9.24@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7"
+        in dockerfile
+    )
     assert 'ENTRYPOINT ["/usr/local/bin/vonk-hermes-entrypoint"]' in dockerfile
     assert 'CMD ["gateway", "run"]' in dockerfile
     for forbidden in ("openssh", "sshd", "authorized_keys", "port: 22", "target: 22"):

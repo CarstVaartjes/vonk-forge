@@ -660,3 +660,19 @@ identity and count-independent inventory. Exact model, harness, and recipe
 choices live in the [model catalog](operators/model-catalog.md) and canonical
 recipe library. Admission uses each recipe's declared resource requirements
 and fresh measured capacity; dated hardware tables are not admission authority.
+
+### Process-local cache metadata
+
+`ModelCacheObjectSource._metadata_guard` protects only the adapter's in-process
+manifest, receipt, and authorized-path dictionaries. Producers describe and
+validate the complete managed-cache set before acquiring it. Publication and
+reads hold it only for dictionary operations; cache service calls, filesystem
+opens, and SQL work run after release. Other processes rebuild their own
+projection from the same managed-storage owner. This guard does not provide
+artifact ownership or substitute for the managed cache's verification/fencing.
+
+Distribution grant identities are immutable. Renewing the same identity updates
+its deadline. Reclaiming an expired/revoked grant deletes the old plan/node row
+and inserts the successor atomically under its PostgreSQL row lock. No table
+references its primary key; agent payloads retain the exact old identity and
+cannot use it to authorize the successor's bytes.

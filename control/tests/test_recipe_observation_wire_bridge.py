@@ -1067,7 +1067,7 @@ def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
     assert recovery.tick() is True
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.recovery_attempts == 0
+        assert run is not None and run.recovery_attempts == 1
         assert run.route_next_attempt_at == now[0] + timedelta(seconds=5)
         assert "fresh exact absence" in (run.route_error or "")
         assert not session.scalar(

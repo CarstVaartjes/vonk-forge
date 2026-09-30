@@ -146,6 +146,16 @@ they protect and report the observed value and limit. Structural counts need a
 resource basis too. All layers must agree on values the canonical plan permits;
 reject an invalid value at its owning compile/admission boundary before effects.
 
+The canonical recipe's `peak_bytes` is estimated workload demand. The compiled
+placement's `reserved_memory_bytes` is the accepted capacity promise derived
+from that demand; it is neither measured usage nor a kernel container limit.
+Installation records the recipe envelope; run admission binds its resolved
+reservation. `memory_floor_bytes` is the declared host/system reserve, and job
+invocations may increase it but cannot lower the installed or recipe reserve.
+Keep the estimate's source and uncertainty in planning warnings. Reconcile
+capacity shortages through the existing wait/recovery path; do not permanently
+invalidate a recipe because a forecast or an attempt was wrong.
+
 Count each physical resource once. Distinguish measured usage, reservations,
 future promises, and estimated demand. Unified host/accelerator memory is one
 physical pool. Do not charge already materialized usage again as independent

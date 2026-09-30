@@ -22,7 +22,7 @@ def test_postgres_runtime_is_the_deployed_pin() -> None:
         ).read_text(encoding="utf-8")
     )
     assert POSTGRES_IMAGE == lock["images"]["postgres"]
-    assert re.fullmatch(r"postgres:\d+\.\d+", POSTGRES_IMAGE)
+    assert re.fullmatch(r"postgres:\d+\.\d+@sha256:[0-9a-f]{64}", POSTGRES_IMAGE)
 
 
 def test_postgres_database_names_are_unique_safe_identifiers() -> None:
@@ -59,6 +59,5 @@ def test_postgres_engine_uses_isolated_postgres_18_database(
         ).one()
 
     assert re.fullmatch(r"vonk_test_[0-9a-f]{32}", database)
-    assert version.startswith(POSTGRES_IMAGE.removeprefix("postgres:") + " ") or (
-        version == POSTGRES_IMAGE.removeprefix("postgres:")
-    )
+    release_version = POSTGRES_IMAGE.removeprefix("postgres:").split("@", 1)[0]
+    assert version.startswith(release_version + " ") or version == release_version

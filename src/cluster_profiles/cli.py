@@ -162,7 +162,9 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _sanitize_text(value: object, *, limit: int | None = _MAX_TEXT_CHARS) -> str:
+def _sanitize_text(
+    value: object, *, limit: int | None = _MAX_TEXT_CHARS, terminal: bool = True
+) -> str:
     text = str(value)
     text = _SENSITIVE_ASSIGNMENT.sub(
         lambda match: f"{match.group(1)}: <redacted>", text
@@ -172,24 +174,28 @@ def _sanitize_text(value: object, *, limit: int | None = _MAX_TEXT_CHARS) -> str
         text = text.split("-----BEGIN ", 1)[0] + "<redacted private key>"
     if limit is not None and len(text) > limit:
         text = text[: limit - 15] + "... (truncated)"
-    return terminal_text(text)
+    return terminal_text(text) if terminal else text
 
 
 @overload
-def _sanitize(value: Mapping[str, object]) -> dict[str, object]: ...
+def _sanitize(
+    value: Mapping[str, object], *, terminal: bool = True
+) -> dict[str, object]: ...
 
 
 @overload
-def _sanitize(value: object) -> object: ...
+def _sanitize(value: object, *, terminal: bool = True) -> object: ...
 
 
-def _sanitize(value: object) -> object:
+def _sanitize(value: object, *, terminal: bool = True) -> object:
     if isinstance(value, str):
-        return _sanitize_text(value, limit=None)
+        return _sanitize_text(value, limit=None, terminal=terminal)
     if isinstance(value, Mapping):
-        return {str(key): _sanitize(item) for key, item in value.items()}
+        return {
+            str(key): _sanitize(item, terminal=terminal) for key, item in value.items()
+        }
     if isinstance(value, (tuple, list)):
-        return [_sanitize(item) for item in value]
+        return [_sanitize(item, terminal=terminal) for item in value]
     return value
 
 
@@ -522,12 +528,9 @@ def _emit(
     if getattr(args, "document_output", False):
         print(json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False))
         return
-    safe = (
-        dict(payload)
-        if args.global_json or getattr(args, "json", False)
-        else _sanitize(payload)
-    )
-    if args.global_json or getattr(args, "json", False):
+    json_output = args.global_json or getattr(args, "json", False)
+    safe = _sanitize(payload, terminal=not json_output)
+    if json_output:
         print(_json_text(safe))
         return
     if error:

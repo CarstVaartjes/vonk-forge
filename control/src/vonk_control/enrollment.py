@@ -1426,6 +1426,10 @@ def _replay_matches(
     csr: bytes,
     evidence: Mapping[str, object],
 ) -> bool:
+    # Apply the fresh-submit CSR bound before parsing; an oversized or
+    # non-bytes replay cannot match the original request.
+    if not isinstance(csr, bytes) or len(csr) > MAX_CSR_BYTES:
+        return False
     try:
         normalized, _, fingerprint, _ = _load_csr(enrollment.node_id, csr)
     except EnrollmentDenied:

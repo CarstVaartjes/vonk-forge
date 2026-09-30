@@ -265,13 +265,15 @@ class RunSwitchCleanupPreviewRequest(_StrictModel):
 
 
 class RunSwitchCleanupApplyRequest(RunSwitchCleanupPreviewRequest):
+    plan_digest: Digest | None = None
     request_key: UuidId | None = None
 
 
 class InstallationReconcileRequest(_StrictModel):
-    """Idempotency key for reconciling the installation named by the path."""
+    """Reconcile the reviewed plan, or use the Controller's one-step decision."""
 
     request_key: UuidId
+    plan_digest: Digest | None = None
 
 
 class RunSwitchReconciliationTarget(_StrictModel):

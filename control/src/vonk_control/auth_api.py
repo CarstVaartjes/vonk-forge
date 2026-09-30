@@ -113,7 +113,8 @@ def install_auth_routes(
         operation_id="loginBrowser",
     )
     def login(body: LoginRequest, request: Request, response: Response) -> AuthSession:
-        if request.headers.get("origin") != f"https://{request.headers['host']}":
+        host = request.headers.get("host")
+        if host is None or request.headers.get("origin") != f"https://{host}":
             raise HTTPException(status_code=403, detail="origin validation failed")
         try:
             issued = service.login(body.subject, body.password)
@@ -203,10 +204,11 @@ def install_auth_routes(
         request: Request,
         _authenticated_actor: Actor = authenticated,
     ) -> Response:
-        # This endpoint is deliberately browser-session-only. The general
-        # actor dependency enforces CSRF for cookie mutations; resolving the
-        # cookie again prevents a bearer caller from minting another bearer.
+        # This endpoint is deliberately browser-session-only. CSRF is enforced
+        # explicitly here, exactly like logout; resolving the cookie again
+        # prevents a bearer caller from minting another bearer.
         identity = cookie_identity(request)
+        require_csrf(request)
         issued_at = now()
         token = tokens.issue(
             identity.actor,

@@ -2957,7 +2957,9 @@ class RunSwitchOperationService:
         request_key = request.request_key or str(uuid.uuid4())
         intent = {
             "type": "cleanup",
-            **request.model_dump(mode="json", exclude={"request_key"}),
+            **request.model_dump(
+                mode="json", exclude={"request_key"}, exclude_none=True
+            ),
         }
         if request.request_key is not None:
             existing = self._existing_request_operation(
@@ -2968,6 +2970,7 @@ class RunSwitchOperationService:
             if existing is not None:
                 return existing
         preview = self.preview_cleanup(request, actor=actor)
+        _require_reviewed_plan(request.plan_digest, preview)
         if not preview.allowed and not _plan_blockers_are_waitable(preview):
             raise RunSwitchOperationConflict(
                 "run-switch.plan_blocked: "
@@ -2994,7 +2997,7 @@ class RunSwitchOperationService:
         intent = {
             "type": "run",
             "request": request.model_dump(
-                mode="json", exclude={"plan_digest", "request_key"}
+                mode="json", exclude={"request_key"}, exclude_none=True
             ),
         }
         if request.request_key is not None:
@@ -3008,6 +3011,7 @@ class RunSwitchOperationService:
         plan = self.preview(
             request, actor=actor, profile_application_id=profile_application_id
         )
+        _require_reviewed_plan(request.plan_digest, plan)
         if not plan.allowed and not _plan_blockers_are_waitable(plan):
             raise RunSwitchOperationConflict(
                 "run-switch.plan_blocked: "
@@ -3042,7 +3046,9 @@ class RunSwitchOperationService:
         request_key = request.request_key or str(uuid.uuid4())
         intent = {
             "type": "stop",
-            **request.model_dump(mode="json", exclude={"plan_digest", "request_key"}),
+            **request.model_dump(
+                mode="json", exclude={"request_key"}, exclude_none=True
+            ),
         }
         if request.request_key is not None:
             existing = self._existing_request_operation(
@@ -3053,6 +3059,7 @@ class RunSwitchOperationService:
             if existing is not None:
                 return existing
         preview = self.preview_stop(request, actor=actor)
+        _require_reviewed_plan(request.plan_digest, preview)
         if not preview.allowed and not _plan_blockers_are_waitable(preview):
             raise RunSwitchOperationConflict(
                 "run-switch.plan_blocked: "
@@ -6521,15 +6528,16 @@ class RunSwitchOperationService:
 
         try:
             if kind == "run" and isinstance(intent.get("request"), Mapping):
-                request = RunSwitchPreviewRequest.model_validate(
-                    intent["request"], strict=True
+                request = read_stored_model(
+                    RunSwitchApplyRequest, intent["request"], strict=True
                 )
                 refreshed = self.preview(
                     request, actor=actor, profile_application_id=profile_application_id
                 )
             elif kind == "stop":
                 refreshed = self.preview_stop(
-                    RunSwitchStopPreviewRequest.model_validate(
+                    read_stored_model(
+                        RunSwitchStopApplyRequest,
                         {key: value for key, value in intent.items() if key != "type"},
                         strict=True,
                     ),
@@ -6537,7 +6545,8 @@ class RunSwitchOperationService:
                 )
             elif kind == "cleanup":
                 refreshed = self.preview_cleanup(
-                    RunSwitchCleanupPreviewRequest.model_validate(
+                    read_stored_model(
+                        RunSwitchCleanupApplyRequest,
                         {key: value for key, value in intent.items() if key != "type"},
                         strict=True,
                     ),
@@ -8969,6 +8978,13 @@ def _same_intent(existing: Job, intent: Mapping[str, object] | None) -> bool:
     if stored is None or intent is None:
         return True
     return canonical_message(stored) == canonical_message(dict(intent))
+
+
+def _require_reviewed_plan(reviewed_digest: str | None, plan: RunSwitchPlan) -> None:
+    if reviewed_digest is not None and reviewed_digest != plan.plan_digest:
+        raise RunSwitchOperationConflict(
+            "run-switch.stale_plan: effects changed; review the current plan"
+        )
 
 
 def _plan_blockers_are_waitable(plan: RunSwitchPlan) -> bool:

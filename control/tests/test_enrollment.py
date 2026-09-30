@@ -554,6 +554,22 @@ def test_consumed_grant_denies_mismatched_replay_without_revealing_certificate(
     assert issued.certificate_pem.decode() not in str(approved_mismatch.value)
 
 
+def test_consumed_enrollment_grant_refuses_oversized_valid_csr_replay(service):
+    # Break caught: the PEM parser tolerates trailing whitespace, so an
+    # oversized replay bypasses the fresh-submission CSR byte limit.
+    from vonk_agent_protocol.enrollment import MAX_CSR_BYTES
+
+    enrollment, _, _, authority = service
+    request = csr()
+    grant = enrollment.create(NODE_ID, "admin", 600)
+    issued = enrollment.submit(grant.token, request, evidence(request))
+    oversized = request + b" " * MAX_CSR_BYTES
+    with pytest.raises(EnrollmentDenied, match="does not match"):
+        enrollment.submit(grant.token, oversized, evidence(request))
+    assert len(authority.calls) == 1
+    assert enrollment.submit(grant.token, request, evidence(request)) == issued
+
+
 def test_renewal_stages_once_then_activation_atomically_retires_older_identity(
     service,
 ) -> None:

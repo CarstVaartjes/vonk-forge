@@ -1054,7 +1054,12 @@ def test_candidate_overlay_checks_exact_roles_and_pinned_upstream(mutation):
     api = "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-x@sha256:" + "a" * 64
     worker = "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-x@sha256:" + "b" * 64
     expected = {"control-api": {"image": api}, "control-worker": {"image": worker}}
-    services = {**expected, "postgres": {"image": "postgres:18.6"}}
+    services = {
+        **expected,
+        "postgres": {
+            "image": "postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722"
+        },
+    }
     if mutation == "wrong_role":
         services["control-api"] = {"image": worker}
     elif mutation == "floating_candidate":

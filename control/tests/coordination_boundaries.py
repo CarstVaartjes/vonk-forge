@@ -198,6 +198,7 @@ GUARD_LOCK_NAMES = frozenset(
     {
         "_identity_lock",
         "_identity_locks_guard",
+        "_metadata_guard",
         "_quota_lock",
     }
 )

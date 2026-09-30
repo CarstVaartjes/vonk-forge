@@ -1628,12 +1628,20 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         return failed_job(&request, exit_code.max(1), started, reason);
                     }
                 };
+                let output_root = match self.runtime.job_output_root(&job_scope) {
+                    Ok(root) => root,
+                    Err(_) => {
+                        let _ = self.runtime.cleanup_job_scope(&job_scope);
+                        return failed_job(
+                            &request,
+                            exit_code.max(1),
+                            started,
+                            "job output directory is unavailable",
+                        );
+                    }
+                };
                 for output in &output_manifest.files {
-                    let path = self
-                        .runtime
-                        .job_output_root(&job_scope)
-                        .unwrap()
-                        .join(&output.name);
+                    let path = output_root.join(&output.name);
                     let upload = run_until_cancelled(
                         self.client.upload_recipe_job_output(
                             request.job_id,
@@ -2924,8 +2932,10 @@ fn job_result_body(
         exit_code,
         output_manifest,
         evidence: RecipeJobEvidence {
-            elapsed_milliseconds: u32::try_from(started.elapsed().as_millis())
-                .expect("bounded job elapsed time"),
+            // A job that legitimately runs past the u32::MAX millisecond
+            // ceiling (~49.7 days) saturates its reported elapsed time instead
+            // of failing the result report with a panic.
+            elapsed_milliseconds: u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX),
             // The helper does not expose a cgroup peak for transient containers yet. Null is
             // honest unavailable evidence; zero would falsely claim a measurement.
             peak_memory_bytes: None,
