@@ -1,0 +1,228 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "e5a2f80c0f1bdbb829d19b3ba3e84359acad95ea9fae2161661e08af46a31ce0",
+    "repository": "ghcr.io/ggml-org/llama.cpp"
+   },
+   "context": {
+    "path": "adapters/nvidia/nemotron-3-nano-30b-a3b-q4-k-m-ggml-org-llamacpp-single"
+   },
+   "dockerfile": "adapters/nvidia/nemotron-3-nano-30b-a3b-q4-k-m-ggml-org-llamacpp-single/Dockerfile",
+   "network": {
+    "hosts": []
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "nemotron-3-nano-30b-a3b-q4-k-m-ggml-org-llamacpp-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "nemotron-3-nano"
+   ],
+   "port": 8080
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Executable Candidate llama.cpp recipe based on the ggml-org GGUF repository: the official ggml-org llama.cpp 0.5.0 CUDA 13 server image (arm64, pinned by digest; its default CUDA architectures include GB10 sm_121a) serving the exact GGUF revision through llama-server. NVIDIA's llama.cpp playbook compiles the same upstream source with -DCMAKE_CUDA_ARCHITECTURES=121a-real; this recipe uses the project's published binary instead. Resource envelopes are estimates, not measurements; physical Spark acceptance is pending.",
+  "tags": [
+   "executable",
+   "candidate",
+   "llama-cpp",
+   "openai",
+   "single",
+   "spark",
+   "nemotron",
+   "gguf",
+   "q4_k_m",
+   "reasoning"
+  ],
+  "title": "Nemotron 3 Nano 30B-A3B Q4_K_M llama.cpp single Spark (ggml-org)"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-3c5be90f7d96-618cd5b83d",
+     "id": "metadata-3c5be90f7d96-618cd5b83d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "nvidia-nemotron-3-nano-30b-a3b-q4-k-m-0f111a0d4977-c0268468c2",
+     "id": "nvidia-nemotron-3-nano-30b-a3b-q4-k-m-0f111a0d4977-c0268468c2",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-1ea6f4e1a69d-b335630551",
+     "id": "readme-1ea6f4e1a69d-b335630551",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "ad19ddb0d5f8202e4c260f55b20ec3613a4d67e9aa9cd68d04ebbfd1a8c29ae0",
+    "kind": "model",
+    "publisher": "ggml-org",
+    "slug": "nemotron-3-nano-30b-a3b-q4-k-m-f9d9b441"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "ggml-org",
+   "llama.cpp contributors",
+   "NVIDIA Corporation",
+   "ggml-org"
+  ],
+  "source_reference": "https://huggingface.co/ggml-org/NVIDIA-Nemotron-3-Nano-30B-A3B-GGUF/tree/f9d9b441a049bf27473c3cdd9cec220f5657b862"
+ },
+ "release": {
+  "released_at": "2026-09-23",
+  "version": "0.5.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "model",
+    "setting": null,
+    "value": "/models/NVIDIA-Nemotron-3-Nano-30B-A3B-Q4_K_M.gguf"
+   },
+   {
+    "name": "alias",
+    "setting": null,
+    "value": "nemotron-3-nano"
+   },
+   {
+    "name": "ctx-size",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "offline",
+    "setting": null,
+    "value": true
+   }
+  ],
+  "engine": "llama-cpp",
+  "entrypoint": [
+   "/opt/vonk/bin/llama-server"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 262144
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 22421829729,
+      "image_bytes": 8000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 16000000000
+     },
+     "memory": {
+      "peak_bytes": 45000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 64,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "nemotron-3-nano"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

@@ -1,0 +1,310 @@
+{
+ "capabilities": [
+  "audio-generation",
+  "video-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "artifact-01",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "7a61fc32351125d498beb00fce1ec2fb457c4df927cb640b8830efe6a4e634b8",
+   "size_bytes": 1622
+  },
+  {
+   "id": "artifact-02",
+   "path": "LICENSE",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "191ee7ebecd395ef20b98fa55c803d2d0bfc50cdbefaa0eafbaef3e79f4d2475",
+   "size_bytes": 21474
+  },
+  {
+   "id": "artifact-03",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "dfca212bf609dc6b1836dfe4024368556a991d42028bfc0e7c6d6fe5a6fce417",
+   "size_bytes": 9554
+  },
+  {
+   "id": "artifact-04",
+   "path": "ltx-2-19b-dev-fp4.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "08a28245d8412962a8f6a1437c7db4b07bd5c2acdb2b84f96793a9b7c8550751",
+   "size_bytes": 19988416674
+  },
+  {
+   "id": "artifact-05",
+   "path": "ltx-2-19b-distilled-lora-384.safetensors",
+   "roles": [
+    "adapter"
+   ],
+   "sha256": "2718f89582003cbb5b616635f18c091641917a3f3e5a2f2ad0fb3d5fdd153534",
+   "size_bytes": 7674558424
+  },
+  {
+   "id": "artifact-06",
+   "path": "ltx-2-spatial-upscaler-x2-1.0.safetensors",
+   "roles": [
+    "upscaler"
+   ],
+   "sha256": "3160fabf8edf0bc4dd8de40353a180813b111ce586b655ad54af9a7b8c6736de",
+   "size_bytes": 995765578
+  },
+  {
+   "id": "artifact-07",
+   "path": "text_encoder/config.json",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "fb4508a46270e0af2778cd72c191f290984e6a5fa8f155895544507d3803dbe9",
+   "size_bytes": 2960
+  },
+  {
+   "id": "artifact-08",
+   "path": "text_encoder/generation_config.json",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "1b77c4610a27b5aa38b72be8a757da4e14849bc4e3dc641ccbe923a0e226ed9a",
+   "size_bytes": 168
+  },
+  {
+   "id": "artifact-09",
+   "path": "text_encoder/model-00001-of-00011.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "cbc6e8132e4998652d4c8c219f0ca8da10a143606c806c8728a7513d49bbcdb3",
+   "size_bytes": 1685223128
+  },
+  {
+   "id": "artifact-10",
+   "path": "text_encoder/model-00002-of-00011.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "b95e7ab472b88860e53c71ef078fe8ba4c85e3727b8f0a0bcc130c1f4a2b9ab9",
+   "size_bytes": 4987027384
+  },
+  {
+   "id": "artifact-11",
+   "path": "text_encoder/model-00003-of-00011.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "3731e7c18280d0e9dcbcfadaecaeb8b81fa7f7f15e702ea3d1b4f8eb1b5919f7",
+   "size_bytes": 4844749824
+  },
+  {
+   "id": "artifact-12",
+   "path": "text_encoder/model-00004-of-00011.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "e9d1ce8b472f2cc6d70c7885388f50fb3a5f233cf1d4784f6a4be1732547a74c",
+   "size_bytes": 4954909736
+  },
+  {
+   "id": "artifact-13",
+   "path": "text_encoder/model-00005-of-00011.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "cb478659a67b2e34a920f237387a1d7a8208325aa2fc285198a97603f15af1e6",
+   "size_bytes": 4907664584
+  },
+  {
+   "id": "artifact-14",
+   "path": "text_encoder/model-00006-of-00011.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "a190581d871980f9309f40d5c2b4db99d76737d7ed743d531bac95443f6b7145",
+   "size_bytes": 4954909792
+  },
+  {
+   "id": "artifact-15",
+   "path": "text_encoder/model-00007-of-00011.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "c347de789ff34be642e4fe7ab8e142ca5e3d833d70cb9ec5127a86af0e2ecfed",
+   "size_bytes": 4907664584
+  },
+  {
+   "id": "artifact-16",
+   "path": "text_encoder/model-00008-of-00011.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "2ec7525b89b083d774f4abbdd1f2d7ee190f0475658875cf700530a2faa84a4f",
+   "size_bytes": 4954909792
+  },
+  {
+   "id": "artifact-17",
+   "path": "text_encoder/model-00009-of-00011.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "2b0117ecf1d83691bb875c66a9f2b47e450a87fdfe90915bc7b9e9946c37a650",
+   "size_bytes": 4907664584
+  },
+  {
+   "id": "artifact-18",
+   "path": "text_encoder/model-00010-of-00011.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "d9f665a743589231adb812c61c9d8e295c9a68c31d3e87976ae032f1de4e46b6",
+   "size_bytes": 4954909792
+  },
+  {
+   "id": "artifact-19",
+   "path": "text_encoder/model-00011-of-00011.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "999bf4706d4f616e558eec486667fc2b66f8d0f9c106e1d1f802458fb349b0db",
+   "size_bytes": 2689808472
+  },
+  {
+   "id": "artifact-20",
+   "path": "text_encoder/model.safetensors.index.json",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "9c85ee65d0de363846bebbe921f43a641c8e0979471560ba8a76f6eec35693c8",
+   "size_bytes": 108642
+  },
+  {
+   "id": "artifact-21",
+   "path": "tokenizer/added_tokens.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "50b2f405ba56a26d4913fd772089992252d7f942123cc0a034d96424221ba946",
+   "size_bytes": 35
+  },
+  {
+   "id": "artifact-22",
+   "path": "tokenizer/chat_template.jinja",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "7de1c58e208eda46e9c7f86397df37ec49883aeece39fb961e0a6b24088dd3c4",
+   "size_bytes": 1532
+  },
+  {
+   "id": "artifact-23",
+   "path": "tokenizer/preprocessor_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "f688d6bb20c5017601c4011de7ca656da8485b540b05013efdaf986c0fcc918d",
+   "size_bytes": 570
+  },
+  {
+   "id": "artifact-24",
+   "path": "tokenizer/processor_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "3ffd5f11778dc73e2b69b3c00535e4121e1badf7018136263cd17b5b34fbaa53",
+   "size_bytes": 70
+  },
+  {
+   "id": "artifact-25",
+   "path": "tokenizer/special_tokens_map.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "2f7b0adf4fb469770bb1490e3e35df87b1dc578246c5e7e6fc76ecf33213a397",
+   "size_bytes": 662
+  },
+  {
+   "id": "artifact-26",
+   "path": "tokenizer/tokenizer.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "4667f2089529e8e7657cfb6d1c19910ae71ff5f28aa7ab2ff2763330affad795",
+   "size_bytes": 33384568
+  },
+  {
+   "id": "artifact-27",
+   "path": "tokenizer/tokenizer.model",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "1299c11d7cf632ef3b4e11937501358ada021bbdf7c47638d13c0ee982f2e79c",
+   "size_bytes": 4689074
+  },
+  {
+   "id": "artifact-28",
+   "path": "tokenizer/tokenizer_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "983c80895e7b188911f5ccfbb4f780a4e73fb3131ed2080a3e847ef8623cfdca",
+   "size_bytes": 1155387
+  }
+ ],
+ "format": {
+  "precision": "fp4",
+  "quantization": "fp4"
+ },
+ "identity": {
+  "family": {
+   "publisher": "lightricks",
+   "slug": "ltx",
+   "title": "LTX"
+  },
+  "model": {
+   "publisher": "lightricks",
+   "slug": "ltx-2",
+   "title": "LTX-2"
+  },
+  "publisher": "lightricks",
+  "slug": "ltx-2-19b-dev-fp4-dfcc2108",
+  "variant": "LTX-2 19B dev FP4 dfcc2108",
+  "version": "19b-dev-fp4-dfcc2108"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "Lightricks"
+  ],
+  "spdx": "LTX-2 Community License Agreement",
+  "url": "https://huggingface.co/Lightricks/LTX-2/blob/dfcc2108383fe1aaa0584bdf55d368a4bdadd90c/LICENSE"
+ },
+ "metadata": {
+  "description": "Exact Lightricks LTX-2 development FP4 checkpoint and native-pipeline companion artifacts for an experimental Spark video/audio recipe.",
+  "tags": [
+   "lightricks",
+   "ltx",
+   "video",
+   "audio",
+   "generation",
+   "fp4",
+   "spark"
+  ]
+ },
+ "modalities": [
+  "audio",
+  "video"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/Lightricks/LTX-2",
+  "revision": "dfcc2108383fe1aaa0584bdf55d368a4bdadd90c"
+ }
+}

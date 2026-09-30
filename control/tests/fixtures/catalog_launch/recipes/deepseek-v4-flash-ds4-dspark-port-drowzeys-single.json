@@ -1,0 +1,325 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "d44d6dc249c2c8330d0b380c595a514f0e86137fcc717fe7a4389a25720ade37",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/deepseek/drowzeys-ds4-dspark-port-single"
+   },
+   "dockerfile": "adapters/deepseek/drowzeys-ds4-dspark-port-single/Dockerfile",
+   "network": {
+    "hosts": []
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "deepseek-v4-flash-ds4-dspark-port-drowzeys-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "deepseek-v4-flash"
+   ],
+   "port": 8080
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "standard",
+  "description": "drowzeys' DSpark-style speculative-decoding port for antirez's ds4 (DwarfStar) engine on one Spark: eight flag-gated C patches on antirez/ds4 80ebbc3 (replay-free row commits, suffix n-gram drafting, confidence stops, MTP-seeded verify rounds, acceptance scheduler, a decode-shaped q8 microbatch kernel, GB10 shared-staged int4 weight loads, batched draft chains and a trained Markov table, both off by default), built from a vendored, hash-checked source archive with the patches applied at image build. Serves antirez's DeepSeek-V4-Flash chat-v2 IQ2XXS/Q2K imatrix GGUF (81 GB) with the Q4K/Q8_0/F32 MTP GGUF, the pre-0731 files that upstream used (the library's other ds4 recipes use the 0731 files). Defaults are upstream's final DSpark configuration: --mtp-draft 5, --dspark-early-margin 3, --dspark-ngram 8, --dspark-row-commit, --dspark-rounds 16, --dspark-adapt, --dspark-mbatch. Upstream reports (not measured here) single-stream 20.0 tok/s on C code and 20.9 on JSON against 14.2 for antirez's published baseline (stock --mtp lost at 13.9 to 14.3), CLI with -c 8192, temperature 0. Licence MIT (ds4 and drowzeys' patches; model files carry DeepSeek's MIT licence). Not gated.",
+  "tags": [
+   "candidate",
+   "ds4",
+   "dspark",
+   "executable",
+   "gguf",
+   "mtp",
+   "single",
+   "spark",
+   "tool-use"
+  ],
+  "title": "DeepSeek V4 Flash ds4 Q2 with DSpark-style speculation (drowzeys) one Spark"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "target",
+     "id": "primary-target",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "drafter",
+     "id": "primary-drafter",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "2e3b451adfeb6725d0729ef933fb799a5f22200f724d712ceb04dbc1750a7239",
+    "kind": "model",
+    "publisher": "antirez",
+    "slug": "deepseek-v4-flash-ds4-q2-imatrix-mtp-f71f23d5"
+   }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Upstream final configuration (--dspark-mbatch).",
+     "label": "Microbatch kernel on",
+     "value": "on"
+    },
+    {
+     "args": [
+      {
+       "name": "dspark-mbatch",
+       "value": false
+      }
+     ],
+     "help": "Verifier without the microbatch kernel; upstream A/B baseline.",
+     "label": "Microbatch kernel off",
+     "value": "off"
+    }
+   ],
+   "help": "Upstream ablation: the decode-shaped q8 microbatch kernel removes fixed verifier overhead for 2 to 16 row batches (verify wall 124 ms at 2 rows stock, 95 ms with the kernel, upstream-measured).",
+   "label": "Verify microbatch kernel",
+   "name": "mbatch"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Default ds4 kernels (upstream default).",
+     "label": "Fast",
+     "value": "fast"
+    },
+    {
+     "args": [
+      {
+       "name": "quality",
+       "value": true
+      }
+     ],
+     "help": "Pass --quality: prefer exact kernels where faster approximate paths exist; may be slower.",
+     "label": "Exact kernels",
+     "value": "quality"
+    }
+   ],
+   "help": "Whether ds4 prefers exact kernels over faster approximate paths (upstream default is the faster path).",
+   "label": "Kernel precision",
+   "name": "kernels"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Weights are touched on first use (upstream default); the first requests may stall.",
+     "label": "Lazy",
+     "value": "lazy"
+    },
+    {
+     "args": [
+      {
+       "name": "warm-weights",
+       "value": true
+      }
+     ],
+     "help": "Pass --warm-weights to reduce first-use stalls; startup takes longer.",
+     "label": "Warm at startup",
+     "value": "warm"
+    }
+   ],
+   "help": "Whether ds4 touches its resident weights at startup.",
+   "label": "Weight warm-up",
+   "name": "warm-weights"
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "drowzeys (keyspark)",
+   "Salvatore Sanfilippo (antirez), ds4 and the DeepSeek V4 GGUFs",
+   "DeepSeek AI",
+   "rafaelcaricio, aidendle94, MiaAI-Lab, tonyd2wild (DSpark lineage)"
+  ],
+  "source_reference": "https://github.com/drowzeys/keys-Antirez-Dwarf-Star-DSV4-on-DGX-Spark-GB10-Q2bit/tree/98b73b7caa342fffd7871b5e77c803b7e087c67b"
+ },
+ "release": {
+  "released_at": "2026-07-08",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "model",
+    "setting": null,
+    "value": "/models/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix.gguf"
+   },
+   {
+    "name": "mtp",
+    "setting": null,
+    "value": "/models/DeepSeek-V4-Flash-MTP-Q4K-Q8_0-F32.gguf"
+   },
+   {
+    "name": "mtp-draft",
+    "setting": null,
+    "value": 5
+   },
+   {
+    "name": "dspark-early-margin",
+    "setting": null,
+    "value": 3
+   },
+   {
+    "name": "dspark-ngram",
+    "setting": null,
+    "value": 8
+   },
+   {
+    "name": "dspark-row-commit",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "dspark-rounds",
+    "setting": null,
+    "value": 16
+   },
+   {
+    "name": "dspark-adapt",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "dspark-mbatch",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "ctx",
+    "setting": "context_tokens",
+    "value": null
+   }
+  ],
+  "engine": "ds4",
+  "entrypoint": [
+   "/opt/vonk/bin/ds4-serve"
+  ],
+  "environment": [
+   {
+    "name": "DS4_LOG_LEVEL",
+    "value": "INFO"
+   },
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 131072
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 90527713888,
+      "image_bytes": 10000000000,
+      "safety_margin_bytes": 10000000000,
+      "working_bytes": 18000000000
+     },
+     "memory": {
+      "peak_bytes": 115000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 64,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "deepseek-v4-flash"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

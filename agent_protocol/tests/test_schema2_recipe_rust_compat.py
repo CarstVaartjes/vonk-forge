@@ -629,3 +629,66 @@ def test_required_nullable_fields_cannot_be_omitted_on_either_wire(
         with pytest.raises(ValueError):
             RecipeInstallPayload.model_validate(payload)
         assert not _rust_accepts(wire_probe, AgentOperation.RECIPE_INSTALL, payload)
+
+
+CATALOG_LAUNCH = Path(__file__).parent / "fixtures" / "catalog-launch"
+
+
+def _catalog_launch_plans() -> list[tuple[str, dict[str, Any]]]:
+    plans = [
+        (path.name, json.loads(path.read_text(encoding="utf-8")))
+        for path in sorted(CATALOG_LAUNCH.glob("*.json"))
+    ]
+    assert len(plans) >= 20
+    return plans
+
+
+def _catalog_start(plan: dict[str, Any]) -> dict[str, Any] | None:
+    """The start claim for a catalog plan, or None where the plan never starts.
+
+    Jobs are installed and then invoked per run; they have no recipe.start.
+    """
+    plan = copy.deepcopy(plan)
+    if plan["job"] is not None:
+        return None
+    placement = plan["runtime"]["placement"]
+    if placement["world_size"] == 1:
+        return _start(plan)
+    # A rank of a distributed launch starts on the connected fabric.
+    plan["security"]["network_mode"] = "host"
+    placement.update(endpoint_address=None, master_port=29500)
+    return _start(plan)
+
+
+def test_catalog_launch_payloads_are_accepted_by_python_and_rust(
+    wire_probe: Path,
+) -> None:
+    """Every payload the Controller compiles from the real catalog is readable.
+
+    The fixtures are compiled by control/tests/test_catalog_launch_fixtures.py
+    from verbatim release recipes; here the same documents cross the production
+    Rust install/start parser and the Python wire models.
+    """
+    cases: list[tuple[AgentOperation, dict[str, Any]]] = []
+    labels: list[str] = []
+    models = {
+        AgentOperation.RECIPE_INSTALL: RecipeInstallPayload,
+        AgentOperation.RECIPE_START: RecipeStartPayload,
+    }
+    for name, plan in _catalog_launch_plans():
+        cases.append((AgentOperation.RECIPE_INSTALL, _install(plan)))
+        labels.append(f"install {name}")
+        start = _catalog_start(plan)
+        if start is not None:
+            cases.append((AgentOperation.RECIPE_START, start))
+            labels.append(f"start {name}")
+    for (operation, payload), label in zip(cases, labels, strict=True):
+        try:
+            models[operation].model_validate(payload)
+        except ValueError as error:
+            raise AssertionError(f"{label}: {error}") from error
+    verdicts = _rust_accepts_many(wire_probe, cases)
+    assert [
+        label for label, verdict in zip(labels, verdicts, strict=True) if not verdict
+    ] == []
+    assert any(label.startswith("start") for label in labels)

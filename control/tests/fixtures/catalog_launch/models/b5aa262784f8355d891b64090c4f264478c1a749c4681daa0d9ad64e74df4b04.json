@@ -1,0 +1,92 @@
+{
+ "capabilities": [
+  "video-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "high-noise",
+   "path": "split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "cad711ae211c8b23455ec68cd6a190a33a3d874234a77eb57266d73f8f0e6c9f",
+   "size_bytes": 14293923632
+  },
+  {
+   "id": "low-noise",
+   "path": "split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "e71b96d7c82e638694c5e7fb98fac4bfb0e4ddc5fbbb4b1df40da8f0f1278a97",
+   "size_bytes": 14293923632
+  },
+  {
+   "id": "text-encoder",
+   "path": "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "c3355d30191f1f066b26d93fba017ae9809dce6c627dda5f6a66eaa651204f68",
+   "size_bytes": 6735906897
+  },
+  {
+   "id": "vae",
+   "path": "split_files/vae/wan_2.1_vae.safetensors",
+   "roles": [
+    "vae"
+   ],
+   "sha256": "2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b",
+   "size_bytes": 253815318
+  }
+ ],
+ "format": {
+  "precision": "fp8",
+  "quantization": "fp8"
+ },
+ "identity": {
+  "family": {
+   "publisher": "wan-ai",
+   "slug": "wan-2-2",
+   "title": "Wan 2.2"
+  },
+  "model": {
+   "publisher": "wan-ai",
+   "slug": "wan-2-2-t2v-14b",
+   "title": "Wan 2.2 T2V 14B"
+  },
+  "publisher": "wan-ai",
+  "slug": "wan-2-2-t2v-14b-comfyui-ee6f4a40",
+  "variant": "Wan 2.2 T2V 14B ComfyUI revision ee6f4a40",
+  "version": "comfyui-ee6f4a40"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "Wan-AI",
+   "Comfy-Org"
+  ],
+  "spdx": "Apache-2.0",
+  "url": "https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B/blob/c8c270b13ee05bfa474194ac9fb07a5868a97cea/LICENSE.txt"
+ },
+ "metadata": {
+  "description": "Exact Comfy-Org scaled-FP8 high/low-noise T2V experts, encoder, and Wan VAE.",
+  "tags": [
+   "wan",
+   "video",
+   "text-to-video",
+   "comfyui",
+   "fp8",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "video"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+  "revision": "ee6f4a40737a995bf5818954cfce6d59443b0f04"
+ }
+}

@@ -1,0 +1,181 @@
+{
+ "capabilities": [
+  "reasoning",
+  "text-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-34448b82c17d-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930",
+   "size_bytes": 1570
+  },
+  {
+   "id": "license-d7c8a9e5d189-c693279643",
+   "path": "LICENSE",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "d7c8a9e5d1896d0a9588319cc7b1433e64645ad6d9e55632c30b78d8c038c23b",
+   "size_bytes": 2693
+  },
+  {
+   "id": "readme-ce0891251a86-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "ce0891251a860d93dffb61d8e5ccfb6691e7555a883b4c57bb868dd7b31a0bb2",
+   "size_bytes": 9233
+  },
+  {
+   "id": "chat-template-58933db77d30-00824420d1",
+   "path": "chat_template.jinja",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "58933db77d3099b4f78c55a38347a72e1ea05b97d6bd8f38775303dc0194e0a9",
+   "size_bytes": 9867
+  },
+  {
+   "id": "config-2d4bdc543efd-587cb980af",
+   "path": "config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "2d4bdc543efd8ccd68fccbf1231b1d1216ab2a0482229ea5638d448127973b27",
+   "size_bytes": 2932
+  },
+  {
+   "id": "generation-config-0ed94823ae73-97dd3d578b",
+   "path": "generation_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "0ed94823ae737b507aef6af01e837041b7aa2fb0306793a310cd201d89a31ff4",
+   "size_bytes": 210
+  },
+  {
+   "id": "model-00001-of-00004-7cc60a26a467-1913267ec8",
+   "path": "model-00001-of-00004.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "7cc60a26a46712e471d74c64dc4460558b15194a879a99426c5647ef1d588ca6",
+   "size_bytes": 5118631458
+  },
+  {
+   "id": "model-00002-of-00004-ed6020dad4cd-60f6088da9",
+   "path": "model-00002-of-00004.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "ed6020dad4cdeac47bb24d31ce8d212a607476358845b8620f1767b2fae30b3a",
+   "size_bytes": 5291568451
+  },
+  {
+   "id": "model-00003-of-00004-fcc12aa6d00f-fc35f2c4d5",
+   "path": "model-00003-of-00004.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "fcc12aa6d00fa75447fc01ba7efe288e5bae025ae44aaad0afde265ac3abb7f1",
+   "size_bytes": 5291568415
+  },
+  {
+   "id": "model-00004-of-00004-6fcd77b94087-5078e75d62",
+   "path": "model-00004-of-00004.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "6fcd77b940874080dce8c63843c93957d96565284b7810063e592b6febd63089",
+   "size_bytes": 2073657055
+  },
+  {
+   "id": "model-safetensors-index-4c12ae327464-0a05be8238",
+   "path": "model.safetensors.index.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "4c12ae32746441ec65e94d8cf312462ac10ab0d3c80513bba3d1c1ca3f2ed9ca",
+   "size_bytes": 65410
+  },
+  {
+   "id": "mtp-4bit-4953d2323861-fe52f099e1",
+   "path": "mtp-4bit.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "4953d2323861b48db04d01e86559eb8b944f750ca1c1088409e2a65c6350f5f7",
+   "size_bytes": 751638984
+  },
+  {
+   "id": "tokenizer-623c34567aeb-224931eb13",
+   "path": "tokenizer.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "623c34567aebb18582765289fbe23d901c62704d6518d71866e0e58db892b5b7",
+   "size_bytes": 17077484
+  },
+  {
+   "id": "tokenizer-config-ec380f0a6c0c-94d5c6ba8f",
+   "path": "tokenizer_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "ec380f0a6c0c2e294eb2435f5ec521fb2121cfc970e6ebf023d06829714a4eaa",
+   "size_bytes": 430
+  }
+ ],
+ "format": {
+  "precision": "mlx-4bit-g64",
+  "quantization": "mlx-4bit-group64-mtp"
+ },
+ "identity": {
+  "family": {
+   "publisher": "vontra",
+   "slug": "nemotron-3-5-vontra",
+   "title": "Vontra Nemotron 3.5 MLX checkpoints"
+  },
+  "model": {
+   "publisher": "vontra",
+   "slug": "nemotron-3-5-lightning-30b-a3b-mlx-4bit-mtp",
+   "title": "Nemotron 3.5 Lightning 30B-A3B MLX 4-bit with MTP head"
+  },
+  "publisher": "vontra",
+  "slug": "nemotron-3-5-lightning-30b-a3b-mlx-4bit-mtp-8bbcb5b6",
+  "variant": "Nemotron 3.5 Lightning 30B-A3B MLX 4-bit MTP 8bbcb5b6",
+  "version": "Nemotron 3.5 Lightning 30B-A3B MLX 4-bit MTP 8bbcb5b6"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "NVIDIA Corporation",
+   "Vontra"
+  ],
+  "spdx": "LicenseRef-OpenMDW-1.1",
+  "url": "https://huggingface.co/Vontra/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MLX-4bit/blob/8bbcb5b6a46a4409d47832b6fdc2fcc9183c83e8/LICENSE"
+ },
+ "metadata": {
+  "description": "Exact public Vontra MLX 4-bit (group size 64) conversion of NVIDIA Nemotron 3.5 Lightning 30B-A3B with its MTP draft head (mtp-4bit.safetensors), for TensorFold.",
+  "tags": [
+   "vontra",
+   "nemotron-3-5-vontra",
+   "language",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "text"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/Vontra/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MLX-4bit",
+  "revision": "8bbcb5b6a46a4409d47832b6fdc2fcc9183c83e8"
+ }
+}

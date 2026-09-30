@@ -1,0 +1,66 @@
+{
+ "capabilities": [
+  "image-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "diffusion",
+   "path": "flux-2-klein-4b-nvfp4.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "d8c5007b6a3bbbdfd38538bbcef5101a55dfde81894f58d2e3c8701cdef3542b",
+   "size_bytes": 2460413488
+  }
+ ],
+ "format": {
+  "precision": "mixed",
+  "quantization": "nvfp4"
+ },
+ "identity": {
+  "family": {
+   "publisher": "black-forest-labs",
+   "slug": "flux-2",
+   "title": "FLUX.2"
+  },
+  "model": {
+   "publisher": "black-forest-labs",
+   "slug": "flux-2-klein-4b",
+   "title": "FLUX.2 Klein 4B"
+  },
+  "publisher": "black-forest-labs",
+  "slug": "flux-2-klein-4b-nvfp4-1db2b2f7",
+  "variant": "FLUX.2 Klein 4B NVFP4 revision 1db2b2f7",
+  "version": "nvfp4-1db2b2f7"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "Black Forest Labs",
+   "Comfy-Org"
+  ],
+  "spdx": "Apache-2.0",
+  "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-nvfp4/blob/1db2b2f776c24b76f1122e5f69ab1949fc620068/LICENSE.md"
+ },
+ "metadata": {
+  "description": "Official Black Forest Labs NVFP4 transformer with the exact Comfy-Org Qwen3 encoder and VAE companions required for core ComfyUI inference.",
+  "tags": [
+   "flux",
+   "image",
+   "comfyui",
+   "nvfp4",
+   "distilled",
+   "candidate",
+   "spark"
+  ]
+ },
+ "modalities": [
+  "image"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-nvfp4",
+  "revision": "1db2b2f776c24b76f1122e5f69ab1949fc620068"
+ }
+}

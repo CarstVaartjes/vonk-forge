@@ -4639,7 +4639,7 @@ fn valid_environment(value: &str) -> bool {
             if index == 0 {
                 byte.is_ascii_uppercase()
             } else {
-                byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
+                byte.is_ascii_alphanumeric() || byte == b'_'
             }
         })
 }
@@ -7874,6 +7874,23 @@ mod tests {
                 Err(OperationError::Io(_))
             ));
             assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
+        }
+    }
+
+    #[test]
+    fn runtime_environment_names_keep_engine_case_and_stay_shell_safe() {
+        for accepted in ["NCCL_DEBUG=INFO", "RAY_memory_usage_threshold=0.99", "A1="] {
+            assert!(super::valid_environment(accepted), "{accepted}");
+        }
+        for rejected in [
+            "lowercase=1",
+            "_LEADING=1",
+            "HAS-DASH=1",
+            "HAS SPACE=1",
+            "=1",
+            "NO_EQUALS",
+        ] {
+            assert!(!super::valid_environment(rejected), "{rejected}");
         }
     }
 }

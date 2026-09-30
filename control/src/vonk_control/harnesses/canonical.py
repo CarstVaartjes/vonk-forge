@@ -49,7 +49,9 @@ _MAX_ARGV_TOKEN_BYTES = 65_536
 # request ceiling rather than restated as 1 MiB.
 _MAX_ARGV_BYTES = MAX_ARGV_BYTES
 _SAFE_ARG_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
-_SAFE_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+# Engine variables such as Ray's RAY_memory_usage_threshold are case-sensitive,
+# so only the first character is held to upper case.
+_SAFE_ENV_NAME = re.compile(r"^[A-Z][A-Za-z0-9_]{0,127}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _PLATFORM_ENV_NAMES = frozenset(
     {

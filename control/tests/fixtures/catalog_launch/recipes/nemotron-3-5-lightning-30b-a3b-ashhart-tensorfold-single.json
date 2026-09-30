@@ -1,0 +1,428 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "7531d90bcbe0e43e1f7363029c7e145ce90eebeb494a7b4695fdba0329d7c3c3",
+    "repository": "nvcr.io/nvidia/pytorch"
+   },
+   "context": {
+    "path": "adapters/nvidia/nemotron-lightning-tensorfold-single"
+   },
+   "dockerfile": "adapters/nvidia/nemotron-lightning-tensorfold-single/Dockerfile",
+   "network": {
+    "hosts": [
+     "files.pythonhosted.org",
+     "pypi.org"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "nemotron-3-5-lightning-30b-a3b-ashhart-tensorfold-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "nemotron-3-5-lightning"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Single-DGX-Spark NVIDIA Nemotron 3.5 Lightning 30B-A3B (Mamba-2, attention and MoE hybrid) on Ash Hart's TensorFold engine v0.4.0 (exact decoding, custom CUDA kernels JIT-compiled on first start, stock upstream source) with Vontra's MLX 4-bit (group 64) checkpoint, which includes the model's MTP draft head. One rank only: TensorFold's two-rank mode is not available here. Requests are served one at a time (upstream CUDA behaviour for Nemotron) in TensorFold's default 16,384-token window; raise the context setting for longer prompts, up to the model's 262,144 tokens, subject to TensorFold's startup memory check. Upstream measured about 123 to 146 tok/s with MTP and a 42.2 GiB peak at 262,144 tokens on a 64 GB M5 Pro, an MLX run with TensorFold 0.3.5.1; no DGX Spark figure is published, and none is measured here. Licence, for information: NVIDIA Nemotron 3.5 Lightning weights are under the OpenMDW License Agreement 1.1 (text in the model repository); TensorFold is MIT.",
+  "tags": [
+   "engine",
+   "kernel-jit",
+   "mamba",
+   "mlx-checkpoint",
+   "moe",
+   "mtp",
+   "nemotron",
+   "reasoning",
+   "spark",
+   "tensorfold"
+  ],
+  "title": "Nemotron 3.5 Lightning 30B A3B TensorFold single Spark"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-34448b82c17d-618cd5b83d",
+     "id": "primary-metadata-34448b82c17d-618cd5b83d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "license-d7c8a9e5d189-c693279643",
+     "id": "primary-license-d7c8a9e5d189-c693279643",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-ce0891251a86-b335630551",
+     "id": "primary-readme-ce0891251a86-b335630551",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "chat-template-58933db77d30-00824420d1",
+     "id": "primary-chat-template-58933db77d30-00824420d1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-2d4bdc543efd-587cb980af",
+     "id": "primary-config-2d4bdc543efd-587cb980af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "generation-config-0ed94823ae73-97dd3d578b",
+     "id": "primary-generation-config-0ed94823ae73-97dd3d578b",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00004-7cc60a26a467-1913267ec8",
+     "id": "primary-model-00001-of-00004-7cc60a26a467-1913267ec8",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00004-ed6020dad4cd-60f6088da9",
+     "id": "primary-model-00002-of-00004-ed6020dad4cd-60f6088da9",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00003-of-00004-fcc12aa6d00f-fc35f2c4d5",
+     "id": "primary-model-00003-of-00004-fcc12aa6d00f-fc35f2c4d5",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00004-of-00004-6fcd77b94087-5078e75d62",
+     "id": "primary-model-00004-of-00004-6fcd77b94087-5078e75d62",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-4c12ae327464-0a05be8238",
+     "id": "primary-model-safetensors-index-4c12ae327464-0a05be8238",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "mtp-4bit-4953d2323861-fe52f099e1",
+     "id": "primary-mtp-4bit-4953d2323861-fe52f099e1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-623c34567aeb-224931eb13",
+     "id": "primary-tokenizer-623c34567aeb-224931eb13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-ec380f0a6c0c-94d5c6ba8f",
+     "id": "primary-tokenizer-config-ec380f0a6c0c-94d5c6ba8f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "20ef4f4ab34b2c1da7df40dad0ee63e0be4f7d9e31dcf00819242fd5a0adbb26",
+    "kind": "model",
+    "publisher": "vontra",
+    "slug": "nemotron-3-5-lightning-30b-a3b-mlx-4bit-mtp-8bbcb5b6"
+   }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Open a think block by default (upstream default: --thinking).",
+     "label": "Think first",
+     "value": "thinking"
+    },
+    {
+     "args": [
+      {
+       "name": "thinking",
+       "value": false
+      },
+      {
+       "name": "no-thinking",
+       "value": true
+      }
+     ],
+     "help": "Answer without a think block unless a request asks for one.",
+     "label": "Answer directly",
+     "value": "direct"
+    }
+   ],
+   "help": "Whether the chat template opens a think block by default. A request can still set chat_template_kwargs.enable_thinking; reasoning comes back separately from the answer.",
+   "label": "Thinking",
+   "name": "thinking"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "At most 3 MTP drafts a round (upstream default).",
+     "label": "MTP, 3 drafts",
+     "value": "mtp-3"
+    },
+    {
+     "args": [
+      {
+       "name": "mtp-drafts",
+       "value": 1
+      }
+     ],
+     "help": "At most 1 MTP draft a round (--mtp-drafts 1); speed unmeasured.",
+     "label": "MTP, 1 draft",
+     "value": "mtp-1"
+    },
+    {
+     "args": [
+      {
+       "name": "mtp-drafts",
+       "value": 6
+      }
+     ],
+     "help": "At most 6 MTP drafts a round (--mtp-drafts 6); speed unmeasured.",
+     "label": "MTP, 6 drafts",
+     "value": "mtp-6"
+    },
+    {
+     "args": [
+      {
+       "name": "no-drafts",
+       "value": true
+      }
+     ],
+     "help": "Serial one-token-at-a-time reference decoding (--no-drafts); slower (upstream measured 108 to 110 tok/s serial against 123 to 146 with MTP on a 64 GB M5 Pro, an MLX result).",
+     "label": "No drafting",
+     "value": "serial"
+    }
+   ],
+   "help": "The model's own MTP head drafts tokens and the target verifies each against its serial sample, so outputs are unchanged by drafting (upstream claim). On CUDA drafts continue while the running head confidence stays at or above 20 percent (the first draft is always kept); --mtp-drafts takes 0 to 8.",
+   "label": "MTP drafting",
+   "name": "drafting"
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Ash Hart (TensorFold)",
+   "Vontra",
+   "NVIDIA Corporation"
+  ],
+  "source_reference": "https://github.com/ashhart/TensorFold/tree/7a00336b2f6d1a1a3e0ba49d1ef5b4b82e927759"
+ },
+ "release": {
+  "released_at": "2026-09-29",
+  "version": "0.4.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "host",
+    "setting": null,
+    "value": "0.0.0.0"
+   },
+   {
+    "name": "port",
+    "setting": null,
+    "value": 8000
+   },
+   {
+    "name": "name",
+    "setting": null,
+    "value": "nemotron-3-5-lightning"
+   },
+   {
+    "name": "context",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "thinking",
+    "setting": null,
+    "value": true
+   }
+  ],
+  "engine": "tensorfold",
+  "entrypoint": [
+   "/opt/vonk/bin/tensorfold-serve"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TENSORFOLD_NO_UPDATE_CHECK",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 60
+  }
+ },
+ "settings": {
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 16384
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 18544234192,
+      "image_bytes": 26000000000,
+      "safety_margin_bytes": 15000000000,
+      "working_bytes": 8000000000
+     },
+     "memory": {
+      "peak_bytes": 45000000000,
+      "reserve_bytes": 13100000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 256,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "nemotron-3-5-lightning"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

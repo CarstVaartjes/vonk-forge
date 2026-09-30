@@ -94,7 +94,7 @@ def validate_projection(
             type(item) is not tuple
             or len(item) != 2
             or type(item[0]) is not str
-            or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", item[0])
+            or not re.fullmatch(r"[A-Z][A-Za-z0-9_]{0,127}", item[0])
             or type(item[1]) is not str
             or len(item[1].encode("utf-8")) > (65536 if canonical_argv else 2048)
             or "\x00" in item[1]

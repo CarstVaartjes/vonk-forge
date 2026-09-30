@@ -1,0 +1,560 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "4864d46625cbc3307623e29ac742030655e27249feba7b97ec925ce4cc4dfb56",
+    "repository": "docker.io/vllm/vllm-openai"
+   },
+   "context": {
+    "path": "adapters/qwen/mia-27b-exl3-dflash2-single"
+   },
+   "dockerfile": "adapters/qwen/mia-27b-exl3-dflash2-single/Dockerfile",
+   "network": {
+    "hosts": [
+     "codeload.github.com",
+     "files.pythonhosted.org",
+     "github.com",
+     "pypi.org"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "qwen3-8-27b-exl3-dflash2-mia-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "qwen3.8-27b-exl3-3.5bpw-wm"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Candidate single-Spark recipe from MiaAI-Lab's public Qwen3.8-27B-DFlash2-EXL3-5.0bpw deployment kit at 1242187 (MIT, no release or tag): the exact 19441ac8 Mia-AiLab Qwen3.8-27B EXL3 3.5 bpw checkpoint (14.2 GB, text only, with its built-in MTP head) and the exact 4f043626 DFlash2 EXL3 5.0 bpw draft (1.4 GB), served by the kit's own tools/serve_openai.py on the MiaAI-Lab exllamav3 fork pinned at 63b32f0 (the kit installs the fork from unpinned git HEAD; this recipe pins the fork commit). The kit ships no container: the image installs the fork the way start.sh does, on the digest-pinned official vLLM v0.30.0 arm64 image used only as a torch and CUDA 13 toolchain base, compiling the extension for sm_120/sm_121; the engine's Python dependencies (marisa_trie, llguidance, flash-linear-attention and others) resolve from PyPI at build time and are not version-pinned, exactly as in upstream's launcher. Defaults follow upstream: MTP drafting, NVFP4 KV cache, 262,144-token context; the DFlash2 draft is mounted in every run and selected with the speculative decoding option. Both checkpoints are Apache-2.0 and the kit source is MIT. The server generates one request at a time (batch-1 speculative decoding, upstream states concurrent requests queue) and always reasons: reasoning and answer share max_tokens, so a small limit can return empty content. Upstream claims (not measured here): about 30 tok/s with MTP and about 34.5 to 47.5 tok/s with DFlash2 on GB10, DFlash2 about 15 percent faster than MTP. Memory figures are estimates from upstream's memory math (weights plus about 18 KB per token of NVFP4 KV plus draft KV), not measurements. Not exposed: the 1M-token YaRN config switch (it rewrites the checkpoint's config.json, and models mount read-only), the CPU cache tier (upstream says it is not yet active), the GPU memory budget auto-detection (fixed at upstream's documented 110 GB for a Spark), and the engine-source override. Physical Spark acceptance is pending.",
+  "tags": [
+   "candidate",
+   "dflash2",
+   "exl3",
+   "executable",
+   "mia",
+   "mtp",
+   "pending",
+   "reasoning",
+   "single",
+   "spark",
+   "tool-use",
+   "qwen3-8"
+  ],
+  "title": "Qwen3.8 27B EXL3 3.5bpw MTP and DFlash2 single Spark (Mia)"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-34448b82c17d-618cd5b83d",
+     "id": "primary-metadata-34448b82c17d-618cd5b83d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "license-bbedc3fda330-c693279643",
+     "id": "primary-license-bbedc3fda330-c693279643",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-19c0690b5be7-b335630551",
+     "id": "primary-readme-19c0690b5be7-b335630551",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "chat-template-c3cf9e34abf4-00824420d1",
+     "id": "primary-chat-template-c3cf9e34abf4-00824420d1",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-153407dcf654-587cb980af",
+     "id": "primary-config-153407dcf654-587cb980af",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-yarn-1m-c8fa390aa601-334632c17f",
+     "id": "primary-config-yarn-1m-c8fa390aa601-334632c17f",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "generation-config-e70c136c1b78-97dd3d578b",
+     "id": "primary-generation-config-e70c136c1b78-97dd3d578b",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "merges-a9d356d7bdf1-b0d6dcfed4",
+     "id": "primary-merges-a9d356d7bdf1-b0d6dcfed4",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00002-7b77214fe58f-27a6880801",
+     "id": "primary-model-00001-of-00002-7b77214fe58f-27a6880801",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00002-411c83bb1070-2cca3b5a88",
+     "id": "primary-model-00002-of-00002-411c83bb1070-2cca3b5a88",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-ee2d5e73b5f8-0a05be8238",
+     "id": "primary-model-safetensors-index-ee2d5e73b5f8-0a05be8238",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "preprocessor-config-27225450ac9c-36afccab5d",
+     "id": "primary-preprocessor-config-27225450ac9c-36afccab5d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "quantization-config-d5e7e4c41108-6f24389fb3",
+     "id": "primary-quantization-config-d5e7e4c41108-6f24389fb3",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-0997f410c57a-224931eb13",
+     "id": "primary-tokenizer-0997f410c57a-224931eb13",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-b11349aafa7c-94d5c6ba8f",
+     "id": "primary-tokenizer-config-b11349aafa7c-94d5c6ba8f",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "video-preprocessor-config-7768af27c1fa-35d01a7325",
+     "id": "primary-video-preprocessor-config-7768af27c1fa-35d01a7325",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "vocab-ce99b4cb2983-ba05d8e2e4",
+     "id": "primary-vocab-ce99b4cb2983-ba05d8e2e4",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "86984bebd7a4f0cd6832946042461e725cc607ad358e2a8fb13d3e4873e46733",
+    "kind": "model",
+    "publisher": "mia-ai-lab",
+    "slug": "qwen3-8-27b-exl3-3-5bpw-19441ac8"
+   }
+  },
+  {
+   "files": [
+    {
+     "file_id": "metadata-8e63f02a5caa-618cd5b83d",
+     "id": "draft-metadata-8e63f02a5caa-618cd5b83d",
+     "mount": {
+      "target": "/models/draft"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "license-bbedc3fda330-c693279643",
+     "id": "draft-license-bbedc3fda330-c693279643",
+     "mount": {
+      "target": "/models/draft"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-711fd0843f9d-b335630551",
+     "id": "draft-readme-711fd0843f9d-b335630551",
+     "mount": {
+      "target": "/models/draft"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-b7f916198b36-587cb980af",
+     "id": "draft-config-b7f916198b36-587cb980af",
+     "mount": {
+      "target": "/models/draft"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-6b2e3afc694a-9d75c1098f",
+     "id": "draft-model-6b2e3afc694a-9d75c1098f",
+     "mount": {
+      "target": "/models/draft"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "quantization-config-38fcf955384f-6f24389fb3",
+     "id": "draft-quantization-config-38fcf955384f-6f24389fb3",
+     "mount": {
+      "target": "/models/draft"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "draft",
+   "model": {
+    "content_sha256": "5fb2ae4be3c84b4201dcd187a5d40b03e9f95e9198b49ec3cbeafcead72bd6cd",
+    "kind": "model",
+    "publisher": "mia-ai-lab",
+    "slug": "qwen3-8-27b-dflash2-exl3-5-0bpw-4f043626"
+   }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Upstream default.",
+     "label": "MTP head",
+     "value": "mtp"
+    },
+    {
+     "args": [
+      {
+       "name": "draft_model",
+       "value": "/models/draft"
+      }
+     ],
+     "help": "Drafts up to 7 tokens per step with the mounted DFlash2 EXL3 5.0 bpw draft.",
+     "label": "DFlash2 draft",
+     "value": "dflash2"
+    },
+    {
+     "args": [
+      {
+       "name": "draft_model",
+       "value": "none"
+      }
+     ],
+     "help": "Upstream: slowest per token, no extra memory.",
+     "label": "No drafting",
+     "value": "none"
+    }
+   ],
+   "help": "How tokens are drafted. MTP uses the draft head inside the target checkpoint (no extra weights, about 20% less KV per token); DFlash2 uses the separate 1.4 GB draft (upstream claims about 15% faster, at the cost of its weights and draft KV). Speed statements are upstream claims until measured on Vonk hardware.",
+   "label": "Speculative decoding",
+   "name": "speculation"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Upstream default and recommendation (about 18 KB per token).",
+     "label": "NVFP4 (about 4.5 bits)",
+     "value": "nvfp4"
+    },
+    {
+     "args": [
+      {
+       "name": "cache_quant",
+       "value": "fp8"
+      }
+     ],
+     "help": "Raw E4M3 cache.",
+     "label": "FP8 E4M3 (8 bits)",
+     "value": "fp8"
+    },
+    {
+     "args": [
+      {
+       "name": "cache_quant",
+       "value": "8"
+      }
+     ],
+     "help": "Upstream cache_quant 8.",
+     "label": "INT8 Hadamard (about 8.5 bits)",
+     "value": "int8"
+    },
+    {
+     "args": [
+      {
+       "name": "cache_quant",
+       "value": "8,4"
+      }
+     ],
+     "help": "Upstream cache_quant 8,4 (asymmetric).",
+     "label": "INT8 keys, INT4 values (Hadamard)",
+     "value": "int8-int4"
+    },
+    {
+     "args": [
+      {
+       "name": "cache_quant",
+       "value": "4"
+      }
+     ],
+     "help": "Upstream cache_quant 4; documented for Ampere GPUs that cannot compile the NVFP4/FP8 kernels.",
+     "label": "INT4 Hadamard (about 4.5 bits)",
+     "value": "int4"
+    },
+    {
+     "args": [
+      {
+       "name": "cache_quant",
+       "value": "none"
+      }
+     ],
+     "help": "No KV quantization (about 64 KB per token); the wrapper omits --cache_quant as upstream does for CACHE_QUANT=none.",
+     "label": "FP16 (16 bits)",
+     "value": "fp16"
+    }
+   ],
+   "help": "Format of the attention KV cache. NVFP4 and FP8 are the fork's software-packed lanes and need compute capability 8.9 or newer (GB10 qualifies); upstream measured NVFP4 lossless at generation level. Bits per element are upstream figures.",
+   "label": "KV cache format",
+   "name": "kv-cache"
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Qwen",
+   "inco.ai and z-lab (DFlash2)",
+   "MiaAI-Lab (MIT)",
+   "Turboderp (exllamav3, MIT)",
+   "vLLM contributors (Apache-2.0 base image)"
+  ],
+  "source_reference": "https://github.com/MiaAI-Lab/Qwen3.8-27B-DFlash2-EXL3-5.0bpw/tree/1242187390f780dba907e30659f1639fd0b491c8"
+ },
+ "release": {
+  "released_at": "2026-09-01",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "model",
+    "setting": null,
+    "value": "/models/target"
+   },
+   {
+    "name": "draft_model",
+    "setting": null,
+    "value": "mtp"
+   },
+   {
+    "name": "cache_quant",
+    "setting": null,
+    "value": "nvfp4"
+   },
+   {
+    "name": "grid_size",
+    "setting": null,
+    "value": 110
+   },
+   {
+    "name": "cache_size",
+    "setting": "context_tokens",
+    "value": null
+   }
+  ],
+  "engine": "exllamav3",
+  "entrypoint": [
+   "/opt/vonk/bin/exl3-serve"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 60
+  }
+ },
+ "settings": {
+  "concurrency": {
+   "change_effect": "restart",
+   "value": 1
+  },
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 262144
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 16833051252,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 16000000000,
+      "working_bytes": 16000000000
+     },
+     "memory": {
+      "peak_bytes": 36000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 1024,
+       "messages": [
+        {
+         "content": "Reply with the single word: ok",
+         "role": "user"
+        }
+       ],
+       "model": "qwen3.8-27b-exl3-3.5bpw-wm"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

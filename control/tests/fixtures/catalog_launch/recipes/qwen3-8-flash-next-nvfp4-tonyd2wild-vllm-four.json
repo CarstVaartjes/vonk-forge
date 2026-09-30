@@ -1,0 +1,841 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "c4a8820479f1c012dcb350300220eb82845a484937c9fc635cb2c5489dd3b74f",
+    "repository": "docker.io/vllm/vllm-openai"
+   },
+   "context": {
+    "path": "adapters/qwen/flash-next-tonyd2wild-vllm"
+   },
+   "dockerfile": "adapters/qwen/flash-next-tonyd2wild-vllm/Dockerfile",
+   "network": {
+    "hosts": []
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "qwen3-8-flash-next-nvfp4-tonyd2wild-vllm-four"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "qwen3.8-flash-next"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "tonyd2wild's four-Spark vLLM TP4 CONTEXT profile for NVIDIA's own nvidia/Qwen3.8-Flash-Next-NVFP4 checkpoint, used byte for byte (124 GB) with expert parallel (which TP4 needs on GB10 because FlashInfer CUTLASS NVFP4 cannot pad the MoE intermediate four ways). The n-gram table stays on each rank's NVMe (disk-backed table patch), with MTP 4, eight sequences, FP8 KV, piecewise CUDA graphs, vLLM's default prefill chunk, memory utilization 0.80 and 262,144 context (upstream defaults; upstream measured a 9.1M-token KV pool). Each rank needs a readable local copy of the checkpoint; the option 'table' moves the table into memory (upstream's later TP4 variant). The adapter bakes upstream's patch files and vLLM overlays into the image at upstream's exact vLLM commit 8a728663. Image note: upstream ran the vllm/vllm-openai nightly-8a728663 tag, which is no longer on Docker Hub; the same commit survives only as the cu129-nightly-8a728663 build, pinned here by digest (CUDA 12.9 runtime instead of upstream's CUDA 13), so a Spark start is unverified. Licences (information only): repository Apache-2.0; vLLM Apache-2.0; checkpoint under the NVIDIA Open Model License and the Qwen licence of the base model. Upstream throughput figures are claims until measured here; Vonk physical acceptance is pending. ",
+  "tags": [
+   "four",
+   "mtp",
+   "multimodal",
+   "nvfp4",
+   "qwen3.8",
+   "reasoning",
+   "spark",
+   "tonyd2wild",
+   "tool-use",
+   "vllm"
+  ],
+  "title": "Qwen3.8 Flash Next NVFP4 vLLM four Sparks (tonyd2wild)"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-fe81d528e7ee-618cd5b83d",
+     "id": "primary-metadata-fe81d528e7ee-618cd5b83d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "readme-e3ed0cb89950-b335630551",
+     "id": "primary-readme-e3ed0cb89950-b335630551",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "chat-template-c3cf9e34abf4-00824420d1",
+     "id": "primary-chat-template-c3cf9e34abf4-00824420d1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "config-deef67a61f33-587cb980af",
+     "id": "primary-config-deef67a61f33-587cb980af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "generation-config-e70c136c1b78-97dd3d578b",
+     "id": "primary-generation-config-e70c136c1b78-97dd3d578b",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "hf-quant-config-331ad11d57c8-a481ad90fa",
+     "id": "primary-hf-quant-config-331ad11d57c8-a481ad90fa",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "merges-a9d356d7bdf1-b0d6dcfed4",
+     "id": "primary-merges-a9d356d7bdf1-b0d6dcfed4",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00010-63fde954be6f-abda2caf91",
+     "id": "primary-model-00001-of-00010-63fde954be6f-abda2caf91",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00010-4dafaef62a90-c78aeb3aa5",
+     "id": "primary-model-00002-of-00010-4dafaef62a90-c78aeb3aa5",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00003-of-00010-3218ddc12925-3bbb02f554",
+     "id": "primary-model-00003-of-00010-3218ddc12925-3bbb02f554",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00004-of-00010-55e2bdf6a3a1-9744fa3b65",
+     "id": "primary-model-00004-of-00010-55e2bdf6a3a1-9744fa3b65",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00005-of-00010-d3c169d3694b-287722c574",
+     "id": "primary-model-00005-of-00010-d3c169d3694b-287722c574",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00006-of-00010-38f65a9d1109-5c0b2f8f0d",
+     "id": "primary-model-00006-of-00010-38f65a9d1109-5c0b2f8f0d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00007-of-00010-8cf3fa05c04c-3028b843f1",
+     "id": "primary-model-00007-of-00010-8cf3fa05c04c-3028b843f1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00008-of-00010-53d1f80746aa-1a97e5bd74",
+     "id": "primary-model-00008-of-00010-53d1f80746aa-1a97e5bd74",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00009-of-00010-eaff6a87ece6-9e545a3307",
+     "id": "primary-model-00009-of-00010-eaff6a87ece6-9e545a3307",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00010-of-00010-0d49b0cf7c15-3cc422b9fe",
+     "id": "primary-model-00010-of-00010-0d49b0cf7c15-3cc422b9fe",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-fp8-mtp-ple-3525520c8602-8c766fad0c",
+     "id": "primary-model-fp8-mtp-ple-3525520c8602-8c766fad0c",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-660414e83007-0a05be8238",
+     "id": "primary-model-safetensors-index-660414e83007-0a05be8238",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "preprocessor-config-27225450ac9c-36afccab5d",
+     "id": "primary-preprocessor-config-27225450ac9c-36afccab5d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "processor-config-d89ef49ce9cd-27f0cb76af",
+     "id": "primary-processor-config-d89ef49ce9cd-27f0cb76af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-0997f410c57a-224931eb13",
+     "id": "primary-tokenizer-0997f410c57a-224931eb13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-b11349aafa7c-94d5c6ba8f",
+     "id": "primary-tokenizer-config-b11349aafa7c-94d5c6ba8f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "video-preprocessor-config-7768af27c1fa-35d01a7325",
+     "id": "primary-video-preprocessor-config-7768af27c1fa-35d01a7325",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "vocab-ce99b4cb2983-ba05d8e2e4",
+     "id": "primary-vocab-ce99b4cb2983-ba05d8e2e4",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "a870adf202e8f1241cbeaba904694534d090e9875e4b147a61ade2fa0f601518",
+    "kind": "model",
+    "publisher": "nvidia",
+    "slug": "qwen3-8-flash-next-nvfp4-fc694b54"
+   }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Upstream default. 4 drafted tokens per step.",
+     "label": "MTP 4 (default)",
+     "value": "mtp4"
+    },
+    {
+     "args": [
+      {
+       "name": "speculative-config",
+       "setting": null,
+       "value": "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+      }
+     ],
+     "help": "3 drafted tokens per step.",
+     "label": "MTP 3",
+     "value": "mtp3"
+    },
+    {
+     "args": [
+      {
+       "name": "speculative-config",
+       "setting": null,
+       "value": "{\"method\":\"mtp\",\"num_speculative_tokens\":4,\"index_share_for_mtp_iteration\":true}"
+      }
+     ],
+     "help": "4 drafted tokens and the QSA indexer top-k reused across draft steps (index_share_for_mtp_iteration); upstream measured +3 percent median single stream but prose -6 percent at TP2 and did not adopt it.",
+     "label": "MTP 4 with shared indexer",
+     "value": "mtp4-index-share"
+    },
+    {
+     "env": {
+      "VONK_QWEN_SPEC": "off"
+     },
+     "help": "No speculative decoding.",
+     "label": "Off",
+     "value": "off"
+    }
+   ],
+   "help": "Depth of MTP drafting with the checkpoint's own MTP head. Upstream default here is 4 tokens.",
+   "label": "MTP speculation",
+   "name": "speculation"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Upstream default at this topology.",
+     "label": "Full vocabulary (default)",
+     "value": "full"
+    },
+    {
+     "env": {
+      "QWEN4EXP_DRAFT_VOCAB": "65536"
+     },
+     "help": "Reduced-vocabulary draft head.",
+     "label": "Reduced 65,536 ids",
+     "value": "reduced"
+    }
+   ],
+   "help": "The MTP head projects onto the 65,536 lowest token ids and the target verifies over the full vocabulary, so the emitted text is unchanged (upstream design note). At TP2 upstream measured long answers faster and short structured answers and loaded TTFT slightly slower.",
+   "label": "Reduced-vocabulary draft",
+   "name": "draft-vocabulary"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Upstream default (fp8_e4m3 through the baked vLLM PR #54846 overlay).",
+     "label": "FP8 e4m3 (default)",
+     "value": "fp8"
+    },
+    {
+     "args": [
+      {
+       "name": "kv-cache-dtype",
+       "setting": null,
+       "value": "auto"
+      }
+     ],
+     "help": "Stock BF16 KV.",
+     "label": "BF16",
+     "value": "bf16"
+    }
+   ],
+   "help": "Precision of the main attention KV cache.",
+   "label": "KV cache precision",
+   "name": "kv-cache"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Upstream default.",
+     "label": "qwen3_xml (default)",
+     "value": "qwen3-xml"
+    },
+    {
+     "args": [
+      {
+       "name": "tool-call-parser",
+       "setting": null,
+       "value": "qwen3_coder"
+      }
+     ],
+     "help": "Upstream's alternative parser knob.",
+     "label": "qwen3_coder",
+     "value": "qwen3-coder"
+    }
+   ],
+   "help": "vLLM tool-call parser for auto tool choice.",
+   "label": "Tool call parser",
+   "name": "tool-parser"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Upstream default.",
+     "label": "Off (default)",
+     "value": "off"
+    },
+    {
+     "args": [
+      {
+       "name": "async-scheduling",
+       "setting": null,
+       "value": true
+      }
+     ],
+     "help": "Enable --async-scheduling.",
+     "label": "On",
+     "value": "on"
+    }
+   ],
+   "help": "vLLM asynchronous scheduling. Upstream measured it slower (-3 percent single stream, worse TTFT at every load) on the TP2 speed profile.",
+   "label": "Async scheduling",
+   "name": "async-scheduling"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "NCCL chooses.",
+     "label": "Automatic (default)",
+     "value": "auto"
+    },
+    {
+     "env": {
+      "NCCL_MAX_NCHANNELS": "8",
+      "NCCL_MIN_NCHANNELS": "8"
+     },
+     "help": "NCCL_MIN_NCHANNELS and NCCL_MAX_NCHANNELS set to 8.",
+     "label": "8 channels",
+     "value": "channels-8"
+    }
+   ],
+   "help": "Pin the NCCL channel count. Upstream measured pinning to 8 as -3 percent (within noise) and names it as another author's setting.",
+   "label": "NCCL channels",
+   "name": "nccl-channels"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Disk-backed table (upstream CONTEXT profile, default at TP4: measured 40.5 tok/s median single stream, 9.1M-token KV pool).",
+     "label": "On NVMe (default)",
+     "value": "disk"
+    },
+    {
+     "args": [
+      {
+       "name": "gpu-memory-utilization",
+       "setting": null,
+       "value": "0.70"
+      }
+     ],
+     "env": {
+      "QWEN4EXP_PLE_MMAP": "0"
+     },
+     "help": "Stock loader with the table in memory across the four ranks and piecewise graphs (upstream measured 42.8 median, 3.2K tok/s cold prefill, 1.65M-token pool; memory utilization 0.70).",
+     "label": "In unified memory",
+     "value": "memory"
+    }
+   ],
+   "help": "Where the 47.7 GiB per-layer n-gram table lives.",
+   "label": "Embedding table",
+   "name": "table"
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "tonyd2wild (Tech2Wild)",
+   "NVIDIA",
+   "Qwen contributors",
+   "vLLM contributors"
+  ],
+  "source_reference": "https://github.com/tonyd2wild/Qwen3.8-Flash-Next-NVFP4-DGX-Spark/tree/6ad1c8f15cbab1ababd2048e8e5f94094dbfc4a0"
+ },
+ "release": {
+  "released_at": "2026-09-06",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "served-model-name",
+    "setting": null,
+    "value": "qwen3.8-flash-next"
+   },
+   {
+    "name": "trust-remote-code",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "quantization",
+    "setting": null,
+    "value": "modelopt"
+   },
+   {
+    "name": "tensor-parallel-size",
+    "setting": null,
+    "value": 4
+   },
+   {
+    "name": "distributed-executor-backend",
+    "setting": null,
+    "value": "mp"
+   },
+   {
+    "name": "enable-expert-parallel",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "max-model-len",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "max-num-seqs",
+    "setting": "concurrency",
+    "value": null
+   },
+   {
+    "name": "gpu-memory-utilization",
+    "setting": null,
+    "value": "0.80"
+   },
+   {
+    "name": "no-enable-flashinfer-autotune",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "no-enable-prefix-caching",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "reasoning-parser",
+    "setting": null,
+    "value": "qwen3"
+   },
+   {
+    "name": "enable-auto-tool-choice",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "tool-call-parser",
+    "setting": null,
+    "value": "qwen3_xml"
+   },
+   {
+    "name": "default-chat-template-kwargs",
+    "setting": null,
+    "value": "{\"enable_thinking\":false}"
+   },
+   {
+    "name": "speculative-config",
+    "setting": null,
+    "value": "{\"method\":\"mtp\",\"num_speculative_tokens\":4}"
+   },
+   {
+    "name": "compilation-config",
+    "setting": null,
+    "value": "{\"cudagraph_mode\":\"PIECEWISE\"}"
+   },
+   {
+    "name": "kv-cache-dtype",
+    "setting": null,
+    "value": "fp8_e4m3"
+   }
+  ],
+  "engine": "vllm",
+  "entrypoint": [
+   "/opt/vonk/bin/qwen38-tonyd2wild-serve"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "PYTORCH_CUDA_ALLOC_CONF",
+    "value": "expandable_segments:True"
+   },
+   {
+    "name": "CUTE_DSL_ARCH",
+    "value": "sm_121a"
+   },
+   {
+    "name": "TORCH_CUDA_ARCH_LIST",
+    "value": "12.1a"
+   },
+   {
+    "name": "FLASHINFER_CUDA_ARCH_LIST",
+    "value": "12.1a"
+   },
+   {
+    "name": "FLASHINFER_DISABLE_VERSION_CHECK",
+    "value": "1"
+   },
+   {
+    "name": "VLLM_USE_DEEP_GEMM",
+    "value": "0"
+   },
+   {
+    "name": "VLLM_USE_V2_MODEL_RUNNER",
+    "value": "1"
+   },
+   {
+    "name": "NCCL_NET",
+    "value": "IB"
+   },
+   {
+    "name": "NCCL_IB_DISABLE",
+    "value": "0"
+   },
+   {
+    "name": "NCCL_IB_ROCE_VERSION_NUM",
+    "value": "2"
+   },
+   {
+    "name": "NCCL_NVLS_ENABLE",
+    "value": "0"
+   },
+   {
+    "name": "NCCL_CROSS_NIC",
+    "value": "0"
+   },
+   {
+    "name": "NCCL_IB_MERGE_NICS",
+    "value": "0"
+   },
+   {
+    "name": "NCCL_CUMEM_ENABLE",
+    "value": "0"
+   },
+   {
+    "name": "NCCL_IGNORE_CPU_AFFINITY",
+    "value": "1"
+   },
+   {
+    "name": "NCCL_DEBUG",
+    "value": "WARN"
+   },
+   {
+    "name": "TORCH_NCCL_ASYNC_ERROR_HANDLING",
+    "value": "1"
+   },
+   {
+    "name": "QWEN4EXP_PLE_MMAP",
+    "value": "1"
+   },
+   {
+    "name": "QWEN4EXP_PLE_MMAP_THREADS",
+    "value": "64"
+   },
+   {
+    "name": "VONK_QWEN_CHUNK",
+    "value": "default"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 180
+  }
+ },
+ "settings": {
+  "concurrency": {
+   "change_effect": "restart",
+   "value": 8
+  },
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 262144
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "four",
+  "node_count": 4,
+  "parallelism": {
+   "backend": "mp",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 4
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 132734506847,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 24000000000,
+      "working_bytes": 30000000000
+     },
+     "memory": {
+      "peak_bytes": 108000000000,
+      "reserve_bytes": 12000000000
+     }
+    }
+   },
+   {
+    "count": 3,
+    "endpoint_owner": false,
+    "name": "worker",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 132734506847,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 24000000000,
+      "working_bytes": 30000000000
+     },
+     "memory": {
+      "peak_bytes": 108000000000,
+      "reserve_bytes": 12000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint",
+   "worker"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 64,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "qwen3.8-flash-next"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

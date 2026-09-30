@@ -122,7 +122,7 @@ class CompiledEnvironmentEntry(_Strict):
     @field_validator("name")
     @classmethod
     def name_is_canonical(cls, value: str) -> str:
-        if not re.fullmatch(r"[A-Z][A-Z0-9_]*\Z", value):
+        if not re.fullmatch(r"[A-Z][A-Za-z0-9_]*\Z", value):
             raise ValueError("environment name is invalid")
         return value
 

@@ -1,0 +1,249 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/media/comfyui-qwen-image-2512-bf16"
+   },
+   "dockerfile": "adapters/media/comfyui-qwen-image-2512-bf16/Dockerfile",
+   "network": {
+    "hosts": [
+     "codeload.github.com",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "qwen-image-2512-comfyui-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "image-job",
+   "input": {
+    "max_bytes": 16384,
+    "media_types": [
+     "text/plain"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "UTF-8 text prompt for image generation.",
+      "extensions": [
+       ".txt"
+      ],
+      "id": "prompt",
+      "label": "Prompt",
+      "max_file_bytes": 16384,
+      "max_files": 1,
+      "max_total_bytes": 16384,
+      "media_types": [
+       "text/plain"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 16777216,
+    "slots": [
+     {
+      "description": "Single generated PNG image.",
+      "extensions": [
+       ".png"
+      ],
+      "id": "image",
+      "label": "Generated image",
+      "max_file_bytes": 16777216,
+      "max_files": 1,
+      "max_total_bytes": 16777216,
+      "media_types": [
+       "image/png"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Candidate single-Spark core-node ComfyUI binding for the hash-locked Qwen Image 2512 BF16 repack with Qwen's published 50-step, true-CFG 4.0 generation defaults.",
+  "tags": [
+   "executable",
+   "candidate",
+   "qwen",
+   "image",
+   "text-to-image",
+   "comfyui",
+   "bf16",
+   "single",
+   "spark"
+  ],
+  "title": "Qwen Image 2512 ComfyUI single Spark"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "target",
+     "id": "primary-target",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "text-encoder",
+     "id": "primary-text-encoder",
+     "mount": {
+      "target": "/models/text-encoder"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "vae",
+     "id": "primary-vae",
+     "mount": {
+      "target": "/models/vae"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "efb222d33973f73f1b1c1da7dc30b5260bf9e2b5d333459e3e25501aeff8dcd0",
+    "kind": "model",
+    "publisher": "qwen",
+    "slug": "qwen-image-2512-comfyui-1f12b17b"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Qwen",
+   "Comfy-Org"
+  ],
+  "source_reference": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/tree/1f12b17be14c89b026c51a91d67c32f84bb047bc"
+ },
+ "release": {
+  "released_at": "2026-09-28",
+  "version": "1.1.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "workflow",
+    "setting": null,
+    "value": "/opt/vonk/source/workflows/qwen-image-2512-bf16.json"
+   },
+   {
+    "name": "workflow-sha256",
+    "setting": null,
+    "value": "cb4a3c052c6d1e886acf46b26f4922de93085f40614713bb9453993453881f8c"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "image/png"
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 0
+   }
+  ],
+  "engine": "comfyui",
+  "entrypoint": [
+   "/opt/vonk/bin/comfyui-job"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 50499508414,
+      "image_bytes": 5000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 68000000000
+     },
+     "memory": {
+      "peak_bytes": 118000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "image-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/prompt.txt",
+      "input_slots": {
+       "prompt": "qualification/fixtures/prompt.txt"
+      },
+      "output_slot": "image",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "image-job"
+  }
+ }
+}

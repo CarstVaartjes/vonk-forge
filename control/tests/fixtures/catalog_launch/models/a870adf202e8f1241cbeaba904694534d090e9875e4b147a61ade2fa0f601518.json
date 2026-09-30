@@ -1,0 +1,283 @@
+{
+ "capabilities": [
+  "code-generation",
+  "image-understanding",
+  "reasoning",
+  "text-generation",
+  "video-understanding"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-fe81d528e7ee-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "fe81d528e7ee055bbcf6a310afe0f2808423a4a16d45225f29c285926abef08d",
+   "size_bytes": 1635
+  },
+  {
+   "id": "readme-e3ed0cb89950-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "e3ed0cb89950ef0f41e8df344ba1cc15c67e1baf91e1cb5305a7344e58a8d975",
+   "size_bytes": 12109
+  },
+  {
+   "id": "chat-template-c3cf9e34abf4-00824420d1",
+   "path": "chat_template.jinja",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+   "size_bytes": 8952
+  },
+  {
+   "id": "config-deef67a61f33-587cb980af",
+   "path": "config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "deef67a61f3311faf051b23dc4192f442c7fee4f9cd2f38cbcbe4da55c763a80",
+   "size_bytes": 30820
+  },
+  {
+   "id": "generation-config-e70c136c1b78-97dd3d578b",
+   "path": "generation_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e",
+   "size_bytes": 202
+  },
+  {
+   "id": "hf-quant-config-331ad11d57c8-a481ad90fa",
+   "path": "hf_quant_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "331ad11d57c8bc374554579977198084e0d4d0933d5b3558f125f6f670aba0e8",
+   "size_bytes": 23001
+  },
+  {
+   "id": "merges-a9d356d7bdf1-b0d6dcfed4",
+   "path": "merges.txt",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d",
+   "size_bytes": 3353259
+  },
+  {
+   "id": "model-00001-of-00010-63fde954be6f-abda2caf91",
+   "path": "model-00001-of-00010.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "63fde954be6f08b49b876f4f70a0ad0bcfee71aff7b1faa33779b6b32feca2a2",
+   "size_bytes": 3115991696
+  },
+  {
+   "id": "model-00002-of-00010-4dafaef62a90-c78aeb3aa5",
+   "path": "model-00002-of-00010.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "4dafaef62a908e49e0d92c7c2a3fa99f4d9651fdeeb0ca09f09a9b40095af4e0",
+   "size_bytes": 10005510304
+  },
+  {
+   "id": "model-00003-of-00010-3218ddc12925-3bbb02f554",
+   "path": "model-00003-of-00010.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "3218ddc129258e91a721a8e81329ca8f00588332ec721bd8d2cf7d20e324bf47",
+   "size_bytes": 10005364728
+  },
+  {
+   "id": "model-00004-of-00010-55e2bdf6a3a1-9744fa3b65",
+   "path": "model-00004-of-00010.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "55e2bdf6a3a1f6e65270787f65c63b2a2a56b308b54eb1fb318dfabc9b48b141",
+   "size_bytes": 10006060112
+  },
+  {
+   "id": "model-00005-of-00010-d3c169d3694b-287722c574",
+   "path": "model-00005-of-00010.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "d3c169d3694bfba846455d01e48f047d770f78d071c5a4d22f129389411d686e",
+   "size_bytes": 10005362392
+  },
+  {
+   "id": "model-00006-of-00010-38f65a9d1109-5c0b2f8f0d",
+   "path": "model-00006-of-00010.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "38f65a9d11090428e139cc60d0587e8e5433ea2ce79820883c583d7cfcc53130",
+   "size_bytes": 10005375328
+  },
+  {
+   "id": "model-00007-of-00010-8cf3fa05c04c-3028b843f1",
+   "path": "model-00007-of-00010.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "8cf3fa05c04cb2e060963b69bb01f7a7b9f43c58435fbe380836a0457a19cd3e",
+   "size_bytes": 10005956544
+  },
+  {
+   "id": "model-00008-of-00010-53d1f80746aa-1a97e5bd74",
+   "path": "model-00008-of-00010.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "53d1f80746aa0cc0a7c2f4836587002a8a4dd72c827432cd2e43abae3c3899e4",
+   "size_bytes": 10005375200
+  },
+  {
+   "id": "model-00009-of-00010-eaff6a87ece6-9e545a3307",
+   "path": "model-00009-of-00010.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "eaff6a87ece6fbfd6ad0fbaa0a5cf9ff542f8076acba38e62410b1ed55e12cc3",
+   "size_bytes": 5679113808
+  },
+  {
+   "id": "model-00010-of-00010-0d49b0cf7c15-3cc422b9fe",
+   "path": "model-00010-of-00010.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "0d49b0cf7c15bf9b5bd1e17403b36727315860a8f2a2e0f5a53655547084f640",
+   "size_bytes": 128587536
+  },
+  {
+   "id": "model-fp8-mtp-ple-3525520c8602-8c766fad0c",
+   "path": "model-fp8-mtp-ple.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "3525520c8602d850003eb1960aec0b64291dae33b83f8b65dd639a451df78823",
+   "size_bytes": 53717551730
+  },
+  {
+   "id": "model-safetensors-index-660414e83007-0a05be8238",
+   "path": "model.safetensors.index.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "660414e8300728ba80062e6a3c81cb76a65e2ab136ac9e9ceb450ba0c51c3c0d",
+   "size_bytes": 31275518
+  },
+  {
+   "id": "preprocessor-config-27225450ac9c-36afccab5d",
+   "path": "preprocessor_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516",
+   "size_bytes": 390
+  },
+  {
+   "id": "processor-config-d89ef49ce9cd-27f0cb76af",
+   "path": "processor_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "d89ef49ce9cd37fbf510158e13c1ef063d9286411c1ec9049932dbe0487143b1",
+   "size_bytes": 1191
+  },
+  {
+   "id": "tokenizer-0997f410c57a-224931eb13",
+   "path": "tokenizer.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+   "size_bytes": 12809320
+  },
+  {
+   "id": "tokenizer-config-b11349aafa7c-94d5c6ba8f",
+   "path": "tokenizer_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27",
+   "size_bytes": 17928
+  },
+  {
+   "id": "video-preprocessor-config-7768af27c1fa-35d01a7325",
+   "path": "video_preprocessor_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13",
+   "size_bytes": 385
+  },
+  {
+   "id": "vocab-ce99b4cb2983-ba05d8e2e4",
+   "path": "vocab.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+   "size_bytes": 6722759
+  }
+ ],
+ "format": {
+  "precision": "mixed",
+  "quantization": "nvfp4-w4a4-routed-experts"
+ },
+ "identity": {
+  "family": {
+   "publisher": "nvidia",
+   "slug": "qwen3-8-nvidia",
+   "title": "NVIDIA Qwen3.8 deployments"
+  },
+  "model": {
+   "publisher": "nvidia",
+   "slug": "qwen3-8-flash-next-nvfp4",
+   "title": "Qwen3.8 Flash Next NVFP4"
+  },
+  "publisher": "nvidia",
+  "slug": "qwen3-8-flash-next-nvfp4-fc694b54",
+  "variant": "fc694b54",
+  "version": "fc694b54"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "NVIDIA Corporation",
+   "Qwen"
+  ],
+  "spdx": "LicenseRef-NVIDIA-Open-Model-License",
+  "url": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/"
+ },
+ "metadata": {
+  "description": "NVIDIA ModelOpt NVFP4 quantization of Qwen3.8 Flash Next (BF16 dense layers, NVFP4 routed experts, FP8 per-layer embeddings and MTP).",
+  "tags": [
+   "nvidia",
+   "qwen3-8-nvidia",
+   "video",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "video"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/nvidia/Qwen3.8-Flash-Next-NVFP4",
+  "revision": "fc694b54fb0174e0913e6adf86691ef85a4ead47"
+ }
+}

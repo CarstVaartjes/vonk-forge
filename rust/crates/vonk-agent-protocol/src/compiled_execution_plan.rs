@@ -252,7 +252,7 @@ impl CompiledRuntime {
                     if index == 0 {
                         byte.is_ascii_uppercase()
                     } else {
-                        byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
+                        byte.is_ascii_alphanumeric() || byte == b'_'
                     }
                 })
                 || entry.value.len() > MAX_ARGV_ITEM_BYTES

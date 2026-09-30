@@ -1,0 +1,83 @@
+{
+ "capabilities": [
+  "image-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "target",
+   "path": "split_files/diffusion_models/qwen_image_2512_bf16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "cbf55390fff27dbc785046d7007b04e0c5dd7421e7ef128f2831eacb53a8e075",
+   "size_bytes": 40861031488
+  },
+  {
+   "id": "text-encoder",
+   "path": "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4",
+   "size_bytes": 9384670680
+  },
+  {
+   "id": "vae",
+   "path": "split_files/vae/qwen_image_vae.safetensors",
+   "roles": [
+    "vae"
+   ],
+   "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
+   "size_bytes": 253806246
+  }
+ ],
+ "format": {
+  "precision": "mixed",
+  "quantization": "fp8"
+ },
+ "identity": {
+  "family": {
+   "publisher": "qwen",
+   "slug": "qwen-image",
+   "title": "Qwen Image"
+  },
+  "model": {
+   "publisher": "qwen",
+   "slug": "qwen-image-2512",
+   "title": "Qwen Image 2512"
+  },
+  "publisher": "qwen",
+  "slug": "qwen-image-2512-comfyui-1f12b17b",
+  "variant": "Qwen Image 2512 ComfyUI revision 1f12b17b",
+  "version": "comfyui-1f12b17b"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "Qwen",
+   "Comfy-Org"
+  ],
+  "spdx": "Apache-2.0",
+  "url": "https://huggingface.co/Qwen/Qwen-Image-2512/blob/25468b98e3276ca6700de15c6628e51b7de54a26/LICENSE.md"
+ },
+ "metadata": {
+  "description": "Exact Comfy-Org BF16 Qwen Image 2512 diffusion model, scaled-FP8 Qwen-VL encoder, and VAE.",
+  "tags": [
+   "qwen",
+   "image",
+   "text-to-image",
+   "comfyui",
+   "bf16",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "image"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI",
+  "revision": "1f12b17be14c89b026c51a91d67c32f84bb047bc"
+ }
+}

@@ -1,0 +1,241 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "d44d6dc249c2c8330d0b380c595a514f0e86137fcc717fe7a4389a25720ade37",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/three-d/trellis2-native"
+   },
+   "dockerfile": "adapters/three-d/trellis2-native/Dockerfile",
+   "network": {
+    "hosts": [
+     "github.com",
+     "objects.githubusercontent.com",
+     "gitlab.com",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "trellis-2-4b-pytorch-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "mesh-job",
+   "input": {
+    "max_bytes": 16777216,
+    "media_types": [
+     "image/jpeg",
+     "image/png",
+     "image/webp"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "One object image used to generate the textured mesh.",
+      "extensions": [
+       ".jpeg",
+       ".jpg",
+       ".png",
+       ".webp"
+      ],
+      "id": "image",
+      "label": "Source image",
+      "max_file_bytes": 16777216,
+      "max_files": 1,
+      "max_total_bytes": 16777216,
+      "media_types": [
+       "image/jpeg",
+       "image/png",
+       "image/webp"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 1073741824,
+    "slots": [
+     {
+      "description": "The generated TRELLIS.2 binary glTF mesh.",
+      "extensions": [
+       ".glb"
+      ],
+      "id": "mesh",
+      "label": "Generated mesh",
+      "max_file_bytes": 1073741824,
+      "max_files": 1,
+      "max_total_bytes": 1073741824,
+      "media_types": [
+       "model/gltf-binary"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Installable single-DGX Spark image-to-3D Candidate using the pinned official TRELLIS.2 source, exact companion sparse decoder, local DINOv3 encoder, ARM64-native extensions, and deterministic GLB adapter. Its pinned nvdiffrast runtime dependency is limited to non-commercial research or evaluation; operator acceptance and physical Spark quality, memory, and latency evidence are still required.",
+  "tags": [
+   "candidate",
+   "three-d",
+   "image-to-3d",
+   "glb",
+   "pytorch-pipeline",
+   "single",
+   "spark",
+   "executable",
+   "offline",
+   "source-bundled",
+   "non-commercial-runtime"
+  ],
+  "title": "TRELLIS.2 4B native single Spark"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "snapshot",
+     "id": "primary-snapshot",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "5c13691df9a719b52ab3ea091a814fdd19b67f4ab880744ee1775f2c50b99647",
+    "kind": "model",
+    "publisher": "microsoft",
+    "slug": "trellis-2-4b"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Microsoft TRELLIS.2 contributors",
+   "Meta DINOv3 contributors",
+   "camenduru DINOv3 mirror"
+  ],
+  "source_reference": "https://github.com/microsoft/TRELLIS.2/tree/75fbf0183001ed9876c8dbb35de6b68552ee08bd"
+ },
+ "release": {
+  "released_at": "2026-09-28",
+  "version": "2.0.10"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "entrypoint",
+    "setting": null,
+    "value": "/opt/vonk/source/trellis2_job.py"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "model/gltf-binary"
+   },
+   {
+    "name": "timeout-seconds",
+    "setting": null,
+    "value": 3600
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 0
+   }
+  ],
+  "engine": "pytorch-pipeline",
+  "entrypoint": [
+   "/opt/vonk/bin/pytorch-pipeline"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 17597661941,
+      "image_bytes": 12000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 44000000000
+     },
+     "memory": {
+      "peak_bytes": 48000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "mesh-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/tiny.png",
+      "input_slots": {
+       "image": "qualification/fixtures/tiny.png"
+      },
+      "output_slot": "mesh",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "mesh-job"
+  }
+ }
+}

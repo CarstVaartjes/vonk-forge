@@ -1,0 +1,73 @@
+{
+ "capabilities": [
+  "audio-generation",
+  "video-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "filtered-snapshot",
+   "path": "filtered-snapshot",
+   "roles": [
+    "weights",
+    "text-encoder",
+    "tokenizer",
+    "video-vae",
+    "audio-vae",
+    "vocoder"
+   ],
+   "sha256": "6ad49fdbc4b6d35644a45ecd0310d95e25d178bc942d909ced168e498754b0ef",
+   "size_bytes": 70090051372
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "lightricks",
+   "slug": "ltx",
+   "title": "LTX"
+  },
+  "model": {
+   "publisher": "lightricks",
+   "slug": "ltx-2-5",
+   "title": "LTX-2.5"
+  },
+  "publisher": "lightricks",
+  "slug": "ltx-2-5-22b-distilled-bf16-diffusers",
+  "variant": "LTX-2.5 distilled BF16 Diffusers",
+  "version": "22b-distilled-bf16-diffusers-426936f8"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "Lightricks"
+  ],
+  "spdx": "LicenseRef-LTX-2-Community",
+  "url": "https://github.com/Lightricks/LTX-2/blob/a95ab856bf29407b6b066ede0abe1846050db56c/LICENSE-2_x"
+ },
+ "metadata": {
+  "description": "Filtered official gated Diffusers closure at 426936f8: distilled split transformer, convolutional video VAE, audio VAE, BWE vocoder, connectors, and text stack.",
+  "tags": [
+   "lightricks",
+   "ltx",
+   "video",
+   "audio",
+   "diffusers",
+   "bf16",
+   "gated",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "audio",
+  "video"
+ ],
+ "requires_token": true,
+ "source": {
+  "repository": "https://huggingface.co/Lightricks/LTX-2.5-Diffusers",
+  "revision": "426936f8b22dc28e4def61e515478b0b7e4a53cc"
+ }
+}

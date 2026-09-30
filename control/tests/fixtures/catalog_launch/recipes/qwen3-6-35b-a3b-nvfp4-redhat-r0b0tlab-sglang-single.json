@@ -1,0 +1,428 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "6fb82d4fa57425bc0df5b35fba328b08bda950ecf78ce60ea63d8830fc271eb5",
+    "repository": "docker.io/lmsysorg/sglang"
+   },
+   "context": {
+    "path": "adapters/nvidia/r0b0tlab-qwen36-redhat-sglang-single"
+   },
+   "dockerfile": "adapters/nvidia/r0b0tlab-qwen36-redhat-sglang-single/Dockerfile",
+   "network": {
+    "hosts": []
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "qwen3-6-35b-a3b-nvfp4-redhat-r0b0tlab-sglang-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "redhat/qwen36-35b-a3b-nvfp4-mtp"
+   ],
+   "port": 30000
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "standard",
+  "description": "r0b0tlab's SGLang native-MTP profile for RedHatAI's compressed-tensors NVFP4 Qwen3.6-35B-A3B (Apache-2.0; built-in MTP layer, no external draft) on one Spark, from r0b0tlab/qwen36-35b-a3b-nvfp4-gb10-native-mtp at c962efdf (the repository declares MIT for its scripts and docs). Runs the lmsysorg/sglang dev-cu13-nemotronh-nano-omni-reasoning-v3 image (pinned by the digest the tag resolved to on 2026-09-29; the tag was last pushed 2026-04-27, before upstream's 2026-05-19 evidence) with upstream's local loader fix baked in: the checkpoint stores the hybrid GDN linear-attention projections as plain unquantized weights, and stock SGLang produced repeated '!' tokens for it. Profile: FlashInfer CUTLASS FP4 GEMM and MoE, NEXTN with 1 step, top-1 and 2 draft tokens (built-in Qwen3_5ForCausalLMMTP), spec v2, radix cache and piecewise CUDA graph off, memory fraction 0.72, 4 running requests, 8,192-token context. Upstream claims (not measured here): correctness smoke 4/4, 57.49 tok/s single long decode, c1 61.49 / c2 97.87 / c4 174.69 tok/s, MTP accept length about 1.87 of 2. Bound to RedHatAI revision e850c696, the last one before upstream's evidence (later commits change only the model card). Physical Spark acceptance is pending.",
+  "tags": [
+   "candidate",
+   "executable",
+   "mtp",
+   "nvfp4",
+   "qwen",
+   "qwen3-6",
+   "r0b0tlab",
+   "reasoning",
+   "sglang",
+   "single",
+   "spark",
+   "speculative-decoding",
+   "tool-use"
+  ],
+  "title": "Qwen3.6 35B-A3B NVFP4 (RedHat AI) native MTP SGLang single Spark (r0b0tlab)"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-d1a8f4a1d2e3-618cd5b83d",
+     "id": "primary-metadata-d1a8f4a1d2e3-618cd5b83d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-2a001916abad-b335630551",
+     "id": "primary-readme-2a001916abad-b335630551",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "chat-template-e84f32a23fdd-00824420d1",
+     "id": "primary-chat-template-e84f32a23fdd-00824420d1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-2af7513fb092-587cb980af",
+     "id": "primary-config-2af7513fb092-587cb980af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "generation-config-252e0efee3de-97dd3d578b",
+     "id": "primary-generation-config-252e0efee3de-97dd3d578b",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-bb759388bf46-9d75c1098f",
+     "id": "primary-model-bb759388bf46-9d75c1098f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-3a43cf79383a-0a05be8238",
+     "id": "primary-model-safetensors-index-3a43cf79383a-0a05be8238",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-mtp-68b2cabe2ff8-3cebc61d53",
+     "id": "primary-model-mtp-68b2cabe2ff8-3cebc61d53",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-visual-1e1b1d5f576d-358c84b81e",
+     "id": "primary-model-visual-1e1b1d5f576d-358c84b81e",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "processor-config-d89ef49ce9cd-27f0cb76af",
+     "id": "primary-processor-config-d89ef49ce9cd-27f0cb76af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "recipe-4a182833929f-e6afb07ce9",
+     "id": "primary-recipe-4a182833929f-e6afb07ce9",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-dd6b8cf757c2-224931eb13",
+     "id": "primary-tokenizer-dd6b8cf757c2-224931eb13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-a4f52c2103a6-94d5c6ba8f",
+     "id": "primary-tokenizer-config-a4f52c2103a6-94d5c6ba8f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "bc340088de37c8ac6a6bad4940544642e227cf5c69a1ec5e3fe46451222d819d",
+    "kind": "model",
+    "publisher": "redhatai",
+    "slug": "qwen3-6-35b-a3b-nvfp4-redhatai-e850c696"
+   }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "args": [
+      {
+       "name": "speculative-algorithm",
+       "value": "NEXTN"
+      },
+      {
+       "name": "speculative-num-steps",
+       "value": 1
+      },
+      {
+       "name": "speculative-eagle-topk",
+       "value": 1
+      },
+      {
+       "name": "speculative-num-draft-tokens",
+       "value": 2
+      }
+     ],
+     "default": true,
+     "env": {
+      "SGLANG_ENABLE_SPEC_V2": "1"
+     },
+     "help": "Upstream's launch: 1 step, top-1, 2 draft tokens, spec v2. Upstream claims 57.49 tok/s single long decode.",
+     "label": "Native MTP (NEXTN)",
+     "value": "native-mtp"
+    },
+    {
+     "help": "Autoregressive decoding with the same loader fix.",
+     "label": "No speculation",
+     "value": "none"
+    }
+   ],
+   "help": "Whether the checkpoint's built-in MTP layer drafts tokens.",
+   "label": "Speculative decoding",
+   "name": "speculation"
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "r0b0tlab (MIT)",
+   "Red Hat AI (Apache-2.0)",
+   "Qwen (Apache-2.0)",
+   "SGLang contributors (Apache-2.0)"
+  ],
+  "source_reference": "https://github.com/r0b0tlab/qwen36-35b-a3b-nvfp4-gb10-native-mtp/tree/c962efdf2b80bbf71e092bb3f4ca65a6d1380386"
+ },
+ "release": {
+  "released_at": "2026-05-19",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "model-path",
+    "setting": null,
+    "value": "/models"
+   },
+   {
+    "name": "served-model-name",
+    "setting": null,
+    "value": "redhat/qwen36-35b-a3b-nvfp4-mtp"
+   },
+   {
+    "name": "trust-remote-code",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "reasoning-parser",
+    "setting": null,
+    "value": "qwen3"
+   },
+   {
+    "name": "tool-call-parser",
+    "setting": null,
+    "value": "qwen3_coder"
+   },
+   {
+    "name": "fp4-gemm-backend",
+    "setting": null,
+    "value": "flashinfer_cutlass"
+   },
+   {
+    "name": "moe-runner-backend",
+    "setting": null,
+    "value": "flashinfer_cutlass"
+   },
+   {
+    "name": "disable-radix-cache",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "disable-piecewise-cuda-graph",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "mem-fraction-static",
+    "setting": null,
+    "value": "0.72"
+   },
+   {
+    "name": "max-running-requests",
+    "setting": "concurrency",
+    "value": null
+   },
+   {
+    "name": "context-length",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "enable-metrics",
+    "setting": null,
+    "value": true
+   }
+  ],
+  "engine": "sglang",
+  "entrypoint": [
+   "/opt/vonk/bin/sglang-serve"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "SGLANG_ENABLE_JIT_DEEPGEMM",
+    "value": "0"
+   },
+   {
+    "name": "SGLANG_JIT_DEEPGEMM_PRECOMPILE",
+    "value": "0"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": {
+   "change_effect": "restart",
+   "value": 4
+  },
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 8192
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 25075981088,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 16000000000,
+      "working_bytes": 30000000000
+     },
+     "memory": {
+      "peak_bytes": 96000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 64,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "redhat/qwen36-35b-a3b-nvfp4-mtp"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

@@ -1,0 +1,110 @@
+{
+ "capabilities": [
+  "text-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-8e63f02a5caa-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "8e63f02a5caa4dbc92838d44dddcfa2c1b76f355503fcbeaa3d6512f7fe132ef",
+   "size_bytes": 1581
+  },
+  {
+   "id": "license-bbedc3fda330-c693279643",
+   "path": "LICENSE",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a",
+   "size_bytes": 11544
+  },
+  {
+   "id": "readme-711fd0843f9d-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "711fd0843f9df152247ea4691d96b1297aa7375dec84006f27c66bef8140d07f",
+   "size_bytes": 3221
+  },
+  {
+   "id": "config-b7f916198b36-587cb980af",
+   "path": "config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "b7f916198b36fb8a1b2104c265ce055c2d128b72c5b0bad74b55e754aff60d3f",
+   "size_bytes": 1686
+  },
+  {
+   "id": "model-6b2e3afc694a-9d75c1098f",
+   "path": "model.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "6b2e3afc694a343b7f3f0edfe5925e460762fc9ede4699165b577ca0733c8e56",
+   "size_bytes": 1470916078
+  },
+  {
+   "id": "quantization-config-38fcf955384f-6f24389fb3",
+   "path": "quantization_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "38fcf955384fb09efbb2f21f2fdc9c602350257059d208185b40f49609f424d4",
+   "size_bytes": 53190
+  }
+ ],
+ "format": {
+  "precision": "mixed",
+  "quantization": "exl3-5-0bpw"
+ },
+ "identity": {
+  "family": {
+   "publisher": "mia-ai-lab",
+   "slug": "qwen3-8-mia",
+   "title": "Qwen3.8 MiaAI-Lab deployments"
+  },
+  "model": {
+   "publisher": "mia-ai-lab",
+   "slug": "qwen3-8-27b-dflash2-exl3-5-0bpw",
+   "title": "Qwen3.8 27B DFlash2 EXL3 5.0bpw draft (Mia)"
+  },
+  "publisher": "mia-ai-lab",
+  "slug": "qwen3-8-27b-dflash2-exl3-5-0bpw-4f043626",
+  "variant": "Qwen3.8 27B DFlash2 EXL3 5.0bpw Mia 4f043626",
+  "version": "Qwen3.8 27B DFlash2 EXL3 5.0bpw Mia 4f043626"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "inco.ai",
+   "z-lab",
+   "MiaAI-Lab",
+   "Turboderp"
+  ],
+  "spdx": "Apache-2.0",
+  "url": "https://huggingface.co/Mia-AiLab/Qwen3.8-27B-DFlash2-EXL3-5.0bpw/blob/4f0436269bca761b071f05319e8e04a87cc633f9/LICENSE"
+ },
+ "metadata": {
+  "description": "Exact public Mia-AiLab EXL3 5.0 bpw quantization of the inco.ai Qwen3.8-27B DFlash2 block-diffusion draft (1.4 GB). Not a standalone language model: it drafts tokens for Qwen3.8-27B and needs the MiaAI-Lab exllamav3 fork. Apache-2.0.",
+  "tags": [
+   "mia-ai-lab",
+   "qwen3-8-mia",
+   "language",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "text"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/Mia-AiLab/Qwen3.8-27B-DFlash2-EXL3-5.0bpw",
+  "revision": "4f0436269bca761b071f05319e8e04a87cc633f9"
+ }
+}
