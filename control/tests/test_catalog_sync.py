@@ -263,7 +263,7 @@ def test_unchanged_catalog_refreshes_build_policy_without_refetching_recipe(
 ) -> None:
     sessions, catalog, reader, item = _fixture(tmp_path)
     sync = _sync(sessions, catalog, reader)
-    compile_policy = catalog_entities_module._build_projection
+    compile_policy = catalog_entities_module.build_policy_projection
 
     def previous_policy(recipe):
         policy = compile_policy(recipe)
@@ -272,7 +272,9 @@ def test_unchanged_catalog_refreshes_build_policy_without_refetching_recipe(
 
     # Persist the previous compiler output through the real import path.
     with monkeypatch.context() as previous:
-        previous.setattr(catalog_entities_module, "_build_projection", previous_policy)
+        previous.setattr(
+            catalog_entities_module, "build_policy_projection", previous_policy
+        )
         first = sync.automatic()
     builds = RecipeBuildService(
         sessions, bundles=SourceBundleStore(tmp_path / "bundles")

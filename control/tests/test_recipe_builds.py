@@ -56,7 +56,7 @@ from vonk_control.recipe_image_availability import (
 from vonk_control.recipe_image_removal_contract import RecipeCacheRemovalOwner
 from vonk_control.recipe_operations import (
     RecipeOperationService,
-    _record_build_evidence,
+    record_build_evidence,
 )
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_adapters import resolve_runtime_adapter
@@ -2140,7 +2140,7 @@ def test_build_result_refreshes_upload_evidence_after_a_retried_attempt(
             uploaded.oci_layout_sha256 = new_layout
             uploaded.image_bytes = 500
 
-        _record_build_evidence(
+        record_build_evidence(
             stale_session,
             stale_build,
             {

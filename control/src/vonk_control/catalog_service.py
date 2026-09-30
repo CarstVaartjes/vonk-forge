@@ -30,6 +30,7 @@ from .catalog_entities import (
 )
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
+    PrebuiltImage,
     read_catalog_document,
     read_catalog_projection,
     write_catalog_projection,
@@ -241,6 +242,13 @@ class CatalogService:
 
     def refresh_build_policy(self) -> None:
         CatalogEntityService(self._sessions, clock=self._clock).refresh_build_policy()
+
+    def record_prebuilt_images(
+        self, images: Mapping[tuple[str, str, str], PrebuiltImage | None]
+    ) -> None:
+        CatalogEntityService(self._sessions, clock=self._clock).record_prebuilt_images(
+            images
+        )
 
     def import_recipe_library(
         self,

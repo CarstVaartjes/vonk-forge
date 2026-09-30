@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .catalog_revision_contract import PrebuiltImage
     from .recipe_packages import RecipePackageHandle
 
 
@@ -57,6 +58,8 @@ class RecipeLibraryItem:
     package_handle: RecipePackageHandle | None = None
     package_sha256: str | None = None
     source_bundle_sha256: str | None = None
+    # The signed index's CI-built runtime image for this exact revision.
+    prebuilt_image: PrebuiltImage | None = None
 
 
 @dataclass(frozen=True, slots=True)

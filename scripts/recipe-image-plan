@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""Plan the prebuilt runtime images for a built recipe library.
+
+Run from the recipe repository's image workflow after
+``tools/build-catalog-index`` wrote ``catalog-index.json`` and ``packages/``:
+
+    uv run --project <vonk-forge>/control --frozen \
+        --with-editable <recipes>/contracts \
+        <vonk-forge>/scripts/recipe-image-plan \
+        --library-root <recipes> --output-dir <dir>
+
+It writes one build context per distinct executable build key under
+``<dir>/<key>/context`` and prints the plan (build arguments, adapter stage,
+the recipes sharing each image) as JSON. The key is the one the Controller
+derives for the same revision, so the catalog can pin the pushed digest.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from vonk_control.prebuilt_images import write_library_image_plan
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--library-root", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    arguments = parser.parse_args()
+    plan = write_library_image_plan(
+        arguments.library_root.resolve(), arguments.output_dir.resolve()
+    )
+    json.dump(plan, sys.stdout, indent=2, sort_keys=True)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

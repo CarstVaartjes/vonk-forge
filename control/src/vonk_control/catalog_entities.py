@@ -25,6 +25,8 @@ from vonk_forge_contracts.resolver import validate_recipe_models
 from .auth import CursorCodec
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
+    PrebuiltImage,
+    RecipeRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
     write_catalog_projection,
@@ -126,7 +128,7 @@ class CatalogEntityService:
                     )
                     continue
                 assert isinstance(recipe, RecipeDefinition)
-                policy = _build_projection(recipe)
+                policy = build_policy_projection(recipe)
                 if all(projected.get(key) == value for key, value in policy.items()):
                     continue
                 projected.update(policy)
@@ -137,6 +139,48 @@ class CatalogEntityService:
                     )
                     .values(
                         projected=write_catalog_projection(projected, kind="recipe")
+                    )
+                )
+                session.expire(revision, ["projected"])
+
+    def record_prebuilt_images(
+        self, images: Mapping[tuple[str, str, str], PrebuiltImage | None]
+    ) -> None:
+        """Record the signed catalog's prebuilt image on each active recipe revision.
+
+        ``images`` is keyed by ``(publisher, slug, content digest)``: a
+        prebuilt image belongs to one exact revision. The signed index is the
+        only source, so a revision it no longer pins loses its image and
+        builds on a Spark instead.
+        """
+        with self._write() as session:
+            revisions = session.scalars(
+                select(CatalogDocumentRevision)
+                .where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                )
+                .with_for_update()
+            ).all()
+            for revision in revisions:
+                try:
+                    projected = read_catalog_projection(revision)
+                except CatalogRevisionContractError:
+                    continue
+                if not isinstance(projected, RecipeRevisionProjection):
+                    continue
+                image = images.get(
+                    (revision.publisher, revision.slug, revision.content_digest or "")
+                )
+                if projected.prebuilt_image == image:
+                    continue
+                session.execute(
+                    update(CatalogDocumentRevision)
+                    .where(CatalogDocumentRevision.id == revision.id)
+                    .values(
+                        projected=write_catalog_projection(
+                            projected.model_copy(update={"prebuilt_image": image})
+                        )
                     )
                 )
                 session.expire(revision, ["projected"])
@@ -500,7 +544,7 @@ def _revision(
             "runtime_engine": parsed.runtime.engine,
             "topology": parsed.topology.model_dump(mode="json"),
         }
-        projected.update(_build_projection(parsed))
+        projected.update(build_policy_projection(parsed))
     return CatalogDocumentRevision(
         document_id=root.id,
         kind=str(parsed.kind),
@@ -521,7 +565,7 @@ def _revision(
     )
 
 
-def _build_projection(recipe: RecipeDefinition) -> dict[str, object]:
+def build_policy_projection(recipe: RecipeDefinition) -> dict[str, object]:
     """Compile platform-owned rootless build policy for every source recipe.
 
     These are admission budgets, not measured image sizes. The builder still

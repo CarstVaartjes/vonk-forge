@@ -26,7 +26,7 @@ from vonk_control.artifact_reference_scan import (
     runtime_image_reference_reasons,
 )
 from vonk_control.bounded_json import require_mapping, require_sequence
-from vonk_control.catalog_entities import _build_projection
+from vonk_control.catalog_entities import build_policy_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.failure_evidence import failure_code
 from vonk_control.model_cache import ModelCacheError, ModelCacheService
@@ -295,7 +295,7 @@ def _recipe_projection(
         "runtime_engine": recipe.runtime.engine,
         "topology": recipe.topology.model_dump(mode="json"),
     }
-    projected.update(_build_projection(recipe))
+    projected.update(build_policy_projection(recipe))
     projected["source_bundle_sha256"] = source_bundle_sha256
     return write_catalog_projection(projected, kind="recipe")
 

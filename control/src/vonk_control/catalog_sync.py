@@ -507,6 +507,27 @@ class ManagedRecipeCatalogSyncService:
                         str(getattr(error, "detail", str(error))),
                     )
             self._progress(run_id, result)
+        # Prebuilt images can arrive after their revision (CI publishes the
+        # bundle first and adds image digests once the builds finish), so
+        # every sync records them for unchanged revisions too.
+        record_prebuilt = getattr(self._catalog, "record_prebuilt_images", None)
+        if callable(record_prebuilt):
+            try:
+                record_prebuilt(
+                    {
+                        (item.publisher, item.slug, item.content_sha256): (
+                            item.prebuilt_image
+                        )
+                        for item in snapshot.items
+                    }
+                )
+            except Exception as error:  # noqa: BLE001 - images are optional; recipes still apply
+                self._record_problem_values(
+                    result,
+                    uri=None,
+                    code="catalog.sync_prebuilt_images_failed",
+                    detail=str(error)[:256] or type(error).__name__,
+                )
         result["state"] = "partial" if result["problems"] else "current"
         return result
 

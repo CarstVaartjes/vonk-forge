@@ -5,33 +5,33 @@ This page describes the current transfer implementation. The target
 places artifact bookkeeping in managed storage. Existing native OCI caches
 and transfer behavior remain the starting point for that work.
 
-Registry images are prepared independently from model downloads. The Controller
-uses Skopeo to fetch up to six image layers concurrently, with three retries
-and exponential backoff for transient errors. Completed OCI blobs are shared
-between images and retained for a retry; an interrupted individual layer may
-need to restart. Skopeo validates and publishes complete blobs atomically.
+Recipe images are normally prebuilt. When a recipe is published or updated,
+the recipe library builds each distinct image on a GitHub-hosted ARM64 runner
+with the same build flags and platform adaptation stage a Spark uses, pushes
+it to GHCR (public), and pins the pushed manifest digest beside the recipe in
+the signed catalog index (`prebuilt_image: {reference, build_key}`). The
+`build_key` names the executable build inputs (source bundle, Dockerfile,
+pinned base images, build options and capabilities, runtime adapter); recipes
+that build the same adapter directory the same way share one image.
 
-The cache lives in `image-cache/registry-layers/` beneath the existing artifact
-volume, beside the runnable archives. It survives worker container replacement
-and is disposable cache, not PostgreSQL backup data. Different image preparations
-run concurrently; an OS file lock serializes writers to the same image index.
-Abandoned temporary blobs for that image are removed when its lock is acquired.
-Completed shared layers remain until this cache is explicitly cleared, so they
-consume disk space in addition to exported archives. Clear the registry-layer
-cache only with image preparation stopped; clearing it does not remove final
-runnable archives.
+Build planning prefers that image when the Controller derives the same key for
+the revision. The plan then admits no Spark inventory, disk or memory, and its
+`recipe.build.v1` job gets no Spark operation: the worker's prebuilt importer
+pulls the pinned digest with Skopeo into a Docker archive in `image-cache/`.
+Skopeo verifies the manifest and every blob against the digest; the archive
+digest is computed once at that point and names the file. The importer records
+the same build evidence a Spark upload records, so everything after it
+(receipt, authorization, distribution to Sparks) is unchanged, and a prebuilt
+image and a Spark build of the same inputs are interchangeable reuse
+candidates. A pull runs off the worker loop under a renewable lease, so a
+restarted worker resumes it; cancelling the build discards a late pull.
 
-A separate observer samples native OCI file sizes once per second while Skopeo
-continues transferring. The download count means layer bytes available locally,
-including reused blobs; it is not a claim about bytes received over the network.
-Only this image's layers and in-progress files are counted. Local archive
-creation is a separate `prepare` phase, without an invented download percentage.
-Slow progress persistence does not block Skopeo's receive loop.
-
-Completed layers are converted locally into the same Docker archive consumed
-by Sparks. No registry push is involved. The verified archive and its immutable
-image identity in the Controller/NAS cache are authoritative; Spark imports are
-derived execution copies and cannot replenish or replace that cache.
+A Spark build remains the fallback: when the catalog pins no image, when the
+image was built from other inputs (for example under a different platform
+adapter), or when this Controller already failed to pull that digest. A failed
+pull is visible on the build (`prebuilt_image_pull_failed`) and in the worker
+log, and the next plan builds on a Spark. A newly published digest is tried
+again.
 
 A Controller source build records its exact executable input identity on the
 filesystem receipt beside the archive. That receipt owns availability: reuse is

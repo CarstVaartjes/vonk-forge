@@ -61,6 +61,38 @@ class _CatalogRevisionProjection(StrictJSONModel):
     release_released_at: str | None = None
 
 
+PREBUILT_REFERENCE_PATTERN = (
+    r"^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]{1,5})?"
+    r"(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+"
+    r"@sha256:[0-9a-f]{64}$"
+)
+
+
+class PrebuiltImage(StrictJSONModel):
+    """One catalog-pinned prebuilt runtime image for a recipe revision."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+    reference: str = Field(max_length=512, pattern=PREBUILT_REFERENCE_PATTERN)
+    build_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @property
+    def digest(self) -> str:
+        """The pinned manifest digest, ``sha256:<hex>``."""
+        return self.reference.rsplit("@", 1)[1]
+
+
+def read_prebuilt_image(value: object) -> PrebuiltImage | None:
+    """Read a catalog entry; anything invalid is treated as absent."""
+
+    if value is None:
+        return None
+    try:
+        return PrebuiltImage.model_validate_json(canonical_message(value))
+    except (TypeError, ValueError, ValidationError):
+        return None
+
+
 class BuildResourcesProjection(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
@@ -113,6 +145,8 @@ class RecipeRevisionProjection(_CatalogRevisionProjection):
     build_model_artifacts: list[BuildModelArtifactProjection] | None = None
     build_topology_inputs: dict[str, object] | None = None
     artifact_inputs: list[ArtifactInputProjection] | None = None
+    # The CI-built image the signed catalog pins for this revision, if any.
+    prebuilt_image: PrebuiltImage | None = None
 
 
 CatalogRevisionProjection = ModelRevisionProjection | RecipeRevisionProjection

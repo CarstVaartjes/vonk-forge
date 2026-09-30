@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -17,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.build_import import RecipeBuildOptions
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
@@ -32,6 +34,7 @@ from .catalog_revision_contract import (
     BuildResourcesProjection,
     BuildSecurityProjection,
     CatalogRevisionContractError,
+    PrebuiltImage,
     RecipeRevisionProjection,
     read_catalog_projection,
 )
@@ -47,6 +50,7 @@ from .models import (
     RecipeSourceBundle,
     ResourceReservation,
 )
+from .prebuilt_images import executable_build_key, prebuilt_failed
 from .profile_capacity import profile_build_memory_claims
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -75,6 +79,7 @@ from .source_policy import (
     inspect_build_source_policy,
 )
 
+_LOGGER = logging.getLogger(__name__)
 _OCI_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 BUILD_ARTIFACT_FORMAT = "docker-archive-v1"
@@ -239,9 +244,18 @@ def _canonical_model_build_inputs(
     )
 
 
-def _canonical_build(
-    document: Mapping[str, object], projected: RecipeRevisionProjection | None = None
+def canonical_build(
+    document: Mapping[str, object],
+    *,
+    options: RecipeBuildOptions | None = None,
+    security: BuildSecurityProjection | None = None,
+    compile_policy: bool = True,
 ) -> Mapping[str, object]:
+    """Project ``execution.build`` plus the platform build policy it runs under.
+
+    Executable platform policy participates in the same cache identity as the
+    Dockerfile and base images. Resource quotas do not.
+    """
     execution = document.get("execution")
     build = execution.get("build") if isinstance(execution, Mapping) else None
     if not isinstance(build, Mapping):
@@ -249,20 +263,24 @@ def _canonical_build(
             "build.contract_invalid", "canonical execution.build is unavailable"
         )
     compiled = {**build, "dockerfile": _bundle_dockerfile_path(build)}
-    if projected is not None:
-        # Executable platform policy participates in the same cache identity
-        # as the Dockerfile and base images. Resource quotas do not.
+    if compile_policy:
         compiled["options"] = (
-            projected.build_options.model_dump(mode="json")
-            if projected.build_options is not None
-            else {}
+            options.model_dump(mode="json") if options is not None else {}
         )
         compiled["security"] = (
-            projected.build_security.model_dump(mode="json")
-            if projected.build_security is not None
-            else {}
+            security.model_dump(mode="json") if security is not None else {}
         )
     return compiled
+
+
+def _canonical_build(
+    document: Mapping[str, object], projected: RecipeRevisionProjection | None = None
+) -> Mapping[str, object]:
+    if projected is None:
+        return canonical_build(document, compile_policy=False)
+    return canonical_build(
+        document, options=projected.build_options, security=projected.build_security
+    )
 
 
 def _bundle_dockerfile_path(build: Mapping[str, object]) -> object:
@@ -753,6 +771,102 @@ class RecipeBuildService:
             receipt_pending=receipt_pending,
         )
 
+    def _admit_spark_build(
+        self,
+        builder_node_id: str,
+        *,
+        now: datetime,
+        public_network: bool,
+        memory_bytes: int,
+        disk_envelope: int,
+    ) -> None:
+        """Admit a Spark build against fresh inventory, disk and memory."""
+        try:
+            snapshot = self._inventory.latest(
+                builder_node_id, now=now, maximum_age=self._inventory_max_age
+            )
+        except KeyError as error:
+            raise RecipeBuildError(
+                "build.inventory_missing", "fresh builder inventory is unavailable"
+            ) from error
+        if snapshot.stale:
+            raise RecipeBuildError(
+                "build.inventory_stale", "builder inventory is stale"
+            )
+        if "recipe.build.v1" not in snapshot.capabilities:
+            raise RecipeBuildError(
+                "build.capability_missing",
+                "builder does not support typed recipe builds",
+            )
+        if (
+            public_network
+            and "recipe.build.egress-proxy.v1" not in snapshot.capabilities
+        ):
+            raise RecipeBuildError(
+                "build.network_capability_missing",
+                "fresh builder inventory does not prove the hostname-aware build egress boundary",
+            )
+        with self._sessions() as session:
+            disk_reserved = outstanding_disk_reservation_bytes(
+                session, builder_node_id, inventory_observed_at=snapshot.observed_at
+            )
+            memory_available = _available_build_memory(session, snapshot)
+        # Preserve a separate host reserve so an admitted build cannot crowd
+        # out the Spark itself.
+        if (
+            snapshot.disk_free_bytes - disk_reserved
+            < disk_envelope + _build_disk_reserve(snapshot.disk_total_bytes)
+        ):
+            raise RecipeBuildError(
+                "build.insufficient_disk", "builder lacks temporary disk capacity"
+            )
+        if memory_available < memory_bytes:
+            raise RecipeBuildError(
+                "build.insufficient_memory", "builder lacks build memory capacity"
+            )
+
+    def _usable_prebuilt(
+        self,
+        recipe_revision_id: str,
+        projected: RecipeRevisionProjection,
+        *,
+        build: Mapping[str, object],
+        source_sha256: str,
+        base_images: Sequence[Mapping[str, object]],
+        adapter: RuntimeAdapter,
+    ) -> PrebuiltImage | None:
+        """The catalog's prebuilt image when it was built from these exact inputs.
+
+        A missing image, an image built from other inputs (for example under
+        a different platform adapter) and an image this Controller already
+        failed to pull all fall back to a Spark build.
+        """
+        image = projected.prebuilt_image
+        if image is None:
+            return None
+        key = executable_build_key(
+            derive_build_input_identity(
+                build,
+                source_bundle_sha256=source_sha256,
+                builder_binary_digest=None,
+                base_images=base_images,
+                runtime_adapter=adapter.document(),
+            )
+        )
+        if key != image.build_key:
+            _LOGGER.info(
+                "prebuilt image %s was built from other inputs (catalog key %s, "
+                "Controller key %s); building on a Spark instead",
+                image.reference,
+                image.build_key,
+                key,
+            )
+            return None
+        with self._sessions() as session:
+            if prebuilt_failed(session, recipe_revision_id, image):
+                return None
+        return image
+
     def prepare_plan(
         self,
         recipe_revision_id: str,
@@ -811,64 +925,43 @@ class RecipeBuildService:
                 "build.source_invalid", "recipe Dockerfile authority is unavailable"
             )
         base_images = list(dockerfile_base_images(dockerfile_payload))
-        try:
-            snapshot = self._inventory.latest(
-                builder_node_id, now=now, maximum_age=self._inventory_max_age
-            )
-        except KeyError as error:
-            raise RecipeBuildError(
-                "build.inventory_missing", "fresh builder inventory is unavailable"
-            ) from error
-        if snapshot.stale:
-            raise RecipeBuildError(
-                "build.inventory_stale", "builder inventory is stale"
-            )
-        if "recipe.build.v1" not in snapshot.capabilities:
-            raise RecipeBuildError(
-                "build.capability_missing",
-                "builder does not support typed recipe builds",
-            )
-        if (
-            public_network
-            and "recipe.build.egress-proxy.v1" not in snapshot.capabilities
-        ):
-            raise RecipeBuildError(
-                "build.network_capability_missing",
-                "fresh builder inventory does not prove the hostname-aware build egress boundary",
-            )
+        prebuilt = self._usable_prebuilt(
+            revision.id,
+            projected,
+            build=build,
+            source_sha256=source_sha256,
+            base_images=base_images,
+            adapter=adapter,
+        )
+        if prebuilt is not None:
+            # The Controller pulls this image; the Spark builds nothing, so
+            # no Spark inventory, disk or memory is admitted for it. The
+            # builder stays the nominal owner of the row, and the pinned
+            # manifest digest stands in for the builder binary identity.
+            builder_binary_digest = prebuilt.digest.removeprefix("sha256:")
         resources, security = _canonical_build_resources(projected)
         temporary_bytes = resources.temporary_bytes
         memory_bytes = resources.memory_bytes
         cpu_cores = resources.cpu_cores
         processes = resources.processes
         capabilities = list(security.capabilities)
-        with self._sessions() as session:
-            disk_reserved = outstanding_disk_reservation_bytes(
-                session, builder_node_id, inventory_observed_at=snapshot.observed_at
-            )
-            memory_available = _available_build_memory(session, snapshot)
-        # The rootless builder retains inputs while exporting the image. Treat
-        # recipe storage as a generous peak envelope, not an exact quota over
-        # Podman's implementation-specific graph. Preserve a separate host
-        # reserve so an admitted build cannot crowd out the Spark itself.
         output_bytes = _declared_image_bytes(document)
         base_image_storage_bytes = resources.download_bytes if base_images else 0
-        disk_envelope = _build_disk_envelope(
-            base_image_bytes=base_image_storage_bytes,
-            temporary_bytes=temporary_bytes,
-            source_bytes=len(bundle.archive),
-            output_bytes=output_bytes,
-        )
-        if (
-            snapshot.disk_free_bytes - disk_reserved
-            < disk_envelope + _build_disk_reserve(snapshot.disk_total_bytes)
-        ):
-            raise RecipeBuildError(
-                "build.insufficient_disk", "builder lacks temporary disk capacity"
-            )
-        if memory_available < memory_bytes:
-            raise RecipeBuildError(
-                "build.insufficient_memory", "builder lacks build memory capacity"
+        if prebuilt is None:
+            self._admit_spark_build(
+                builder_node_id,
+                now=now,
+                public_network=public_network,
+                memory_bytes=memory_bytes,
+                # The rootless builder retains inputs while exporting the
+                # image. Treat recipe storage as a generous peak envelope, not
+                # an exact quota over Podman's implementation-specific graph.
+                disk_envelope=_build_disk_envelope(
+                    base_image_bytes=base_image_storage_bytes,
+                    temporary_bytes=temporary_bytes,
+                    source_bytes=len(bundle.archive),
+                    output_bytes=output_bytes,
+                ),
             )
         model_inputs = projected.build_model_artifacts
         topology_inputs = projected.build_topology_inputs
@@ -941,6 +1034,8 @@ class RecipeBuildService:
             "builder_binary_digest": builder_binary_digest,
             "artifact_format": BUILD_ARTIFACT_FORMAT,
         }
+        if prebuilt is not None:
+            policy_document["prebuilt_image"] = prebuilt.reference
         try:
             # Persist the canonical JSON-mode representation.  This is also
             # the representation handed to the agent build queue.
@@ -1019,7 +1114,10 @@ class RecipeBuildService:
                 "build.plan_invalid",
                 "prepared source build policy is invalid" + error.detail,
             ) from error
-        if policy.builder_binary_digest != node.binary_digest:
+        if (
+            policy.prebuilt_image is None
+            and policy.builder_binary_digest != node.binary_digest
+        ):
             raise RecipeBuildError(
                 "build.runtime_changed", "builder runtime identity changed"
             )
