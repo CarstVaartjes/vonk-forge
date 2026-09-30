@@ -280,6 +280,10 @@ services:
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
+    # Listens only on high ports (8443 published, 8080-8087 internal), so the
+    # default capability set is unnecessary.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     ports:
       - target: 8443
         published: 8443
