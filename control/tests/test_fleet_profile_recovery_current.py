@@ -632,6 +632,119 @@ def test_load_with_a_missing_image_requests_preparation_and_continues_when_ready
     assert service.application(application.id).state == "running"
 
 
+def test_cancelling_a_queued_load_waiting_for_preparation_always_succeeds(
+    tmp_path: Path,
+) -> None:
+    """A waiting load issued no workload effect: cancel leaves the workload alone."""
+
+    from vonk_control.models import AgentNode, RecipeBuild, ResourceReservation
+    from vonk_control.operation_blockers import make_blocker
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    service = build_production_fleet_profile_service(
+        sessions, clock=lifecycle._clock, run_switch_operations=run_switch
+    )
+    service.bind_preparation_starter(
+        lambda recipe_revision_id, *, actor: [
+            make_blocker(
+                "recipe_image.preparing",
+                "Preparing the model and runtime image (prepare).",
+                severity="info",
+            )
+        ]
+    )
+    cancelled_preparations: list[str] = []
+
+    def cancel_preparation(
+        recipe_revision_id: str, *, actor: str, reason: str
+    ) -> tuple[str, ...]:
+        cancelled_preparations.append(recipe_revision_id)
+        return ("prep-1",)
+
+    service.bind_preparation_canceller(cancel_preparation)
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Reload waiting",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "reload-chat",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        for build in session.scalars(select(RecipeBuild)):
+            build.state = "failed"
+    application = service.apply(profile.id, request_key=_uuid(930), actor="admin")
+    assert application.state == "queued"
+
+    def workload_state() -> tuple[tuple[str, int], ...]:
+        with sessions() as session:
+            return tuple(
+                (node.node_id, node.workload_intent_ordinal)
+                for node in session.scalars(
+                    select(AgentNode).order_by(AgentNode.node_id)
+                )
+            )
+
+    before = workload_state()
+    cancelled = service.cancel(
+        application.id,
+        profile_number=profile.number,
+        request_key=_uuid(931),
+        actor="admin",
+    )
+
+    assert cancelled.state == "cancelled"
+    assert cancelled.cancellation is not None
+    assert cancelled.cancellation.state == "cancelled"
+    assert "running workload was not touched" in (cancelled.status_reason or "")
+    assert "prep-1" in (cancelled.status_reason or "")
+    assert cancelled_preparations == [revision.id]
+    assert workload_state() == before
+    with sessions() as session:
+        leftovers = session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "fleet-profile",
+                ResourceReservation.owner_id == application.id,
+                ResourceReservation.state.in_(("active", "promised")),
+            )
+        ).all()
+    assert leftovers == []
+    # The same request key is an idempotent replay.
+    again = service.cancel(
+        application.id,
+        profile_number=profile.number,
+        request_key=_uuid(931),
+        actor="admin",
+    )
+    assert again.state == "cancelled"
+
+
 def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
     tmp_path: Path,
 ) -> None:

@@ -1551,6 +1551,9 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     fleet_profiles.bind_preparation_starter(
         recipe_image_production.service.ensure_preparation
     )
+    fleet_profiles.bind_preparation_canceller(
+        recipe_image_production.service.cancel_profile_preparation
+    )
 
     automatic_sync_task: asyncio.Task[None] | None = None
     automatic_sync_stop = asyncio.Event()

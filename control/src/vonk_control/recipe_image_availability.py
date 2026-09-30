@@ -3227,6 +3227,58 @@ class RecipeImageAvailabilityService:
         )
         return self._start_request(intent, actor=actor, request_id=request_id)
 
+    def cancel_profile_preparation(
+        self, recipe_revision_id: str, *, actor: str, reason: str
+    ) -> tuple[str, ...]:
+        """Cancel the pending preparation a profile load asked for, if any.
+
+        Only the chain of deterministic requests ``ensure_preparation`` makes
+        is touched. The build layer still refuses to cancel an image another
+        accepted consumer needs.
+        """
+
+        namespace = uuid.NAMESPACE_URL
+        request_id = str(
+            uuid.uuid5(
+                namespace, f"vonk-forge:profile-preparation:{recipe_revision_id}"
+            )
+        )
+        cancelled: list[str] = []
+        for _ in range(16):
+            with self._sessions.begin() as session:
+                job = session.scalar(
+                    select(Job)
+                    .where(Job.kind == OPERATION_KIND, Job.request_id == request_id)
+                    .with_for_update(nowait=True)
+                )
+                if job is None:
+                    break
+                if job.state in {"queued", "running", "partial"}:
+                    self._request_cancellation(
+                        session,
+                        job,
+                        actor=actor,
+                        request_id=str(
+                            uuid.uuid5(
+                                namespace,
+                                f"vonk-forge:profile-preparation-cancel:{job.id}",
+                            )
+                        ),
+                        reason=reason,
+                        authorize=True,
+                    )
+                    cancelled.append(job.id)
+                    break
+                if job.state not in {"failed", "cancelled"}:
+                    break
+                request_id = str(
+                    uuid.uuid5(
+                        namespace,
+                        f"vonk-forge:profile-preparation:{recipe_revision_id}:{job.id}",
+                    )
+                )
+        return tuple(cancelled)
+
     def ensure_preparation(
         self, recipe_revision_id: str, *, actor: str
     ) -> tuple[OperationBlocker, ...]:
