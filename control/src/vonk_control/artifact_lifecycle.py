@@ -396,7 +396,6 @@ __all__ = [
     "ArtifactKind",
     "ArtifactLifecycleError",
     "RemovalOwnerKind",
-    "_identity_order",
     "check_removal_fence_nowait",
     "clear_removal",
     "lock_reference_gates",
