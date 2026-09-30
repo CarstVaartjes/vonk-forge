@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -509,6 +509,25 @@ fn load_root_public_key(path: &Path) -> Result<[u8; 32], String> {
 
 fn read_root_text(path: &Path, maximum_bytes: u64) -> Result<String, String> {
     let metadata = fs::symlink_metadata(path).map_err(display)?;
+    verify_root_text(path, &metadata, maximum_bytes)?;
+    // Re-open with O_NOFOLLOW and re-verify on the opened descriptor so the
+    // checks cannot be bypassed by swapping the path after the metadata check.
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .open(path)
+        .map_err(display)?;
+    verify_root_text(path, &file.metadata().map_err(display)?, maximum_bytes)?;
+    let mut value = String::new();
+    (&file).read_to_string(&mut value).map_err(display)?;
+    Ok(value.trim_end().to_owned())
+}
+
+fn verify_root_text(
+    path: &Path,
+    metadata: &fs::Metadata,
+    maximum_bytes: u64,
+) -> Result<(), String> {
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
         || metadata.nlink() != 1
@@ -519,8 +538,7 @@ fn read_root_text(path: &Path, maximum_bytes: u64) -> Result<String, String> {
     {
         return Err(format!("{} is unsafe", path.display()));
     }
-    let value = fs::read_to_string(path).map_err(display)?;
-    Ok(value.trim_end().to_owned())
+    Ok(())
 }
 
 fn group_gid(path: &Path, name: &str) -> Result<u32, String> {
