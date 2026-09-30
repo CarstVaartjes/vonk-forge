@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -133,6 +134,23 @@ def _child_receipt(
     return receipt.model_dump(mode="json", exclude_unset=True)
 
 
+_FAILURE_TEXT = re.compile(r"^[a-z][a-z0-9._-]{0,127}$")
+
+
+def _typed_failure(value: Mapping[str, object]) -> dict[str, str]:
+    """The agent's typed failure fields, bounded to the member contract."""
+
+    typed: dict[str, str] = {}
+    for key in ("failure_kind", "error_code"):
+        item = value.get(key)
+        if isinstance(item, str) and _FAILURE_TEXT.fullmatch(item):
+            typed[key] = item
+    diagnostic = value.get("diagnostic")
+    if isinstance(diagnostic, str) and diagnostic:
+        typed["diagnostic"] = diagnostic[:512]
+    return typed
+
+
 def _evidence_projection(
     node_id: str, value: Mapping[str, object]
 ) -> ArtifactVerificationEvidence:
@@ -153,6 +171,7 @@ def _evidence_projection(
                 )
                 if key in value
             },
+            **_typed_failure(value),
         },
     )
 
@@ -429,6 +448,11 @@ class DurableDistributionPhaseExecutor:
                             if isinstance(result, Mapping)
                             else None
                         ),
+                        **(
+                            _typed_failure(result)
+                            if member_state == "failed" and isinstance(result, Mapping)
+                            else {}
+                        ),
                     }
                 )
                 if raw:
@@ -527,6 +551,23 @@ class DurableDistributionPhaseExecutor:
             ).model_dump(mode="json", exclude_none=True)
             if child.status_reason or projection_reason:
                 payload["reason"] = child.status_reason or projection_reason
+            failed = [item for item in members if item.get("state") == "failed"]
+            if failed:
+                kinds = {item.get("failure_kind") for item in failed}
+                # One kind for all failed members is that kind; anything mixed
+                # or unknown stays for the parent's fail-closed classifier.
+                if len(kinds) == 1 and isinstance(next(iter(kinds)), str):
+                    payload["failure_kind"] = next(iter(kinds))
+                code = next(
+                    (
+                        item["error_code"]
+                        for item in failed
+                        if isinstance(item.get("error_code"), str)
+                    ),
+                    None,
+                )
+                if code is not None:
+                    payload["error_code"] = code
             if state != child.state:
                 child.state = state
                 child.status_reason = payload.get("reason")

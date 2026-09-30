@@ -699,8 +699,12 @@ class RunSwitchPlan(RunSwitchAssessment):
         authority = self.reconciliation_authority
         if self.action != "cleanup" or self.installation_id is None:
             raise ValueError("reconciliation authority requires installation cleanup")
-        if self.cleanup_disposition != "uninstall":
-            raise ValueError("reconciliation cannot abandon an installation")
+        if self.cleanup_disposition == "abandon":
+            # A plan that never reached a node has no effect to reconcile:
+            # reconciling it discards the record, with no receipt authority.
+            if authority is not None:
+                raise ValueError("an abandoned installation has no reconciliation")
+            return self
         if self.allowed and authority is None:
             raise ValueError("allowed reconciliation requires exact authority")
         if authority is None:
@@ -765,6 +769,11 @@ class RunSwitchProgress(_StrictModel):
         return self
 
 
+_FailureText = Annotated[
+    str, StringConstraints(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9._-]*$")
+]
+
+
 class ArtifactVerificationEvidence(_StrictModel):
     """One node's immutable artifact handoff evidence."""
 
@@ -774,6 +783,11 @@ class ArtifactVerificationEvidence(_StrictModel):
     error: Annotated[str, StringConstraints(max_length=512)] | None = None
     reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     uncertain: bool = False
+    # The agent's typed failure: kind decides retry, code and diagnostic say
+    # which request or check refused (e.g. ``http_status=404``).
+    failure_kind: _FailureText | None = None
+    error_code: _FailureText | None = None
+    diagnostic: Annotated[str, StringConstraints(max_length=512)] | None = None
 
 
 class RunSwitchMemberReceipt(_StrictModel):
@@ -786,6 +800,9 @@ class RunSwitchMemberReceipt(_StrictModel):
     total_bytes: int | None = Field(default=None, ge=0)
     error: Annotated[str, StringConstraints(max_length=512)] | None = None
     cached: bool = False
+    failure_kind: _FailureText | None = None
+    error_code: _FailureText | None = None
+    diagnostic: Annotated[str, StringConstraints(max_length=512)] | None = None
 
 
 class RunSwitchRankReceipt(_StrictModel):
@@ -1095,6 +1112,10 @@ class RunSwitchDistributionChildResult(_StrictModel):
     members: list[RunSwitchMemberReceipt] = Field(min_length=1, max_length=32)
     evidence: list[ArtifactVerificationEvidence] = Field(max_length=32)
     reason: Annotated[str, StringConstraints(max_length=512)] | None = None
+    # Aggregate of the failed members: the parent retries only when every
+    # failed member reports a temporary dependency.
+    failure_kind: _FailureText | None = None
+    error_code: _FailureText | None = None
 
 
 RunSwitchPhaseResult = (

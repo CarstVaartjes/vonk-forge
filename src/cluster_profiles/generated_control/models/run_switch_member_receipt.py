@@ -33,7 +33,10 @@ class RunSwitchMemberReceipt:
             state (RunSwitchMemberReceiptState):
             cached (bool | Unset):  Default: False.
             completed_bytes (int | Unset):  Default: 0.
+            diagnostic (None | str | Unset):
             error (None | str | Unset):
+            error_code (None | str | Unset):
+            failure_kind (None | str | Unset):
             phase (None | RunSwitchMemberReceiptPhaseType0 | Unset):
             total_bytes (int | None | Unset):
      """
@@ -42,7 +45,10 @@ class RunSwitchMemberReceipt:
     state: RunSwitchMemberReceiptState
     cached: bool | Unset = False
     completed_bytes: int | Unset = 0
+    diagnostic: None | str | Unset = UNSET
     error: None | str | Unset = UNSET
+    error_code: None | str | Unset = UNSET
+    failure_kind: None | str | Unset = UNSET
     phase: None | RunSwitchMemberReceiptPhaseType0 | Unset = UNSET
     total_bytes: int | None | Unset = UNSET
 
@@ -59,11 +65,29 @@ class RunSwitchMemberReceipt:
 
         completed_bytes = self.completed_bytes
 
+        diagnostic: None | str | Unset
+        if isinstance(self.diagnostic, Unset):
+            diagnostic = UNSET
+        else:
+            diagnostic = self.diagnostic
+
         error: None | str | Unset
         if isinstance(self.error, Unset):
             error = UNSET
         else:
             error = self.error
+
+        error_code: None | str | Unset
+        if isinstance(self.error_code, Unset):
+            error_code = UNSET
+        else:
+            error_code = self.error_code
+
+        failure_kind: None | str | Unset
+        if isinstance(self.failure_kind, Unset):
+            failure_kind = UNSET
+        else:
+            failure_kind = self.failure_kind
 
         phase: None | str | Unset
         if isinstance(self.phase, Unset):
@@ -90,8 +114,14 @@ class RunSwitchMemberReceipt:
             field_dict["cached"] = cached
         if completed_bytes is not UNSET:
             field_dict["completed_bytes"] = completed_bytes
+        if diagnostic is not UNSET:
+            field_dict["diagnostic"] = diagnostic
         if error is not UNSET:
             field_dict["error"] = error
+        if error_code is not UNSET:
+            field_dict["error_code"] = error_code
+        if failure_kind is not UNSET:
+            field_dict["failure_kind"] = failure_kind
         if phase is not UNSET:
             field_dict["phase"] = phase
         if total_bytes is not UNSET:
@@ -115,6 +145,16 @@ class RunSwitchMemberReceipt:
 
         completed_bytes = d.pop("completed_bytes", UNSET)
 
+        def _parse_diagnostic(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        diagnostic = _parse_diagnostic(d.pop("diagnostic", UNSET))
+
+
         def _parse_error(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -123,6 +163,26 @@ class RunSwitchMemberReceipt:
             return cast(None | str | Unset, data)
 
         error = _parse_error(d.pop("error", UNSET))
+
+
+        def _parse_error_code(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        error_code = _parse_error_code(d.pop("error_code", UNSET))
+
+
+        def _parse_failure_kind(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        failure_kind = _parse_failure_kind(d.pop("failure_kind", UNSET))
 
 
         def _parse_phase(data: object) -> None | RunSwitchMemberReceiptPhaseType0 | Unset:
@@ -160,7 +220,10 @@ class RunSwitchMemberReceipt:
             state=state,
             cached=cached,
             completed_bytes=completed_bytes,
+            diagnostic=diagnostic,
             error=error,
+            error_code=error_code,
+            failure_kind=failure_kind,
             phase=phase,
             total_bytes=total_bytes,
         )

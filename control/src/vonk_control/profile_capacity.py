@@ -38,8 +38,9 @@ def reservation_visible(
     excluded_profile_application_ids: Sequence[str] = (),
     *,
     excluded_run_ids: Sequence[str] = (),
+    excluded_installation_ids: Sequence[str] = (),
 ) -> ColumnElement[bool]:
-    """Only an explicit inherited or reviewed-superseded claim is discounted."""
+    """Only an explicit inherited, superseded or adoptable claim is discounted."""
     return and_(
         or_(
             ResourceReservation.owner_kind != "fleet-profile",
@@ -48,6 +49,10 @@ def reservation_visible(
         or_(
             ResourceReservation.owner_kind != "run",
             ResourceReservation.owner_id.not_in(excluded_run_ids),
+        ),
+        or_(
+            ResourceReservation.owner_kind != "installation",
+            ResourceReservation.owner_id.not_in(excluded_installation_ids),
         ),
     )
 

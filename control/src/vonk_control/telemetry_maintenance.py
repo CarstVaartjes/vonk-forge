@@ -1,11 +1,11 @@
-"""Bounded retention for raw telemetry samples and Fleet stream events."""
+"""Bounded retention for raw telemetry, inventory history and Fleet events."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -13,6 +13,7 @@ from .fleet_events import FleetEventDraft, FleetEventRepository
 from .models import (
     AgentNode,
     FleetStreamEvent,
+    NodeInventorySnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
@@ -108,6 +109,43 @@ class TelemetryMaintenance:
             )
         with self._sessions.begin() as session:
             self._prune_events(session, now=now, limit=limit)
+        with self._sessions.begin() as session:
+            self._prune_inventory(session, cutoff=cutoff, limit=limit)
+
+    @staticmethod
+    def _prune_inventory(session: Session, *, cutoff: datetime, limit: int) -> None:
+        """Keep a day of inventory history and always each node's newest row.
+
+        Admission reads only recent inventory; unbounded history only slowed
+        every read that looks for the newest row.
+        """
+
+        newest = (
+            select(
+                NodeInventorySnapshot.node_id.label("node_id"),
+                func.max(NodeInventorySnapshot.observed_at).label("observed_at"),
+            )
+            .group_by(NodeInventorySnapshot.node_id)
+            .subquery()
+        )
+        stale = list(
+            session.scalars(
+                select(NodeInventorySnapshot.id)
+                .join(newest, NodeInventorySnapshot.node_id == newest.c.node_id)
+                .where(
+                    NodeInventorySnapshot.observed_at < cutoff,
+                    NodeInventorySnapshot.observed_at < newest.c.observed_at,
+                )
+                .order_by(NodeInventorySnapshot.observed_at, NodeInventorySnapshot.id)
+                .limit(limit)
+            )
+        )
+        for chunk in TelemetryMaintenance._chunks(stale):
+            session.execute(
+                delete(NodeInventorySnapshot)
+                .where(NodeInventorySnapshot.id.in_(chunk))
+                .execution_options(synchronize_session=False)
+            )
 
     @staticmethod
     def _prune_events(session: Session, *, now: datetime, limit: int) -> None:

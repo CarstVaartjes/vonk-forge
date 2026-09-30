@@ -352,6 +352,7 @@ def assemble_production_worker(
     from .artifact_blob_store import ArtifactBlobStore
     from .artifact_jobs import ArtifactJobService
     from .artifact_maintenance import ArtifactMaintenanceCadence
+    from .attempt_residues import AttemptResidueReconciler
     from .cluster_mappings import ClusterMappingService
     from .distributed_recovery import DistributedRecoveryCoordinator
     from .distribution import build_distribution_service_from_components
@@ -468,6 +469,11 @@ def assemble_production_worker(
         clock=clock,
         build_cleanup=lifecycle.reconcile_cancelled_builds,
         retirement_cleanup=lifecycle.reconcile_retired_operations,
+        residue_cleanup=AttemptResidueReconciler(
+            sessions,
+            abandon_never_installed=lifecycle.abandon_never_installed,
+            clock=clock,
+        ).tick,
         fleet_profiles=fleet_profiles,
         run_switches=run_switch_operations,
         recoveries=DistributedRecoveryCoordinator(

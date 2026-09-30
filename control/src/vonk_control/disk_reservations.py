@@ -24,6 +24,7 @@ def outstanding_disk_reservation_bytes(
     inventory_observed_at: datetime | None,
     excluded_run_ids: Collection[str] = (),
     excluded_profile_application_ids: Collection[str] = (),
+    excluded_installation_ids: Collection[str] = (),
 ) -> int:
     """Keep uncertain commitments; count completed download bytes only once.
 
@@ -61,6 +62,7 @@ def outstanding_disk_reservation_bytes(
             reservation_visible(
                 tuple(excluded_profile_application_ids),
                 excluded_run_ids=tuple(excluded_run_ids),
+                excluded_installation_ids=tuple(excluded_installation_ids),
             ),
         )
     )

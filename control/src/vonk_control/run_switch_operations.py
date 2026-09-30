@@ -43,6 +43,7 @@ from .artifact_reference_scan import (
     _run_switch_runtime_image_intent,
     require_model_sets_open,
 )
+from .attempt_residues import unowned_never_installed
 from .bounded_json import require_integer, require_sequence
 from .cluster_mappings import (
     ClusterMappingError,
@@ -1648,7 +1649,10 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     "run-switch.uninstall_target_unavailable"
                 )
-            if plan.cleanup_mode == "reconcile":
+            if (
+                plan.cleanup_mode == "reconcile"
+                and plan.cleanup_disposition != "abandon"
+            ):
                 authority = plan.reconciliation_authority
                 if authority is None:
                     raise RunSwitchOperationConflict(
@@ -2083,13 +2087,17 @@ class RecipeLifecyclePhaseExecutor:
         if installation_id is None:
             raise RunSwitchOperationConflict("run-switch.uninstall_target_unavailable")
         reconciliation_complete = True
-        reconcile_request_id: str | None = None
-        if plan.cleanup_mode == "reconcile":
+        reconcile_request_id: str | None = (
+            str(uuid.uuid5(uuid.UUID(request_key), "reconcile"))
+            if plan.cleanup_mode == "reconcile"
+            else None
+        )
+        if plan.cleanup_mode == "reconcile" and plan.cleanup_disposition != "abandon":
             if self._lifecycle is None or plan.reconciliation_authority is None:
                 raise RunSwitchOperationConflict(
                     "run-switch.reconciliation-authority-unavailable"
                 )
-            reconcile_request_id = str(uuid.uuid5(uuid.UUID(request_key), "reconcile"))
+            assert reconcile_request_id is not None
             reconciliation_complete = self._lifecycle.reconciliation_complete(
                 reconcile_request_id,
                 expected_authority=plan.reconciliation_authority.model_dump(
@@ -2734,6 +2742,10 @@ class RunSwitchOperationService:
                         node_ids=node_ids,
                     )
                 )
+            elif cleanup_mode == "reconcile" and self._never_installed(installation_id):
+                # Reconciling a plan that never reached a node discards the
+                # record: there is no effect on a Spark to reconcile.
+                cleanup_disposition = "abandon"
             elif cleanup_mode == "reconcile":
                 try:
                     authority = self._lifecycle.preview_reconciliation_authority(
@@ -3457,8 +3469,46 @@ class RunSwitchOperationService:
                     message=redact_text(error),
                     traceback=redact_text(traceback.format_exc()),
                 )
+                self._hold_after_advance_failure(str(job_id), error)
                 continue
         return advanced
+
+    def _hold_after_advance_failure(self, operation_id: str, error: Exception) -> None:
+        """Show an unexpected advance failure on the operation and back off.
+
+        The operation keeps its checkpoint and is tried again, but it is never
+        a silent endless retry: its wait names the failure and the next try.
+        """
+
+        now = _now(self._clock)
+        try:
+            with self._sessions.begin() as session:
+                job = session.get(Job, operation_id, with_for_update=True)
+                if job is None or job.state not in {"queued", "running", "waiting"}:
+                    return
+                progress = _read_progress(job.result)
+                code = error_code(error) or "run-switch.advance-failed"
+                attempt = (
+                    require_integer(progress.get("retry_attempt"), "retry attempt")
+                    if progress.get("retry_reason") == code
+                    and progress.get("retry_attempt") is not None
+                    else 1
+                )
+                delay = min(300, 5 * (2 ** min(attempt - 1, 6)))
+                due = now + timedelta(seconds=delay)
+                progress["retry_reason"] = code
+                progress["retry_attempt"] = attempt + 1
+                progress["observation_due_at"] = due.isoformat()
+                job.state = "running"
+                job.status_reason = (
+                    f"{code}: {type(error).__name__}: {redact_text(error)}"[:400]
+                    + f"; retry {attempt} at {due.isoformat()}"
+                )[:512]
+                job.result = _persisted_result(progress)
+                job.updated_at = now
+            self._record_wait(operation_id)
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+            return  # the log above still names the failure
 
     def _record_wait(self, operation_id: str) -> None:
         """Store what a waiting or retrying operation waits for; log changes.
@@ -5435,6 +5485,15 @@ class RunSwitchOperationService:
         blockers: list[RunSwitchReason] = []
         warnings: list[RunSwitchReason] = []
         insufficient_components_by_node: dict[str, frozenset[str]] = {}
+        adoptable = (
+            unowned_never_installed(
+                session,
+                recipe_revision_id=revision.id,
+                node_ids=frozenset(node.node_id for node in group.nodes),
+            )
+            if revision is not None
+            else ()
+        )
         role_by_name = (
             {role.name: role for role in recipe_topology(revision.document).roles}
             if revision is not None
@@ -5723,6 +5782,10 @@ class RunSwitchOperationService:
                             inventory_observed_at=snapshot.observed_at,
                             excluded_run_ids=excluded,
                             excluded_profile_application_ids=excluded_profile_application_ids,
+                            # This attempt adopts the unowned plan a failed
+                            # attempt of the same recipe left on these Sparks,
+                            # so its claim is not capacity to wait for.
+                            excluded_installation_ids=adoptable,
                         )
                         disk_free_after = disk_free - reserved_disk - required_disk
                         if disk_free_after < 0:
@@ -7638,6 +7701,17 @@ class RunSwitchOperationService:
                 **expiry_event,
             )
         return True
+
+    def _never_installed(self, installation_id: str) -> bool:
+        """Whether the installation's own assessment proves no node effect."""
+
+        if self._lifecycle is None:
+            return False
+        try:
+            assessment = self._lifecycle.preview_uninstall(installation_id)
+        except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError):
+            return False
+        return assessment.allowed and assessment.disposition == "abandon"
 
     @staticmethod
     def _scope_intent_status(session: Session, job: Job) -> str:

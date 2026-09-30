@@ -1425,10 +1425,16 @@ export interface components {
         ArtifactVerificationEvidence: {
             /** Copied Bytes */
             copied_bytes?: number | null;
+            /** Diagnostic */
+            diagnostic?: string | null;
             /** Downloaded Bytes */
             downloaded_bytes?: number | null;
             /** Error */
             error?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Failure Kind */
+            failure_kind?: string | null;
             /** Node Id */
             node_id: string;
             /** Reason */
@@ -6464,8 +6470,14 @@ export interface components {
              * @default 0
              */
             completed_bytes: number;
+            /** Diagnostic */
+            diagnostic?: string | null;
             /** Error */
             error?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Failure Kind */
+            failure_kind?: string | null;
             /** Node Id */
             node_id: string;
             /** Phase */

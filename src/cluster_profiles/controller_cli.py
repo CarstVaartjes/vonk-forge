@@ -3916,13 +3916,15 @@ def _key(args: argparse.Namespace, client: ControllerClient) -> dict[str, object
         _confirm_action(
             args, f"Revoke key {args.name}? Apps using it stop working immediately."
         )
-        return client.request("POST", f"/api/key/{_quoted(args.name)}/revoke", {})
+        return client.request("POST", f"/api/key/{_quoted(args.name)}/revoke")
     if action == "roll":
         _confirm_action(
             args,
             f"Roll key {args.name}? Apps using the old secret stop working immediately.",
         )
-        path, payload = f"/api/key/{_quoted(args.name)}/roll", {}
+        # Revoke and roll take no request body; sending ``{}`` fails the
+        # client's own OpenAPI request check before anything is sent.
+        path, payload = f"/api/key/{_quoted(args.name)}/roll", None
     else:
         path = "/api/key"
         payload = {"name": args.name, "models": args.models}
