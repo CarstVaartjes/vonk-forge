@@ -287,6 +287,8 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
             "slug": recipe.identity.slug,
             "version": recipe.release.version if recipe.release else None,
             "content_sha256": item.content_sha256,
+            "source_path": item.source_path,
+            "context": recipe.execution.build.context.path,
         }
         if key in images:
             images[key]["recipes"].append(recipe_entry)  # type: ignore[union-attr]
