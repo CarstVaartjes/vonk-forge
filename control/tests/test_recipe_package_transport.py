@@ -13,6 +13,7 @@ import httpx2
 import pytest
 from vonk_control import recipe_packages
 from vonk_control.bounded_json import require_mapping
+from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     PACKAGE_REPOSITORY,
@@ -472,7 +473,7 @@ def test_unsigned_release_is_refused_even_with_a_previous_generation(
         ("index", "catalog-index.json does not match SHA256SUMS"),
         ("package", "bytes do not match|does not match SHA256SUMS"),
         ("source", "not built from the signed release commit"),
-        ("missing", "does not contain tiny-recipe.tar.gz|not in the signed release"),
+        ("missing", "package assets that were never uploaded or were removed"),
         ("redirect", "redirect leaves the GitHub asset origin"),
     ],
 )
@@ -501,6 +502,110 @@ def test_release_assets_must_match_the_signed_manifest(
     with pytest.raises(RecipePackageError, match=error):
         client.prepare(client.list())
     client.close()
+
+
+def test_release_missing_a_signed_package_names_the_asset(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    # A publish that died mid-update leaves SHA256SUMS and catalog-index.json
+    # naming a package whose asset is gone. The release stays refused, but the
+    # refusal names the tag and the asset instead of a bare response_invalid.
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    del release.assets["tiny-recipe.tar.gz"]
+    release.assets["unlisted-extra.tar.gz"] = b"never signed"  # ignored
+    client = RecipePackageClient(
+        api_url="http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx2.MockTransport(release.handler),
+    )
+    with pytest.raises(RecipePackageError) as refused:
+        client.list()
+    assert refused.value.code == "recipe_package.release_incomplete"
+    assert refused.value.detail == (
+        "signed release v2.1.0 lists package assets that were never uploaded "
+        "or were removed: tiny-recipe.tar.gz"
+    )
+    client.close()
+
+
+def test_release_index_digest_disagreeing_with_sums_names_the_field(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    release.assets["SHA256SUMS"] = (
+        f"{hashlib.sha256(index).hexdigest()}  catalog-index.json\n"
+        + "0" * 64
+        + "  tiny-recipe.tar.gz\n"
+    ).encode()
+    client = RecipePackageClient(
+        api_url="http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx2.MockTransport(release.handler),
+    )
+    with pytest.raises(RecipePackageError) as refused:
+        client.list()
+    assert refused.value.code == "recipe_package.response_invalid"
+    assert refused.value.detail == (
+        "catalog-index.json package.sha256 differs from the signed SHA256SUMS "
+        "for tiny-recipe.tar.gz"
+    )
+    client.close()
+
+
+def _bind(locations: list[str], *, assets: set[str], sums: dict[str, str]) -> None:
+    packages = {
+        f"vonk-forge/recipe-{number}": {
+            "location": location,
+            "package_sha256": "a" * 64,
+        }
+        for number, location in enumerate(locations)
+    }
+    recipe_packages._bind_release(
+        RecipeLibrarySnapshot(commit=SIGNED_COMMIT, items=()),
+        packages,
+        recipe_packages._VerifiedRelease(
+            tag="v2.1.0",
+            commit=SIGNED_COMMIT,
+            assets=frozenset(assets),
+            checksums=sums,
+            checksums_raw=b"",
+            bundle_raw=b"",
+        ),
+    )
+
+
+def test_release_binding_reports_bounded_offenders() -> None:
+    names = [f"recipe-{number}.tar.gz" for number in range(40)]
+    signed = {name: "a" * 64 for name in names}
+    with pytest.raises(RecipePackageError) as refused:
+        _bind([f"packages/{name}" for name in names], assets=set(), sums=signed)
+    assert refused.value.code == "recipe_package.release_incomplete"
+    assert refused.value.detail.endswith(
+        "recipe-0.tar.gz, recipe-1.tar.gz, recipe-2.tar.gz (+37 more)"
+    )
+    assert len(refused.value.detail) <= 256
+
+    with pytest.raises(RecipePackageError) as escaped:
+        _bind(["packages/../etc/passwd"], assets=set(), sums={})
+    assert escaped.value.code == "recipe_package.response_invalid"
+    assert escaped.value.detail == (
+        "catalog-index.json package.path is not packages/<asset> for "
+        "vonk-forge/recipe-0"
+    )
+
+    with pytest.raises(RecipePackageError) as hostile:
+        _bind(["packages/bad\nname.tar.gz"], assets=set(), sums={})
+    assert "\n" not in hostile.value.detail
+    assert "<invalid asset name>" in hostile.value.detail
+
+    # A complete release binds; assets beyond the signed list are ignored.
+    _bind(
+        ["packages/recipe-0.tar.gz"],
+        assets={"recipe-0.tar.gz", "unlisted.tar.gz"},
+        sums={"recipe-0.tar.gz": "a" * 64},
+    )
 
 
 def test_restart_offline_reverifies_the_persisted_release(

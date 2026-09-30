@@ -1277,24 +1277,66 @@ def _bind_release(
     packages: Mapping[str, Mapping[str, object]],
     release: _VerifiedRelease,
 ) -> None:
-    """Require the index and every package it names to be the signed ones."""
+    """Require the index and every package it names to be the signed ones.
+
+    A refusal names the offending assets and the field that disagrees, so the
+    publisher can see what to repair; an inconsistent release is never used.
+    """
     if snapshot.commit != release.commit:
         raise RecipePackageError(
             "recipe_package.response_invalid",
             "recipe index was not built from the signed release commit",
         )
-    for package in packages.values():
+    bad_location: list[str] = []
+    bad_digest: list[str] = []
+    missing: list[str] = []
+    for key, package in packages.items():
         location = str(package.get("location"))
         name = PurePosixPath(location).name
-        if (
-            location != f"packages/{name}"
-            or name not in release.assets
-            or release.checksums.get(name) != package.get("package_sha256")
-        ):
-            raise RecipePackageError(
-                "recipe_package.response_invalid",
-                "recipe package is not in the signed release",
-            )
+        if location != f"packages/{name}":
+            bad_location.append(key)
+        elif release.checksums.get(name) != package.get("package_sha256"):
+            bad_digest.append(_asset_label(name))
+        elif name not in release.assets:
+            missing.append(_asset_label(name))
+    if bad_location:
+        raise RecipePackageError(
+            "recipe_package.response_invalid",
+            _bounded_reason(
+                "catalog-index.json package.path is not packages/<asset> for",
+                bad_location,
+            ),
+        )
+    if bad_digest:
+        raise RecipePackageError(
+            "recipe_package.response_invalid",
+            _bounded_reason(
+                "catalog-index.json package.sha256 differs from the signed "
+                "SHA256SUMS for",
+                bad_digest,
+            ),
+        )
+    if missing:
+        raise RecipePackageError(
+            "recipe_package.release_incomplete",
+            _bounded_reason(
+                f"signed release {release.tag} lists package assets that were "
+                "never uploaded or were removed:",
+                missing,
+            ),
+        )
+
+
+def _asset_label(name: str) -> str:
+    """Return a release asset name that is safe to show, or a placeholder."""
+    return name if _ASSET_NAME.fullmatch(name) else "<invalid asset name>"
+
+
+def _bounded_reason(prefix: str, names: list[str], *, shown: int = 3) -> str:
+    """Name the first offenders and count the rest, within the detail bound."""
+    listed = ", ".join(names[:shown])
+    more = f" (+{len(names) - shown} more)" if len(names) > shown else ""
+    return f"{prefix} {listed}{more}"[:256]
 
 
 def _persisted_release(value: object, index: bytes) -> _VerifiedRelease | None:
