@@ -522,11 +522,7 @@ def _emit(
     if getattr(args, "document_output", False):
         print(json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False))
         return
-    safe = (
-        dict(payload)
-        if args.global_json or getattr(args, "json", False)
-        else _sanitize(payload)
-    )
+    safe = _sanitize(payload)
     if args.global_json or getattr(args, "json", False):
         print(_json_text(safe))
         return
