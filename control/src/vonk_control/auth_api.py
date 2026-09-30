@@ -113,7 +113,8 @@ def install_auth_routes(
         operation_id="loginBrowser",
     )
     def login(body: LoginRequest, request: Request, response: Response) -> AuthSession:
-        if request.headers.get("origin") != f"https://{request.headers['host']}":
+        host = request.headers.get("host")
+        if host is None or request.headers.get("origin") != f"https://{host}":
             raise HTTPException(status_code=403, detail="origin validation failed")
         try:
             issued = service.login(body.subject, body.password)
