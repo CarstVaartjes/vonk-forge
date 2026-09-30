@@ -82,6 +82,20 @@ def compile_job_invocation(
         rank=plan.runtime.placement.rank,
     )
     runtime_spec = _bind_runtime_artifacts(runtime_spec, models)
+    runtime = runtime_spec.get("runtime")
+    compiled_image_digest = _image_digest(
+        runtime.get("image") if isinstance(runtime, Mapping) else None
+    )
+    # The installed plan binds the exact reviewed runtime image, and a
+    # repaired build row can acquire a different image digest after
+    # installation.  The stored plan carries no execution digest of its own
+    # (per-job parameters and timeout intentionally recompile it), so this
+    # exact image digest is the installed-identity comparison available on
+    # the apply path.
+    if compiled_image_digest != plan.runtime_image.image_digest:
+        raise ExecutionPlanCompilationError(
+            "job build differs from the installed workload"
+        )
     job = runtime_spec.get("job")
     if not isinstance(job, dict):
         raise ExecutionPlanCompilationError(
