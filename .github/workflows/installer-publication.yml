@@ -388,7 +388,7 @@ jobs:
   candidate:
     name: Publish immutable ${{ needs.authority.outputs.channel }} installer candidate
     needs: [authority]
-    if: needs.authority.result == 'success'
+    if: ${{ !cancelled() && needs.authority.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: installer-candidate-${{ needs.authority.outputs.channel }}
@@ -979,7 +979,7 @@ jobs:
     # final acceptance signer still requires complete NAS and Spark evidence.
     needs: [authority, candidate]
     if: >-
-      needs.authority.result == 'success' &&
+      !cancelled() && needs.authority.result == 'success' &&
       needs.candidate.result == 'success'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
@@ -1238,7 +1238,7 @@ jobs:
     name: Promote accepted ${{ needs.authority.outputs.channel }} installer generation
     needs: [authority, candidate, acceptance]
     if: >-
-      needs.authority.result == 'success' &&
+      !cancelled() && needs.authority.result == 'success' &&
       needs.candidate.result == 'success' &&
       needs.acceptance.result == 'success'
     runs-on: ubuntu-24.04
