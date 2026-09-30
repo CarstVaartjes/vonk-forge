@@ -200,6 +200,8 @@ jobs:
         with:
           name: release-producer-agent
           retention-days: 90
+          # A re-run attempt records the same producer again.
+          overwrite: true
           if-no-files-found: error
           path: ${{ runner.temp }}/release-producer-source
       - name: Record the accepted development images
@@ -208,6 +210,7 @@ jobs:
         with:
           name: release-producer-images
           retention-days: 90
+          overwrite: true
           if-no-files-found: error
           path: ${{ runner.temp }}/release-producer-source
       - name: Record the accepted installer setup programs
@@ -216,6 +219,7 @@ jobs:
         with:
           name: release-producer-setups
           retention-days: 90
+          overwrite: true
           if-no-files-found: error
           path: ${{ runner.temp }}/release-producer-source
 
