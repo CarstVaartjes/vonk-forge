@@ -536,6 +536,31 @@ _AUTHORIZATION_CACHE_ENTRIES = 1024
 _AUTHORIZATION_TTL_SECONDS = 30.0
 
 
+def _may_replace(
+    existing: NodeDistributionAssignment,
+    requested: NodeDistributionAssignment,
+    *,
+    active: bool,
+    now: datetime,
+) -> bool:
+    """Whether a registration may take over a stored (plan, node) grant.
+
+    The same grant (equal bytes and identities; only its expiry differs) is
+    renewed by whichever switch now transfers it. A grant that is no longer
+    live -- revoked, expired, or past its expiry -- belongs to no transfer and
+    is reclaimed. A live grant for different bytes stays refused.
+    """
+
+    def grant(value: NodeDistributionAssignment) -> dict[str, object]:
+        mapping = value.to_mapping()
+        mapping.pop("expires_at", None)
+        return mapping
+
+    return grant(existing) == grant(requested) or not (
+        active and existing.expires_at > now
+    )
+
+
 class DistributionService:
     """Resolves exact assignments and serves only their declared objects."""
 
@@ -591,10 +616,14 @@ class DistributionService:
                 "assignment OCI archive does not match the verified image identity",
             )
         key = (assignment.plan_digest, assignment.node_id)
+        with self._authorized_lock:
+            self._authorized.pop(key, None)
         if self.sessions is None:
             with self._lock:
                 existing = self._assignments.get(key)
-                if existing is not None and existing != assignment:
+                if existing is not None and not _may_replace(
+                    existing, assignment, active=True, now=self.clock()
+                ):
                     raise DistributionError(
                         "distribution.assignment_conflict",
                         "node assignment is already bound",
@@ -621,14 +650,18 @@ class DistributionService:
                 )
                 .with_for_update()
             )
+            now = self.clock()
             if row is not None:
-                if self._from_row(row) != assignment:
+                existing = self._from_row(row)
+                if existing == assignment and row.state == "active":
+                    return
+                if not _may_replace(
+                    existing, assignment, active=row.state == "active", now=now
+                ):
                     raise DistributionError(
                         "distribution.assignment_conflict",
                         "node assignment is already bound",
                     )
-                return
-            now = self.clock()
             try:
                 require_model_sets_open(
                     session,
@@ -642,6 +675,20 @@ class DistributionService:
                 )
             except ArtifactLifecycleError as error:
                 raise DistributionError(error.code, error.detail) from error
+            if row is not None:
+                # The same plan's grant, renewed by the transfer that uses it
+                # now, or reclaimed from a switch that no longer holds it.
+                row.id = assignment.assignment_id
+                row.generation = assignment.generation
+                row.expires_at = assignment.expires_at
+                row.model_artifact_set_sha256 = assignment.model_artifact_set_sha256
+                row.objects = [item.to_mapping() for item in assignment.objects]
+                row.oci_image_digest = assignment.oci_image_digest
+                row.oci_archive_sha256 = assignment.oci_archive_sha256
+                row.state = "active"
+                row.revoked_at = None
+                row.updated_at = now
+                return
             session.add(
                 ArtifactDistributionAssignment(
                     id=assignment.assignment_id,

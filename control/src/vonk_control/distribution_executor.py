@@ -24,7 +24,7 @@ from vonk_agent_protocol import (
 
 from .agent_jobs import AgentJobService
 from .bounded_json import sequence
-from .distribution import DistributionError, DistributionService
+from .distribution import DistributionService
 from .distribution_assignment import NodeDistributionAssignment
 from .logging import redact_text
 from .model_cache import ModelCacheNotFound
@@ -666,20 +666,7 @@ class DurableDistributionPhaseExecutor:
         # Register immutable assignments before opening the child transaction;
         # this avoids nested session transactions while retaining replay safety.
         for assignment in assignments.values():
-            try:
-                self._distribution.register(assignment)
-            except DistributionError as error:
-                if error.code != "distribution.assignment_conflict":
-                    raise
-                existing = self._distribution.authorize(
-                    node_id=assignment.node_id, plan_digest=assignment.plan_digest
-                )
-                existing_mapping = existing.to_mapping()
-                requested_mapping = assignment.to_mapping()
-                existing_mapping.pop("assignment_id", None)
-                requested_mapping.pop("assignment_id", None)
-                if existing_mapping != requested_mapping:
-                    raise
+            self._distribution.register(assignment)
         with self._sessions.begin() as session:
             target_totals = {
                 node_id: target_bytes
@@ -1008,8 +995,11 @@ class DurableDistributionPhaseExecutor:
                 "plan_digest": plan.plan_digest,
                 "generation": generation,
                 "node_id": node_id,
+                # The grant lives from this registration; agent progress
+                # renews it while the copy runs. A plan may be accepted hours
+                # before its copy starts, so its age must not expire the grant.
                 "expires_at": (
-                    plan.generated_at.astimezone(UTC) + timedelta(hours=1)
+                    self._clock().astimezone(UTC) + timedelta(hours=1)
                 ).isoformat(),
                 "model_artifact_set_sha256": model_set_digest,
                 "objects": [item.to_mapping() for item in (*model_objects, archive)],
