@@ -99,3 +99,25 @@ def test_a_newer_main_push_cancels_work_but_never_an_r2_write() -> None:
         assert jobs[name]["concurrency"]["cancel-in-progress"] is False, name
     refresh = load(WORKFLOWS / "installer-maintenance.yml")["jobs"]["refresh"]
     assert refresh["concurrency"]["cancel-in-progress"] is False
+
+
+def test_a_skipped_producer_does_not_skip_publication() -> None:
+    # A job whose `if` has no status function gets an implicit `success()`,
+    # which is false when any ancestor was skipped. Producers skip whenever
+    # their inputs are unchanged, so every job downstream of them must use a
+    # status function or it silently skips the whole publication.
+    jobs = load(RELEASE)["jobs"]
+    status = ("!cancelled()", "always()", "cancelled()", "failure()")
+    downstream = {"authority"}
+    changed = True
+    while changed:
+        changed = False
+        for name, job in jobs.items():
+            needs = job.get("needs", [])
+            needs = [needs] if isinstance(needs, str) else needs
+            if name not in downstream and downstream & set(needs):
+                downstream.add(name)
+                changed = True
+    for name in sorted(downstream):
+        condition = " ".join(str(jobs[name].get("if", "")).split())
+        assert any(fn in condition for fn in status), name
