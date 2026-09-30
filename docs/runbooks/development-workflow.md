@@ -115,9 +115,10 @@ or failed check still blocks the merge, report that specific condition.
 
 ## Serialize publication-producing merges
 
-A merge triggers image production only when the actual workflow path filters
-select it. Inspect `.github/workflows/dev-images.yml` and the producer results;
-some scripts, workflows, and tests are build inputs. Do not assume a commit has
+Every merge starts a release run, but it builds images only when their inputs
+changed since an ancestor release built them. The producer input paths live in
+`scripts/resolve-publication-producer`; some scripts, workflows, and tests are
+build inputs. Do not assume a commit has
 `dev-sha-<full-commit-sha>` merely because it reached `main`. Verify image tags
 in the registry; `git ls-remote` verifies Git refs, not registry images.
 
@@ -127,8 +128,8 @@ superseded builds; several rapid merges can leave newer built images outside
 the accepted channel. A floating alias follows accepted publication. An image
 existing in the registry alone is not an accepted release or deployment proof.
 
-A documentation-only merge outside all producer filters creates no image and
-does not require a nonexistent generation. Do not classify it as a failed or
+A documentation-only merge outside all producer inputs creates no image; its
+release reuses the ancestor images. Do not classify it as a failed or
 superseding build. If an earlier build-producing merge still awaits acceptance,
 resolve that publication gate before arming another PR. Follow the current
 [publication runbook](platform-release-publication.md) to reconcile an eligible

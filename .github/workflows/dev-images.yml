@@ -1,33 +1,9 @@
 name: Development images
 
+# Called by the release workflow (installer-publication.yml), which owns the
+# trigger, concurrency and the decision whether this producer must run.
 on:
-  push:
-    branches: [main]
-    paths:
-      - .dockerignore
-      - .github/workflows/dev-images.yml
-      - control/**
-      - deploy/compose/**
-      - inventory/wheels/**
-      - pyproject.toml
-      - uv.lock
-      - schemas/global/**
-      - scripts/accept-development-image-archive
-      - scripts/dev-image-acceptance-receipt
-      - scripts/dev-image-metadata
-      - scripts/dev-image-inputs
-      - scripts/reuse-development-image
-      - agent_protocol/**
-      - scripts/promote-image-aliases
-      - scripts/publish-immutable-image
-      - scripts/render-dev-compose
-      - scripts/render-production-compose
-      - scripts/verify-public-image-inputs
-      - scripts/verify-published-image
-      - scripts/retry-dependency-fetch
-      - scripts/retry_dependency_fetch.py
-      - src/cluster_profiles/**
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -37,13 +13,6 @@ jobs:
     name: Build once and publish accepted main images
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # A newer main push that changes image inputs starts a run that replaces
-    # this one; a newer commit that does not leaves these images current, and
-    # the installer reuses them for that commit. Either way the newest main is
-    # published without failing a superseded run.
-    concurrency:
-      group: vonk-forge-development-image-publication
-      cancel-in-progress: true
     permissions:
       actions: read
       attestations: write
@@ -706,7 +675,7 @@ jobs:
         with:
           name: ${{ steps.metadata.outputs.artifact_name }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
           path: |
             ${{ runner.temp }}/accepted/docker-compose.pinned.yml
             ${{ runner.temp }}/accepted/docker-compose.dev.yml

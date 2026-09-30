@@ -51,7 +51,7 @@ The release path:
 5. advances all four Vonk image aliases, rechecks authority, then publishes the
    signed installer pointer last.
 
-`Installer publication` is the only image-channel promotion workflow. Its promotion
+The `Release` workflow is the only image-channel promotion workflow. Its promotion
 job records the channel, source commit, generation, and four image digests in the
 Actions summary and uploads a receipt. Failed promotion attempts restore existing
 image aliases where possible. Registry tags and the installer pointer are separate
@@ -61,15 +61,17 @@ that had no prior value. Rerun a failed job to reconcile an already accepted set
 Builds and independent test suites remain parallel. Jobs that mutate the same
 channel share a concurrency group and use `queue: max`, so they run one at a time
 and retain up to 100 waiting jobs rather than replacing the previous waiter.
-Installer workflow completion events cannot interrupt an active publication.
-This queues Actions work; it does not block PR merges or serialize the entire
-pipeline. Stale development sources are rejected before publication.
+A newer `main` push never interrupts an active publication. This queues
+Actions work; it does not block PR merges or serialize the entire pipeline.
+Stale development sources are rejected before publication.
 
-Development producers build and validate each image once. Producer-completion
-events resolve exact successful runs, or successful ancestor runs whose build
-inputs have not changed. Missing producers leave publication pending without a
-runner polling loop; their completion events retry readiness. Daily manifest
-refresh renews the existing accepted generation's expiry without changing images.
+Development producers build and validate each image once. A release run builds
+a producer only when no ancestor release produced it from unchanged inputs, and
+otherwise reuses that release's artifacts. Publication starts after every
+producer in the run has settled. Daily manifest refresh renews the existing
+accepted generation's expiry without changing images. The
+[release workflow](../operations/agent-package-release.md#the-release-workflow)
+describes the run in full.
 
 PRs expose one always-running `CI gate` that checks every selected suite result,
 including selector failures. Deleted files participate in area selection.

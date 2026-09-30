@@ -501,7 +501,7 @@ runs:
         name: ${{ inputs.baseline_artifact_name }}
         if-no-files-found: error
         overwrite: false
-        retention-days: 7
+        retention-days: 90
         path: |
           baseline/vonk-forge-agent_${{ inputs.baseline_version }}_arm64.deb
           baseline/vonk-forge-agent_${{ inputs.baseline_version }}_arm64.deb.sha256
@@ -666,5 +666,5 @@ runs:
         name: ${{ inputs.artifact_name }}
         if-no-files-found: error
         overwrite: false
-        retention-days: 30
+        retention-days: 90
         path: dist/*

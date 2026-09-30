@@ -1,90 +1,240 @@
-name: Installer publication
+name: Release
 
+# One release run per push: main publishes the dev channel, a signed v* tag
+# publishes the stable channel. The run tests the source (CI), builds only the
+# development producers whose inputs changed since an ancestor release run
+# produced them, and publishes one installer generation once everything it
+# needs has succeeded.
+#
+# The file keeps its historical path so github.run_number keeps counting from
+# the retired installer publication runs. Development agent packages are
+# versioned X.Y.Z~dev.<run_number>+g<sha> with this workflow's run_number, and
+# that number must stay above every version already published to apt dev.
 on:
-  workflow_run:
-    workflows:
-      - CI
-      - Installer publication source
-      - Rust Vonk Forge agent development
-      - Development images
-      - Installer setup programs
-    types: [completed]
-  schedule:
-    # Refresh only re-signs the already published immutable generation.
-    - cron: '17 3 * * *'
-    # Re-evaluate the current main tip when the last producer was not yet
-    # visible as successful at its own completion, so nothing re-triggers.
-    - cron: '7,37 * * * *'
+  push:
+    branches: [main]
+    tags: ["v*"]
+  # Re-runs the release for the current main tip, for example when GitHub
+  # recorded a merge without emitting its push event.
   workflow_dispatch:
-    inputs:
-      tailnet_cleanup:
-        description: >-
-          Delete stale disposable CI tailnets and exit without publishing
-        required: true
-        type: boolean
-        default: false
-      child_id:
-        description: >-
-          Optional exact stale child id to clean; empty cleans every stale child
-        required: false
-        type: string
-        default: ""
 
-permissions:
-  actions: read
-  contents: read
-
-concurrency:
-  group: >-
-    vonk-forge-installer-${{
-      (github.event_name == 'workflow_run' &&
-       (github.event.workflow_run.event == 'push' ||
-        github.event.workflow_run.event == 'workflow_dispatch') &&
-       github.event.workflow_run.head_sha) ||
-      github.run_id
-    }}
-  # Producer completions retry readiness for their source. Never interrupt
-  # an in-flight publication transaction when a later completion event arrives.
-  cancel-in-progress: false
-  queue: max
+permissions: {}
 
 jobs:
-  authority:
-    name: Accept one complete source generation
-    # A producer completion promotes only when it came from a push to main. The
-    # one exception is a producer an operator dispatched deliberately for main:
-    # GitHub has recorded a merge without emitting the matching
-    # `refs/heads/main` push event, which left a merged tree that no producer
-    # ever built and no generation could reference. The event is still checked,
-    # the branch is still required to be main, and the resolver below still binds
-    # the exact changed paths and the exact source commit, so a dispatched main
-    # producer can re-establish evidence for the current tip and nothing else.
-    # The frequent schedule and a manual dispatch on main re-evaluate the
-    # current main tip through the development path only.
+  changes:
+    name: Select release producers
+    # Only a push of a release tag publishes stable; any other ref is ignored.
     if: >-
-      (github.event_name == 'schedule' &&
-       github.event.schedule == '7,37 * * * *') ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.ref == 'refs/heads/main' &&
-       inputs.tailnet_cleanup != true) ||
-      ((github.event.workflow_run.event == 'push' ||
-        github.event.workflow_run.event == 'workflow_dispatch') &&
-       ((github.event.workflow_run.name == 'Installer publication source' &&
-        github.event.workflow_run.head_branch == 'main') ||
-        github.event.workflow_run.name == 'CI' ||
-        (github.event.workflow_run.name == 'Rust Vonk Forge agent development' &&
-         github.event.workflow_run.head_branch == 'main') ||
-        (github.event.workflow_run.name == 'Development images' &&
-         github.event.workflow_run.head_branch == 'main') ||
-        (github.event.workflow_run.name == 'Installer setup programs' &&
-         github.event.workflow_run.head_branch == 'main')))
+      github.ref == 'refs/heads/main' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       actions: read
       contents: read
     outputs:
-      ready: ${{ steps.accept.outputs.ready }}
+      channel: ${{ steps.select.outputs.channel }}
+      agent: ${{ steps.select.outputs.agent }}
+      images: ${{ steps.select.outputs.images }}
+      setups: ${{ steps.select.outputs.setups }}
+    steps:
+      - name: Check out exact release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reuse unchanged development producers from ancestor releases
+        id: select
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/heads/main) channel=dev ;;
+            refs/tags/v*) channel=stable ;;
+            *) exit 64 ;;
+          esac
+          printf 'channel=%s\n' "$channel" >> "$GITHUB_OUTPUT"
+          # A stable release builds its own evidence from the tag in CI.
+          if [[ "$channel" != dev ]]; then exit 0; fi
+          # Each output is empty when the producer must run in this release,
+          # or the run ID, run number and source of reusable evidence.
+          for producer in agent images setups; do
+            if evidence=$(scripts/resolve-publication-producer "$producer" "$GITHUB_SHA"); then
+              echo "$producer reuses release run evidence: $evidence"
+            else
+              status=$?
+              [[ "$status" == 2 ]] || exit "$status"
+              evidence=
+              echo "$producer runs in this release"
+            fi
+            printf '%s=%s\n' "$producer" "$evidence" >> "$GITHUB_OUTPUT"
+          done
+
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+    # The union of every job-level grant in ci.yml. Each called job keeps its
+    # own narrower block; the rest inherit ci.yml's contents: read.
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+      security-events: write
+    # A newer main push supersedes this run's tests; tags never cancel.
+    concurrency:
+      group: vonk-forge-release-ci-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+
+  agent:
+    name: Agent package
+    needs: [changes]
+    if: >-
+      needs.changes.outputs.channel == 'dev' &&
+      needs.changes.outputs.agent == ''
+    uses: ./.github/workflows/agent-release.yml
+    secrets: inherit
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    concurrency:
+      group: vonk-forge-release-agent-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+
+  apt:
+    name: Publish accepted ARM64 Spark agent package to apt dev
+    needs: [agent]
+    if: needs.agent.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: apt-development
+    concurrency:
+      group: vonk-forge-agent-apt-dev
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact accepted apt publication tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish exact accepted ARM64 development package
+        uses: ./.github/actions/agent-apt-publish
+        with:
+          channel: dev
+          version: ${{ needs.agent.outputs.version }}
+          arm64_package: ${{ needs.agent.outputs.arm64_package }}
+          artifact_name: ${{ needs.agent.outputs.artifact_name }}
+          environment: apt-development
+          source_sha: ${{ github.sha }}
+          tag_name: ''
+          tag_oid: ''
+          apt_gpg_passphrase: ${{ secrets.APT_GPG_PASSPHRASE }}
+          apt_repository_gpg_fingerprint: ${{ vars.APT_REPOSITORY_GPG_FINGERPRINT }}
+          apt_repository_gpg_private_key: ${{ secrets.APT_REPOSITORY_GPG_PRIVATE_KEY }}
+          r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2_account_id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2_secret_access_key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2_apt_public_bucket: ${{ vars.R2_APT_PUBLIC_BUCKET }}
+          r2_apt_state_bucket: ${{ vars.R2_APT_STATE_BUCKET }}
+
+  images:
+    name: Development images
+    needs: [changes]
+    if: >-
+      needs.changes.outputs.channel == 'dev' &&
+      needs.changes.outputs.images == ''
+    uses: ./.github/workflows/dev-images.yml
+    secrets: inherit
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+      security-events: write
+    concurrency:
+      group: vonk-forge-release-images-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+
+  setups:
+    name: Installer setup programs
+    needs: [changes]
+    if: >-
+      needs.changes.outputs.channel == 'stable' ||
+      (needs.changes.outputs.channel == 'dev' &&
+       needs.changes.outputs.setups == '')
+    uses: ./.github/workflows/installer-setups.yml
+    permissions:
+      contents: read
+    concurrency:
+      group: vonk-forge-release-setups-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+
+  producers:
+    name: Record accepted development producers
+    # Later releases reuse what this run produced (scripts/resolve-publication-
+    # producer). An agent counts only once apt dev also published it, so a
+    # failed apt publication is healed by the next release building again.
+    needs: [changes, agent, apt, images, setups]
+    if: ${{ !cancelled() && needs.changes.outputs.channel == 'dev' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Name the recorded source
+        shell: bash
+        run: printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/release-producer-source"
+      - name: Record the accepted agent package
+        if: needs.agent.result == 'success' && needs.apt.result == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-producer-agent
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ runner.temp }}/release-producer-source
+      - name: Record the accepted development images
+        if: needs.images.result == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-producer-images
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ runner.temp }}/release-producer-source
+      - name: Record the accepted installer setup programs
+        if: needs.setups.result == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-producer-setups
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ runner.temp }}/release-producer-source
+
+  authority:
+    name: Accept one complete source generation
+    # needs: makes every producer settle first; a failed or superseded
+    # (cancelled) producer or CI run publishes nothing.
+    needs: [changes, ci, agent, apt, images, setups, producers]
+    if: >-
+      ${{ !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      needs.changes.outputs.channel != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
       channel: ${{ steps.accept.outputs.channel }}
       version: ${{ steps.accept.outputs.version }}
       source_sha: ${{ steps.accept.outputs.source_sha }}
@@ -107,113 +257,54 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Install readiness runtime
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: "0.12.19"
-          python-version: "3.14"
-          enable-cache: true
-
-      - name: Bind accepted workflow evidence to source authority
+      - name: Bind accepted release evidence to source authority
         id: accept
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-          TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion || 'success' }}
-          TRIGGER_NAME: ${{ github.event.workflow_run.name || 'Scheduled main evaluation' }}
-          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
+          CHANNEL: ${{ needs.changes.outputs.channel }}
+          AGENT_EVIDENCE: ${{ needs.changes.outputs.agent }}
+          IMAGES_EVIDENCE: ${{ needs.changes.outputs.images }}
+          SETUPS_EVIDENCE: ${{ needs.changes.outputs.setups }}
         run: |
           set -euo pipefail
-          not_ready() {
-            printf 'ready=false\n' >> "$GITHUB_OUTPUT"
-            exit 0
-          }
-          # The last producer's own run can still look incomplete to the API
-          # when its workflow_run event fires. Retry "not ready" (exit 2) until
-          # a fixed shared deadline; any other failure is real and is not retried.
-          deadline=$((SECONDS + 180))
-          development_run() {
-            local workflow=$1 variable=$2 result status
-            while true; do
-              if result=$(uv run --frozen --only-group dev \
-                scripts/resolve-publication-producer "$workflow" "$SOURCE_SHA"); then
-                printf -v "$variable" '%s' "$result"
-                return 0
-              else
-                status=$?
-              fi
-              if [[ "$status" != 2 ]]; then return "$status"; fi
-              if (( SECONDS + 15 > deadline )); then not_ready; fi
-              sleep 15
-            done
-          }
+          SOURCE_SHA=$GITHUB_SHA
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$TRIGGER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          # A failed producer is reported by its own workflow; the next
-          # successful completion re-evaluates readiness for the source.
-          if [[ "$TRIGGER_CONCLUSION" != success ]]; then not_ready; fi
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
           git fetch --force --tags origin
+          # A producer that ran in this release left its evidence here; a
+          # reused producer names the ancestor release run that holds it.
+          evidence() {
+            if [[ -n "$1" ]]; then
+              printf '%s\n' "$1"
+            else
+              printf '%s\t%s\t%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_NUMBER" "$SOURCE_SHA"
+            fi
+          }
 
-          case "$TRIGGER_NAME" in
-            'Installer publication source'|'Rust Vonk Forge agent development'|'Development images'|'Installer setup programs'|'Scheduled main evaluation')
-              channel=dev
+          case "$CHANNEL" in
+            dev)
+              test "$GITHUB_REF" = refs/heads/main
+              git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
               authority_ref=refs/heads/main
               tag_oid=
-              # A late producer completion may be the last readiness event
-              # after main advances. Re-evaluate the current source; immutable
-              # ancestor reuse still requires unchanged producer inputs.
-              SOURCE_SHA=$(git rev-parse --verify refs/remotes/origin/main^{commit})
-              git checkout --detach "$SOURCE_SHA"
-              # A scheduled or dispatched evaluation only heals a missed
-              # producer event; skip a tip an earlier run already promoted.
-              if [[ "$TRIGGER_NAME" == 'Scheduled main evaluation' ]]; then
-                promoted=$(
-                  gh run list --workflow installer-publication.yml \
-                    --commit "$SOURCE_SHA" --status completed \
-                    --json databaseId --jq '.[].databaseId' \
-                  | while read -r run_id; do
-                    gh api --paginate \
-                      "/repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
-                      --jq '.jobs[] | select(
-                        (.name | startswith("Promote accepted dev ")) and
-                        .conclusion == "success") | .id'
-                  done
-                )
-                if [[ -n "$promoted" ]]; then not_ready; fi
-              fi
-              development_run agent-release.yml package_evidence
               IFS=$'\t' read -r package_run_id package_run_number package_source_sha \
-                <<< "$package_evidence"
+                < <(evidence "$AGENT_EVIDENCE")
               metadata=$(
                 scripts/agent-package-metadata \
                   development branch main "$package_source_sha" "$package_run_number"
               )
-              development_run dev-images.yml compose_evidence
               IFS=$'\t' read -r compose_run_id _ compose_source_sha \
-                <<< "$compose_evidence"
+                < <(evidence "$IMAGES_EVIDENCE")
               compose_artifact="vonk-forge-dev-compose-$compose_source_sha"
-              development_run installer-setups.yml setup_evidence
               IFS=$'\t' read -r setup_run_id _ setup_source_sha \
-                <<< "$setup_evidence"
+                < <(evidence "$SETUPS_EVIDENCE")
               ;;
-            CI)
-              channel=stable
-              mapfile -t release_tags < <(
-                git tag --points-at "$SOURCE_SHA" \
-                  | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
-                  || true
-              )
-              # CI also runs for ordinary pushes to main. Only a release tag
-              # makes a CI completion a stable publication; development
-              # generations come from the dev producers above.
-              if [[ "${#release_tags[@]}" == 0 ]]; then not_ready; fi
-              test "${#release_tags[@]}" = 1
-              release_tag=${release_tags[0]}
+            stable)
+              release_tag=$GITHUB_REF_NAME
+              [[ "$release_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
               authority_ref="refs/tags/$release_tag"
               test "$(git cat-file -t "$authority_ref")" = tag
               tag_oid=$(git rev-parse --verify "$authority_ref")
@@ -223,25 +314,14 @@ jobs:
                 scripts/agent-package-metadata \
                   production tag "$release_tag" "$SOURCE_SHA" 0
               )
-              package_run_id=$TRIGGER_RUN_ID
-              compose_run_id=$TRIGGER_RUN_ID
+              # CI built the tagged agent package and production Compose, and
+              # this release built the setup programs, all in this run.
+              package_run_id=$GITHUB_RUN_ID
+              compose_run_id=$GITHUB_RUN_ID
               compose_source_sha=$SOURCE_SHA
               compose_artifact="platform-build-${release_tag#v}"
+              setup_run_id=$GITHUB_RUN_ID
               setup_source_sha=$SOURCE_SHA
-              setup_runs=$RUNNER_TEMP/installer-setup-runs.json
-              gh api --paginate \
-                -H 'Accept: application/vnd.github+json' \
-                -H 'X-GitHub-Api-Version: 2022-11-28' \
-                "/repos/$GITHUB_REPOSITORY/actions/workflows/installer-setups.yml/runs?event=push&status=completed&head_sha=$SOURCE_SHA&per_page=100" \
-                --jq '.workflow_runs[]' | jq -s . > "$setup_runs"
-              setup_run_id=$(jq -r --arg sha "$SOURCE_SHA" '
-                [.[] | select(
-                  .head_sha == $sha and .head_branch == "main" and
-                  .event == "push" and .status == "completed" and
-                  .conclusion == "success"
-                )] | sort_by(.created_at) | reverse | .[0].id // empty
-              ' "$setup_runs")
-              test -n "$setup_run_id"
               ;;
             *)
               exit 64
@@ -255,38 +335,35 @@ jobs:
           baseline_artifact=$(sed -n 's/^baseline_artifact_name=//p' <<< "$metadata")
           arm64_baseline_package=$(sed -n 's/^arm64_baseline_package=//p' <<< "$metadata")
           test -n "$version" && test -n "$package_artifact"
-          [[ "$compose_run_id" =~ ^[1-9][0-9]*$ ]]
+          for run_id in "$package_run_id" "$compose_run_id" "$setup_run_id"; do
+            [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+          done
           [[ "$compose_source_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$setup_source_sha" =~ ^[0-9a-f]{40}$ ]]
 
-          artifacts=$RUNNER_TEMP/accepted-artifacts.json
-          gh api --paginate \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "/repos/$GITHUB_REPOSITORY/actions/runs/$package_run_id/artifacts?per_page=100" \
-            --jq '.artifacts[]' | jq -s . > "$artifacts"
-          test "$(jq --arg name "$package_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1
-          test "$(jq --arg name "$baseline_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1
-          if [[ "$compose_run_id" != "$package_run_id" ]]; then
+          # needs: settled every producer; still verify the exact evidence.
+          artifacts() {
             gh api --paginate \
               -H 'Accept: application/vnd.github+json' \
               -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "/repos/$GITHUB_REPOSITORY/actions/runs/$compose_run_id/artifacts?per_page=100" \
-              --jq '.artifacts[]' | jq -s . > "$artifacts"
-          fi
-          test "$(jq --arg name "$compose_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1
-          gh api --paginate \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "/repos/$GITHUB_REPOSITORY/actions/runs/$setup_run_id/artifacts?per_page=100" \
-            --jq '.artifacts[]' | jq -s . > "$artifacts"
+              "/repos/$GITHUB_REPOSITORY/actions/runs/$1/artifacts?per_page=100" \
+              --jq '.artifacts[]' | jq -s .
+          }
+          require() {
+            test "$(jq --arg name "$2" '[.[] | select(.name == $name and (.expired | not))] | length' <<< "$1")" = 1
+          }
+          listing=$(artifacts "$package_run_id")
+          require "$listing" "$package_artifact"
+          require "$listing" "$baseline_artifact"
+          listing=$(artifacts "$compose_run_id")
+          require "$listing" "$compose_artifact"
+          listing=$(artifacts "$setup_run_id")
           for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
-            setup_artifact="installer-setup-$setup_source_sha-$platform"
-            test "$(jq --arg name "$setup_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1
+            require "$listing" "installer-setup-$setup_source_sha-$platform"
           done
 
           printf '%s\n' \
-            "ready=true" \
-            "channel=$channel" \
+            "channel=$CHANNEL" \
             "version=$version" \
             "source_sha=$SOURCE_SHA" \
             "authority_ref=$authority_ref" \
@@ -307,9 +384,7 @@ jobs:
   candidate:
     name: Publish immutable ${{ needs.authority.outputs.channel }} installer candidate
     needs: [authority]
-    if: >-
-      needs.authority.result == 'success' &&
-      needs.authority.outputs.ready == 'true'
+    if: needs.authority.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: installer-candidate-${{ needs.authority.outputs.channel }}
@@ -332,8 +407,8 @@ jobs:
         run: |
           set -euo pipefail
           # Runs before any R2 write or promotion of this job's work. A newer
-          # main generation is promoted by its own run or the scheduled
-          # re-evaluation, so this superseded run is cancelled as a whole.
+          # main generation is promoted by its own release run, so this
+          # superseded run is cancelled as a whole.
           tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
           if [[ "$tip" != "$SOURCE_SHA" ]]; then
             gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
@@ -571,6 +646,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: installer-canary-${{ needs.authority.outputs.channel }}
+    concurrency:
+      group: vonk-forge-release-nas-lane-${{ matrix.lane }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
     permissions:
       actions: write
       contents: read
@@ -584,8 +662,8 @@ jobs:
         run: |
           set -euo pipefail
           # Runs before any R2 write or promotion of this job's work. A newer
-          # main generation is promoted by its own run or the scheduled
-          # re-evaluation, so this superseded run is cancelled as a whole.
+          # main generation is promoted by its own release run, so this
+          # superseded run is cancelled as a whole.
           tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
           if [[ "$tip" != "$SOURCE_SHA" ]]; then
             gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
@@ -836,6 +914,9 @@ jobs:
       needs['nas-lane-acceptance'].result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    concurrency:
+      group: vonk-forge-release-nas-acceptance-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
     permissions:
       contents: read
     steps:
@@ -899,6 +980,9 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     environment: installer-canary-${{ needs.authority.outputs.channel }}
+    concurrency:
+      group: vonk-forge-release-spark-acceptance-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
     permissions:
       actions: write
       contents: read
@@ -915,8 +999,8 @@ jobs:
         run: |
           set -euo pipefail
           # Runs before any R2 write or promotion of this job's work. A newer
-          # main generation is promoted by its own run or the scheduled
-          # re-evaluation, so this superseded run is cancelled as a whole.
+          # main generation is promoted by its own release run, so this
+          # superseded run is cancelled as a whole.
           tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
           if [[ "$tip" != "$SOURCE_SHA" ]]; then
             gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
@@ -1055,6 +1139,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: installer-acceptance-${{ needs.authority.outputs.channel }}
+    concurrency:
+      group: vonk-forge-release-acceptance-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
     permissions:
       actions: read
       contents: read
@@ -1139,7 +1226,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: installer-acceptance-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
-          retention-days: 30
+          retention-days: 90
           if-no-files-found: error
           path: ${{ runner.temp }}/acceptance
 
@@ -1226,176 +1313,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: installer-promotion-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
-          retention-days: 30
+          retention-days: 90
           if-no-files-found: error
           path: |
             ${{ runner.temp }}/installer-publication/installer-publication/publication-plan.json
             ${{ runner.temp }}/promotion-receipt.jsonl
-
-  refresh:
-    name: Refresh signed ${{ matrix.channel }} installer manifest
-    if: github.event.schedule == '17 3 * * *'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - channel: dev
-          - channel: stable
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    environment: installer-promotion-${{ matrix.channel }}
-    concurrency:
-      group: vonk-forge-installer-r2-${{ matrix.channel }}
-      cancel-in-progress: false
-      queue: max
-    permissions:
-      contents: read
-    steps:
-      - name: Check out current publication tooling
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install canonical publication model runtime
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: "0.12.19"
-          python-version: "3.14"
-          enable-cache: true
-
-      - name: Install R2 publication client
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes rclone
-
-      - name: Detect published channel
-        id: availability
-        shell: bash
-        env:
-          CHANNEL: ${{ matrix.channel }}
-          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
-          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
-          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          RCLONE_CONFIG_R2_TYPE: s3
-          R2_INSTALLER_PUBLIC_BUCKET: ${{ vars.R2_INSTALLER_PUBLIC_BUCKET }}
-        run: |
-          set -euo pipefail
-          [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
-          pointer=$(rclone lsf \
-            --files-only \
-            --include current.manifest \
-            --max-depth 1 \
-            "r2:$R2_INSTALLER_PUBLIC_BUCKET/artifacts/$CHANNEL")
-          case "$pointer" in
-            current.manifest)
-              printf 'published=true\n' >> "$GITHUB_OUTPUT"
-              ;;
-            '')
-              if [ "$CHANNEL" != stable ]; then
-                echo "published $CHANNEL channel manifest is missing" >&2
-                exit 1
-              fi
-              remote_tags=$(git ls-remote --tags origin)
-              if printf '%s\n' "$remote_tags" \
-                | grep -E '^.+[[:space:]]+refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-              then
-                echo "stable channel manifest is missing despite a stable release tag" >&2
-                exit 1
-              fi
-              printf 'published=false\n' >> "$GITHUB_OUTPUT"
-              echo "::notice::Stable installer channel is not published yet; skipping refresh"
-              ;;
-            *)
-              echo "channel pointer listing is inconsistent" >&2
-              exit 1
-              ;;
-          esac
-
-      - name: Verify immutable generation and refresh signed pointer
-        if: steps.availability.outputs.published == 'true'
-        shell: bash
-        env:
-          CHANNEL: ${{ matrix.channel }}
-          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
-          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
-          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          RCLONE_CONFIG_R2_TYPE: s3
-          R2_INSTALLER_PUBLIC_BUCKET: ${{ vars.R2_INSTALLER_PUBLIC_BUCKET }}
-          VONK_INSTALLER_RELEASE_KEY_FINGERPRINT: ${{ vars.VONK_INSTALLER_RELEASE_KEY_FINGERPRINT }}
-          VONK_INSTALLER_RELEASE_PRIVATE_KEY: ${{ secrets.VONK_INSTALLER_RELEASE_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
-          [[ "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
-          signing_key=$RUNNER_TEMP/installer-release-private.pem
-          public_key=$RUNNER_TEMP/installer-release-public.pem
-          public_der=$RUNNER_TEMP/installer-release-public.der
-          trap 'rm -f "$signing_key" "$public_key" "$public_der"' EXIT
-          install -m 0600 /dev/null "$signing_key"
-          printf '%s' "$VONK_INSTALLER_RELEASE_PRIVATE_KEY" > "$signing_key"
-          openssl pkey -in "$signing_key" -pubout -out "$public_key"
-          openssl pkey -in "$signing_key" -pubout -outform DER -out "$public_der"
-          test "$(sha256sum "$public_der" | cut -d' ' -f1)" = \
-            "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT"
-          openssl pkey -pubin -in "$public_key" -text -noout \
-            | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
-          scripts/build-control-wheel
-          uv run --project control --frozen python scripts/install-release-publication refresh \
-            --channel "$CHANNEL" \
-            --expires-at "$(($(date +%s) + 604800))" \
-            --signing-key "$signing_key" \
-            --signing-public-key "$public_key" \
-            --rclone-remote "r2:$R2_INSTALLER_PUBLIC_BUCKET"
-
-  tailnet-cleanup:
-    name: Delete stale disposable CI tailnets
-    # A manual dispatch is the only event that may delete a child, and even then
-    # only when the operator selected the cleanup input.  A producer completion
-    # carries no dispatch inputs, and the scheduled refresh must never delete.
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      inputs.tailnet_cleanup == true
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    # The canary environment owns the factory OAuth credential, and that
-    # credential is environment-scoped, so this job -- not a developer machine
-    # -- is the only place stale cleanup can run.  The cleanup never needs the
-    # release or acceptance signing keys that live in the other environments.
-    environment: installer-canary-dev
-    permissions:
-      contents: read
-    steps:
-      - name: Check out exact cleanup tooling from main
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Require current main cleanup authority
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --force --no-tags origin \
-            +refs/heads/main:refs/remotes/origin/main
-          test "$GITHUB_SHA" = \
-            "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
-
-      - name: Delete stale disposable Tailscale CI children
-        timeout-minutes: 10
-        shell: bash
-        env:
-          CHILD_ID: ${{ inputs.child_id }}
-          VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID }}
-          VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET }}
-        run: |
-          set -euo pipefail
-          if [[ -n "$CHILD_ID" ]]; then
-            python scripts/tailscale-acceptance-tailnet cleanup --id "$CHILD_ID"
-          else
-            python scripts/tailscale-acceptance-tailnet cleanup
-          fi

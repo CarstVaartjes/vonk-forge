@@ -1,13 +1,13 @@
 name: CI
 
+# Pushes to main and release tags run this suite through the release workflow
+# (installer-publication.yml), which calls it and gates publication on it.
 on:
   pull_request:
     branches: [main]
   merge_group:
     types: [checks_requested]
-  push:
-    branches: [main]
-    tags: ["v*"]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -22,12 +22,11 @@ env:
   CARGO_HTTP_TIMEOUT: "60"
   npm_config_fetch_retries: "5"
 
-# A new commit supersedes an older PR check. Tag releases use separate groups,
-# so one valid version can never evict another version from GitHub's pending
-# concurrency slot.
+# A new commit supersedes an older PR check. Every other run, including a
+# release workflow call, has its own group: the caller owns its cancellation.
 concurrency:
-  group: vonk-forge-ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  group: vonk-forge-ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
 jobs:
   changes:
@@ -92,11 +91,6 @@ jobs:
             compact=$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "$timing_file")
             printf '%s=%s\n' "$suite" "$compact" >> "$GITHUB_OUTPUT"
           done
-
-  installer-setups:
-    name: Build accepted installer setup programs
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    uses: ./.github/workflows/installer-setups.yml
 
   lint:
     name: Ruff
@@ -1625,7 +1619,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: platform-build-${{ needs.release-metadata.outputs.version }}
-          retention-days: 1
+          retention-days: 90
           if-no-files-found: error
           path: |
             release-output/docker-compose.production.yml
