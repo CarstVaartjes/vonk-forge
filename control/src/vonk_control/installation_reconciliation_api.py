@@ -68,7 +68,11 @@ def install_installation_reconciliation_routes(
                 plan.reconciliation_authority is not None
                 and plan.reconciliation_authority.installation_id != installation_id
             )
-            or (plan.allowed and plan.reconciliation_authority is None)
+            or (
+                plan.allowed
+                and plan.reconciliation_authority is None
+                and plan.cleanup_disposition != "abandon"
+            )
         ):
             raise HTTPException(
                 status_code=503,

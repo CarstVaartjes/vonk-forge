@@ -253,3 +253,54 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
     assert data["snapshot"]["event_cursor"] == 1
     assert [node["id"] for node in data["snapshot"]["nodes"]] == [NODE_A]
     assert data["snapshot"]["nodes"][0]["telemetry"] is None
+
+
+def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
+    sessions,
+) -> None:
+    from vonk_control.inventory_repository import (
+        InventoryRepository,
+        InventorySnapshotInput,
+    )
+    from vonk_control.models import NodeInventorySnapshot
+
+    def record(node_id: str, observed_at: datetime) -> None:
+        InventoryRepository(sessions, clock=lambda: observed_at).record(
+            InventorySnapshotInput(
+                node_id,
+                observed_at,
+                10_000,
+                8_000,
+                10_000,
+                8_000,
+                10_000,
+                8_000,
+                1,
+                False,
+                ("runtime.vonk.v1",),
+                memory_pool="shared",
+            )
+        )
+
+    node_b = "spk_" + "b" * 32
+    with sessions.begin() as session:
+        session.add(AgentNode(node_id=node_b, state="active"))
+    for hours in (72, 48, 30, 2):
+        record(NODE_A, NOW - timedelta(hours=hours))
+    # A node that stopped reporting two days ago keeps its newest reading.
+    record(node_b, NOW - timedelta(hours=60))
+    record(node_b, NOW - timedelta(hours=50))
+
+    telemetry_maintenance.TelemetryMaintenance(sessions, clock=lambda: NOW).run_once()
+
+    with sessions() as session:
+        kept = sorted(
+            (
+                row.node_id,
+                round(
+                    (NOW - row.observed_at.replace(tzinfo=UTC)).total_seconds() / 3600
+                ),
+            )
+            for row in session.scalars(select(NodeInventorySnapshot))
+        )
+    assert kept == [(NODE_A, 2), (node_b, 50)]
