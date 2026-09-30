@@ -4105,3 +4105,83 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
 def test_every_mutating_command_accepts_yes(arguments: list[str]) -> None:
     args = cli._parser().parse_args([*arguments, "--yes"])
     assert args.yes is True
+
+
+def _zero_target_upgrade_client(job_id: str, request_key: str) -> FakeClient:
+    return FakeClient(
+        {
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "succeeded",
+                "operation_id": job_id,
+                "plan_digest": "a" * 64,
+                "request_key": request_key,
+                "targets": [],
+            },
+        }
+    )
+
+
+def test_fleet_upgrade_with_no_targets_reports_cleanly(capsys) -> None:
+    request_key = "11111111-1111-4111-8111-111111111111"
+    client = _zero_target_upgrade_client("upgrade-job", request_key)
+
+    status = cli.main(
+        ("fleet", "upgrade", "--all", "--yes", "--request-key", request_key),
+        control_client=client,
+    )
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert (
+        "All Sparks already run the current agent; nothing to upgrade." in captured.out
+    )
+    assert "Job: unavailable" not in captured.out
+    assert "progress is not a valid object" not in captured.out + captured.err
+    assert "progress unavailable" not in captured.err
+    assert [call[1] for call in client.calls] == ["/api/fleet/upgrade"]
+
+
+def test_fleet_upgrade_with_no_targets_json_keeps_the_receipt() -> None:
+    request_key = "11111111-1111-4111-8111-111111111111"
+    client = _zero_target_upgrade_client("upgrade-job", request_key)
+
+    status, result = run(
+        (
+            "fleet",
+            "upgrade",
+            "--all",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert result["state"] == "succeeded"
+    assert result["targets"] == []
+
+
+def test_job_rendering_tolerates_a_missing_progress_object(capsys) -> None:
+    job_id = "upgrade-job"
+    client = FakeClient(
+        {
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "kind": "agent-upgrade",
+                "state": "succeeded",
+                "targets": [],
+                "operations": [],
+                "progress": None,
+            }
+        }
+    )
+
+    status = cli.main(("fleet", "progress", job_id), control_client=client)
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert "Job: upgrade-job" in captured.out
+    assert "not a valid object" not in captured.out + captured.err

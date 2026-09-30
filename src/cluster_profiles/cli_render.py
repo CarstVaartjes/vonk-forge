@@ -1285,12 +1285,13 @@ def _job(payload: Mapping[str, object]) -> None:
     _field("Targets", _words(payload.get("targets")))
     if payload.get("status_reason") is not None:
         _field("Reason", payload["status_reason"])
-    progress = _object(payload.get("progress"), "job progress")
-    _field(
-        "Completed",
-        f"{_text(progress.get('completed'))} / {_text(progress.get('total'))}",
-    )
-    _field("Failed", progress.get("failed"))
+    progress = _optional(payload.get("progress"), "job progress")
+    if progress:
+        _field(
+            "Completed",
+            f"{_text(progress.get('completed'))} / {_text(progress.get('total'))}",
+        )
+        _field("Failed", progress.get("failed"))
     for operation in _records(payload, "operations"):
         _field("Operation", operation.get("id"))
         _field("Spark", operation.get("node_id"))
@@ -1743,6 +1744,13 @@ def render_payload(
                     f"{_time(entry.get('observed_at'))} {_text(entry.get('level'))} {_text(entry.get('source'))}: {_text(entry.get('message'))}"
                 )
             _field("Retained evidence", payload.get("retained"))
+        elif (
+            action == "upgrade"
+            and payload.get("action") == "upgrade"
+            and not payload.get("targets")
+            and payload.get("state") == "succeeded"
+        ):
+            print("All Sparks already run the current agent; nothing to upgrade.")
         elif action in {"remove", "upgrade"}:
             _field("Action", payload.get("action"))
             _field("State", payload.get("state"))
