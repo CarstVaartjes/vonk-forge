@@ -224,6 +224,9 @@ services:
       - --storage.tsdb.retention.size=10GB
     read_only: true
     user: "65534:65534"
+    # Binds the internal high port 9090 as nobody; no capabilities needed.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     secrets: []
     volumes:
       - prometheus-data:/prometheus
