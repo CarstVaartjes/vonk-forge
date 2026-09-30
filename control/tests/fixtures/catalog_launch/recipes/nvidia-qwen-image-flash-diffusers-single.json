@@ -1,0 +1,474 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/image/nvidia-qwen-image-flash-diffusers"
+   },
+   "dockerfile": "adapters/image/nvidia-qwen-image-flash-diffusers/Dockerfile",
+   "network": {
+    "hosts": [
+     "github.com",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "nvidia-qwen-image-flash-diffusers-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "image-job",
+   "input": {
+    "max_bytes": 16384,
+    "media_types": [
+     "text/plain"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "UTF-8 text prompt for image generation.",
+      "extensions": [
+       ".txt"
+      ],
+      "id": "prompt",
+      "label": "Prompt",
+      "max_file_bytes": 16384,
+      "max_files": 1,
+      "max_total_bytes": 16384,
+      "media_types": [
+       "text/plain"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 16777216,
+    "slots": [
+     {
+      "description": "Single generated PNG image.",
+      "extensions": [
+       ".png"
+      ],
+      "id": "image",
+      "label": "Generated image",
+      "max_file_bytes": 16777216,
+      "max_files": 1,
+      "max_total_bytes": 16777216,
+      "media_types": [
+       "image/png"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Candidate four-step NVIDIA Qwen Image Flash binding using the model card's tested scheduler, CFG, and 1024px profile; physical Spark acceptance is required.",
+  "tags": [
+   "executable",
+   "candidate",
+   "image",
+   "diffusers",
+   "single",
+   "spark"
+  ],
+  "title": "NVIDIA Qwen Image Flash diffusers single Spark"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "artifact-01",
+     "id": "primary-artifact-01",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-02",
+     "id": "primary-artifact-02",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-03",
+     "id": "primary-artifact-03",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-04",
+     "id": "primary-artifact-04",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-05",
+     "id": "primary-artifact-05",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-06",
+     "id": "primary-artifact-06",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-07",
+     "id": "primary-artifact-07",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-08",
+     "id": "primary-artifact-08",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-09",
+     "id": "primary-artifact-09",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-10",
+     "id": "primary-artifact-10",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-11",
+     "id": "primary-artifact-11",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-12",
+     "id": "primary-artifact-12",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-13",
+     "id": "primary-artifact-13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-14",
+     "id": "primary-artifact-14",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-15",
+     "id": "primary-artifact-15",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-16",
+     "id": "primary-artifact-16",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-17",
+     "id": "primary-artifact-17",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-18",
+     "id": "primary-artifact-18",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-19",
+     "id": "primary-artifact-19",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-20",
+     "id": "primary-artifact-20",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-21",
+     "id": "primary-artifact-21",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-22",
+     "id": "primary-artifact-22",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-23",
+     "id": "primary-artifact-23",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-24",
+     "id": "primary-artifact-24",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "4a1ded083517d700ee074abcfd4cfc97102fb954d0688006841bd0d2676ccdaa",
+    "kind": "model",
+    "publisher": "nvidia",
+    "slug": "nvidia-qwen-image-flash"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "nvidia"
+  ],
+  "source_reference": "https://huggingface.co/nvidia/Qwen-Image-Flash/tree/eafac15f6140e6dd9c6031217d658ac10bfb604b"
+ },
+ "release": {
+  "released_at": "2026-09-28",
+  "version": "1.2.9"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "image/png"
+   },
+   {
+    "name": "pipeline",
+    "setting": null,
+    "value": "text-to-image"
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 42
+   },
+   {
+    "name": "num-inference-steps",
+    "setting": null,
+    "value": 4
+   },
+   {
+    "name": "true-cfg-scale",
+    "setting": null,
+    "value": "1"
+   },
+   {
+    "name": "width",
+    "setting": null,
+    "value": 1024
+   },
+   {
+    "name": "height",
+    "setting": null,
+    "value": 1024
+   }
+  ],
+  "engine": "diffusers",
+  "entrypoint": [
+   "/opt/vonk/bin/diffusers-job"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 57708363017,
+      "image_bytes": 2000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 123416726034
+     },
+     "memory": {
+      "peak_bytes": 118000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "image-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/prompt.txt",
+      "input_slots": {
+       "prompt": "qualification/fixtures/prompt.txt"
+      },
+      "output_slot": "image",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "image-job"
+  }
+ }
+}

@@ -1,0 +1,581 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/image/qwen-image-layered-diffusers"
+   },
+   "dockerfile": "adapters/image/qwen-image-layered-diffusers/Dockerfile",
+   "network": {
+    "hosts": [
+     "github.com",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "qwen-image-layered-diffusers-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "artifact-job",
+   "input": {
+    "max_bytes": 8388608,
+    "media_types": [
+     "image/jpeg",
+     "image/png",
+     "image/webp"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "Single image to decompose into transparent layers.",
+      "extensions": [
+       ".jpg",
+       ".jpeg",
+       ".png",
+       ".webp"
+      ],
+      "id": "image",
+      "label": "Source image",
+      "max_file_bytes": 8388608,
+      "max_files": 1,
+      "max_total_bytes": 8388608,
+      "media_types": [
+       "image/jpeg",
+       "image/png",
+       "image/webp"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 33554432,
+    "slots": [
+     {
+      "description": "Exactly four generated transparent PNG layers.",
+      "extensions": [
+       ".png"
+      ],
+      "id": "layers",
+      "label": "Image layers",
+      "max_file_bytes": 8388608,
+      "max_files": 4,
+      "max_total_bytes": 33554432,
+      "media_types": [
+       "image/png"
+      ],
+      "min_files": 4
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Separate layer-decomposition Candidate, not a general Qwen Image Edit variant: one Spark converts exactly one input image into four deterministic RGBA PNG layers at the pinned 640-pixel, 50-step schedule. Its declared admission envelope is 126.00 GB unified memory including reserve and 149.72 GB peak installation disk.",
+  "tags": [
+   "executable",
+   "candidate",
+   "layer-decomposition",
+   "qwen",
+   "image",
+   "editing",
+   "layered",
+   "diffusers",
+   "bf16",
+   "single",
+   "spark"
+  ],
+  "title": "Qwen Image Layered Diffusers single Spark"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "artifact-01",
+     "id": "primary-artifact-01",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-02",
+     "id": "primary-artifact-02",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-03",
+     "id": "primary-artifact-03",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-04",
+     "id": "primary-artifact-04",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-05",
+     "id": "primary-artifact-05",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-06",
+     "id": "primary-artifact-06",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-07",
+     "id": "primary-artifact-07",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-08",
+     "id": "primary-artifact-08",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-09",
+     "id": "primary-artifact-09",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-10",
+     "id": "primary-artifact-10",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-11",
+     "id": "primary-artifact-11",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-12",
+     "id": "primary-artifact-12",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-13",
+     "id": "primary-artifact-13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-14",
+     "id": "primary-artifact-14",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-15",
+     "id": "primary-artifact-15",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-16",
+     "id": "primary-artifact-16",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-17",
+     "id": "primary-artifact-17",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-18",
+     "id": "primary-artifact-18",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-19",
+     "id": "primary-artifact-19",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-20",
+     "id": "primary-artifact-20",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-21",
+     "id": "primary-artifact-21",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-22",
+     "id": "primary-artifact-22",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-23",
+     "id": "primary-artifact-23",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-24",
+     "id": "primary-artifact-24",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-25",
+     "id": "primary-artifact-25",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-26",
+     "id": "primary-artifact-26",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-27",
+     "id": "primary-artifact-27",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-28",
+     "id": "primary-artifact-28",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-29",
+     "id": "primary-artifact-29",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-30",
+     "id": "primary-artifact-30",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-31",
+     "id": "primary-artifact-31",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-32",
+     "id": "primary-artifact-32",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-33",
+     "id": "primary-artifact-33",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "e9b7bcac28245097f08fba8c5097ee4d1fbd41513c68b636a8323d78f696d5db",
+    "kind": "model",
+    "publisher": "qwen",
+    "slug": "qwen-image-layered-8f0ca708"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Qwen"
+  ],
+  "source_reference": "https://huggingface.co/Qwen/Qwen-Image-Layered/tree/8f0ca708dfff6ba1dd5f2d85d78f8c108a040bcf"
+ },
+ "release": {
+  "released_at": "2026-09-28",
+  "version": "1.1.12"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "pipeline",
+    "setting": null,
+    "value": "image-to-layers"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "image/png"
+   },
+   {
+    "name": "num-inference-steps",
+    "setting": null,
+    "value": 50
+   },
+   {
+    "name": "true-cfg-scale",
+    "setting": null,
+    "value": "4"
+   },
+   {
+    "name": "layers",
+    "setting": null,
+    "value": 4
+   },
+   {
+    "name": "resolution",
+    "setting": null,
+    "value": 640
+   },
+   {
+    "name": "cfg-normalize",
+    "setting": null,
+    "value": "true"
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 777
+   }
+  ],
+  "engine": "diffusers",
+  "entrypoint": [
+   "/opt/vonk/bin/diffusers-job"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 57720484610,
+      "image_bytes": 2000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 78000000000
+     },
+     "memory": {
+      "peak_bytes": 118000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "artifact-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/tiny.png",
+      "input_slots": {
+       "image": "qualification/fixtures/tiny.png"
+      },
+      "output_slot": "layers",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "artifact-job"
+  }
+ }
+}

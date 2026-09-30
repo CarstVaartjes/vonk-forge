@@ -1,0 +1,618 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "c218aa40a162889959f83d055e0b69e92c1f1bacd53a13df2cfa7d8c3c44e52e",
+    "repository": "ghcr.io/r0b0tlab/vllm-step37-flash-nvfp4-sm121"
+   },
+   "context": {
+    "path": "adapters/stepfun/r0b0tlab-vllm-dual"
+   },
+   "dockerfile": "adapters/stepfun/r0b0tlab-vllm-dual/Dockerfile",
+   "network": {
+    "hosts": []
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "step-3-7-flash-nvfp4-r0b0tlab-vllm-dual"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "/models/Step-3.7-Flash-NVFP4"
+   ],
+   "port": 8888
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "r0b0tlab's plug-and-play dual-GB10 vLLM serve of StepFun Step 3.7 Flash NVFP4 (198B sparse MoE vision-language model, ModelOpt NVFP4, fp8 KV): a vLLM dev build (0.1.dev16944) with Ray 2.55.1 and FlashInfer 0.6.11, tensor parallel 2 over Ray, native FlashInfer-CUTLASS NVFP4 (no Marlin or emulation), step3p5 reasoning and tool parsers, eager execution. Upstream README profile: 65,536 token context, 4 sequences, 0.90 memory utilization; it validated 32K context and reports about 16.5 tok/s single-stream decode (upstream claims, not measured here). Licences: Apache-2.0 for the model and the package (information only). The image serves the model under the name /models/Step-3.7-Flash-NVFP4, as upstream's examples do.",
+  "tags": [
+   "candidate",
+   "distributed",
+   "executable",
+   "nvfp4",
+   "openai",
+   "r0b0tlab",
+   "ray",
+   "reasoning",
+   "spark",
+   "step-3-7-flash",
+   "tool-use",
+   "vision-language",
+   "vllm"
+  ],
+  "title": "Step 3.7 Flash NVFP4 vLLM dual Spark (r0b0tlab)"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-04bc81cb0b1a-618cd5b83d",
+     "id": "primary-metadata-04bc81cb0b1a-618cd5b83d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "readme-b72077488505-b335630551",
+     "id": "primary-readme-b72077488505-b335630551",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "benchmarks-3d26171162c0-61aadb7b73",
+     "id": "primary-benchmarks-3d26171162c0-61aadb7b73",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "chat-template-f428623fc81c-00824420d1",
+     "id": "primary-chat-template-f428623fc81c-00824420d1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "config-e09a8654f5c8-587cb980af",
+     "id": "primary-config-e09a8654f5c8-587cb980af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "configuration-step3p7-4689fe2daf39-4e641cac68",
+     "id": "primary-configuration-step3p7-4689fe2daf39-4e641cac68",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "generation-config-86de547389d8-97dd3d578b",
+     "id": "primary-generation-config-86de547389d8-97dd3d578b",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "hf-quant-config-bde947cd2dab-a481ad90fa",
+     "id": "primary-hf-quant-config-bde947cd2dab-a481ad90fa",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00013-f02b63dc8d92-47027bc6a4",
+     "id": "primary-model-00001-of-00013-f02b63dc8d92-47027bc6a4",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00013-40c1d8326685-9557582c81",
+     "id": "primary-model-00002-of-00013-40c1d8326685-9557582c81",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00003-of-00013-8ce1db3a76b8-685e2b1a02",
+     "id": "primary-model-00003-of-00013-8ce1db3a76b8-685e2b1a02",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00004-of-00013-86e751cdaec7-490a023f25",
+     "id": "primary-model-00004-of-00013-86e751cdaec7-490a023f25",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00005-of-00013-75fb523b05dd-bcc8badd72",
+     "id": "primary-model-00005-of-00013-75fb523b05dd-bcc8badd72",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00006-of-00013-90b3961c80c4-120488f450",
+     "id": "primary-model-00006-of-00013-90b3961c80c4-120488f450",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00007-of-00013-1a1526905f3d-7d5203840b",
+     "id": "primary-model-00007-of-00013-1a1526905f3d-7d5203840b",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00008-of-00013-0b0b1ba3ea82-91f9b8c570",
+     "id": "primary-model-00008-of-00013-0b0b1ba3ea82-91f9b8c570",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00009-of-00013-75c4e4fed6a8-dff74d072a",
+     "id": "primary-model-00009-of-00013-75c4e4fed6a8-dff74d072a",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00010-of-00013-6b2bcf31109f-8ff0115785",
+     "id": "primary-model-00010-of-00013-6b2bcf31109f-8ff0115785",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00011-of-00013-22fc34fbb097-c294fe3a38",
+     "id": "primary-model-00011-of-00013-22fc34fbb097-c294fe3a38",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00012-of-00013-ad7a884aee32-e9cdb80d52",
+     "id": "primary-model-00012-of-00013-ad7a884aee32-e9cdb80d52",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00013-of-00013-2d81bee65067-8bcff86841",
+     "id": "primary-model-00013-of-00013-2d81bee65067-8bcff86841",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-mtp-bf16-7af1f8ae0a31-44922e9b24",
+     "id": "primary-model-mtp-bf16-7af1f8ae0a31-44922e9b24",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-b1dd5b2bc83e-0a05be8238",
+     "id": "primary-model-safetensors-index-b1dd5b2bc83e-0a05be8238",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "modeling-step3p7-1a6d88edb1e6-8e1e632616",
+     "id": "primary-modeling-step3p7-1a6d88edb1e6-8e1e632616",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "processing-step3-983f9fc399a5-06df1cbe5d",
+     "id": "primary-processing-step3-983f9fc399a5-06df1cbe5d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "special-tokens-map-d47424bda11d-c07a9be597",
+     "id": "primary-special-tokens-map-d47424bda11d-c07a9be597",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-a8859f8d349f-224931eb13",
+     "id": "primary-tokenizer-a8859f8d349f-224931eb13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-78202af487f4-94d5c6ba8f",
+     "id": "primary-tokenizer-config-78202af487f4-94d5c6ba8f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "vision-encoder-88adf0a61c84-76201f018e",
+     "id": "primary-vision-encoder-88adf0a61c84-76201f018e",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "f052976a156b7aaf66bc238cb72c889489f337e17be8d0b3311347c44f1911af",
+    "kind": "model",
+    "publisher": "stepfun-ai",
+    "slug": "step-3-7-flash-nvfp4-42755324"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "StepFun (Step 3.7 Flash)",
+   "r0b0tlab (SM121 serving image, Apache-2.0)",
+   "vLLM contributors (Apache-2.0)"
+  ],
+  "source_reference": "https://github.com/r0b0tlab/step37-flash-nvfp4-sm121-vllm-docker/tree/e79e192dbe1120302406abed97bf26be4c189484"
+ },
+ "release": {
+  "released_at": "2026-06-11",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "served-model-name",
+    "setting": null,
+    "value": "/models/Step-3.7-Flash-NVFP4"
+   },
+   {
+    "name": "trust-remote-code",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "tensor-parallel-size",
+    "setting": null,
+    "value": 2
+   },
+   {
+    "name": "distributed-executor-backend",
+    "setting": null,
+    "value": "ray"
+   },
+   {
+    "name": "disable-custom-all-reduce",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "quantization",
+    "setting": null,
+    "value": "modelopt"
+   },
+   {
+    "name": "kv-cache-dtype",
+    "setting": null,
+    "value": "fp8"
+   },
+   {
+    "name": "disable-cascade-attn",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "gpu-memory-utilization",
+    "setting": null,
+    "value": "0.90"
+   },
+   {
+    "name": "max-model-len",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "max-num-batched-tokens",
+    "setting": null,
+    "value": 32768
+   },
+   {
+    "name": "max-num-seqs",
+    "setting": "concurrency",
+    "value": null
+   },
+   {
+    "name": "reasoning-parser",
+    "setting": null,
+    "value": "step3p5"
+   },
+   {
+    "name": "tool-call-parser",
+    "setting": null,
+    "value": "step3p5"
+   },
+   {
+    "name": "enable-auto-tool-choice",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "enforce-eager",
+    "setting": null,
+    "value": true
+   }
+  ],
+  "engine": "vllm",
+  "entrypoint": [
+   "/opt/vonk/bin/vllm",
+   "serve",
+   "/models"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "RAY_memory_usage_threshold",
+    "value": "0.99"
+   },
+   {
+    "name": "RAY_memory_monitor_refresh_ms",
+    "value": "0"
+   },
+   {
+    "name": "NCCL_DEBUG",
+    "value": "WARN"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 180
+  }
+ },
+ "settings": {
+  "concurrency": {
+   "change_effect": "restart",
+   "value": 4
+  },
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 65536
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "dual",
+  "node_count": 2,
+  "parallelism": {
+   "backend": "ray",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 2
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 129252403665,
+      "image_bytes": 25000000000,
+      "safety_margin_bytes": 24000000000,
+      "working_bytes": 65000000000
+     },
+     "memory": {
+      "peak_bytes": 115000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   },
+   {
+    "count": 1,
+    "endpoint_owner": false,
+    "name": "worker",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 129252403665,
+      "image_bytes": 25000000000,
+      "safety_margin_bytes": 24000000000,
+      "working_bytes": 65000000000
+     },
+     "memory": {
+      "peak_bytes": 115000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint",
+   "worker"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 64,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "/models/Step-3.7-Flash-NVFP4"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

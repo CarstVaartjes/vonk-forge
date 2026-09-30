@@ -1,0 +1,124 @@
+{
+ "capabilities": [],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "file-587cb980af76",
+   "path": "config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "6268f76a067e3104bf9001e97d7dcc0fcfb16f3086cfb478ee72d95900d7fc1d",
+   "size_bytes": 643
+  },
+  {
+   "id": "file-b0d6dcfed49b",
+   "path": "merges.txt",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5",
+   "size_bytes": 456318
+  },
+  {
+   "id": "file-36afccab5d8d",
+   "path": "preprocessor_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "9739f58296aa6f9ac18008fd0150fb2649bc554985fbde86d0a4041c882ac753",
+   "size_bytes": 541
+  },
+  {
+   "id": "file-207cf36381de",
+   "path": "pytorch_model.bin",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "314eb00cce6ad68d25237b8446b659ccdb136ed4672c1bca470f142f72455026",
+   "size_bytes": 776444665
+  },
+  {
+   "id": "file-c07a9be597b7",
+   "path": "special_tokens_map.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "06e405a36dfe4b9604f484f6a1e619af1a7f7d09e34a8555eb0b77b66318067f",
+   "size_bytes": 280
+  },
+  {
+   "id": "file-224931eb13f8",
+   "path": "tokenizer.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "dc239041d98de27ffc3975473a1a23e3db4c937b23c138c38bbc66588bd247e5",
+   "size_bytes": 2108774
+  },
+  {
+   "id": "file-94d5c6ba8f6b",
+   "path": "tokenizer_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "e2eb445cfdbf4711de620cbdf10478b0423950799e85652d9f28da47066ab86d",
+   "size_bytes": 1362
+  },
+  {
+   "id": "file-ba05d8e2e484",
+   "path": "vocab.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "ed19656ea1707df69134c4af35c8ceda2cc9860bf2c3495026153a133670ab5e",
+   "size_bytes": 798293
+  }
+ ],
+ "format": {
+  "precision": "unspecified",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "laion",
+   "slug": "clap",
+   "title": "CLAP"
+  },
+  "model": {
+   "publisher": "laion",
+   "slug": "larger-clap-general",
+   "title": "LAION CLAP Larger General"
+  },
+  "publisher": "laion",
+  "slug": "larger-clap-general-ada0c23a",
+  "variant": "Larger general",
+  "version": "CLAP Larger General ada0c23a"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "laion"
+  ],
+  "spdx": "Apache-2.0",
+  "url": "https://huggingface.co/laion/larger_clap_general/blob/ada0c23a36c4e8582805bb38fec3905903f18b41/README.md"
+ },
+ "metadata": {
+  "description": "Pinned LAION-CLAP larger-general files required by the HunyuanVideo-Foley offline text encoder.",
+  "tags": [
+   "laion",
+   "auxiliary",
+   "audio",
+   "offline"
+  ]
+ },
+ "modalities": [
+  "audio",
+  "text"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/laion/larger_clap_general",
+  "revision": "ada0c23a36c4e8582805bb38fec3905903f18b41"
+ }
+}

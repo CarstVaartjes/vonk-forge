@@ -1,0 +1,138 @@
+{
+ "capabilities": [
+  "audio-generation",
+  "video-understanding"
+ ],
+ "dependencies": [
+  {
+   "content_sha256": "b9369da043d15102a1d0846ead9d50e40e9e281032deb791a27561781bb62185",
+   "kind": "model",
+   "publisher": "google",
+   "slug": "siglip2-base-patch16-512-a89f5c50"
+  },
+  {
+   "content_sha256": "93ad9df26ac5d64c323fc4f34eb557ecbfd100ccb65e067601e7499543f428d2",
+   "kind": "model",
+   "publisher": "laion",
+   "slug": "larger-clap-general-ada0c23a"
+  }
+ ],
+ "files": [
+  {
+   "id": "file-c693279643b8",
+   "path": "LICENSE",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "7334afd50a0fbca64182b5dadd33db5a09dc6c1756034aefba08a23c703c2a5c",
+   "size_bytes": 15544
+  },
+  {
+   "id": "file-dfb14fbb9e7d",
+   "path": "NOTICE",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "974052d83067e4c50314286e7fc7af68dd60edd9adf12cf0592f6f7d8e501901",
+   "size_bytes": 2533
+  },
+  {
+   "id": "file-d8d0422389f0",
+   "path": "config.yaml",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "557c4cdffebcffe7f33c4ae14be84d854afbeb769dcb3e3c3833787d1a34dc75",
+   "size_bytes": 1313
+  },
+  {
+   "id": "file-55838f7b4600",
+   "path": "config_xl.yaml",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "873c89fb63fd27ce08de95f5e66a7b27f862a0d3bfa6d90863db7f34607083cb",
+   "size_bytes": 1278
+  },
+  {
+   "id": "file-38117435414b",
+   "path": "hunyuanvideo_foley_xl.pth",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "cf7e93dca93063942bc22b53d4fe888e9d9d5a1ad7977873b7b2c6b126cf00ca",
+   "size_bytes": 5854140970
+  },
+  {
+   "id": "file-edbeb86cdf4b",
+   "path": "synchformer_state_dict.pth",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "8aff082f2df5c3bc52759db0c865c7ee772ae6400b860d1b7e90413f2defb67c",
+   "size_bytes": 950058171
+  },
+  {
+   "id": "file-526cd132f4e6",
+   "path": "vae_128d_48k.pth",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "07e6139ff33bd21ba8a7a7f40ed24aab13ac0d100cd686f8a9f3e03dc5251cb1",
+   "size_bytes": 1486465965
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "tencent",
+   "slug": "hunyuan-video-foley",
+   "title": "HunyuanVideo Foley"
+  },
+  "model": {
+   "publisher": "tencent",
+   "slug": "hunyuan-video-foley",
+   "title": "HunyuanVideo Foley"
+  },
+  "publisher": "tencent",
+  "slug": "hunyuan-video-foley-xl",
+  "variant": "HunyuanVideo Foley XL",
+  "version": "HunyuanVideo Foley XL"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "tencent"
+  ],
+  "spdx": "LicenseRef-Tencent-Hunyuan-Community",
+  "territorial_restrictions": {
+   "denied_jurisdictions": [
+    "EU",
+    "GB",
+    "KR"
+   ],
+   "notice": "The Tencent Hunyuan Community License Agreement does not apply in the European Union, United Kingdom, or South Korea."
+  },
+  "url": "https://huggingface.co/tencent/HunyuanVideo-Foley/blob/3abd4e833b95b8db0fc9c687afc52483a48e9a97/LICENSE"
+ },
+ "metadata": {
+  "description": "Immutable public snapshot at 3abd4e83.",
+  "tags": [
+   "tencent",
+   "audio",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "audio",
+  "video"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/tencent/HunyuanVideo-Foley",
+  "revision": "3abd4e833b95b8db0fc9c687afc52483a48e9a97"
+ }
+}

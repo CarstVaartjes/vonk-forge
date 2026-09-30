@@ -1,0 +1,282 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2970dd3c8fd00bccbc663345f9b4d87b35c491f4b13a2a4cdef60fe5c015f6e2",
+    "repository": "docker.io/vllm/vllm-openai"
+   },
+   "context": {
+    "path": "adapters/nvidia/gemma-4-e2b-it-nvidia-vllm-single"
+   },
+   "dockerfile": "adapters/nvidia/gemma-4-e2b-it-nvidia-vllm-single/Dockerfile",
+   "network": {
+    "hosts": []
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "gemma-4-e2b-it-nvidia-vllm-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "gemma-4-e2b-it"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Executable Candidate recipe of NVIDIA's DGX Spark playbook (vllm) for Gemma 4 E2B IT: vllm/vllm-openai:gemma4-cu130 (Gemma 4 custom container named by the playbook), pinned by arm64 digest, serving the exact model revision through `vllm serve` with the playbook's flags (vLLM defaults where the playbook passes none). Resource envelopes are estimates from vLLM's default 0.9 GPU memory utilization, not measurements; physical Spark acceptance is pending.",
+  "tags": [
+   "executable",
+   "candidate",
+   "nvidia",
+   "vllm",
+   "openai",
+   "single",
+   "spark",
+   "gemma",
+   "bf16"
+  ],
+  "title": "Gemma 4 E2B IT vLLM single Spark (NVIDIA playbook)"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-34448b82c17d-618cd5b83d",
+     "id": "metadata-34448b82c17d-618cd5b83d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-3e0608a6be80-b335630551",
+     "id": "readme-3e0608a6be80-b335630551",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "chat-template-0a2c8073c878-00824420d1",
+     "id": "chat-template-0a2c8073c878-00824420d1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-1b28f3d2c310-587cb980af",
+     "id": "config-1b28f3d2c310-587cb980af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "generation-config-d4226bbe3117-97dd3d578b",
+     "id": "generation-config-d4226bbe3117-97dd3d578b",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-2db5482b20d7-9d75c1098f",
+     "id": "model-2db5482b20d7-9d75c1098f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "processor-config-32bdf45d2ad4-27f0cb76af",
+     "id": "processor-config-32bdf45d2ad4-27f0cb76af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-cc8d3a0ce364-224931eb13",
+     "id": "tokenizer-cc8d3a0ce364-224931eb13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-9f4fec4b1dc6-94d5c6ba8f",
+     "id": "tokenizer-config-9f4fec4b1dc6-94d5c6ba8f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "24524aaa082a2a681962a94367bede0aab18651b01c1d68114df4fbaf419a51a",
+    "kind": "model",
+    "publisher": "google",
+    "slug": "gemma-4-e2b-it-3e22461f"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "NVIDIA",
+   "vLLM contributors",
+   "Google DeepMind"
+  ],
+  "source_reference": "https://github.com/NVIDIA/dgx-spark-playbooks/blob/b3bc0813e1864e54ce5ed9a0cc74e0b03745c027/nvidia/vllm/README.md"
+ },
+ "release": {
+  "released_at": "2026-04-10",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "served-model-name",
+    "setting": null,
+    "value": "gemma-4-e2b-it"
+   },
+   {
+    "name": "max-model-len",
+    "setting": "context_tokens",
+    "value": null
+   }
+  ],
+  "engine": "vllm",
+  "entrypoint": [
+   "/opt/vonk/bin/vllm",
+   "serve",
+   "/models"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 180
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 131072
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 10278849571,
+      "image_bytes": 22000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 16000000000
+     },
+     "memory": {
+      "peak_bytes": 112000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 64,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "gemma-4-e2b-it"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

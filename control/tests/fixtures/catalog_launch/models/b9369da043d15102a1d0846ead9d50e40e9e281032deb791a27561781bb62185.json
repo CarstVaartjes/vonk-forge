@@ -1,0 +1,114 @@
+{
+ "capabilities": [],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "file-587cb980af76",
+   "path": "config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "a15bc39fbcd92498dea6d5d3cb2b0d8b9ba389d6a3f2b565ea66128a2d141934",
+   "size_bytes": 276
+  },
+  {
+   "id": "file-9d75c1098fc5",
+   "path": "model.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "fe0e601c625e69eed8e73500d39e9b6164403fe03db8048e87913c3cefbbb3fe",
+   "size_bytes": 1503344520
+  },
+  {
+   "id": "file-36afccab5d8d",
+   "path": "preprocessor_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "63ff380d3e424f93e6fbca5cc8e74eeed882e96fd6be2b7728aed308f3ad1513",
+   "size_bytes": 394
+  },
+  {
+   "id": "file-c07a9be597b7",
+   "path": "special_tokens_map.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "baec30ea10906f16adb8c18af7a34023002c1746542612b8b41c9f09e1351351",
+   "size_bytes": 636
+  },
+  {
+   "id": "file-224931eb13f8",
+   "path": "tokenizer.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322",
+   "size_bytes": 34363039
+  },
+  {
+   "id": "file-6a714af7b49e",
+   "path": "tokenizer.model",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "61a7b147390c64585d6c3543dd6fc636906c9af3865a5548f27f31aee1d4c8e2",
+   "size_bytes": 4241003
+  },
+  {
+   "id": "file-94d5c6ba8f6b",
+   "path": "tokenizer_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "14afe629fe4959b9e0d51e1852b8d9f7ad074f90a1a7125a4fcdd17f06e78fc8",
+   "size_bytes": 47164
+  }
+ ],
+ "format": {
+  "precision": "unspecified",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "google",
+   "slug": "siglip2",
+   "title": "SigLIP 2"
+  },
+  "model": {
+   "publisher": "google",
+   "slug": "siglip2-base-patch16-512",
+   "title": "SigLIP 2 Base Patch16 512"
+  },
+  "publisher": "google",
+  "slug": "siglip2-base-patch16-512-a89f5c50",
+  "variant": "Base patch16 512",
+  "version": "SigLIP 2 Base Patch16 512 a89f5c50"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "google"
+  ],
+  "spdx": "Apache-2.0",
+  "url": "https://huggingface.co/google/siglip2-base-patch16-512/blob/a89f5c5093f902bf39d3cd4d81d2c09867f0724b/README.md"
+ },
+ "metadata": {
+  "description": "Pinned SigLIP 2 Base files for the HunyuanVideo-Foley offline image encoder.",
+  "tags": [
+   "google",
+   "auxiliary",
+   "image",
+   "offline"
+  ]
+ },
+ "modalities": [
+  "image"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/google/siglip2-base-patch16-512",
+  "revision": "a89f5c5093f902bf39d3cd4d81d2c09867f0724b"
+ }
+}

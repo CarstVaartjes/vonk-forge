@@ -1,0 +1,77 @@
+{
+ "capabilities": [
+  "chat",
+  "text-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "target",
+   "path": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix.gguf",
+   "roles": [
+    "target"
+   ],
+   "sha256": "efc7ed607ff27076e3e501fc3fefefa33c0ed8cf1eff483a2b7fdc0c2e616668",
+   "size_bytes": 86720111488
+  },
+  {
+   "id": "drafter",
+   "path": "DeepSeek-V4-Flash-MTP-Q4K-Q8_0-F32.gguf",
+   "roles": [
+    "drafter"
+   ],
+   "sha256": "afd481ee689dce9037f70f39085fcdae5a5b096d521cdad43b19fa52bf8f4083",
+   "size_bytes": 3807602400
+  }
+ ],
+ "format": {
+  "precision": "mixed",
+  "quantization": "iq2_xxs-q2_k-mixed"
+ },
+ "identity": {
+  "family": {
+   "publisher": "antirez",
+   "slug": "deepseek-v4-flash-ds4-gguf",
+   "title": "DeepSeek V4 Flash ds4 GGUFs"
+  },
+  "model": {
+   "publisher": "antirez",
+   "slug": "deepseek-v4-flash-ds4-q2-imatrix-mtp",
+   "title": "DeepSeek V4 Flash IQ2XXS/Q2K imatrix GGUF with MTP (ds4)"
+  },
+  "publisher": "antirez",
+  "slug": "deepseek-v4-flash-ds4-q2-imatrix-mtp-f71f23d5",
+  "variant": "f71f23d552d664e523b422157b2befbf74040380",
+  "version": "f71f23d552d664e523b422157b2befbf74040380"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "DeepSeek AI",
+   "Salvatore Sanfilippo (antirez)"
+  ],
+  "spdx": "MIT",
+  "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark/blob/62af8fffb2f7030cac4de2f0169f5b8d1101b646/LICENSE"
+ },
+ "metadata": {
+  "description": "antirez's DeepSeek-V4-Flash chat-v2 IQ2XXS/Q2K imatrix GGUF (81 GB) with the Q4K/Q8_0/F32 MTP GGUF, at the repository revision that still carries the pre-0731 files. Used by drowzeys' DSpark-style ds4 port.",
+  "tags": [
+   "antirez",
+   "candidate",
+   "deepseek-v4-flash-ds4-gguf",
+   "ds4",
+   "gguf",
+   "iq2",
+   "language",
+   "mtp"
+  ]
+ },
+ "modalities": [
+  "text"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/antirez/deepseek-v4-gguf",
+  "revision": "f71f23d552d664e523b422157b2befbf74040380"
+ }
+}

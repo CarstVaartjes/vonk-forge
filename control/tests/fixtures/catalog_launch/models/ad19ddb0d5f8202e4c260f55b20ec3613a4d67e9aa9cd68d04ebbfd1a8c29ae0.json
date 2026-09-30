@@ -1,0 +1,85 @@
+{
+ "capabilities": [
+  "chat",
+  "reasoning",
+  "text-generation",
+  "tool-use"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-3c5be90f7d96-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "3c5be90f7d9645c9904047d44d4478f505f4b1893187c42acee877190dd759aa",
+   "size_bytes": 1752
+  },
+  {
+   "id": "nvidia-nemotron-3-nano-30b-a3b-q4-k-m-0f111a0d4977-c0268468c2",
+   "path": "NVIDIA-Nemotron-3-Nano-30B-A3B-Q4_K_M.gguf",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "0f111a0d49777a2a0178758b1aee14e5365c495987499401ef3ebe87754322a8",
+   "size_bytes": 22421827488
+  },
+  {
+   "id": "readme-1ea6f4e1a69d-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "1ea6f4e1a69d14ea4b36600f0dfd6522c00d77c332a4cd075683cc51c7318eef",
+   "size_bytes": 489
+  }
+ ],
+ "format": {
+  "precision": "mixed",
+  "quantization": "gguf-q4-k-m"
+ },
+ "identity": {
+  "family": {
+   "publisher": "ggml-org",
+   "slug": "nemotron",
+   "title": "NVIDIA Nemotron"
+  },
+  "model": {
+   "publisher": "ggml-org",
+   "slug": "nemotron-3-nano-30b-a3b",
+   "title": "Nemotron 3 Nano 30B-A3B"
+  },
+  "publisher": "ggml-org",
+  "slug": "nemotron-3-nano-30b-a3b-q4-k-m-f9d9b441",
+  "variant": "Q4_K_M f9d9b441",
+  "version": "Q4_K_M f9d9b441"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "NVIDIA Corporation",
+   "ggml-org"
+  ],
+  "spdx": "LicenseRef-NVIDIA-Nemotron-Open-Model-License",
+  "url": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-nemotron-open-model-license/"
+ },
+ "metadata": {
+  "description": "ggml-org GGUF conversion of NVIDIA Nemotron 3 Nano 30B-A3B at Q4_K_M.",
+  "tags": [
+   "ggml-org",
+   "nemotron",
+   "language",
+   "gguf",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "text"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/ggml-org/NVIDIA-Nemotron-3-Nano-30B-A3B-GGUF",
+  "revision": "f9d9b441a049bf27473c3cdd9cec220f5657b862"
+ }
+}

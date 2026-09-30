@@ -1,0 +1,268 @@
+{
+ "capabilities": [
+  "image-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "artifact-01",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "bb4b2856ed362740ae3e0b117c723ddd207d28ba31437a815f93b7a759647fba",
+   "size_bytes": 1592
+  },
+  {
+   "id": "artifact-02",
+   "path": "LICENSE",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+   "size_bytes": 11343
+  },
+  {
+   "id": "artifact-03",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "59a77659ac2084cf698836f0d5659b7d1f41a46affa250ea291565cc531825e6",
+   "size_bytes": 27488
+  },
+  {
+   "id": "artifact-04",
+   "path": "assets/qwen-image-flash-showcase.jpg",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "5495fd114d2f94fe736da8aaacb31eeec56029a6eaf3752f4ceda902c049c580",
+   "size_bytes": 3762429
+  },
+  {
+   "id": "artifact-05",
+   "path": "model_index.json",
+   "roles": [
+    "pipeline"
+   ],
+   "sha256": "9fb9557c1e5bafb3a582af8407b5a7ad8a8bcbdb20dde4d248bbb4718e1654bd",
+   "size_bytes": 443
+  },
+  {
+   "id": "artifact-06",
+   "path": "scheduler/scheduler_config.json",
+   "roles": [
+    "scheduler"
+   ],
+   "sha256": "b53a49994282a93d71fb03693c0c2f9e024290a4a3f816cabe262bab24490884",
+   "size_bytes": 486
+  },
+  {
+   "id": "artifact-07",
+   "path": "text_encoder/config.json",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "081d41bae4c75815afde340b5cee39d9c71febe3fc3146e0366a75a45da0c04b",
+   "size_bytes": 3217
+  },
+  {
+   "id": "artifact-08",
+   "path": "text_encoder/generation_config.json",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "45b75d70ff5862fddbedd7d32e3d0965a894eceb67a2b9fe53192555124f965e",
+   "size_bytes": 244
+  },
+  {
+   "id": "artifact-09",
+   "path": "text_encoder/model-00001-of-00004.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "d725335e4ea2399be706469e4b8807716a8fa64bd03468252e9f7acf2415fee4",
+   "size_bytes": 4968243304
+  },
+  {
+   "id": "artifact-10",
+   "path": "text_encoder/model-00002-of-00004.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "b1830db6908dcc76df3a71492acbcf2b8cac130114cf1f3c2d9edae8de8c6de3",
+   "size_bytes": 4991495816
+  },
+  {
+   "id": "artifact-11",
+   "path": "text_encoder/model-00003-of-00004.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "09c1807c6d00d7cab94f7db39d4c02ebb8537225ccde383861ac48db97945aa6",
+   "size_bytes": 4932751040
+  },
+  {
+   "id": "artifact-12",
+   "path": "text_encoder/model-00004-of-00004.safetensors",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "5dd068336d14d45ffb43cef374d286cc6ba9d8741b028f90a7d040d847961f4a",
+   "size_bytes": 1691924384
+  },
+  {
+   "id": "artifact-13",
+   "path": "text_encoder/model.safetensors.index.json",
+   "roles": [
+    "text-encoder"
+   ],
+   "sha256": "4be35310ddc165e46e88de4c3fec8c1210014b0b8717f4544d82cc740814ae0c",
+   "size_bytes": 57655
+  },
+  {
+   "id": "artifact-14",
+   "path": "tokenizer/added_tokens.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "58b54bbe36fc752f79a24a271ef66a0a0830054b4dfad94bde757d851968060b",
+   "size_bytes": 605
+  },
+  {
+   "id": "artifact-15",
+   "path": "tokenizer/chat_template.jinja",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "44d5f08f3f72b837eaad09f13a54c1f9f4eb58d75240334548b7fd52a5437fa5",
+   "size_bytes": 2427
+  },
+  {
+   "id": "artifact-16",
+   "path": "tokenizer/merges.txt",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+   "size_bytes": 1671853
+  },
+  {
+   "id": "artifact-17",
+   "path": "tokenizer/special_tokens_map.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd",
+   "size_bytes": 613
+  },
+  {
+   "id": "artifact-18",
+   "path": "tokenizer/tokenizer_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "0a04a9d7d4a62b28482bdfe726c122756de85714fb64166ace92ae75b8f57614",
+   "size_bytes": 4686
+  },
+  {
+   "id": "artifact-19",
+   "path": "tokenizer/vocab.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "87a257b04b17642a0688c98cd1df89c398bda4fee532d6f88b38a659ecb4ac8d",
+   "size_bytes": 3383407
+  },
+  {
+   "id": "artifact-20",
+   "path": "transformer/config.json",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "1bd1ef23f159b4eb3c894eaecc2ac2b9ab5ad31ca1bf8ecc0b0f71081f0730b5",
+   "size_bytes": 371
+  },
+  {
+   "id": "artifact-21",
+   "path": "transformer/diffusion_pytorch_model.safetensors.index.json",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "4fb74d57a2b85d4d8a861bf3d4fff2ec2e825da632ee3d7ce4bae9b6a7ef5069",
+   "size_bytes": 164092
+  },
+  {
+   "id": "artifact-22",
+   "path": "transformer/model-00001-of-00001.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "3a716f870c1de89a9468629163c02fd80086b61d0216b6eb788854d72f223a3a",
+   "size_bytes": 40861047826
+  },
+  {
+   "id": "artifact-23",
+   "path": "vae/config.json",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "e4e61b7553f930e9eabf8935f0a77e6d004cc3ee67a601a56ef03cc41ccada68",
+   "size_bytes": 730
+  },
+  {
+   "id": "artifact-24",
+   "path": "vae/diffusion_pytorch_model.safetensors",
+   "roles": [
+    "vae"
+   ],
+   "sha256": "0c8bc8b758c649abef9ea407b95408389a3b2f610d0d10fcb054fe171d0a8344",
+   "size_bytes": 253806966
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "qwen",
+   "slug": "qwen-image",
+   "title": "Qwen Image"
+  },
+  "model": {
+   "publisher": "nvidia",
+   "slug": "qwen-image-flash",
+   "title": "NVIDIA Qwen Image"
+  },
+  "publisher": "nvidia",
+  "slug": "nvidia-qwen-image-flash",
+  "variant": "NVIDIA Qwen Image Flash",
+  "version": "NVIDIA Qwen Image Flash"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "nvidia"
+  ],
+  "spdx": "LicenseRef-NVIDIA-Open-Model-Agreement",
+  "url": "https://huggingface.co/nvidia/Qwen-Image-Flash/blob/eafac15f6140e6dd9c6031217d658ac10bfb604b/LICENSE"
+ },
+ "metadata": {
+  "description": "Exact public four-step Qwen Image Flash checkpoint at eafac15f for candidate single-Spark Diffusers qualification.",
+  "tags": [
+   "nvidia",
+   "image",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "image"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/nvidia/Qwen-Image-Flash",
+  "revision": "eafac15f6140e6dd9c6031217d658ac10bfb604b"
+ }
+}

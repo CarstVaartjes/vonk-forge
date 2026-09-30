@@ -1,0 +1,568 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "adc80460cea286f1f9bf96d399530096b491c27d8a153558f961a90fb7b655f0",
+    "repository": "docker.io/eugr/spark-vllm"
+   },
+   "context": {
+    "path": "adapters/inkling/tonyd2wild-mtp-dual"
+   },
+   "dockerfile": "adapters/inkling/tonyd2wild-mtp-dual/Dockerfile",
+   "network": {
+    "hosts": []
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "inkling-small-nvfp4-mtp-tonyd2wild-vllm-dual"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "inkling-small"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "standard",
+  "description": "tonyd2wild's regular Inkling Small profile on two Sparks: thinkingmachines/Inkling-Small-NVFP4 on vLLM tensor parallel 2 (mp, as eugr's launcher does by default) with Inkling's native one-token MTP drafter, InstantTensor loading, a 262,144-token context, BF16 KV cache (upstream: FP8 and NVFP4 KV are hardware-capable but the Inkling relative-attention kernel cannot consume them yet) and CUDA graphs. Image: eugr's published spark-vllm image (digest-pinned, built from eugr/spark-vllm-docker 60dee5b4), with upstream's mods applied at build time: eugr's inkling-sm12-paged-kv (vendored FA4 SM120 kernel) and instanttensor-hybrid-draft-loader, and tonyd2wild's inkling-agent-parser-fix (filters a leaked terminal end-of-message marker after tool results). Same-creator alternative for this model and Spark count: the DSpark recipe with the RadixArk draft. Licences (information only): model Apache-2.0; eugr's runtime and mods MIT with a bundled FA4 package under its own licence; tonyd2wild's repository states that no licence has been selected. Upstream measurements are in its results document and are claims until measured here; Vonk physical two-Spark acceptance is pending.",
+  "tags": [
+   "distributed",
+   "inkling",
+   "instanttensor",
+   "mtp",
+   "multimodal",
+   "nvfp4",
+   "reasoning",
+   "spark",
+   "tool-use",
+   "vllm"
+  ],
+  "title": "Inkling Small NVFP4 MTP vLLM two Sparks (tonyd2wild)"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-34448b82c17d",
+     "id": "primary-metadata-34448b82c17d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "readme-146664eb4ce2",
+     "id": "primary-readme-146664eb4ce2",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "chat-template-0aa1aa0c729d",
+     "id": "primary-chat-template-0aa1aa0c729d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "config-dcb5b1d587bc",
+     "id": "primary-config-dcb5b1d587bc",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "hf-quant-config-70f2ae087bb4",
+     "id": "primary-hf-quant-config-70f2ae087bb4",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00009-0536fc0774c0",
+     "id": "primary-model-00001-of-00009-0536fc0774c0",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00009-94046cd4c60e",
+     "id": "primary-model-00002-of-00009-94046cd4c60e",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00003-of-00009-5b011d77adab",
+     "id": "primary-model-00003-of-00009-5b011d77adab",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00004-of-00009-f84efa4eab97",
+     "id": "primary-model-00004-of-00009-f84efa4eab97",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00005-of-00009-04911920af13",
+     "id": "primary-model-00005-of-00009-04911920af13",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00006-of-00009-6f2e9eb03063",
+     "id": "primary-model-00006-of-00009-6f2e9eb03063",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00007-of-00009-728792823d6b",
+     "id": "primary-model-00007-of-00009-728792823d6b",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00008-of-00009-dc821c24f1af",
+     "id": "primary-model-00008-of-00009-dc821c24f1af",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00009-of-00009-c91d957b4a0c",
+     "id": "primary-model-00009-of-00009-c91d957b4a0c",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-2e3a00b15c54",
+     "id": "primary-model-safetensors-index-2e3a00b15c54",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "mtp-d286dd21cb98",
+     "id": "primary-mtp-d286dd21cb98",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "processor-config-b4a3962ea5f7",
+     "id": "primary-processor-config-b4a3962ea5f7",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "special-tokens-map-abc97715b4b3",
+     "id": "primary-special-tokens-map-abc97715b4b3",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-bc253fd2b702",
+     "id": "primary-tokenizer-bc253fd2b702",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-9fb6333a7db8",
+     "id": "primary-tokenizer-9fb6333a7db8",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-2e36c9748a20",
+     "id": "primary-tokenizer-config-2e36c9748a20",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "90ffed7245a29ca1a0cb69bee73cf893bc0c4ca037489bc6f1757858e1e8ebfe",
+    "kind": "model",
+    "publisher": "thinkingmachines",
+    "slug": "inkling-small-nvfp4"
+   }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Mod default.",
+     "label": "Auto (default)",
+     "value": "auto"
+    },
+    {
+     "env": {
+      "INSTANTTENSOR_DRAFT_LOADER": "safetensors"
+     },
+     "help": "Force the draft through vLLM's lazy safetensors loader.",
+     "label": "Safetensors",
+     "value": "safetensors"
+    },
+    {
+     "env": {
+      "INSTANTTENSOR_DRAFT_LOADER": "instanttensor"
+     },
+     "help": "Force the draft through InstantTensor as well.",
+     "label": "InstantTensor",
+     "value": "instanttensor"
+    }
+   ],
+   "help": "How selected speculative drafts are loaded next to the InstantTensor target (eugr's instanttensor-hybrid-draft-loader mod). Auto keeps target loads on InstantTensor and lets the mod pick for drafts.",
+   "label": "Speculative-draft loader",
+   "name": "draft-loader"
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Thinking Machines Lab (model, Apache-2.0)",
+   "tonyd2wild (recipe)",
+   "eugr (spark-vllm-docker image and mods, MIT)",
+   "vLLM contributors (Apache-2.0)"
+  ],
+  "source_reference": "https://github.com/tonyd2wild/Inkling-Small-NVFP4-MTP-262K-2x-DGX-Spark/tree/7913395c4f1bacfc8a97c90efe096a62f3010178"
+ },
+ "release": {
+  "released_at": "2026-07-31",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "served-model-name",
+    "setting": null,
+    "value": "inkling-small"
+   },
+   {
+    "name": "trust-remote-code",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "tokenizer-mode",
+    "setting": null,
+    "value": "inkling"
+   },
+   {
+    "name": "tensor-parallel-size",
+    "setting": null,
+    "value": 2
+   },
+   {
+    "name": "enable-auto-tool-choice",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "tool-call-parser",
+    "setting": null,
+    "value": "inkling"
+   },
+   {
+    "name": "reasoning-parser",
+    "setting": null,
+    "value": "inkling"
+   },
+   {
+    "name": "gpu-memory-utilization",
+    "setting": null,
+    "value": "0.8"
+   },
+   {
+    "name": "max-model-len",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "max-num-seqs",
+    "setting": "concurrency",
+    "value": null
+   },
+   {
+    "name": "load-format",
+    "setting": null,
+    "value": "instanttensor"
+   },
+   {
+    "name": "quantization",
+    "setting": null,
+    "value": "nvfp4"
+   },
+   {
+    "name": "enable-prefix-caching",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "enable-chunked-prefill",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "async-scheduling",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "compilation-config",
+    "setting": null,
+    "value": "{\"cudagraph_mode\":\"FULL_AND_PIECEWISE\",\"custom_ops\":[\"all\"]}"
+   },
+   {
+    "name": "speculative-config",
+    "setting": null,
+    "value": "{\"method\":\"mtp\",\"num_speculative_tokens\":1}"
+   }
+  ],
+  "engine": "vllm",
+  "entrypoint": [
+   "/opt/vonk/bin/vllm",
+   "serve",
+   "/models/target"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "LAMPORT_RS_SCONV",
+    "value": "0"
+   },
+   {
+    "name": "VLLM_USE_BREAKABLE_CUDAGRAPH",
+    "value": "0"
+   },
+   {
+    "name": "VLLM_USE_AOT_COMPILE",
+    "value": "1"
+   },
+   {
+    "name": "INSTANTTENSOR_DRAFT_LOADER",
+    "value": "auto"
+   },
+   {
+    "name": "NCCL_DEBUG",
+    "value": "WARN"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 180
+  }
+ },
+ "settings": {
+  "concurrency": {
+   "change_effect": "restart",
+   "value": 2
+  },
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 262144
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "dual",
+  "node_count": 2,
+  "parallelism": {
+   "backend": "mp",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 2
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 170764923366,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 20000000000,
+      "working_bytes": 60000000000
+     },
+     "memory": {
+      "peak_bytes": 110000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   },
+   {
+    "count": 1,
+    "endpoint_owner": false,
+    "name": "worker",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 170764923366,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 20000000000,
+      "working_bytes": 60000000000
+     },
+     "memory": {
+      "peak_bytes": 110000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "worker",
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 64,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "inkling-small"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

@@ -1,0 +1,261 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/media/comfyui-core"
+   },
+   "dockerfile": "adapters/media/comfyui-core/Dockerfile",
+   "network": {
+    "hosts": [
+     "codeload.github.com",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "flux-2-klein-4b-nvfp4-comfyui-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "image-job",
+   "input": {
+    "max_bytes": 16384,
+    "media_types": [
+     "text/plain"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "UTF-8 text prompt for image generation.",
+      "extensions": [
+       ".txt"
+      ],
+      "id": "prompt",
+      "label": "Prompt",
+      "max_file_bytes": 16384,
+      "max_files": 1,
+      "max_total_bytes": 16384,
+      "media_types": [
+       "text/plain"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 16777216,
+    "slots": [
+     {
+      "description": "Single generated PNG image.",
+      "extensions": [
+       ".png"
+      ],
+      "id": "image",
+      "label": "Generated image",
+      "max_file_bytes": 16777216,
+      "max_files": 1,
+      "max_total_bytes": 16777216,
+      "media_types": [
+       "image/png"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Candidate four-step single-Spark core-node ComfyUI text-to-image recipe using Black Forest Labs' official NVFP4 transformer for lower artifact storage and native Blackwell execution.",
+  "tags": [
+   "executable",
+   "candidate",
+   "flux",
+   "image",
+   "text-to-image",
+   "comfyui",
+   "nvfp4",
+   "distilled",
+   "single",
+   "spark"
+  ],
+  "title": "FLUX.2 Klein 4B NVFP4 ComfyUI single Spark"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "diffusion",
+     "id": "primary-diffusion",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "7891311a55af883f641899fe8ac9c8eb769b4a7b5e0a7bd210c006e48531ffc7",
+    "kind": "model",
+    "publisher": "black-forest-labs",
+    "slug": "flux-2-klein-4b-nvfp4-1db2b2f7"
+   }
+  },
+  {
+   "files": [
+    {
+     "file_id": "text-encoder",
+     "id": "dependency-flux-2-klein-4b-comfyui-5f526678-text-encoder",
+     "mount": {
+      "target": "/models/text-encoder"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "vae",
+     "id": "dependency-flux-2-klein-4b-comfyui-5f526678-vae",
+     "mount": {
+      "target": "/models/vae"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "dependency-flux-2-klein-4b-comfyui-5f526678",
+   "model": {
+    "content_sha256": "5a5fc6767322da0ec006518a91d88825ba7d70e57d5d25e896fe6f66e8daa618",
+    "kind": "model",
+    "publisher": "black-forest-labs",
+    "slug": "flux-2-klein-4b-comfyui-5f526678"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Black Forest Labs",
+   "Comfy-Org"
+  ],
+  "source_reference": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-nvfp4/tree/1db2b2f776c24b76f1122e5f69ab1949fc620068"
+ },
+ "release": {
+  "released_at": "2026-09-28",
+  "version": "1.1.1"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "workflow",
+    "setting": null,
+    "value": "/opt/vonk/source/workflows/flux-2-klein-4b.json"
+   },
+   {
+    "name": "workflow-sha256",
+    "setting": null,
+    "value": "b322f7b92589c49b6d15a4cd935dc12700de9c1f16cde3bba61118fb4dedca1d"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "image/png"
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 0
+   }
+  ],
+  "engine": "comfyui",
+  "entrypoint": [
+   "/opt/vonk/bin/comfyui-job"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 10841606828,
+      "image_bytes": 5000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 21000000000
+     },
+     "memory": {
+      "peak_bytes": 36000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "image-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/prompt.txt",
+      "input_slots": {
+       "prompt": "qualification/fixtures/prompt.txt"
+      },
+      "output_slot": "image",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "image-job"
+  }
+ }
+}

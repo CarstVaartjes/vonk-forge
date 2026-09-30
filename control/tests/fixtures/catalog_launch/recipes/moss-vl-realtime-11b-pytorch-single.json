@@ -1,0 +1,496 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/video/moss-vl-realtime"
+   },
+   "dockerfile": "adapters/video/moss-vl-realtime/Dockerfile",
+   "network": {
+    "hosts": [
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "moss-vl-realtime-11b-pytorch-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "artifact-job",
+   "input": {
+    "max_bytes": 261095424,
+    "media_types": [
+     "application/json",
+     "image/jpeg",
+     "image/png",
+     "image/webp"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "Timestamped JPEG, PNG, or WebP frames referenced by the session document.",
+      "extensions": [
+       ".jpeg",
+       ".jpg",
+       ".png",
+       ".webp"
+      ],
+      "id": "frames",
+      "label": "Session frames",
+      "max_file_bytes": 8388608,
+      "max_files": 31,
+      "max_total_bytes": 260046848,
+      "media_types": [
+       "image/jpeg",
+       "image/png",
+       "image/webp"
+      ],
+      "min_files": 1
+     },
+     {
+      "description": "The bounded realtime event schedule and frame references as JSON.",
+      "extensions": [
+       ".json"
+      ],
+      "id": "session",
+      "label": "Session document",
+      "max_file_bytes": 1048576,
+      "max_files": 1,
+      "max_total_bytes": 1048576,
+      "media_types": [
+       "application/json"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 1090519040,
+    "slots": [
+     {
+      "description": "The timestamped frame sequence encoded as an MP4 replay.",
+      "extensions": [
+       ".mp4"
+      ],
+      "id": "replay",
+      "label": "Session replay",
+      "max_file_bytes": 1073741824,
+      "max_files": 1,
+      "max_total_bytes": 1073741824,
+      "media_types": [
+       "video/mp4"
+      ],
+      "min_files": 1
+     },
+     {
+      "description": "The authoritative ordered MOSS session events as newline-delimited JSON.",
+      "extensions": [
+       ".jsonl"
+      ],
+      "id": "transcript",
+      "label": "Realtime transcript",
+      "max_file_bytes": 16777216,
+      "max_files": 1,
+      "max_total_bytes": 16777216,
+      "media_types": [
+       "application/x-ndjson"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Single-Spark MOSS-VL-Realtime 11B session-replay job using the exact d1f71a58 BF16 snapshot. It preserves the bounded MP4-plus-JSONL contract and adopts upstream cached-vision RoPE, preprocessing, system-prompt, and per-sample batched-vision fixes. It does not expose the upstream interactive WebSocket, camera, or screen-capture service. Physical Spark acceptance remains pending.",
+  "tags": [
+   "executable",
+   "pending",
+   "candidate",
+   "openmoss",
+   "moss-vl",
+   "video-understanding",
+   "realtime",
+   "streaming",
+   "session-replay",
+   "batch-job",
+   "not-interactive-service",
+   "multimodal",
+   "pytorch",
+   "single",
+   "spark"
+  ],
+  "title": "MOSS-VL-Realtime 11B BF16 native single Spark"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-0715d5b5b152-618cd5b83d",
+     "id": "primary-metadata-0715d5b5b152-618cd5b83d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-b86dfa85b45e-b335630551",
+     "id": "primary-readme-b86dfa85b45e-b335630551",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "architecture-28e51b34e031-aa0ed6aa56",
+     "id": "primary-architecture-28e51b34e031-aa0ed6aa56",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "benchmark-streaming-7366164e8e0b-f4b519c5c9",
+     "id": "primary-benchmark-streaming-7366164e8e0b-f4b519c5c9",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "logo-37bf0241f5fb-90580d12fb",
+     "id": "primary-logo-37bf0241f5fb-90580d12fb",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "chat-template-d272c68bd115-56edbbf8f7",
+     "id": "primary-chat-template-d272c68bd115-56edbbf8f7",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-ebab52596af1-587cb980af",
+     "id": "primary-config-ebab52596af1-587cb980af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "configuration-moss-vl-0603337d493e-55d545c53a",
+     "id": "primary-configuration-moss-vl-0603337d493e-55d545c53a",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "generation-config-8b9afb365eaa-97dd3d578b",
+     "id": "primary-generation-config-8b9afb365eaa-97dd3d578b",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00005-3fe2d46a92e3-8453f51e85",
+     "id": "primary-model-00001-of-00005-3fe2d46a92e3-8453f51e85",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00005-18f357990793-516421cb37",
+     "id": "primary-model-00002-of-00005-18f357990793-516421cb37",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00003-of-00005-cecf1e02afe5-05880bd763",
+     "id": "primary-model-00003-of-00005-cecf1e02afe5-05880bd763",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00004-of-00005-57d794a266a1-c340da1f8a",
+     "id": "primary-model-00004-of-00005-57d794a266a1-c340da1f8a",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00005-of-00005-34009172ba73-2bd52bf6f8",
+     "id": "primary-model-00005-of-00005-34009172ba73-2bd52bf6f8",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-25dc84c05625-0a05be8238",
+     "id": "primary-model-safetensors-index-25dc84c05625-0a05be8238",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "modeling-moss-vl-278d1a6f18cc-c41619fc78",
+     "id": "primary-modeling-moss-vl-278d1a6f18cc-c41619fc78",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "preprocessor-config-b4553631864a-36afccab5d",
+     "id": "primary-preprocessor-config-b4553631864a-36afccab5d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "processing-moss-vl-66bae14d9b47-2cd22ecdf2",
+     "id": "primary-processing-moss-vl-66bae14d9b47-2cd22ecdf2",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-e7bbd0f97840-224931eb13",
+     "id": "primary-tokenizer-e7bbd0f97840-224931eb13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-e23084208a8e-94d5c6ba8f",
+     "id": "primary-tokenizer-config-e23084208a8e-94d5c6ba8f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "video-preprocessor-config-bbe22d3f192c-35d01a7325",
+     "id": "primary-video-preprocessor-config-bbe22d3f192c-35d01a7325",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "video-processing-moss-vl-f270b92b0bae-290a804ea4",
+     "id": "primary-video-processing-moss-vl-f270b92b0bae-290a804ea4",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "vocab-ca10d7e9fb3e-ba05d8e2e4",
+     "id": "primary-vocab-ca10d7e9fb3e-ba05d8e2e4",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "191f3e9452d1a36e627380782b590d64575a9a4b7ee369d7236b866999bc9450",
+    "kind": "model",
+    "publisher": "openmoss",
+    "slug": "moss-vl-realtime-11b-bf16-d1f71a58"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "OpenMOSS"
+  ],
+  "source_reference": "https://huggingface.co/OpenMOSS-Team/MOSS-VL-Realtime/tree/d1f71a588deaf2b9b9cea7c6fff66cb10847cc86"
+ },
+ "release": {
+  "released_at": "2026-09-28",
+  "version": "1.2.5"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "entrypoint",
+    "setting": null,
+    "value": "/opt/vonk/source/run.py"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "video/mp4"
+   },
+   {
+    "name": "timeout-seconds",
+    "setting": null,
+    "value": 1800
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 0
+   }
+  ],
+  "engine": "pytorch-pipeline",
+  "entrypoint": [
+   "/opt/vonk/bin/pytorch-pipeline"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "PYTORCH_CUDA_ALLOC_CONF",
+    "value": "expandable_segments:True"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 60
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 22695585762,
+      "image_bytes": 12000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 49391171524
+     },
+     "memory": {
+      "peak_bytes": 108000000000,
+      "reserve_bytes": 12000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "artifact-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/moss-session.json",
+      "input_slots": {
+       "frames": "qualification/fixtures/tiny.png",
+       "session": "qualification/fixtures/moss-session.json"
+      },
+      "output_slot": "replay",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "artifact-job"
+  }
+ }
+}

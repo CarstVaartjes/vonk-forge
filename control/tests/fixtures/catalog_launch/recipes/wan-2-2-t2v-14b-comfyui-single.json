@@ -1,0 +1,263 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/media/comfyui-core"
+   },
+   "dockerfile": "adapters/media/comfyui-core/Dockerfile",
+   "network": {
+    "hosts": [
+     "codeload.github.com",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "wan-2-2-t2v-14b-comfyui-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "video-job",
+   "input": {
+    "max_bytes": 16384,
+    "media_types": [
+     "text/plain"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "Text prompt describing the video to generate.",
+      "extensions": [
+       ".txt"
+      ],
+      "id": "prompt",
+      "label": "Prompt",
+      "max_file_bytes": 16384,
+      "max_files": 1,
+      "max_total_bytes": 16384,
+      "media_types": [
+       "text/plain"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 536870912,
+    "slots": [
+     {
+      "description": "Generated 640x640 H.264 MP4 video with 81 frames at 16 fps.",
+      "extensions": [
+       ".mp4"
+      ],
+      "id": "video",
+      "label": "Generated video",
+      "max_file_bytes": 536870912,
+      "max_files": 1,
+      "max_total_bytes": 536870912,
+      "media_types": [
+       "video/mp4"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Memory-tight Candidate single-Spark text-to-video recipe using Wan 2.2's scaled-FP8 high/low-noise experts. Its declared 118 GB startup peak plus 8 GB system reserve leaves only 2 GB on a 128 GB Spark, so it is not the default and must pass a physical OOM canary before recommendation.",
+  "tags": [
+   "executable",
+   "candidate",
+   "wan",
+   "video",
+   "text-to-video",
+   "comfyui",
+   "fp8",
+   "14b",
+   "single",
+   "spark",
+   "memory-tight",
+   "physical-oom-gated",
+   "not-default"
+  ],
+  "title": "Wan 2.2 T2V 14B ComfyUI single Spark"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "high-noise",
+     "id": "primary-high-noise",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "low-noise",
+     "id": "primary-low-noise",
+     "mount": {
+      "target": "/models/low-noise"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "text-encoder",
+     "id": "primary-text-encoder",
+     "mount": {
+      "target": "/models/text-encoder"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "vae",
+     "id": "primary-vae",
+     "mount": {
+      "target": "/models/vae"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "b5aa262784f8355d891b64090c4f264478c1a749c4681daa0d9ad64e74df4b04",
+    "kind": "model",
+    "publisher": "wan-ai",
+    "slug": "wan-2-2-t2v-14b-comfyui-ee6f4a40"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Wan-AI",
+   "Comfy-Org"
+  ],
+  "source_reference": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/ee6f4a40737a995bf5818954cfce6d59443b0f04"
+ },
+ "release": {
+  "released_at": "2026-09-28",
+  "version": "1.1.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "workflow",
+    "setting": null,
+    "value": "/opt/vonk/source/workflows/wan-2-2-t2v-14b.json"
+   },
+   {
+    "name": "workflow-sha256",
+    "setting": null,
+    "value": "be8cd9b6886391ae45c3f9b592db854f0bd0a86c62e4aa18a914ee44892ea012"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "video/mp4"
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 0
+   }
+  ],
+  "engine": "comfyui",
+  "entrypoint": [
+   "/opt/vonk/bin/comfyui-job"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 35577569479,
+      "image_bytes": 5000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 54000000000
+     },
+     "memory": {
+      "peak_bytes": 118000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "video-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/prompt.txt",
+      "input_slots": {
+       "prompt": "qualification/fixtures/prompt.txt"
+      },
+      "output_slot": "video",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "video-job"
+  }
+ }
+}

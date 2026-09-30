@@ -1,0 +1,491 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/audio/hunyuan-video-foley-native"
+   },
+   "dockerfile": "adapters/audio/hunyuan-video-foley-native/Dockerfile",
+   "network": {
+    "hosts": [
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": [
+    {
+     "path": "adapters/audio/hunyuan-video-foley-native/patch-offline-models.py"
+    }
+   ]
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "hunyuan-video-foley-xl-pytorch-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "audio-job",
+   "input": {
+    "max_bytes": 536870912,
+    "media_types": [
+     "video/mp4",
+     "video/quicktime",
+     "video/webm",
+     "video/x-matroska",
+     "text/plain"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "UTF-8 description of the desired synchronized sound.",
+      "extensions": [
+       ".txt"
+      ],
+      "id": "prompt",
+      "label": "Foley prompt",
+      "max_file_bytes": 65536,
+      "max_files": 1,
+      "max_total_bytes": 65536,
+      "media_types": [
+       "text/plain"
+      ],
+      "min_files": 1
+     },
+     {
+      "description": "One source video for Foley audio generation.",
+      "extensions": [
+       ".mkv",
+       ".mov",
+       ".mp4",
+       ".webm"
+      ],
+      "id": "video",
+      "label": "Source video",
+      "max_file_bytes": 536805376,
+      "max_files": 1,
+      "max_total_bytes": 536805376,
+      "media_types": [
+       "video/mp4",
+       "video/quicktime",
+       "video/webm",
+       "video/x-matroska"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 536870912,
+    "slots": [
+     {
+      "description": "Generated synchronized WAV audio.",
+      "extensions": [
+       ".wav"
+      ],
+      "id": "audio",
+      "label": "Foley audio",
+      "max_file_bytes": 536870912,
+      "max_files": 1,
+      "max_total_bytes": 536870912,
+      "media_types": [
+       "audio/wav"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Installable Candidate for text-conditioned Foley generation from one video, with the exact official XL checkpoint and pinned local-only SigLIP2 and CLAP encoders; physical Spark acceptance remains pending.",
+  "tags": [
+   "executable",
+   "candidate",
+   "audio",
+   "video-to-audio",
+   "pytorch",
+   "single",
+   "spark"
+  ],
+  "title": "HunyuanVideo Foley XL PyTorch single Spark"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "file-c693279643b8",
+     "id": "primary-file-c693279643b8",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-dfb14fbb9e7d",
+     "id": "primary-file-dfb14fbb9e7d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-d8d0422389f0",
+     "id": "primary-file-d8d0422389f0",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-55838f7b4600",
+     "id": "primary-file-55838f7b4600",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-38117435414b",
+     "id": "primary-file-38117435414b",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-edbeb86cdf4b",
+     "id": "primary-file-edbeb86cdf4b",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-526cd132f4e6",
+     "id": "primary-file-526cd132f4e6",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "67741520c530ad3d4dee0bf01abb24d86961f0b5df7c5b34ee5bb60e4ecdeeb4",
+    "kind": "model",
+    "publisher": "tencent",
+    "slug": "hunyuan-video-foley-xl"
+   }
+  },
+  {
+   "files": [
+    {
+     "file_id": "file-587cb980af76",
+     "id": "siglip2-file-587cb980af76",
+     "mount": {
+      "target": "/models/siglip2"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-9d75c1098fc5",
+     "id": "siglip2-file-9d75c1098fc5",
+     "mount": {
+      "target": "/models/siglip2"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-36afccab5d8d",
+     "id": "siglip2-file-36afccab5d8d",
+     "mount": {
+      "target": "/models/siglip2"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-c07a9be597b7",
+     "id": "siglip2-file-c07a9be597b7",
+     "mount": {
+      "target": "/models/siglip2"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-224931eb13f8",
+     "id": "siglip2-file-224931eb13f8",
+     "mount": {
+      "target": "/models/siglip2"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-6a714af7b49e",
+     "id": "siglip2-file-6a714af7b49e",
+     "mount": {
+      "target": "/models/siglip2"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-94d5c6ba8f6b",
+     "id": "siglip2-file-94d5c6ba8f6b",
+     "mount": {
+      "target": "/models/siglip2"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "siglip2",
+   "model": {
+    "content_sha256": "b9369da043d15102a1d0846ead9d50e40e9e281032deb791a27561781bb62185",
+    "kind": "model",
+    "publisher": "google",
+    "slug": "siglip2-base-patch16-512-a89f5c50"
+   }
+  },
+  {
+   "files": [
+    {
+     "file_id": "file-587cb980af76",
+     "id": "clap-file-587cb980af76",
+     "mount": {
+      "target": "/models/clap"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-b0d6dcfed49b",
+     "id": "clap-file-b0d6dcfed49b",
+     "mount": {
+      "target": "/models/clap"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-36afccab5d8d",
+     "id": "clap-file-36afccab5d8d",
+     "mount": {
+      "target": "/models/clap"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-207cf36381de",
+     "id": "clap-file-207cf36381de",
+     "mount": {
+      "target": "/models/clap"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-c07a9be597b7",
+     "id": "clap-file-c07a9be597b7",
+     "mount": {
+      "target": "/models/clap"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-224931eb13f8",
+     "id": "clap-file-224931eb13f8",
+     "mount": {
+      "target": "/models/clap"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-94d5c6ba8f6b",
+     "id": "clap-file-94d5c6ba8f6b",
+     "mount": {
+      "target": "/models/clap"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "file-ba05d8e2e484",
+     "id": "clap-file-ba05d8e2e484",
+     "mount": {
+      "target": "/models/clap"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "clap",
+   "model": {
+    "content_sha256": "93ad9df26ac5d64c323fc4f34eb557ecbfd100ccb65e067601e7499543f428d2",
+    "kind": "model",
+    "publisher": "laion",
+    "slug": "larger-clap-general-ada0c23a"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "tencent"
+  ],
+  "source_reference": "https://huggingface.co/tencent/HunyuanVideo-Foley/tree/3abd4e833b95b8db0fc9c687afc52483a48e9a97"
+ },
+ "release": {
+  "released_at": "2026-09-28",
+  "version": "1.4.8"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "entrypoint",
+    "setting": null,
+    "value": "/opt/vonk/source/pipelines/hunyuan_foley_xl.py"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "audio/wav"
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 1
+   },
+   {
+    "name": "timeout-seconds",
+    "setting": null,
+    "value": 3600
+   }
+  ],
+  "engine": "pytorch-pipeline",
+  "entrypoint": [
+   "/opt/vonk/bin/pytorch-pipeline"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "PYTORCH_CUDA_ALLOC_CONF",
+    "value": "expandable_segments:True"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 20915171892,
+      "image_bytes": 2000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 49830343784
+     },
+     "memory": {
+      "peak_bytes": 32000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "audio-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/foley-video-1s.mp4",
+      "input_slots": {
+       "prompt": "qualification/fixtures/prompt.txt",
+       "video": "qualification/fixtures/foley-video-1s.mp4"
+      },
+      "output_slot": "audio",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "audio-job"
+  }
+ }
+}

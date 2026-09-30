@@ -1,0 +1,292 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/qwen/mia-gguf-27b-single"
+   },
+   "dockerfile": "adapters/qwen/mia-gguf-27b-single/Dockerfile",
+   "network": {
+    "hosts": [
+     "archive.ubuntu.com",
+     "ports.ubuntu.com",
+     "security.ubuntu.com",
+     "codeload.github.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "qwen3-6-27b-ud-q8-k-xl-llama-cpp-mia-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "Qwen3.6-27B-UD-Q8_K_XL"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Candidate one-DGX Spark Qwen3.6 27B (dense, text only) on llama.cpp llama-server: Unsloth's UD-Q8_K_XL GGUF with MTP heads, 262,144-token context and MTP speculative decoding (draft-mtp, up to 6 draft tokens), as in MiaAI-Lab's start script (MIT). The script expects a host-built llama-server; this recipe builds llama.cpp release b11261 (MIT, commit b5cf8ce0) with CUDA for sm_121a from source in its own image, without the web UI. The upstream script names only the GGUF file; the Hugging Face repository (unsloth/Qwen3.6-27B-MTP-GGUF, the MTP build needed for draft-mtp) is inferred, and the upstream script loads no vision projector. Model weights are Apache-2.0 (Qwen); the upstream repository has no licence file (its README says MIT). Memory figures are estimates, not measurements; physical Spark acceptance is still required.",
+  "tags": [
+   "candidate",
+   "executable",
+   "qwen",
+   "qwen3-6",
+   "llama-cpp",
+   "gguf",
+   "mtp",
+   "speculative-decoding",
+   "openai",
+   "chat",
+   "reasoning",
+   "single",
+   "spark"
+  ],
+  "title": "Qwen3.6 27B UD-Q8_K_XL llama.cpp single Spark (Mia)"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "target",
+     "id": "primary-target",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "fb72986e678a518daf0e51f8f43d1c3d800d4fcc655f2a7ac75f47ac465a17da",
+    "kind": "model",
+    "publisher": "unsloth",
+    "slug": "qwen3-6-27b-mtp-ud-q8-k-xl-gguf-5cb35eb3"
+   }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "llama-server default (upstream).",
+     "label": "Automatic (4 slots)",
+     "value": "auto"
+    },
+    {
+     "args": [
+      {
+       "name": "parallel",
+       "value": 1
+      }
+     ],
+     "help": "Pass --parallel 1: one request at a time, lower memory.",
+     "label": "One slot",
+     "value": "single"
+    }
+   ],
+   "help": "How many requests llama-server serves at once. Upstream leaves this to llama-server, which picks 4 slots on CUDA. Upstream's OOM troubleshooting suggests --parallel 1 to cut memory (recurrent state and prompt-cache pressure) at the cost of concurrency.",
+   "label": "Parallel slots",
+   "name": "slots"
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "MiaAI Lab",
+   "Unsloth",
+   "Qwen",
+   "llama.cpp contributors"
+  ],
+  "source_reference": "https://github.com/MiaAI-Lab/DGX_Spark_Qwen_3.6_27b_35b_GGUF_start_script/tree/78897c9a4d729c3def5c86230f14e56c9800c516"
+ },
+ "release": {
+  "released_at": "2026-06-28",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "model",
+    "setting": null,
+    "value": "/models/Qwen3.6-27B-UD-Q8_K_XL.gguf"
+   },
+   {
+    "name": "alias",
+    "setting": null,
+    "value": "Qwen3.6-27B-UD-Q8_K_XL"
+   },
+   {
+    "name": "ctx-size",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "host",
+    "setting": null,
+    "value": "0.0.0.0"
+   },
+   {
+    "name": "port",
+    "setting": null,
+    "value": 8000
+   },
+   {
+    "name": "temperature",
+    "setting": null,
+    "value": 0.6
+   },
+   {
+    "name": "top-p",
+    "setting": null,
+    "value": 0.95
+   },
+   {
+    "name": "top-k",
+    "setting": null,
+    "value": 20
+   },
+   {
+    "name": "min-p",
+    "setting": null,
+    "value": 0.0
+   },
+   {
+    "name": "presence-penalty",
+    "setting": null,
+    "value": 0.0
+   },
+   {
+    "name": "repeat-penalty",
+    "setting": null,
+    "value": 1.0
+   },
+   {
+    "name": "chat-template-kwargs",
+    "setting": null,
+    "value": "{\"preserve_thinking\":true}"
+   },
+   {
+    "name": "spec-type",
+    "setting": null,
+    "value": "draft-mtp"
+   },
+   {
+    "name": "spec-draft-n-max",
+    "setting": null,
+    "value": 6
+   },
+   {
+    "name": "spec-draft-p-min",
+    "setting": null,
+    "value": 0.85
+   }
+  ],
+  "engine": "llama-cpp",
+  "entrypoint": [
+   "/opt/vonk/bin/llama-server"
+  ],
+  "environment": [],
+  "lifecycle": {
+   "stop_timeout_seconds": 60
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 262144
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 35776484480,
+      "image_bytes": 6000000000,
+      "safety_margin_bytes": 10000000000,
+      "working_bytes": 4000000000
+     },
+     "memory": {
+      "peak_bytes": 70000000000,
+      "reserve_bytes": 10000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 256,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "Qwen3.6-27B-UD-Q8_K_XL"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

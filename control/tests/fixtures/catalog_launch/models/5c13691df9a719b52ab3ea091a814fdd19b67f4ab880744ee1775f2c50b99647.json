@@ -1,0 +1,61 @@
+{
+ "capabilities": [
+  "3d-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "snapshot",
+   "path": "snapshot",
+   "roles": [
+    "entrypoint"
+   ],
+   "sha256": "9a72ea34cfb6b05484e9ed7cd4c0b014400bc45710f097008e88d6c6c883dbef",
+   "size_bytes": 16237485044
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "microsoft",
+   "slug": "trellis",
+   "title": "TRELLIS"
+  },
+  "model": {
+   "publisher": "microsoft",
+   "slug": "trellis-2-4b",
+   "title": "TRELLIS.2"
+  },
+  "publisher": "microsoft",
+  "slug": "trellis-2-4b",
+  "variant": "TRELLIS.2 4B",
+  "version": "TRELLIS.2 4B"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "microsoft"
+  ],
+  "spdx": "MIT",
+  "url": "https://github.com/microsoft/TRELLIS.2/blob/75fbf0183001ed9876c8dbb35de6b68552ee08bd/LICENSE"
+ },
+ "metadata": {
+  "description": "Immutable public snapshot at af44b45f.",
+  "tags": [
+   "microsoft",
+   "three-d",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "3d"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/microsoft/TRELLIS.2-4B",
+  "revision": "af44b45f2e35a493886929c6d786e563ec68364d"
+ }
+}

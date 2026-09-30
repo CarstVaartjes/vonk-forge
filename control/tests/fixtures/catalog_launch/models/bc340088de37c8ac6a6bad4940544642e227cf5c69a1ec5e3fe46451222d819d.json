@@ -1,0 +1,173 @@
+{
+ "capabilities": [
+  "chat",
+  "text-generation",
+  "tool-use"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-d1a8f4a1d2e3-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "d1a8f4a1d2e3787c5956393d9306365ebefe1912cb76828870682b1ab16f5c27",
+   "size_bytes": 1635
+  },
+  {
+   "id": "readme-2a001916abad-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "2a001916abadd53f3af4df37cd86fee7edf53847e8d6bd0c3414af1f6c6b5ca3",
+   "size_bytes": 4328
+  },
+  {
+   "id": "chat-template-e84f32a23fdd-00824420d1",
+   "path": "chat_template.jinja",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259",
+   "size_bytes": 7764
+  },
+  {
+   "id": "config-2af7513fb092-587cb980af",
+   "path": "config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "2af7513fb092e80e64480b8a9155c1347f6a742c958aa35448b0842f5fdaeac8",
+   "size_bytes": 23158
+  },
+  {
+   "id": "generation-config-252e0efee3de-97dd3d578b",
+   "path": "generation_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "252e0efee3ded327704912616f3493a227cdc39eb4bab52fcae1ceb3ed5dc890",
+   "size_bytes": 213
+  },
+  {
+   "id": "model-bb759388bf46-9d75c1098f",
+   "path": "model.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "bb759388bf46cf5abfddaf62ef5f27c67e09ae36edd4c44e26fca3a934596da6",
+   "size_bytes": 22461053808
+  },
+  {
+   "id": "model-safetensors-index-3a43cf79383a-0a05be8238",
+   "path": "model.safetensors.index.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "3a43cf79383a648f7fe4eea81a68a169ae691f72c8bddcb803a4329b9094ae20",
+   "size_bytes": 12434938
+  },
+  {
+   "id": "model-mtp-68b2cabe2ff8-3cebc61d53",
+   "path": "model_mtp.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "68b2cabe2ff84bf3ba0fde0af082795e175a7ab427cb78e3b53df96e1d4dc929",
+   "size_bytes": 1689283656
+  },
+  {
+   "id": "model-visual-1e1b1d5f576d-358c84b81e",
+   "path": "model_visual.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "1e1b1d5f576d65f25427a6d8e89e2c76f4aea6a9383f17dd760dc420b233872a",
+   "size_bytes": 893179504
+  },
+  {
+   "id": "processor-config-d89ef49ce9cd-27f0cb76af",
+   "path": "processor_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "d89ef49ce9cd37fbf510158e13c1ef063d9286411c1ec9049932dbe0487143b1",
+   "size_bytes": 1191
+  },
+  {
+   "id": "recipe-4a182833929f-e6afb07ce9",
+   "path": "recipe.yaml",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "4a182833929f92ab6c66f84cfe7631614a2990a330c3055bfb22aaad1beb758f",
+   "size_bytes": 311
+  },
+  {
+   "id": "tokenizer-dd6b8cf757c2-224931eb13",
+   "path": "tokenizer.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "dd6b8cf757c22939ad262adb1077fa3b8e7cbb89054bc2507630b0f6aafd80ae",
+   "size_bytes": 19989442
+  },
+  {
+   "id": "tokenizer-config-a4f52c2103a6-94d5c6ba8f",
+   "path": "tokenizer_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "a4f52c2103a685c3d9f3022b3954246fbab865abd709ac69d8b8a98f79580564",
+   "size_bytes": 1140
+  }
+ ],
+ "format": {
+  "precision": "mixed",
+  "quantization": "nvfp4"
+ },
+ "identity": {
+  "family": {
+   "publisher": "redhatai",
+   "slug": "qwen3-6-redhatai",
+   "title": "Qwen3.6 RedHat AI"
+  },
+  "model": {
+   "publisher": "redhatai",
+   "slug": "qwen3-6-35b-a3b-nvfp4",
+   "title": "Qwen3.6 35B-A3B NVFP4"
+  },
+  "publisher": "redhatai",
+  "slug": "qwen3-6-35b-a3b-nvfp4-redhatai-e850c696",
+  "variant": "Qwen3.6 35B-A3B NVFP4 RedHatAI e850c696",
+  "version": "Qwen3.6 35B-A3B NVFP4 RedHatAI e850c696"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "Red Hat AI",
+   "Qwen"
+  ],
+  "spdx": "Apache-2.0",
+  "url": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B/blob/main/LICENSE"
+ },
+ "metadata": {
+  "description": "Exact public RedHatAI compressed-tensors NVFP4 Qwen3.6 35B-A3B (built-in MTP layer) at e850c696, the last revision before r0b0tlab's 2026-05-19 evidence.",
+  "tags": [
+   "redhatai",
+   "qwen3-6-redhatai",
+   "language",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "text"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/RedHatAI/Qwen3.6-35B-A3B-NVFP4",
+  "revision": "e850c696e6d75f965367e816c16bc7dacd955ffa"
+ }
+}

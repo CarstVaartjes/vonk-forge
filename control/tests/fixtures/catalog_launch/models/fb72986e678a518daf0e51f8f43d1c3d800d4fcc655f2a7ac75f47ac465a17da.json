@@ -1,0 +1,70 @@
+{
+ "capabilities": [
+  "chat",
+  "code-generation",
+  "image-understanding",
+  "reasoning"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "target",
+   "path": "Qwen3.6-27B-UD-Q8_K_XL.gguf",
+   "roles": [
+    "weights",
+    "entrypoint"
+   ],
+   "sha256": "3d6ff16be3258f910eac4dcec7142edc7a7100d8400fe363035c8cfedc151164",
+   "size_bytes": 35776484480
+  }
+ ],
+ "format": {
+  "precision": "mixed",
+  "quantization": "ud-q8-k-xl"
+ },
+ "identity": {
+  "family": {
+   "publisher": "unsloth",
+   "slug": "qwen",
+   "title": "Qwen"
+  },
+  "model": {
+   "publisher": "unsloth",
+   "slug": "qwen3-6-27b",
+   "title": "Qwen3.6 27B"
+  },
+  "publisher": "unsloth",
+  "slug": "qwen3-6-27b-mtp-ud-q8-k-xl-gguf-5cb35eb3",
+  "variant": "MTP UD-Q8_K_XL GGUF 5cb35eb3",
+  "version": "MTP UD-Q8_K_XL GGUF 5cb35eb3"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "Qwen",
+   "Unsloth"
+  ],
+  "spdx": "Apache-2.0",
+  "url": "https://huggingface.co/Qwen/Qwen3.6-27B/blob/main/LICENSE"
+ },
+ "metadata": {
+  "description": "Unsloth Dynamic UD-Q8_K_XL GGUF of Qwen3.6 27B (dense) with Multi-Token Prediction heads baked in (for llama.cpp draft-mtp speculative decoding). Only this file of the repository is cataloged; the repository has no LICENSE file (Apache-2.0 per its model card).",
+  "tags": [
+   "qwen",
+   "gguf",
+   "llama-cpp",
+   "mtp",
+   "q8",
+   "spark",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "text"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF",
+  "revision": "5cb35eb3dcbf52dbce5f87dbc64df6aaffadcace"
+ }
+}

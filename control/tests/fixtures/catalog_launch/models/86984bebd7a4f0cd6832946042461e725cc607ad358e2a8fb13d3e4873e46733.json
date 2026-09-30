@@ -1,0 +1,210 @@
+{
+ "capabilities": [
+  "code-generation",
+  "reasoning",
+  "text-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-34448b82c17d-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930",
+   "size_bytes": 1570
+  },
+  {
+   "id": "license-bbedc3fda330-c693279643",
+   "path": "LICENSE",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a",
+   "size_bytes": 11544
+  },
+  {
+   "id": "readme-19c0690b5be7-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "19c0690b5be7c2c12f3fe11a7bb879244c3191eb12459ef20ba1d783e306c1e5",
+   "size_bytes": 6725
+  },
+  {
+   "id": "chat-template-c3cf9e34abf4-00824420d1",
+   "path": "chat_template.jinja",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+   "size_bytes": 8952
+  },
+  {
+   "id": "config-153407dcf654-587cb980af",
+   "path": "config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "153407dcf65483b121759efc6bdd0e41e124e1e297496a9ba979936689a4b9d2",
+   "size_bytes": 3892
+  },
+  {
+   "id": "config-yarn-1m-c8fa390aa601-334632c17f",
+   "path": "config.yarn-1m.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "c8fa390aa60193a19d832dfb92584fbd5c31af0b8ad0bea95f1584288c5c0090",
+   "size_bytes": 4091
+  },
+  {
+   "id": "generation-config-e70c136c1b78-97dd3d578b",
+   "path": "generation_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e",
+   "size_bytes": 202
+  },
+  {
+   "id": "merges-a9d356d7bdf1-b0d6dcfed4",
+   "path": "merges.txt",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d",
+   "size_bytes": 3353259
+  },
+  {
+   "id": "model-00001-of-00002-7b77214fe58f-27a6880801",
+   "path": "model-00001-of-00002.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "7b77214fe58ff15fed0b4af55e3cd92f38842b8711886d68954e8071ff8270c6",
+   "size_bytes": 8530774298
+  },
+  {
+   "id": "model-00002-of-00002-411c83bb1070-2cca3b5a88",
+   "path": "model-00002-of-00002.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "411c83bb1070b27f3d670fc93e38dca0f17eb66429f64b5706901b12613188b2",
+   "size_bytes": 6807634163
+  },
+  {
+   "id": "model-safetensors-index-ee2d5e73b5f8-0a05be8238",
+   "path": "model.safetensors.index.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "ee2d5e73b5f8311ad331ce3c94a29d1143225064b278a18fa9966cba54d2802e",
+   "size_bytes": 238664
+  },
+  {
+   "id": "preprocessor-config-27225450ac9c-36afccab5d",
+   "path": "preprocessor_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516",
+   "size_bytes": 390
+  },
+  {
+   "id": "quantization-config-d5e7e4c41108-6f24389fb3",
+   "path": "quantization_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "d5e7e4c411084ef898b470e35a20181093bf3adbb1282e9d81674ce7b3d9069d",
+   "size_bytes": 475810
+  },
+  {
+   "id": "tokenizer-0997f410c57a-224931eb13",
+   "path": "tokenizer.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+   "size_bytes": 12809320
+  },
+  {
+   "id": "tokenizer-config-b11349aafa7c-94d5c6ba8f",
+   "path": "tokenizer_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27",
+   "size_bytes": 17928
+  },
+  {
+   "id": "video-preprocessor-config-7768af27c1fa-35d01a7325",
+   "path": "video_preprocessor_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13",
+   "size_bytes": 385
+  },
+  {
+   "id": "vocab-ce99b4cb2983-ba05d8e2e4",
+   "path": "vocab.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+   "size_bytes": 6722759
+  }
+ ],
+ "format": {
+  "precision": "mixed",
+  "quantization": "exl3-3-5bpw"
+ },
+ "identity": {
+  "family": {
+   "publisher": "mia-ai-lab",
+   "slug": "qwen3-8-mia",
+   "title": "Qwen3.8 MiaAI-Lab deployments"
+  },
+  "model": {
+   "publisher": "mia-ai-lab",
+   "slug": "qwen3-8-27b-exl3-3-5bpw",
+   "title": "Qwen3.8 27B EXL3 3.5bpw (Mia)"
+  },
+  "publisher": "mia-ai-lab",
+  "slug": "qwen3-8-27b-exl3-3-5bpw-19441ac8",
+  "variant": "Qwen3.8 27B EXL3 3.5bpw Mia 19441ac8",
+  "version": "Qwen3.8 27B EXL3 3.5bpw Mia 19441ac8"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "Qwen",
+   "MiaAI-Lab",
+   "Turboderp"
+  ],
+  "spdx": "Apache-2.0",
+  "url": "https://huggingface.co/Mia-AiLab/Qwen3.8-27B-EXL3-3.5bpw/blob/19441ac874c4018295da848e250f23511361cda4/LICENSE"
+ },
+ "metadata": {
+  "description": "Exact public Mia-AiLab EXL3 3.5 bpw quantization of Qwen/Qwen3.8-27B (14.2 GB, workload-calibrated, text model with a built-in MTP draft head, no vision tower). Apache-2.0.",
+  "tags": [
+   "mia-ai-lab",
+   "qwen3-8-mia",
+   "language",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "text"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/Mia-AiLab/Qwen3.8-27B-EXL3-3.5bpw",
+  "revision": "19441ac874c4018295da848e250f23511361cda4"
+ }
+}

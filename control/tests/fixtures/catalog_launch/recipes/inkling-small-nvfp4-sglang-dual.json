@@ -1,0 +1,527 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "b0d8718a4424bb22e448e04407ab3ce5f7399a4c5fc702d6fbe36c3772ec8862",
+    "repository": "docker.io/lmsysorg/sglang"
+   },
+   "context": {
+    "path": "adapters/inkling/small-dual"
+   },
+   "dockerfile": "adapters/inkling/small-dual/Dockerfile",
+   "network": {
+    "hosts": []
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "inkling-small-nvfp4-sglang-dual"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "inkling-small"
+   ],
+   "port": 30000
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Executable Candidate thin adaptation of SGLang's verified two-DGX-Spark Inkling Small NVFP4 TP2 profile, rebased from its dedicated dev image onto the stable SGLang v0.5.20 release image. It serves text, image, and 16 kHz audio inputs through an offline OpenAI-compatible API with bounded 64K context; Candidate status is retained only for Vonk's physical canary.",
+  "tags": [
+   "executable",
+   "candidate",
+   "thinkingmachines",
+   "inkling",
+   "multimodal",
+   "text",
+   "vision",
+   "audio",
+   "reasoning",
+   "tool-use",
+   "nvfp4",
+   "sglang",
+   "distributed",
+   "spark"
+  ],
+  "title": "Inkling Small NVFP4 SGLang two Sparks"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-34448b82c17d",
+     "id": "primary-metadata-34448b82c17d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "readme-146664eb4ce2",
+     "id": "primary-readme-146664eb4ce2",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "chat-template-0aa1aa0c729d",
+     "id": "primary-chat-template-0aa1aa0c729d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "config-dcb5b1d587bc",
+     "id": "primary-config-dcb5b1d587bc",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "hf-quant-config-70f2ae087bb4",
+     "id": "primary-hf-quant-config-70f2ae087bb4",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00009-0536fc0774c0",
+     "id": "primary-model-00001-of-00009-0536fc0774c0",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00009-94046cd4c60e",
+     "id": "primary-model-00002-of-00009-94046cd4c60e",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00003-of-00009-5b011d77adab",
+     "id": "primary-model-00003-of-00009-5b011d77adab",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00004-of-00009-f84efa4eab97",
+     "id": "primary-model-00004-of-00009-f84efa4eab97",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00005-of-00009-04911920af13",
+     "id": "primary-model-00005-of-00009-04911920af13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00006-of-00009-6f2e9eb03063",
+     "id": "primary-model-00006-of-00009-6f2e9eb03063",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00007-of-00009-728792823d6b",
+     "id": "primary-model-00007-of-00009-728792823d6b",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00008-of-00009-dc821c24f1af",
+     "id": "primary-model-00008-of-00009-dc821c24f1af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00009-of-00009-c91d957b4a0c",
+     "id": "primary-model-00009-of-00009-c91d957b4a0c",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-2e3a00b15c54",
+     "id": "primary-model-safetensors-index-2e3a00b15c54",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "mtp-d286dd21cb98",
+     "id": "primary-mtp-d286dd21cb98",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "processor-config-b4a3962ea5f7",
+     "id": "primary-processor-config-b4a3962ea5f7",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "special-tokens-map-abc97715b4b3",
+     "id": "primary-special-tokens-map-abc97715b4b3",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-bc253fd2b702",
+     "id": "primary-tokenizer-bc253fd2b702",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-9fb6333a7db8",
+     "id": "primary-tokenizer-9fb6333a7db8",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-2e36c9748a20",
+     "id": "primary-tokenizer-config-2e36c9748a20",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "90ffed7245a29ca1a0cb69bee73cf893bc0c4ca037489bc6f1757858e1e8ebfe",
+    "kind": "model",
+    "publisher": "thinkingmachines",
+    "slug": "inkling-small-nvfp4"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Thinking Machines Lab",
+   "SGLang contributors"
+  ],
+  "source_reference": "https://github.com/sgl-project/sglang/blob/94602c9c2b7cbdb8efd5c52802dac6a1c180089e/docs/src/snippets/configs/thinkingmachines/inkling-small.jsx"
+ },
+ "release": {
+  "released_at": "2026-09-18",
+  "version": "0.5.20"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "model-path",
+    "setting": null,
+    "value": "/models"
+   },
+   {
+    "name": "served-model-name",
+    "setting": null,
+    "value": "inkling-small"
+   },
+   {
+    "name": "tp",
+    "setting": null,
+    "value": 2
+   },
+   {
+    "name": "context-length",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "quantization",
+    "setting": null,
+    "value": "modelopt_fp4"
+   },
+   {
+    "name": "attention-backend",
+    "setting": null,
+    "value": "triton"
+   },
+   {
+    "name": "page-size",
+    "setting": null,
+    "value": 128
+   },
+   {
+    "name": "fp4-gemm-backend",
+    "setting": null,
+    "value": "marlin"
+   },
+   {
+    "name": "moe-runner-backend",
+    "setting": null,
+    "value": "marlin"
+   },
+   {
+    "name": "mamba-radix-cache-strategy",
+    "setting": null,
+    "value": "extra_buffer"
+   },
+   {
+    "name": "mem-fraction-static",
+    "setting": null,
+    "value": "0.85"
+   },
+   {
+    "name": "swa-full-tokens-ratio",
+    "setting": null,
+    "value": "0.1"
+   },
+   {
+    "name": "mamba-full-memory-ratio",
+    "setting": null,
+    "value": "0.1"
+   },
+   {
+    "name": "enable-multimodal",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "disable-prefill-cuda-graph",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "reasoning-parser",
+    "setting": null,
+    "value": "inkling"
+   },
+   {
+    "name": "tool-call-parser",
+    "setting": null,
+    "value": "inkling"
+   },
+   {
+    "name": "trust-remote-code",
+    "setting": null,
+    "value": true
+   }
+  ],
+  "engine": "sglang",
+  "entrypoint": [
+   "/opt/vonk/bin/sglang-serve"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "NCCL_DEBUG",
+    "value": "WARN"
+   },
+   {
+    "name": "SGLANG_ENABLE_UNIFIED_RADIX_TREE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 180
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 65536
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "dual",
+  "node_count": 2,
+  "parallelism": {
+   "backend": "native",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 2
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 170764923366,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 24000000000,
+      "working_bytes": 52000000000
+     },
+     "memory": {
+      "peak_bytes": 120000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   },
+   {
+    "count": 1,
+    "endpoint_owner": false,
+    "name": "worker",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 170764923366,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 24000000000,
+      "working_bytes": 52000000000
+     },
+     "memory": {
+      "peak_bytes": 120000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "worker",
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 64,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "inkling-small"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

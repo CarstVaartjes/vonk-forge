@@ -1,0 +1,1097 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "219043cf57a42499ccc514f4de5b96f9e8e401fee47e435ba96ce06c3171f1c8",
+    "repository": "ghcr.io/tonyd2wild/mimo-v2.5-tp2-1m-nvfp4kv"
+   },
+   "context": {
+    "path": "adapters/mimo/tonyd2wild-v25-nvfp4kv-triple"
+   },
+   "dockerfile": "adapters/mimo/tonyd2wild-v25-nvfp4kv-triple/Dockerfile",
+   "network": {
+    "hosts": [
+     "patch-diff.githubusercontent.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "mimo-v2-5-omni-nvfp4-tonyd2wild-vllm-triple"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/health",
+   "model_aliases": [
+    "mimo-v2.5"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "standard",
+  "description": "Xiaomi MiMo-V2.5 Omni (text, image, video and audio input) as lukealonso's ModelOpt NVFP4 checkpoint on three Sparks with vLLM tensor parallel 3 over Ray, a 1,000,000-token context on a 4-bit NVFP4 KV cache (DiffKV Triton backend with WMMA decode), MTP2 speculative decoding and the TP3 virtual-heads mod that pads the attention heads for three ranks. Basis: tonyd2wild's TP3 NVFP4-KV recipe (MIT) and his earlier TP3 MTP repository (FP8 KV variant, offered as an option), on his published patched vLLM 0.21.1rc1.dev85 dev-build image with the upstream mods applied at build time (the mods are derived from vLLM, Apache-2.0). The upstream TP3 repository does not name an image; the published TP2 image is used because the earlier TP3 repository's audio recipe names the same image lineage (vllm-mimo-omni-mtp2-1m-audio-exp:20260620). The two-Spark recipe by the same creator is mimo-v2-5-omni-nvfp4-tonyd2wild-vllm-dual. Upstream figures (about 36 tok/s decode, 10.59M-token KV pool at 1M context with NVFP4 KV against 3.06M with FP8 KV) are claims until measured here; Vonk physical three-Spark acceptance is pending.",
+  "tags": [
+   "audio",
+   "diffkv",
+   "mimo-v2.5",
+   "mtp",
+   "multimodal",
+   "nvfp4",
+   "nvfp4-kv",
+   "ray",
+   "reasoning",
+   "spark",
+   "tool-use",
+   "tp3",
+   "video",
+   "vllm"
+  ],
+  "title": "MiMo V2.5 Omni NVFP4 vLLM three Sparks"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-c96667522371-618cd5b83d",
+     "id": "primary-metadata-c96667522371-618cd5b83d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "readme-b0d9aed03ec8-b335630551",
+     "id": "primary-readme-b0d9aed03ec8-b335630551",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "amax-checkpoint-8242c5179df4-63bfec3c43",
+     "id": "primary-amax-checkpoint-8242c5179df4-63bfec3c43",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "chat-template-cf1a0a0e5cbc-d61688c200",
+     "id": "primary-chat-template-cf1a0a0e5cbc-d61688c200",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "config-e0702adae379-ed9711fcf6",
+     "id": "primary-config-e0702adae379-ed9711fcf6",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "generation-config-5e14358a9bd5-131b519c8f",
+     "id": "primary-generation-config-5e14358a9bd5-131b519c8f",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-95cca046bda0-ee7976dc99",
+     "id": "primary-model-95cca046bda0-ee7976dc99",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-ac41378c3257-b2c36aa7e5",
+     "id": "primary-tokenizer-config-ac41378c3257-b2c36aa7e5",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "config-8b414f453bee-587cb980af",
+     "id": "primary-config-8b414f453bee-587cb980af",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "generation-config-eecf00d97019-97dd3d578b",
+     "id": "primary-generation-config-eecf00d97019-97dd3d578b",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "hf-quant-config-91aa1c24a6ce-a481ad90fa",
+     "id": "primary-hf-quant-config-91aa1c24a6ce-a481ad90fa",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "merges-599bab540750-b0d6dcfed4",
+     "id": "primary-merges-599bab540750-b0d6dcfed4",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00035-cdffaebb1ba3-e79e58bbb3",
+     "id": "primary-model-00001-of-00035-cdffaebb1ba3-e79e58bbb3",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00035-c082d19b0038-4fe95db4bc",
+     "id": "primary-model-00002-of-00035-c082d19b0038-4fe95db4bc",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00003-of-00035-3a3e99e29540-e36aebc705",
+     "id": "primary-model-00003-of-00035-3a3e99e29540-e36aebc705",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00004-of-00035-89b394aa1a26-8b6d38d69d",
+     "id": "primary-model-00004-of-00035-89b394aa1a26-8b6d38d69d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00005-of-00035-f3027e6e80d5-c659553c6f",
+     "id": "primary-model-00005-of-00035-f3027e6e80d5-c659553c6f",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00006-of-00035-c571f85609c3-3c3256da94",
+     "id": "primary-model-00006-of-00035-c571f85609c3-3c3256da94",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00007-of-00035-f51793e5be1b-382103c254",
+     "id": "primary-model-00007-of-00035-f51793e5be1b-382103c254",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00008-of-00035-bbd6daeb51aa-22e0cdc710",
+     "id": "primary-model-00008-of-00035-bbd6daeb51aa-22e0cdc710",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00009-of-00035-13755eae35f1-dc21cb7d40",
+     "id": "primary-model-00009-of-00035-13755eae35f1-dc21cb7d40",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00010-of-00035-6e4ba29006a8-f0c0099fc3",
+     "id": "primary-model-00010-of-00035-6e4ba29006a8-f0c0099fc3",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00011-of-00035-e0ae62894374-86f2ae3f7a",
+     "id": "primary-model-00011-of-00035-e0ae62894374-86f2ae3f7a",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00012-of-00035-a67df3dd6f8b-993478bb9d",
+     "id": "primary-model-00012-of-00035-a67df3dd6f8b-993478bb9d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00013-of-00035-420c7a1066ca-2b3d5f588b",
+     "id": "primary-model-00013-of-00035-420c7a1066ca-2b3d5f588b",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00014-of-00035-56caa926135a-8a2a1cb8fc",
+     "id": "primary-model-00014-of-00035-56caa926135a-8a2a1cb8fc",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00015-of-00035-cc0f6704ad8d-7ba940aeff",
+     "id": "primary-model-00015-of-00035-cc0f6704ad8d-7ba940aeff",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00016-of-00035-8a543994672e-17103f96cc",
+     "id": "primary-model-00016-of-00035-8a543994672e-17103f96cc",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00017-of-00035-1d4ba1189f71-447039f6f7",
+     "id": "primary-model-00017-of-00035-1d4ba1189f71-447039f6f7",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00018-of-00035-665289eb5e90-2457943930",
+     "id": "primary-model-00018-of-00035-665289eb5e90-2457943930",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00019-of-00035-dceba5e05d3b-a7b80a21f1",
+     "id": "primary-model-00019-of-00035-dceba5e05d3b-a7b80a21f1",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00020-of-00035-0fd84415308e-fb626e4a32",
+     "id": "primary-model-00020-of-00035-0fd84415308e-fb626e4a32",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00021-of-00035-45e91e0e0698-0d94214bf6",
+     "id": "primary-model-00021-of-00035-45e91e0e0698-0d94214bf6",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00022-of-00035-406da078086a-11b64106d4",
+     "id": "primary-model-00022-of-00035-406da078086a-11b64106d4",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00023-of-00035-9b1bb596097e-bbeadfa0b5",
+     "id": "primary-model-00023-of-00035-9b1bb596097e-bbeadfa0b5",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00024-of-00035-636d5dca3ba6-c861577060",
+     "id": "primary-model-00024-of-00035-636d5dca3ba6-c861577060",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00025-of-00035-d51d7e2eff9f-2553d09d58",
+     "id": "primary-model-00025-of-00035-d51d7e2eff9f-2553d09d58",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00026-of-00035-cfa68725e868-9383090353",
+     "id": "primary-model-00026-of-00035-cfa68725e868-9383090353",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00027-of-00035-129b05d7007b-a0c5b41e99",
+     "id": "primary-model-00027-of-00035-129b05d7007b-a0c5b41e99",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00028-of-00035-c936a5c53a6a-3665059922",
+     "id": "primary-model-00028-of-00035-c936a5c53a6a-3665059922",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00029-of-00035-bbd94937a06f-8dad7bf48a",
+     "id": "primary-model-00029-of-00035-bbd94937a06f-8dad7bf48a",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00030-of-00035-500c6b5e2a83-e40c38ca32",
+     "id": "primary-model-00030-of-00035-500c6b5e2a83-e40c38ca32",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00031-of-00035-5172ff044cf5-856e2d455b",
+     "id": "primary-model-00031-of-00035-5172ff044cf5-856e2d455b",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00032-of-00035-0db73e5d4e00-c7d40444f4",
+     "id": "primary-model-00032-of-00035-0db73e5d4e00-c7d40444f4",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00033-of-00035-babe4a45a574-77b7e2d470",
+     "id": "primary-model-00033-of-00035-babe4a45a574-77b7e2d470",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00034-of-00035-e39b511533ab-d92dfc9348",
+     "id": "primary-model-00034-of-00035-e39b511533ab-d92dfc9348",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00035-of-00035-35bc1a3dc071-e1074fcb62",
+     "id": "primary-model-00035-of-00035-35bc1a3dc071-e1074fcb62",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-inputscales-cf390bfabc0b-e70117f8fa",
+     "id": "primary-model-inputscales-cf390bfabc0b-e70117f8fa",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-mtp-68bdd301dc32-2c09cdbb54",
+     "id": "primary-model-mtp-68bdd301dc32-2c09cdbb54",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-f8b63de584d4-0a05be8238",
+     "id": "primary-model-safetensors-index-f8b63de584d4-0a05be8238",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "preprocessor-config-b269e51bdc1c-36afccab5d",
+     "id": "primary-preprocessor-config-b269e51bdc1c-36afccab5d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-633518aad78f-224931eb13",
+     "id": "primary-tokenizer-633518aad78f-224931eb13",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-fd34b805f75a-94d5c6ba8f",
+     "id": "primary-tokenizer-config-fd34b805f75a-94d5c6ba8f",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "vocab-ca10d7e9fb3e-ba05d8e2e4",
+     "id": "primary-vocab-ca10d7e9fb3e-ba05d8e2e4",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "35a1b9afcce1740399b8ea384f9b3eb075920339379711ee2b55e7adcad4e68d",
+    "kind": "model",
+    "publisher": "lukealonso",
+    "slug": "mimo-v2-5-nvfp4-a147dd04"
+   }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "4-bit KV with the DiffKV Triton backend and WMMA decode (upstream default).",
+     "label": "NVFP4 (default)",
+     "value": "nvfp4"
+    },
+    {
+     "args": [
+      {
+       "name": "kv-cache-dtype",
+       "setting": null,
+       "value": "fp8_e4m3"
+      }
+     ],
+     "env": {
+      "VLLM_NVFP4_INLINE": "0",
+      "VLLM_WMMA_DECODE": "0"
+     },
+     "help": "8-bit KV without the NVFP4 inline and WMMA decode paths, as in upstream's frozen FP8 configuration.",
+     "label": "FP8",
+     "value": "fp8"
+    }
+   ],
+   "help": "Precision of the attention KV cache. Upstream: NVFP4 gives about 3.5x the KV pool of FP8 at a 1M-token request (10.59M against 3.06M tokens) for a few percent of decode speed (36.4 against 38.2 tok/s); the FP8 path is the earlier public TP3 configuration.",
+   "label": "KV cache precision",
+   "name": "kv-cache"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Two drafted tokens per step (upstream default).",
+     "label": "MTP 2 (default)",
+     "value": "mtp2"
+    },
+    {
+     "args": [
+      {
+       "name": "speculative-config",
+       "setting": null,
+       "value": "{\"method\":\"mtp\",\"num_speculative_tokens\":1}"
+      }
+     ],
+     "help": "One drafted token per step (the two-Spark upstream default; not measured upstream on three Sparks).",
+     "label": "MTP 1",
+     "value": "mtp1"
+    },
+    {
+     "env": {
+      "VONK_MIMO_SPEC": "off"
+     },
+     "help": "No speculative decoding.",
+     "label": "Off",
+     "value": "off"
+    }
+   ],
+   "help": "MTP drafting with the checkpoint's bundled MTP head. Upstream's TP3 recipes use two drafted tokens.",
+   "label": "Speculative decoding",
+   "name": "speculative"
+  },
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "No server default (upstream TP3 default).",
+     "label": "Chat template (default)",
+     "value": "template"
+    },
+    {
+     "args": [
+      {
+       "name": "default-chat-template-kwargs",
+       "setting": null,
+       "value": "{\"enable_thinking\":false}"
+      }
+     ],
+     "help": "Reasoning off unless a request enables it (upstream eval setting).",
+     "label": "Off",
+     "value": "off"
+    }
+   ],
+   "help": "Server default for the chat template's enable_thinking. The upstream TP3 recipes pass no default, so the chat template decides; upstream's tool/agent eval ran with thinking off.",
+   "label": "Thinking default",
+   "name": "thinking"
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Xiaomi MiMo",
+   "lukealonso",
+   "tonyd2wild",
+   "vLLM contributors"
+  ],
+  "source_reference": "https://github.com/tonyd2wild/MiMo-V2.5-TP3-NVFP4-KV-3xDGX-Spark/tree/8024c85b5e5fc5c9edd9db7b40f607683372cb0c"
+ },
+ "release": {
+  "released_at": "2026-07-13",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "served-model-name",
+    "setting": null,
+    "value": "mimo-v2.5"
+   },
+   {
+    "name": "trust-remote-code",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "tensor-parallel-size",
+    "setting": null,
+    "value": 3
+   },
+   {
+    "name": "pipeline-parallel-size",
+    "setting": null,
+    "value": 1
+   },
+   {
+    "name": "load-format",
+    "setting": null,
+    "value": "instanttensor"
+   },
+   {
+    "name": "hf-overrides",
+    "setting": null,
+    "value": "{\"architectures\":[\"MiMoV2OmniForCausalLM\"]}"
+   },
+   {
+    "name": "limit-mm-per-prompt",
+    "setting": null,
+    "value": "{\"image\":4,\"video\":1,\"audio\":1}"
+   },
+   {
+    "name": "mm-encoder-tp-mode",
+    "setting": null,
+    "value": "data"
+   },
+   {
+    "name": "attention-backend",
+    "setting": null,
+    "value": "triton_attn_diffkv"
+   },
+   {
+    "name": "kv-cache-dtype",
+    "setting": null,
+    "value": "nvfp4"
+   },
+   {
+    "name": "gpu-memory-utilization",
+    "setting": null,
+    "value": "0.89"
+   },
+   {
+    "name": "max-model-len",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "max-num-batched-tokens",
+    "setting": null,
+    "value": "8192"
+   },
+   {
+    "name": "max-num-seqs",
+    "setting": "concurrency",
+    "value": null
+   },
+   {
+    "name": "block-size",
+    "setting": null,
+    "value": 32
+   },
+   {
+    "name": "compilation-config",
+    "setting": null,
+    "value": "{\"cudagraph_capture_sizes\":[1,2,4,8]}"
+   },
+   {
+    "name": "enable-prefix-caching",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "enable-chunked-prefill",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "speculative-config",
+    "setting": null,
+    "value": "{\"method\":\"mtp\",\"num_speculative_tokens\":2}"
+   },
+   {
+    "name": "no-async-scheduling",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "enable-auto-tool-choice",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "tool-call-parser",
+    "setting": null,
+    "value": "mimo"
+   },
+   {
+    "name": "reasoning-parser",
+    "setting": null,
+    "value": "mimo"
+   }
+  ],
+  "engine": "vllm",
+  "entrypoint": [
+   "/opt/vonk/bin/vllm",
+   "serve",
+   "/models/target"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "VLLM_ENGINE_READY_TIMEOUT_S",
+    "value": "3600"
+   },
+   {
+    "name": "TORCH_CUDA_ARCH_LIST",
+    "value": "12.1a"
+   },
+   {
+    "name": "PYTORCH_CUDA_ALLOC_CONF",
+    "value": "expandable_segments:True"
+   },
+   {
+    "name": "VLLM_MIMO_V2_TP3_VIRTUAL_HEADS",
+    "value": "1"
+   },
+   {
+    "name": "VLLM_NVFP4_GEMM_BACKEND",
+    "value": "flashinfer-cutlass"
+   },
+   {
+    "name": "VLLM_USE_FLASHINFER_MOE_FP4",
+    "value": "1"
+   },
+   {
+    "name": "VLLM_FLASHINFER_MOE_BACKEND",
+    "value": "throughput"
+   },
+   {
+    "name": "VLLM_ALLOW_LONG_MAX_MODEL_LEN",
+    "value": "1"
+   },
+   {
+    "name": "VLLM_NVFP4_INLINE",
+    "value": "1"
+   },
+   {
+    "name": "VLLM_WMMA_DECODE",
+    "value": "1"
+   },
+   {
+    "name": "VLLM_WMMA_INSPECT",
+    "value": "0"
+   },
+   {
+    "name": "VLLM_WMMA_COMPARE",
+    "value": "0"
+   },
+   {
+    "name": "VLLM_WMMA_AUTHCOMPARE",
+    "value": "0"
+   },
+   {
+    "name": "NCCL_NET",
+    "value": "IB"
+   },
+   {
+    "name": "NCCL_IB_DISABLE",
+    "value": "0"
+   },
+   {
+    "name": "NCCL_CUMEM_ENABLE",
+    "value": "0"
+   },
+   {
+    "name": "NCCL_NVLS_ENABLE",
+    "value": "0"
+   },
+   {
+    "name": "NCCL_NTHREADS",
+    "value": "64"
+   },
+   {
+    "name": "NCCL_NSOCKS_PERTHREAD",
+    "value": "2"
+   },
+   {
+    "name": "NCCL_BUFFSIZE",
+    "value": "8388608"
+   },
+   {
+    "name": "NCCL_CROSS_NIC",
+    "value": "1"
+   },
+   {
+    "name": "NCCL_DEBUG",
+    "value": "WARN"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 180
+  }
+ },
+ "settings": {
+  "concurrency": {
+   "change_effect": "restart",
+   "value": 6
+  },
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 1000000
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "triple",
+  "node_count": 3,
+  "parallelism": {
+   "backend": "ray",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 3
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 183531090884,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 24000000000,
+      "working_bytes": 65000000000
+     },
+     "memory": {
+      "peak_bytes": 124000000000,
+      "reserve_bytes": 6000000000
+     }
+    }
+   },
+   {
+    "count": 2,
+    "endpoint_owner": false,
+    "name": "worker",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 183531090884,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 24000000000,
+      "working_bytes": 65000000000
+     },
+     "memory": {
+      "peak_bytes": 124000000000,
+      "reserve_bytes": 6000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint",
+   "worker"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/health",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 64,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "mimo-v2.5"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

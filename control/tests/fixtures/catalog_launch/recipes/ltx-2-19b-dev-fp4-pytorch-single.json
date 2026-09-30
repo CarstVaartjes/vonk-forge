@@ -1,0 +1,504 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/video/ltx2-pytorch"
+   },
+   "dockerfile": "adapters/video/ltx2-pytorch/Dockerfile",
+   "network": {
+    "hosts": [
+     "github.com",
+     "codeload.github.com",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "ltx-2-19b-dev-fp4-pytorch-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "video-job",
+   "input": {
+    "max_bytes": 16384,
+    "media_types": [
+     "text/plain"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "Required UTF-8 prompt.txt describing the video, motion, camera, and synchronized sound.",
+      "extensions": [
+       ".txt"
+      ],
+      "id": "prompt",
+      "label": "Generation prompt",
+      "max_file_bytes": 16384,
+      "max_files": 1,
+      "max_total_bytes": 16384,
+      "media_types": [
+       "text/plain"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 1073741824,
+    "slots": [
+     {
+      "description": "Generated 768x512 H.264/AAC MP4 with exactly 97 frames at 24 fps and one synchronized 24 kHz stereo audio stream.",
+      "extensions": [
+       ".mp4"
+      ],
+      "id": "video",
+      "label": "Synchronized video",
+      "max_file_bytes": 1073741824,
+      "max_files": 1,
+      "max_total_bytes": 1073741824,
+      "media_types": [
+       "video/mp4"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Still-deployable historical disk-offload Candidate using the exact official native LTX 1.3.0 two-stage pipeline, FP4 checkpoint, distilled refinement LoRA, spatial upscaler, Gemma 3 companion closure, and ARM64 CUDA 13.2 wheels. The 89 GB startup and 75 GB steady declarations conservatively apply only the pinned upstream's documented 31 GB disk-versus-CPU offload reduction, with 8 GB growth and 8 GB system reserve for a 97 GB admission total; container build and physical Spark acceptance remain required. LTX-2.5 BF16 is the current fidelity baseline and LTX-2.5 FP8-cast is the current lower-memory canary; this immutable execution contract remains available for reproducibility.",
+  "tags": [
+   "executable",
+   "candidate",
+   "build-unvalidated",
+   "historical",
+   "superseded",
+   "disk-offload",
+   "lightricks",
+   "ltx",
+   "video",
+   "audio",
+   "fp4",
+   "pytorch",
+   "single",
+   "spark"
+  ],
+  "title": "LTX-2 19B dev FP4 native pipeline single Spark (superseded)"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "artifact-01",
+     "id": "primary-artifact-01",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-02",
+     "id": "primary-artifact-02",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-03",
+     "id": "primary-artifact-03",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-04",
+     "id": "primary-artifact-04",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-05",
+     "id": "primary-artifact-05",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-06",
+     "id": "primary-artifact-06",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-07",
+     "id": "primary-artifact-07",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-08",
+     "id": "primary-artifact-08",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-09",
+     "id": "primary-artifact-09",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-10",
+     "id": "primary-artifact-10",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-11",
+     "id": "primary-artifact-11",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-12",
+     "id": "primary-artifact-12",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-13",
+     "id": "primary-artifact-13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-14",
+     "id": "primary-artifact-14",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-15",
+     "id": "primary-artifact-15",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-16",
+     "id": "primary-artifact-16",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-17",
+     "id": "primary-artifact-17",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-18",
+     "id": "primary-artifact-18",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-19",
+     "id": "primary-artifact-19",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-20",
+     "id": "primary-artifact-20",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-21",
+     "id": "primary-artifact-21",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-22",
+     "id": "primary-artifact-22",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-23",
+     "id": "primary-artifact-23",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-24",
+     "id": "primary-artifact-24",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-25",
+     "id": "primary-artifact-25",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-26",
+     "id": "primary-artifact-26",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-27",
+     "id": "primary-artifact-27",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "artifact-28",
+     "id": "primary-artifact-28",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "9253bb344fb0bab7f19db2aed480e1e27649848b478a4b5064b7ba99de828e47",
+    "kind": "model",
+    "publisher": "lightricks",
+    "slug": "ltx-2-19b-dev-fp4-dfcc2108"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Lightricks"
+  ],
+  "source_reference": "https://huggingface.co/Lightricks/LTX-2/tree/dfcc2108383fe1aaa0584bdf55d368a4bdadd90c"
+ },
+ "release": {
+  "released_at": "2026-09-28",
+  "version": "2.3.7"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "entrypoint",
+    "setting": null,
+    "value": "/opt/vonk/source/pipelines/run.py"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "video/mp4"
+   },
+   {
+    "name": "timeout-seconds",
+    "setting": null,
+    "value": 3600
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 0
+   }
+  ],
+  "engine": "pytorch-pipeline",
+  "entrypoint": [
+   "/opt/vonk/bin/pytorch-pipeline"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 77447526016,
+      "image_bytes": 8000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 162895052032
+     },
+     "memory": {
+      "peak_bytes": 89000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "video-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/prompt.txt",
+      "input_slots": {
+       "prompt": "qualification/fixtures/prompt.txt"
+      },
+      "output_slot": "video",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "video-job"
+  }
+ }
+}

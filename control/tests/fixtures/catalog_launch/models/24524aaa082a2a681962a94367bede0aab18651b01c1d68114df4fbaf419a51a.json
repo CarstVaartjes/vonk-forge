@@ -1,0 +1,142 @@
+{
+ "capabilities": [
+  "audio-understanding",
+  "chat",
+  "image-understanding",
+  "reasoning",
+  "text-generation",
+  "tool-use"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-34448b82c17d-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930",
+   "size_bytes": 1570
+  },
+  {
+   "id": "readme-3e0608a6be80-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "3e0608a6be80e3eb040a5aa6c76707809503deb85be6360184a118fb6156526c",
+   "size_bytes": 27955
+  },
+  {
+   "id": "chat-template-0a2c8073c878-00824420d1",
+   "path": "chat_template.jinja",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "0a2c8073c878ab1da004bee933a998606537bbb62016310352c7285c3f01c5b5",
+   "size_bytes": 18569
+  },
+  {
+   "id": "config-1b28f3d2c310-587cb980af",
+   "path": "config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "1b28f3d2c3100f6c594754b81107428bd7b822a7f48272ca681dae9d2ec38330",
+   "size_bytes": 4954
+  },
+  {
+   "id": "generation-config-d4226bbe3117-97dd3d578b",
+   "path": "generation_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "d4226bbe3117d2d253ba4609720ba82c6c4ce4627a9a6ae05387c78983ac03de",
+   "size_bytes": 208
+  },
+  {
+   "id": "model-2db5482b20d7-9d75c1098f",
+   "path": "model.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550",
+   "size_bytes": 10246621918
+  },
+  {
+   "id": "processor-config-32bdf45d2ad4-27f0cb76af",
+   "path": "processor_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "32bdf45d2ad4cc29a0822ddd157a182de76644f0419a6228d151495256e9813c",
+   "size_bytes": 1689
+  },
+  {
+   "id": "tokenizer-cc8d3a0ce364-224931eb13",
+   "path": "tokenizer.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f",
+   "size_bytes": 32169626
+  },
+  {
+   "id": "tokenizer-config-9f4fec4b1dc6-94d5c6ba8f",
+   "path": "tokenizer_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "9f4fec4b1dc6ecddf8f4a92e9caea5971c0e67d81309f3f9066a2bee8c362633",
+   "size_bytes": 3082
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "google",
+   "slug": "gemma",
+   "title": "Google Gemma"
+  },
+  "model": {
+   "publisher": "google",
+   "slug": "gemma-4-e2b",
+   "title": "Gemma 4 E2B"
+  },
+  "publisher": "google",
+  "slug": "gemma-4-e2b-it-3e22461f",
+  "variant": "IT 3e22461f",
+  "version": "IT 3e22461f"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "Google DeepMind"
+  ],
+  "spdx": "Apache-2.0",
+  "url": "https://ai.google.dev/gemma/docs/gemma_4_license"
+ },
+ "metadata": {
+  "description": "Exact public Google Gemma 4 E2B instruction-tuned checkpoint.",
+  "tags": [
+   "google",
+   "gemma",
+   "language",
+   "instruction-tuned",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "audio",
+  "image",
+  "text"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/google/gemma-4-E2B-it",
+  "revision": "3e22461f65e89153144f8adb70e3b8c2cc9845a7"
+ }
+}

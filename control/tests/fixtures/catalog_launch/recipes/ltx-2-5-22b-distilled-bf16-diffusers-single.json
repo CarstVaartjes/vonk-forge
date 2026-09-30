@@ -1,0 +1,290 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/video/ltx25-diffusers"
+   },
+   "dockerfile": "adapters/video/ltx25-diffusers/Dockerfile",
+   "network": {
+    "hosts": [
+     "github.com",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "ltx-2-5-22b-distilled-bf16-diffusers-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "video-job",
+   "input": {
+    "max_bytes": 81920,
+    "media_types": [
+     "application/json",
+     "text/plain"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "Required UTF-8 text describing the shot, motion, camera, lighting, dialogue, and synchronized sound.",
+      "extensions": [
+       ".txt"
+      ],
+      "id": "prompt",
+      "label": "Generation prompt",
+      "max_file_bytes": 16384,
+      "max_files": 1,
+      "max_total_bytes": 16384,
+      "media_types": [
+       "text/plain"
+      ],
+      "min_files": 1
+     },
+     {
+      "description": "Optional request.json overriding the deterministic seed and named unified-memory profile.",
+      "extensions": [
+       ".json"
+      ],
+      "id": "request",
+      "label": "Advanced options",
+      "max_file_bytes": 65536,
+      "max_files": 1,
+      "max_total_bytes": 65536,
+      "media_types": [
+       "application/json"
+      ],
+      "min_files": 0
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 1074790400,
+    "slots": [
+     {
+      "description": "Generated 768x512 H.264/AAC MP4 with exactly 65 frames at 24 fps and one synchronized 48 kHz stereo audio stream.",
+      "extensions": [
+       ".mp4"
+      ],
+      "id": "video",
+      "label": "Synchronized video",
+      "max_file_bytes": 1073741824,
+      "max_files": 1,
+      "max_total_bytes": 1073741824,
+      "media_types": [
+       "video/mp4"
+      ],
+      "min_files": 1
+     },
+     {
+      "description": "JSON receipt containing seed, profile, runtime pins, raw tensor hashes, media facts, and MP4 SHA-256.",
+      "extensions": [
+       ".json"
+      ],
+      "id": "receipt",
+      "label": "Determinism receipt",
+      "max_file_bytes": 1048576,
+      "max_files": 1,
+      "max_total_bytes": 1048576,
+      "media_types": [
+       "application/json"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "metadata": {
+  "alignment": "unspecified",
+  "description": "Installable single-Spark Candidate using the exact official gated LTX-2.5 Diffusers closure, a 505-byte license/token access probe before the 70 GB model artifact, convolutional VAE, deterministic eight-sigma generation, BF16 offload baseline, and optional FP8 layerwise-cast profiles. Exact-license acknowledgement, same-account Hugging Face access, physical authenticated installation, and GB10 audiovisual qualification remain required.",
+  "tags": [
+   "executable",
+   "candidate",
+   "build-unvalidated",
+   "gated",
+   "preflight-required",
+   "lightricks",
+   "ltx",
+   "video",
+   "audio",
+   "synchronized",
+   "diffusers",
+   "bf16",
+   "fp8-cast",
+   "single",
+   "spark"
+  ],
+  "title": "LTX-2.5 distilled BF16 Diffusers single Spark"
+ },
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "filtered-snapshot",
+     "id": "primary-filtered-snapshot",
+     "mount": {
+      "target": "/models/license-token-preflight"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "filtered-snapshot",
+     "id": "primary-filtered-snapshot-2",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "e2bca0110fc64aa6c586ee25157abc0d431f388a00806d7de7d8de16e5a40a68",
+    "kind": "model",
+    "publisher": "lightricks",
+    "slug": "ltx-2-5-22b-distilled-bf16-diffusers"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Lightricks",
+   "Hugging Face"
+  ],
+  "source_reference": "https://huggingface.co/Lightricks/LTX-2.5-Diffusers/tree/426936f8b22dc28e4def61e515478b0b7e4a53cc"
+ },
+ "release": {
+  "released_at": "2026-09-28",
+  "version": "1.1.8"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "video/mp4"
+   },
+   {
+    "name": "pipeline",
+    "setting": null,
+    "value": "text-to-video"
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 42
+   },
+   {
+    "name": "num-inference-steps",
+    "setting": null,
+    "value": 8
+   },
+   {
+    "name": "width",
+    "setting": null,
+    "value": 768
+   },
+   {
+    "name": "height",
+    "setting": null,
+    "value": 512
+   }
+  ],
+  "engine": "diffusers",
+  "entrypoint": [
+   "/opt/vonk/bin/diffusers-job"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 70090051877,
+      "image_bytes": 8000000000,
+      "safety_margin_bytes": 16000000000,
+      "working_bytes": 148180103754
+     },
+     "memory": {
+      "peak_bytes": 118000000000,
+      "reserve_bytes": 10000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "video-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/prompt.txt",
+      "input_slots": {
+       "prompt": "qualification/fixtures/prompt.txt"
+      },
+      "output_slot": "video",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "video-job"
+  }
+ }
+}
