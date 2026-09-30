@@ -204,9 +204,10 @@ def install_auth_routes(
         request: Request,
         _authenticated_actor: Actor = authenticated,
     ) -> Response:
-        # This endpoint is deliberately browser-session-only. The general
-        # actor dependency enforces CSRF for cookie mutations; resolving the
-        # cookie again prevents a bearer caller from minting another bearer.
+        # This endpoint is deliberately browser-session-only. CSRF is enforced
+        # explicitly here, exactly like logout; resolving the cookie again
+        # prevents a bearer caller from minting another bearer.
+        require_csrf(request)
         identity = cookie_identity(request)
         issued_at = now()
         token = tokens.issue(
