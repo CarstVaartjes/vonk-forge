@@ -2932,8 +2932,11 @@ fn job_result_body(
         exit_code,
         output_manifest,
         evidence: RecipeJobEvidence {
+            // A job that legitimately runs past the u32::MAX millisecond
+            // ceiling (~49.7 days) saturates its reported elapsed time instead
+            // of failing the result report with a panic.
             elapsed_milliseconds: u32::try_from(started.elapsed().as_millis())
-                .expect("bounded job elapsed time"),
+                .unwrap_or(u32::MAX),
             // The helper does not expose a cgroup peak for transient containers yet. Null is
             // honest unavailable evidence; zero would falsely claim a measurement.
             peak_memory_bytes: None,
