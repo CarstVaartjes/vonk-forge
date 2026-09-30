@@ -294,10 +294,10 @@ services:
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
-    # Installer secrets retain their owner's restrictive permissions; startup
-    # needs only DAC_OVERRIDE to read these bind-mounted files.
+    # DAC_OVERRIDE reads installer-owned secrets. The pinned Caddy executable
+    # carries NET_BIND_SERVICE, which must remain in its bounding set for exec.
     cap_drop: [ALL]
-    cap_add: [DAC_OVERRIDE]
+    cap_add: [DAC_OVERRIDE, NET_BIND_SERVICE]
     security_opt: [no-new-privileges:true]
     ports:
       - target: 8443

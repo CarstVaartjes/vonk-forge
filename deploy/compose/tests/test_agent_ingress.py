@@ -58,6 +58,32 @@ def _rendered(*files: str, environment: dict[str, str] | None = None) -> dict:
     return json.loads(result.stdout)
 
 
+@pytest.mark.needs_docker
+def test_caddy_binary_executes_with_the_deployed_security_boundary() -> None:
+    # Break caught: the pinned Caddy executable carries NET_BIND_SERVICE;
+    # omitting it from the bounding set rejects exec, even on high ports.
+    _require_docker_runtime()
+    service = _rendered()["services"]["caddy"]
+    command = ["docker", "run", "--rm", "--network", "none", "--read-only"]
+    if "user" in service:
+        command.extend(("--user", service["user"]))
+    for option, field in (
+        ("--cap-drop", "cap_drop"),
+        ("--cap-add", "cap_add"),
+        ("--security-opt", "security_opt"),
+    ):
+        for value in service.get(field, []):
+            command.extend((option, value))
+    result = subprocess.run(
+        [*command, "--entrypoint", "caddy", service["image"], "version"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def _adapted_caddy(environment: dict[str, str], caddyfile: str | None = None) -> dict:
     _require_docker_runtime()
     result = subprocess.run(
