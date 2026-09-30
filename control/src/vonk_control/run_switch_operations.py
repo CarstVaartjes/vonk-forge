@@ -6175,6 +6175,12 @@ class RunSwitchOperationService:
                 )
             )
 
+        # Only a Spark build inside the group needs the memory the old
+        # workload holds. Controller image preparation, transfer and install
+        # run beside it, so without such a build the old workload keeps
+        # serving until the one stop right before start (whose post-stop
+        # memory check still guards the start).
+        stop_for_build = stop_before_prepare and build_required and build_on_target
         if build_required and not build_on_target:
             # Controller build output is an input to transfer.  Keep it ahead
             # of target disk cleanup/stop because this builder is outside the
@@ -6199,13 +6205,13 @@ class RunSwitchOperationService:
                 "Download the exact model artifact set into Controller/NAS cache before Spark distribution.",
                 subphase="model-download",
             )
-        if stops and stop_before_prepare and not stop_added:
+        if stops and stop_for_build and not stop_added:
             add(
                 "stop",
-                "Stop conflicting workloads before memory-consuming runtime preparation.",
+                "Stop conflicting workloads before the Spark build needs their memory.",
             )
             stop_added = True
-        if build_required and build_on_target and stop_before_prepare:
+        if stop_for_build:
             # A build outside the group was already placed first above.
             # This remains a ``prepare`` phase for the shared lifecycle
             # vocabulary; the subphase makes Controller OCI preparation

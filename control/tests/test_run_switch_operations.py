@@ -3149,10 +3149,12 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     )
     with pytest.raises(ValidationError, match="known feasible demand and capacity"):
         RunSwitchPlan.model_validate(impossible_capacity)
+    # No Spark build needs the old workload's memory, so it keeps serving
+    # through preparation and stops only right before start.
     assert [phase.kind for phase in plan.phases] == [
+        "prepare",
+        "prepare",
         "stop",
-        "prepare",
-        "prepare",
         "start",
         "final_verify",
     ]
