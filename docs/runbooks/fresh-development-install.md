@@ -57,5 +57,5 @@ mode `0640` with group `64400` and leaves the owner unchanged; the list comes
 from the Compose file, so it cannot drift. Only root, or a member of the group,
 can assign it. A bundle prepared as an ordinary user keeps `0600` and says so;
 run the installer once with `sudo` from the install directory on the NAS
-(`cd /volume1/docker && sudo sh ./install`-style bootstrap, upgrade mode) to
-apply or repair it. The repair is idempotent and reported in the installer output.
+(the same command that created the bundle, from `/volume1/docker`; it upgrades
+in place) to apply or repair it. The repair is idempotent and reported in the installer output.
