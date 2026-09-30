@@ -325,7 +325,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         f"updated={result.updated_count} skipped={result.skipped_count}"
     )
     assert result.imported_count == len(corpus.index["recipes"])
-    assert len(release.package_downloads) == len(corpus.index["recipes"])
+    assert release.library_downloads == 1
 
     forbidden_tables = {
         "local_recipes",

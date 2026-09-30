@@ -7,14 +7,15 @@ Caddy relay (`http://caddy:8085`, built in); `VONK_RECIPE_LIBRARY_RELEASE` is
 the only operator setting and optionally holds an exact release. There is no
 unsigned package source.
 
-Each release carries `SHA256SUMS`, its Sigstore bundle
-`SHA256SUMS.sigstore.json`, the generated schema-2 `catalog-index.json`, and
-one immutable package asset per recipe. The Controller trusts a release only
-after `SHA256SUMS` verifies against the pinned publisher workflow identity, and
-then checks the index and every package against the digests it lists. The
-index must be built from the signed commit, and each recipe entry names its
-package as `packages/<asset>` together with the package `sha256`,
-`expected_bytes`, and media type
+Each release carries one asset, `recipe-library.tar`: `SHA256SUMS`, its
+Sigstore bundle `SHA256SUMS.sigstore.json`, the generated schema-2
+`catalog-index.json`, and one package per recipe, all under the flat names
+`SHA256SUMS` lists. The Controller downloads it only when the release listing
+reports a new bundle digest, trusts it only after `SHA256SUMS` verifies against
+the pinned publisher workflow identity, and then checks the index and every
+package once against the digests it lists. The index must be built from the
+signed commit, and each recipe entry names its package as `packages/<asset>`
+together with the package `sha256`, `expected_bytes`, and media type
 `application/vnd.vonk-forge.recipe-package.v2+tar+gzip`.
 
 Each package is a deterministic gzip-compressed tar archive containing
@@ -25,9 +26,12 @@ and recipe content digest. The package does not contain the repository commit,
 so unrelated repository changes leave its digest unchanged. Weights and OCI
 images are never included.
 
-The Controller fetches a package only when its digest is absent from the
-persistent `state/recipe-library-packages` cache, verifies the package digest
-and member identities, and rejects unsafe tar members or oversized archives. A
+Verified packages are stored by digest in the persistent
+`state/recipe-library-packages` cache when the bundle is ingested (a digest
+already stored is not rewritten); the reader then checks member identities and
+rejects unsafe tar members or oversized archives. A package absent from the
+bundle or with other bytes skips only its recipe as a
+`recipe_package.release_incomplete` problem. A
 package reader's `prepare` hook validates all packages in a candidate release
 before the managed catalog sync writes its first revision or link. An
 integrity or transport failure rejects the whole candidate. A model or recipe

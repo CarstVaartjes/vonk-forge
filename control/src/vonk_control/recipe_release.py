@@ -27,6 +27,10 @@ from .recipe_library_types import RecipeLibraryError
 RELEASE_CHECKSUMS = "SHA256SUMS"
 RELEASE_BUNDLE = "SHA256SUMS.sigstore.json"
 RELEASE_INDEX = "catalog-index.json"
+# The one release asset the Controller downloads: an uncompressed tar holding
+# SHA256SUMS, its Sigstore bundle and every file SHA256SUMS lists, under the
+# same flat names. One asset makes an in-place release update atomic.
+RELEASE_LIBRARY = "recipe-library.tar"
 RELEASE_REPOSITORY_URI = "https://github.com/CarstVaartjes/vonk-forge-recipes"
 # GitHub's numeric repository ID survives renames and is never reused, so a
 # deleted-and-recreated repository with the same name cannot sign releases.
@@ -175,6 +179,7 @@ __all__ = [
     "RELEASE_BUNDLE",
     "RELEASE_CHECKSUMS",
     "RELEASE_INDEX",
+    "RELEASE_LIBRARY",
     "RELEASE_OIDC_ISSUER",
     "RELEASE_REPOSITORY_ID",
     "RELEASE_SIGNER_IDENTITY",
