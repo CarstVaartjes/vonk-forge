@@ -36,6 +36,7 @@ use crate::protocol::{ContainerRuntimeAction, HostOperation, artifact_signing_by
 const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: u64 = 4096;
+const MAX_ENVIRONMENT_VALUE_BYTES: usize = 4096;
 /// The byte ceiling on one canonical runtime-request document. Owned by the
 /// wire contract, not by this helper: the agent enforces the same ceiling
 /// before it writes the request file, so the helper's read cannot be stricter
@@ -4629,8 +4630,12 @@ fn parse_publication(value: &str) -> Option<(std::net::Ipv4Addr, u16, u16)> {
     Some((address, host, container))
 }
 
+/// The name is charset-restricted because it becomes an exec environment key.
+/// Values are Controller-signed plan data, so their content is not restricted;
+/// they are only bounded and kept NUL-free so the exec environment stays
+/// well-formed.
 fn valid_environment(value: &str) -> bool {
-    let Some((name, _)) = value.split_once('=') else {
+    let Some((name, value)) = value.split_once('=') else {
         return false;
     };
     !name.is_empty()
@@ -4642,6 +4647,8 @@ fn valid_environment(value: &str) -> bool {
                 byte.is_ascii_alphanumeric() || byte == b'_'
             }
         })
+        && value.len() <= MAX_ENVIRONMENT_VALUE_BYTES
+        && !value.contains('\0')
 }
 
 fn valid_local_image(value: &str) -> bool {
@@ -4848,8 +4855,9 @@ mod tests {
     use super::{
         AuthorizedRuntimeEffect, CommandOutput, CommandRunner, HostRuntimeAction,
         HostRuntimeRequest, INSTALLATION_RECONCILIATION_DIRECTORY, JobCancellationFence,
-        MAX_COMMAND_OUTPUT_BYTES, MAX_COMPILED_MODEL_PATH_CHARS, ManagedRoots, OperationError,
-        OperationExecutor, RUNTIME_GENERATION_FENCE_DIRECTORY,
+        MAX_COMMAND_OUTPUT_BYTES, MAX_COMPILED_MODEL_PATH_CHARS,
+        MAX_ENVIRONMENT_VALUE_BYTES, ManagedRoots, OperationError, OperationExecutor,
+        RUNTIME_GENERATION_FENCE_DIRECTORY,
         RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION, RuntimeEffectIdentity, RuntimeGenerationFenceUse,
         RuntimeImageReceipt, RuntimeRequestGrantBinding, bounded_container_wait_exit_code,
         hex_sha256, loaded_image_source, parse_publication, validate_docker_run,
@@ -7875,6 +7883,23 @@ mod tests {
             ));
             assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
         }
+    }
+
+    #[test]
+    fn runtime_environment_values_are_bounded_but_not_charset_restricted() {
+        assert!(super::valid_environment(&format!(
+            "ANY_NAME={}",
+            "x".repeat(MAX_ENVIRONMENT_VALUE_BYTES)
+        )));
+        assert!(!super::valid_environment(&format!(
+            "ANY_NAME={}",
+            "x".repeat(MAX_ENVIRONMENT_VALUE_BYTES + 1)
+        )));
+        assert!(!super::valid_environment("ANY_NAME=bad\0value"));
+        // Values carry Controller-signed plan data: arbitrary content stays valid.
+        assert!(super::valid_environment(
+            "ANY_NAME=--flag; $(echo) with\nnewlines and spaces"
+        ));
     }
 
     #[test]
