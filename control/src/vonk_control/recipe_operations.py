@@ -1010,6 +1010,18 @@ class RecipeOperationService:
         checkpoint.
         """
 
+        if not plan.allowed and {
+            reason.code for node in plan.nodes for reason in node.blockers
+        } <= {"install.insufficient_disk"}:
+            # The exact plan an earlier attempt already persisted holds its own
+            # disk claim; counting that claim against itself must not stop
+            # this attempt adopting it.
+            with self._sessions() as session:
+                adopted = self._prepared_installation_id(
+                    session, plan, planned_only=True
+                )
+            if adopted is not None:
+                return adopted
         if not plan.allowed:
             try:
                 require_install_admissible(plan)
@@ -1071,7 +1083,9 @@ class RecipeOperationService:
             return installation_id
 
     @staticmethod
-    def _prepared_installation_id(session: Session, plan: InstallPlan) -> str | None:
+    def _prepared_installation_id(
+        session: Session, plan: InstallPlan, *, planned_only: bool = False
+    ) -> str | None:
         existing = session.scalar(
             select(RecipeInstallation)
             .where(
@@ -1080,7 +1094,9 @@ class RecipeOperationService:
                 RecipeInstallation.recipe_build_id == plan.recipe_build_id,
                 RecipeInstallation.plan_digest == plan.plan_digest,
                 RecipeInstallation.state.in_(
-                    ("planned", "installing", "partial", "installed")
+                    ("planned",)
+                    if planned_only
+                    else ("planned", "installing", "partial", "installed")
                 ),
             )
             .order_by(RecipeInstallation.created_at.desc())

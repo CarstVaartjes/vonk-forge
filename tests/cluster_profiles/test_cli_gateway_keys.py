@@ -1,6 +1,7 @@
 import json
 
 from cluster_profiles import cli
+from cluster_profiles.control_client import _request_contract
 
 SECRET = "sk-client-" + "s" * 32
 
@@ -12,6 +13,8 @@ class KeyClient:
         self.calls = []
 
     def request(self, method, path, payload=None, **kwargs):
+        # Hold every call to the bundled OpenAPI contract, as the real client does.
+        _request_contract(path, method, payload)
         self.calls.append((method, path, payload))
         if method == "GET":
             return {
@@ -87,7 +90,7 @@ def test_key_list_and_revoke(capsys):
     capsys.readouterr()
     assert cli.main(["key", "revoke", "laptop", "--yes"], control_client=client) == 0
     assert "Revoked key laptop." in capsys.readouterr().out
-    assert client.calls[-1] == ("POST", "/api/key/laptop/revoke", {})
+    assert client.calls[-1] == ("POST", "/api/key/laptop/revoke", None)
 
 
 def test_key_roll_confirms_and_prints_the_new_key_once(capsys):
@@ -97,4 +100,4 @@ def test_key_roll_confirms_and_prints_the_new_key_once(capsys):
     capsys.readouterr()
     assert cli.main(["key", "roll", "laptop", "--yes"], control_client=client) == 0
     assert capsys.readouterr().out.count(SECRET) == 1
-    assert client.calls[-1] == ("POST", "/api/key/laptop/roll", {})
+    assert client.calls[-1] == ("POST", "/api/key/laptop/roll", None)

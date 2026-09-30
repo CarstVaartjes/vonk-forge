@@ -620,6 +620,95 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
     assert view.result["reason"] == "digest mismatch"
 
 
+@pytest.mark.parametrize(
+    ("failure_kind", "retried"),
+    [("temporary-dependency", True), ("integrity-failure", False)],
+)
+def test_member_failure_kind_and_diagnostic_survive_aggregation(
+    agent_system,  # noqa: F811
+    failure_kind: str,
+    retried: bool,
+) -> None:
+    """The agent's typed failure decides the parent's retry and stays visible."""
+
+    from vonk_control.recovery_policy import RecoveryDecision, classify
+    from vonk_control.run_switch_operations import _child_failure_kind
+
+    _client, services, _tokens, clock = agent_system
+    executor = DurableDistributionPhaseExecutor(
+        services.sessions,
+        services.operations,
+        DistributionService(
+            MemoryObjectSource(), clock=clock, sessions=services.sessions
+        ),
+        clock=clock,
+    )
+    with services.sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        node.workload_intent_ordinal = 1
+        child = Job(
+            id=str(uuid4()),
+            request_id=str(uuid4()),
+            kind="artifact-distribution",
+            state="queued",
+            actor="test",
+            authority_revision="f" * 64,
+            targets=[NODE_A],
+            payload_digest="0" * 64,
+            payload={
+                "workload_intent_ordinal": 1,
+                "cached_nodes": [],
+                "target_totals": {NODE_A: 26},
+            },
+            result=None,
+            created_at=clock.now,
+            updated_at=clock.now,
+        )
+        session.add(child)
+        session.flush()
+        services.operations.enqueue_in_session(
+            session,
+            child.id,
+            NODE_A,
+            "artifact.distribution.v1",
+            "f" * 64,
+            ArtifactDistributionPayload(plan_digest="f" * 64).model_dump(mode="json"),
+            operation_id=str(uuid4()),
+        )
+        operation = (
+            session.query(AgentOperation).filter_by(parent_job_id=child.id).one()
+        )
+        operation.state = "failed"
+        operation.current_attempt = 1
+        session.add(
+            AgentOperationAttempt(
+                operation_id=operation.id,
+                attempt=1,
+                fence=str(uuid4()),
+                lease_deadline=clock.now,
+                agent_certificate_serial="serial-a",
+                state="failed",
+                result={
+                    "reason": "Controller distribution could not be verified and retained",
+                    "failure_kind": failure_kind,
+                    "error_code": "artifact_distribution_failed",
+                    "stage": "artifact-distribution",
+                    "diagnostic": "http_status=404 error_code=controller.http_404",
+                },
+            )
+        )
+        child_id = child.id
+    view = executor.get(child_id)
+    member = view.result["members"][0]
+    assert member["failure_kind"] == failure_kind
+    assert member["diagnostic"] == "http_status=404 error_code=controller.http_404"
+    assert view.result["evidence"][0]["diagnostic"] == member["diagnostic"]
+    assert view.result["failure_kind"] == failure_kind
+    decision = classify(_child_failure_kind(view))
+    assert (decision is RecoveryDecision.RETRY) is retried
+
+
 @pytest.mark.parametrize("image_prepared", [True, False])
 def test_model_download_is_a_durable_cache_child_with_exact_pins(
     image_prepared: bool,

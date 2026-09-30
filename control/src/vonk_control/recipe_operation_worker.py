@@ -65,6 +65,7 @@ class RecipeOperationWorker:
         run_switches: _RunSwitchCoordinator | None = None,
         build_cleanup: Callable[[], bool] | None = None,
         retirement_cleanup: Callable[[], bool] | None = None,
+        residue_cleanup: Callable[[], bool] | None = None,
     ) -> None:
         self._sessions = sessions
         self._routes = routes
@@ -74,6 +75,7 @@ class RecipeOperationWorker:
         self._run_switches = run_switches
         self._build_cleanup = build_cleanup
         self._retirement_cleanup = retirement_cleanup
+        self._residue_cleanup = residue_cleanup
 
     def tick(self) -> bool:
         progressed = False
@@ -81,6 +83,10 @@ class RecipeOperationWorker:
             progressed = self._build_cleanup()
         if self._retirement_cleanup is not None:
             progressed = self._retirement_cleanup() or progressed
+        if self._residue_cleanup is not None:
+            # What a finished attempt left behind is released before the next
+            # attempt's admission counts it (see attempt_residues).
+            progressed = self._residue_cleanup() or progressed
         # Parent operations depend on lifecycle observations and published routes.
         # Give each coordinator a turn before servicing those dependencies.
         for coordinator in (self._fleet_profiles, self._run_switches, self._recoveries):
