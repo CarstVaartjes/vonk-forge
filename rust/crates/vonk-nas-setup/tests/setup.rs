@@ -70,9 +70,7 @@ fn site_payload() -> CanonicalTemplatePayload {
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
           "preflight": ["Complete the Tailscale prerequisites."],
-          "internal_values": [
-            {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"}
-          ],
+          "internal_values": [],
           "required_values": [
             {"env": "NAS_LAN_IP", "prompt": "Reserved NAS LAN IP", "validation": "ipv4"},
             {"env": "VONK_MANAGEMENT_CIDRS", "prompt": "Trusted Spark management CIDRs", "validation": "cidr_list"},
@@ -322,7 +320,6 @@ fn secure_remote_install_asks_only_for_site_inputs_and_generates_the_rest() {
     assert_eq!(
         environment(&result.root),
         [
-            "COMPOSE_PROJECT_NAME=vonk-forge-control",
             "COMPOSE_PROFILES=secure-remote",
             "NAS_LAN_IP=192.168.1.22",
             "VONK_MANAGEMENT_CIDRS=192.168.1.0/24",
@@ -367,7 +364,6 @@ fn lab_install_asks_only_for_the_nas_address_and_optional_secrets() {
     assert_eq!(
         environment(&result.root),
         [
-            "COMPOSE_PROJECT_NAME=vonk-forge-control",
             "COMPOSE_PROFILES=",
             "VONK_CONTROL_HOSTNAME=vonk-forge.local",
             "NAS_LAN_IP=10.0.4.9",
@@ -764,9 +760,7 @@ fn upgrade_rewrites_an_old_environment_with_only_known_keys() {
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
-          "internal_values": [
-            {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"}
-          ],
+          "internal_values": [],
           "required_values": [
             {"env": "NAS_LAN_IP", "prompt": "Reserved NAS LAN IP", "validation": "ipv4"},
             {"env": "VONK_CONTROL_HOSTNAME", "prompt": "Control hostname", "validation": "hostname"}
@@ -807,7 +801,6 @@ fn upgrade_rewrites_an_old_environment_with_only_known_keys() {
     assert_eq!(
         environment(&bundle),
         [
-            "COMPOSE_PROJECT_NAME=vonk-forge-control",
             "COMPOSE_PROFILES=secure-remote",
             "NAS_LAN_IP=192.168.1.20",
             "VONK_CONTROL_HOSTNAME=vonk.example.test",
@@ -816,9 +809,43 @@ fn upgrade_rewrites_an_old_environment_with_only_known_keys() {
     );
     assert_eq!(
         result.dropped_environment,
-        ["VONK_AGENT_ENROLL_HOSTNAME", "AGENT_CA_PROVISIONER_KID"]
+        [
+            "COMPOSE_PROJECT_NAME",
+            "VONK_AGENT_ENROLL_HOSTNAME",
+            "AGENT_CA_PROVISIONER_KID"
+        ]
     );
     assert!(transcript.is_empty(), "dropped keys are never prompted for");
+}
+
+#[test]
+fn upgrade_never_introduces_a_compose_project_name() {
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    std::fs::write(
+        bundle.join(".env"),
+        "COMPOSE_PROFILES=\nNAS_LAN_IP=192.168.1.20\n\
+         VONK_MANAGEMENT_CIDRS=192.168.1.0/24\nVONK_DIRECT_FABRIC_CIDRS=192.168.100.0/24\n\
+         VONK_CONTROL_HOSTNAME=vonk.example.test\n",
+    )
+    .expect("old environment");
+
+    let (result, _) = run_with_answers(
+        &site_payload(),
+        SetupRequest::upgrade(temporary.path()),
+        "",
+        &SizedSecretGenerator,
+    );
+
+    assert!(result.dropped_environment.is_empty());
+    assert!(
+        environment(&bundle)
+            .iter()
+            .all(|line| !line.starts_with("COMPOSE_PROJECT_NAME")),
+        "{:?}",
+        environment(&bundle)
+    );
 }
 
 #[test]

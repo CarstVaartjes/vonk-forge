@@ -34,6 +34,7 @@ def _version_pinned(image: str) -> bool:
     ) and bare.rsplit(":", 1)[-1].lower() not in FLOATING_TAGS
 
 
+PROJECT_NAME = "vonk-forge"
 SERVICES = {
     "tailscale-gateway",
     "tailscale-configurator",
@@ -228,7 +229,11 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
     if "configs" in document:
         raise BundleError("Compose must not carry runtime configs")
     _validate_secret_paths(document)
-    compose = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
+    # The project name is fixed here, the single source of truth, so it never
+    # depends on the install directory or a `.env` entry.
+    compose = yaml.safe_dump(
+        {"name": PROJECT_NAME, **document}, sort_keys=False, default_flow_style=False
+    )
     return {
         "schema_version": 2,
         "docker_compose_yaml": compose,
@@ -241,7 +246,6 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
             "Keep the raw OAuth client ID and secret ready; the secret is entered with hidden input.",
         ],
         "internal_values": [
-            {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"},
             {"env": "VONK_INSTALL_CHANNEL", "value": channel},
         ],
         # Only NAS_LAN_IP and the control hostname are asked; the others take
