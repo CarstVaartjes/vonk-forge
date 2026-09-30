@@ -35,6 +35,12 @@ services:
     command: [postgres]
     restart: unless-stopped
     logging: *bounded-logging
+    # The entrypoint stages the initdb secret as postgres, drops privileges via
+    # gosu, and chowns completed dumps to the bundle owner, so the entrypoint
+    # keeps exactly these five capabilities; the server itself runs as postgres.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
     environment:
       VONK_BACKUP_OFFHOST_PATH: ${VONK_BACKUP_OFFHOST_PATH:-}
       POSTGRES_DB: control
