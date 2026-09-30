@@ -15,6 +15,8 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
+import yaml
+
 MAXIMUM_HTTPS_BODY_BYTES = 2 * 1024 * 1024
 OPTIONAL_SECRET_FILES = {"hf-token"}
 
@@ -192,6 +194,34 @@ def _require_mode(path: Path, expected: int) -> None:
         raise AcceptanceError(f"{path.name} has unsafe permissions")
 
 
+def group_readable_secrets(compose: dict[str, object]) -> tuple[int | None, set[str]]:
+    """The secret files capability-free services read through `group_add`.
+
+    Returns the single gid Compose adds to them and their paths under
+    `secrets/`. These are the only files that may be 0640, and only with
+    that group.
+    """
+    gids: set[int] = set()
+    files: set[str] = set()
+    services = compose.get("services")
+    secrets = compose.get("secrets")
+    if not isinstance(services, dict) or not isinstance(secrets, dict):
+        raise AcceptanceError("Compose has no services or secrets")
+    for name, service in services.items():
+        group_add = service.get("group_add") or []
+        if not group_add:
+            continue
+        if service.get("cap_drop") != ["ALL"] or service.get("cap_add"):
+            raise AcceptanceError(f"{name} must drop every capability and add none")
+        gids.update(int(gid) for gid in group_add)
+        for secret in service.get("secrets", []):
+            source = secrets[secret]["file"]
+            files.add(source.removeprefix("./secrets/"))
+    if len(gids) > 1:
+        raise AcceptanceError("capability-free services must share one secret group")
+    return (next(iter(gids)) if gids else None), files
+
+
 def assert_bundle_contract(bundle: Path) -> None:
     if bundle.is_symlink() or not bundle.is_dir():
         raise AcceptanceError("NAS bundle is not a safe directory")
@@ -219,6 +249,7 @@ def assert_bundle_contract(bundle: Path) -> None:
     _require_mode(environment, 0o600)
 
     compose_raw = compose.read_bytes()
+    group_gid, group_files = group_readable_secrets(yaml.safe_load(compose_raw))
     environment_raw = environment.read_bytes()
     # secrets/gateway is a Controller-written mount (group-writable, files owned
     # by the Controller), not installer secret material.
@@ -242,7 +273,13 @@ def assert_bundle_contract(bundle: Path) -> None:
         if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
             raise AcceptanceError("secret file is unsafe")
         relative = path.relative_to(secrets)
-        _require_mode(path, 0o600)
+        if relative.as_posix() in group_files and (
+            stat.S_IMODE(metadata.st_mode) == 0o640
+        ):
+            if metadata.st_gid != group_gid:
+                raise AcceptanceError(f"{path.name} has unsafe permissions")
+        else:
+            _require_mode(path, 0o600)
         content = path.read_bytes().strip()
         if not content and relative.as_posix() not in OPTIONAL_SECRET_FILES:
             raise AcceptanceError(f"bundle file {relative} is empty")

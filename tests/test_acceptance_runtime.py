@@ -501,3 +501,60 @@ def test_https_tunnel_rejects_a_successful_response_from_a_failing_child(
         )
     server.join(timeout=15)
     assert not server.is_alive()
+
+
+def _group_bundle(tmp_path: Path, *, compose_gid: int) -> Path:
+    bundle = tmp_path / "vonk-forge"
+    secrets = bundle / "secrets"
+    secrets.mkdir(parents=True)
+    (secrets / "gateway").mkdir(mode=0o700)
+    (bundle / "backups").mkdir(mode=0o700)
+    (bundle / "docker-compose.yaml").write_text(
+        "services:\n"
+        "  reader:\n"
+        "    cap_drop: [ALL]\n"
+        f"    group_add: ['{compose_gid}']\n"
+        "    secrets: [shared]\n"
+        "secrets:\n"
+        "  shared:\n    file: ./secrets/shared\n"
+        "  private:\n    file: ./secrets/private\n"
+    )
+    (bundle / ".env").write_text("COMPOSE_PROFILES=secure-remote\n")
+    for name in ("shared", "private"):
+        (secrets / name).write_text("value-" + name + "\n")
+        (secrets / name).chmod(0o600)
+    (bundle / "docker-compose.yaml").chmod(0o644)
+    (bundle / ".env").chmod(0o600)
+    secrets.chmod(0o700)
+    return bundle
+
+
+def test_bundle_contract_allows_0640_only_for_the_group_readable_secret(
+    tmp_path: Path,
+) -> None:
+    gid = tmp_path.stat().st_gid
+    bundle = _group_bundle(tmp_path, compose_gid=gid)
+    secrets = bundle / "secrets"
+
+    assert_bundle_contract(bundle)  # 0600 stays valid (installer run unprivileged)
+    (secrets / "shared").chmod(0o640)
+    assert_bundle_contract(bundle)
+
+    # Any other secret must stay owner-only.
+    (secrets / "private").chmod(0o640)
+    with pytest.raises(AcceptanceError, match="private has unsafe permissions"):
+        assert_bundle_contract(bundle)
+
+
+def test_bundle_contract_rejects_a_group_readable_secret_with_another_group(
+    tmp_path: Path,
+) -> None:
+    gid = tmp_path.stat().st_gid
+    bundle = _group_bundle(tmp_path, compose_gid=gid + 1)
+    (bundle / "secrets" / "shared").chmod(0o640)
+
+    with pytest.raises(AcceptanceError, match="shared has unsafe permissions"):
+        assert_bundle_contract(bundle)
+    (bundle / "secrets" / "shared").chmod(0o660)
+    with pytest.raises(AcceptanceError, match="shared has unsafe permissions"):
+        assert_bundle_contract(bundle)

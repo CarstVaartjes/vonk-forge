@@ -34,6 +34,7 @@ from tests.acceptance.runtime import (
     assert_compose_compatibility,
     assert_compose_services_healthy,
     bootstrap_command,
+    group_readable_secrets,
     https_over_command,
 )
 
@@ -642,19 +643,9 @@ def assert_tailscale_secret_group(bundle: Path) -> None:
     wrote must be group-readable (0640) with exactly the group Compose adds.
     """
     compose = yaml.safe_load((bundle / "docker-compose.yaml").read_text("utf-8"))
-    gids: set[int] = set()
-    files: set[str] = set()
-    for name in ("tailscale-gateway", "tailscale-configurator"):
-        service = compose["services"][name]
-        if service.get("cap_add") or service.get("cap_drop") != ["ALL"]:
-            raise AcceptanceError(f"{name} must drop every capability and add none")
-        gids.update(int(gid) for gid in service.get("group_add", []))
-        for secret in service["secrets"]:
-            source = compose["secrets"][secret]["file"]
-            files.add(source.removeprefix("./secrets/"))
-    if len(gids) != 1 or not files:
+    gid, files = group_readable_secrets(compose)
+    if gid is None or not files:
         raise AcceptanceError("Tailscale services must share one secret group")
-    (gid,) = gids
     for relative in sorted(files):
         metadata = (bundle / "secrets" / relative).stat()
         if metadata.st_gid != gid or stat.S_IMODE(metadata.st_mode) != 0o640:
