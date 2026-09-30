@@ -383,13 +383,33 @@ build_agent() {
   identity=$4
   cat > "$test_root/agent-$identity.c" <<SOURCE
 #include <signal.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 static volatile const char build[] = "VONK_AGENT_BUILD_DIGEST=$build_digest";
 static volatile const char semantic[] = "VONK_AGENT_SEMANTIC_VERSION=$semantic";
 static volatile const char identity[] = "$identity";
+static int ready(void) {
+  const char *path = getenv("NOTIFY_SOCKET");
+  if (path == NULL) return 0;
+  size_t length = strlen(path);
+  struct sockaddr_un address = { .sun_family = AF_UNIX };
+  if (length == 0 || length >= sizeof address.sun_path) return 2;
+  memcpy(address.sun_path, path, length + 1);
+  if (path[0] == '@') address.sun_path[0] = '\\0';
+  int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+  if (fd < 0) return 2;
+  socklen_t address_length = offsetof(struct sockaddr_un, sun_path) + length;
+  if (path[0] != '@') ++address_length;
+  ssize_t sent = sendto(fd, "READY=1", 7, MSG_NOSIGNAL,
+      (struct sockaddr *)&address, address_length);
+  close(fd);
+  return sent == 7 ? 0 : 2;
+}
 int main(int argc, char **argv) {
   if (argc == 2 && strcmp(argv[1], "--version") == 0) {
     printf("vonk-agent %s\\n", "$semantic");
@@ -409,6 +429,8 @@ int main(int argc, char **argv) {
     printf("{\"semantic_version\":\"%s\",\"build_digest\":\"%s\",\"binary_digest\":\"%s\",\"architecture\":\"linux-arm64\"}\\n", "$semantic", "$build_digest", binary_digest);
     return 0;
   }
+  /* Match the packaged Type=notify service after the fixture self-test. */
+  if (ready() != 0) return 2;
   for (;;) pause();
 }
 SOURCE
@@ -737,7 +759,10 @@ install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
 systemctl --system daemon-reload
 systemctl --system enable --now "$socket_unit" >/dev/null
 systemctl --system start "$helper_unit"
-systemctl --system enable --now "$agent_unit" >/dev/null
+# The production agent may spend time on host readiness; this tiny fixture
+# must notify promptly. Bound observation so a broken fixture emits diagnostics
+# instead of consuming the entire matrix job's timeout.
+timeout 30s systemctl --system enable --now "$agent_unit" >/dev/null
 
 old_agent_pid="$(systemctl --system show --property=MainPID --value "$agent_unit")"
 old_helper_pid="$(systemctl --system show --property=MainPID --value "$helper_unit")"
