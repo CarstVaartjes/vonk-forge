@@ -12,6 +12,10 @@ services:
     restart: unless-stopped
     logging: *tailscale-logging
     read_only: true
+    # Userspace networking (TS_USERSPACE=true) needs no TUN device and no
+    # capability from the default set.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
       TS_AUTH_ONCE: "true"
       TS_CLIENT_ID: file:/run/secrets/tailscale-oauth-client-id
@@ -64,6 +68,8 @@ services:
     restart: unless-stopped
     logging: *tailscale-logging
     read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     network_mode: service:tailscale-gateway
     entrypoint:
       - /bin/sh
