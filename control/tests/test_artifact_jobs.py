@@ -726,11 +726,13 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         assert placement["reserved_memory_bytes"] == 225
         run = session.get(RecipeRun, run_id)
         assert run is not None
-        planned_floor = next(
-            item.memory_floor_bytes
+        planned_node = next(
+            item
             for item in parse_stored_run_plan(run.plan).nodes
             if item.node_id == node_id
         )
+        assert placement["reserved_memory_bytes"] == planned_node.required_memory_bytes
+        planned_floor = planned_node.memory_floor_bytes
         assert planned_floor == 107
         assert placement["memory_floor_bytes"] == planned_floor
         assert operation.payload["input_manifest_sha256"] == job.input_manifest_sha256

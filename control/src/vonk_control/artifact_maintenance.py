@@ -123,12 +123,14 @@ class ArtifactMaintenanceCadence:
 
     def _read_state(self) -> dict[str, Any]:
         path = self._state_root / ".maintenance.json"
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
         try:
-            if path.is_symlink():
-                raise ValueError("artifact maintenance state is unsafe")
-            raw = path.read_text(encoding="utf-8")
+            descriptor = os.open(path, flags)
         except FileNotFoundError:
             return {}
+        with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
+            raw = stream.read()
         parsed = json.loads(raw)
         if not isinstance(parsed, dict) or parsed.get("version") != _STATE_VERSION:
             raise ValueError("artifact maintenance state is invalid")

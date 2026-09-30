@@ -1196,6 +1196,7 @@ class ArtifactJobService:
                 parameters=parameters,
                 timeout_seconds=artifact_job.timeout_seconds,
                 memory_floor_bytes=planned_node.memory_floor_bytes,
+                reserved_memory_bytes=planned_node.required_memory_bytes,
                 option_choices=mapping_option_choices(
                     mapping.parameters if mapping is not None else {}
                 ),

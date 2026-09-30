@@ -354,6 +354,46 @@ def test_stored_object_is_served_by_name_and_size_without_hashing(tmp_path) -> N
     assert caught.value.code == "distribution.object_unavailable"
 
 
+def test_model_cache_manifest_publication_is_atomic_across_readers(tmp_path):
+    # Break caught: describing one file exposes its authorization before the
+    # rest of the set has been checked, even if a later descriptor is corrupt.
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from types import SimpleNamespace
+
+    descriptor_ready, finish = Event(), Event()
+    path = tmp_path / "model.bin"
+    path.write_bytes(b"model")
+    digest = __import__("hashlib").sha256(b"model").hexdigest()
+
+    class Cache:
+        def manifest_for_artifact_set(self, _digest):
+            return SimpleNamespace(digest="b" * 64)
+
+        def resolve_verified_artifact_set(self, _digest):
+            yield {"path": "model.bin", "sha256": digest, "bytes": 5, "file": path}
+            descriptor_ready.set()
+            assert finish.wait(5)
+            yield {"path": "malformed"}
+
+        def cached_artifact_file(self, *_args):
+            return path, 5, digest
+
+    source = ModelCacheObjectSource.from_service(Cache())
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        loading = pool.submit(source.objects_for_set, "b" * 64)
+        try:
+            assert descriptor_ready.wait(5)
+            with pytest.raises(DistributionError, match="not authorized"):
+                source.open_object(digest, 5)
+        finally:
+            finish.set()
+        with pytest.raises(DistributionError, match="malformed"):
+            loading.result(timeout=5)
+    with pytest.raises(DistributionError, match="not authorized"):
+        source.open_object(digest, 5)
+
+
 def test_authorization_is_decided_once_per_assignment_not_per_range(
     agent_system,
 ) -> None:

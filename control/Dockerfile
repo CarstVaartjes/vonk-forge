@@ -1,10 +1,8 @@
 # syntax=docker/dockerfile:1.7
-# First-party language bases track their rolling tag so a rebuild picks up
-# upstream patch releases. They hold no operator data, run only our own code,
-# and are rebuilt through CI on every change; see docs/image-pin-refresh.md.
-# Third-party bases below stay digest-pinned.
-ARG NODE_IMAGE=node:26-trixie-slim
-ARG PYTHON_IMAGE=python:3.14-slim-trixie
+# Platform build bases bind reviewed multi-platform index digests. Refresh the
+# tag and digest together through docs/image-pin-refresh.md.
+ARG NODE_IMAGE=node:26-trixie-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1
+ARG PYTHON_IMAGE=python:3.14-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
 ARG SKOPEO_IMAGE=quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
 ARG SKOPEO_INDEX_DIGEST=sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
 ARG SKOPEO_AMD64_DIGEST=sha256:ab4c269c9e2bd11affe2666b860fb651a15afec121c15986b052b02e09d86239

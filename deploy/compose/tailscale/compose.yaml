@@ -7,11 +7,15 @@ x-tailscale-logging: &tailscale-logging
 services:
   tailscale-gateway:
     profiles: [secure-remote]
-    image: tailscale/tailscale:v1.102.5
+    image: tailscale/tailscale:v1.102.5@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065
     hostname: vonk-forge-gateway
     restart: unless-stopped
     logging: *tailscale-logging
     read_only: true
+    # Userspace networking (TS_USERSPACE=true) needs no TUN device and no
+    # capability from the default set.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
       TS_AUTH_ONCE: "true"
       TS_CLIENT_ID: file:/run/secrets/tailscale-oauth-client-id
@@ -60,10 +64,12 @@ services:
 
   tailscale-configurator:
     profiles: [secure-remote]
-    image: tailscale/tailscale:v1.102.5
+    image: tailscale/tailscale:v1.102.5@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065
     restart: unless-stopped
     logging: *tailscale-logging
     read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     network_mode: service:tailscale-gateway
     entrypoint:
       - /bin/sh

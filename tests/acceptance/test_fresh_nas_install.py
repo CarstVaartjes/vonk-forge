@@ -388,9 +388,9 @@ def is_immutable_image(image: str) -> bool:
 
 
 def is_channel_image(image: str, channel: str | None = None) -> bool:
-    if "@" in image:
-        return False
     if image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
+        if "@" in image:
+            return False
         tags = (
             ("dev", "latest")
             if channel is None
@@ -405,8 +405,8 @@ def is_channel_image(image: str, channel: str | None = None) -> bool:
             )
             is not None
         )
-    # Third-party images keep the exact version the release was tested with.
-    return PINNED_IMAGE.fullmatch(image) is not None
+    # Upstream dependencies bind the reviewed bytes even when a tag moves.
+    return re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image) is not None
 
 
 def run(

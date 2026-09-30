@@ -27,6 +27,88 @@ from vonk_control.models import AgentNode, ArtifactDistributionAssignment, Job
 from .test_agent_api import NODE_A, NODE_B, agent_system  # noqa: F401
 from .test_distribution_executor import _phase, _plan
 
+
+def _register_grant_in_process(database_url, mapping, now):
+    """Independent worker: PostgreSQL owns coordination across processes."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from vonk_control.distribution_assignment import NodeDistributionAssignment
+
+    assignment = NodeDistributionAssignment.parse(mapping)
+    source = MemoryObjectSource(
+        {item.sha256: b"x" * item.bytes for item in assignment.objects}
+    )
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    source.register_runtime_image(
+        assignment.oci_image_digest, assignment.oci_archive_sha256
+    )
+    engine = create_engine(database_url)
+    try:
+        service = DistributionService(
+            source,
+            clock=lambda: datetime.fromisoformat(now),
+            sessions=sessionmaker(engine),
+        )
+        service.register(assignment)
+        return service.authorize(
+            node_id=assignment.node_id, plan_digest=assignment.plan_digest
+        ).assignment_id
+    finally:
+        engine.dispose()
+
+
+def test_concurrent_processes_reclaim_a_grant_without_mutating_its_identity(
+    tmp_path, postgres_engine
+):
+    # Break caught: renewal/reclaim updates a primary key instead of retiring
+    # the old identity. A database guard models the immutable grant boundary;
+    # two separate workers must converge on the same successor atomically.
+    from concurrent.futures import ProcessPoolExecutor
+    from multiprocessing import get_context
+
+    from .test_agent_api import make_agent_system
+
+    system = make_agent_system(tmp_path, engine=postgres_engine)
+    transfer = _transfer(system)
+    transfer.execute(transfer.clock.now)
+    old = transfer.distribution.authorize(node_id=NODE_A, plan_digest="f" * 64)
+    transfer.clock.now += timedelta(hours=2)
+    successor = old.model_copy(
+        update={
+            "assignment_id": str(uuid4()),
+            "expires_at": transfer.clock.now + timedelta(hours=1),
+        }
+    )
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql("""
+            CREATE FUNCTION forbid_grant_identity_update() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN IF NEW.id <> OLD.id THEN RAISE EXCEPTION 'grant identity is immutable'; END IF;
+            RETURN NEW; END $$
+        """)
+        connection.exec_driver_sql("""
+            CREATE TRIGGER immutable_grant_identity BEFORE UPDATE ON artifact_distribution_assignments
+            FOR EACH ROW EXECUTE FUNCTION forbid_grant_identity_update()
+        """)
+    arguments = (
+        postgres_engine.url.render_as_string(hide_password=False),
+        successor.to_mapping(),
+        transfer.clock.now.isoformat(),
+    )
+    with ProcessPoolExecutor(max_workers=2, mp_context=get_context("spawn")) as pool:
+        attempts = [
+            pool.submit(_register_grant_in_process, *arguments) for _ in range(2)
+        ]
+        assert [attempt.result(timeout=15) for attempt in attempts] == [
+            successor.assignment_id
+        ] * 2
+    with transfer.services.sessions() as session:
+        assert session.get(ArtifactDistributionAssignment, old.assignment_id) is None
+        row = session.get(ArtifactDistributionAssignment, successor.assignment_id)
+        assert row is not None and row.state == "active"
+
+
 MODEL = DistributionObject(
     name="weights/model.bin", sha256="a" * 64, bytes=10, kind="model"
 )

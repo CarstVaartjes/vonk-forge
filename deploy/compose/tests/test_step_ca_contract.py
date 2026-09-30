@@ -11,6 +11,50 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 
 
+@pytest.mark.needs_docker
+def test_step_ca_binary_executes_with_the_deployed_security_boundary():
+    # Break caught: dropping NET_BIND_SERVICE from the bounding set makes exec
+    # of the pinned file-capability-bearing CA binary fail before it can bind.
+    from deploy.compose.tests.test_agent_ingress import (
+        _rendered,
+        _require_docker_runtime,
+    )
+
+    _require_docker_runtime()
+    service = _rendered()["services"]["step-ca"]
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--read-only",
+        "--user",
+        service["user"],
+    ]
+    for option, field in (
+        ("--cap-drop", "cap_drop"),
+        ("--cap-add", "cap_add"),
+        ("--security-opt", "security_opt"),
+    ):
+        for value in service.get(field, []):
+            command.extend((option, value))
+    result = subprocess.run(
+        [
+            *command,
+            "--entrypoint",
+            "/usr/local/bin/step-ca",
+            service["image"],
+            "version",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_compose_keeps_root_key_out_and_provider_private_key_separate() -> None:
     compose = ROOT / "deploy/compose"
     result = subprocess.run(

@@ -22,7 +22,10 @@ x-control-environment: &control-environment
 
 services:
   postgres:
-    image: postgres:18.6
+    # PostgreSQL 17+ is required: the Controller sets the transaction_timeout
+    # connection GUC (added in 17) on every connection. The pinned image
+    # satisfies that.
+    image: postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
     # The Controller image ships this entrypoint and stages it on start (see
     # control-api), so a pulled release updates it. PostgreSQL must start
     # before the Controller, so wait for the staged copy instead of depending
@@ -35,6 +38,12 @@ services:
     command: [postgres]
     restart: unless-stopped
     logging: *bounded-logging
+    # The entrypoint stages the initdb secret as postgres, drops privileges via
+    # gosu, and chowns completed dumps to the bundle owner, so the entrypoint
+    # keeps exactly these five capabilities; the server itself runs as postgres.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
     environment:
       VONK_BACKUP_OFFHOST_PATH: ${VONK_BACKUP_OFFHOST_PATH:-}
       POSTGRES_DB: control
@@ -136,13 +145,18 @@ services:
       retries: 12
 
   step-ca:
-    image: smallstep/step-ca:0.30.2
+    image: smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
     entrypoint: [step-ca]
     command: [/run/vonk-normalized-secrets/step-ca/ca.json, --password-file, /run/vonk-normalized-secrets/step-ca/password]
     user: "1000:1000"
+    # The pinned binary carries a NET_BIND_SERVICE file capability. Its exec
+    # requires that capability in the bounding set even on the high port 9000.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
     secrets: []
     volumes:
       - step-ca-data:/home/step
@@ -200,7 +214,7 @@ services:
       retries: 10
 
   prometheus:
-    image: prom/prometheus:v3.15.0
+    image: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
     restart: unless-stopped
     logging: *bounded-logging
     entrypoint:
@@ -215,6 +229,9 @@ services:
       - --storage.tsdb.retention.size=10GB
     read_only: true
     user: "65534:65534"
+    # Binds the internal high port 9090 as nobody; no capabilities needed.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     secrets: []
     volumes:
       - prometheus-data:/prometheus
@@ -231,11 +248,14 @@ services:
       retries: 12
 
   grafana:
-    image: grafana/grafana:13.2.2
+    image: grafana/grafana:13.2.2@sha256:ac461fb352abc50da10a51c7d02462e9c05488f11f53f14b3ad79a8145f638a0
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
     user: "472:472"
+    # Binds the internal high port 3000 as uid 472; no capabilities needed.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     entrypoint:
       - /bin/sh
       - -c
@@ -270,10 +290,15 @@ services:
   # files, never for a healthy Controller: the volume keeps the last release,
   # so the gateway keeps serving while the Controller is down.
   caddy:
-    image: caddy:2.11.4
+    image: caddy:2.11.4@sha256:0c994536bddb66445885237f1a5dcc1916bccea922661c76b4e9fc24061f9b52
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
+    # Installer secrets retain their owner's restrictive permissions; startup
+    # needs only DAC_OVERRIDE to read these bind-mounted files.
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE]
+    security_opt: [no-new-privileges:true]
     ports:
       - target: 8443
         published: 8443
@@ -307,16 +332,22 @@ services:
       retries: 12
 
   registry:
-    image: registry:3.1.2
+    image: registry:3.1.2@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
+    # Serves the internal high port 5000; no capability from the default set
+    # is needed to serve or write its volume.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
       OTEL_TRACES_EXPORTER: none
     entrypoint:
       - /bin/sh
       - -c
-      - 'until [ -f /run/vonk-runtime-assets/registry/config.yml ]; do sleep 1; done; exec /entrypoint.sh /run/vonk-runtime-assets/registry/config.yml'
+      - >-
+        until [ -f /run/vonk-runtime-assets/registry/config.yml ]; do sleep 1;
+        done; exec /entrypoint.sh /run/vonk-runtime-assets/registry/config.yml
     volumes:
       - runtime-assets:/run/vonk-runtime-assets:ro
       - registry-data:/var/lib/registry
@@ -392,7 +423,8 @@ networks:
   litellm-edge: {internal: true}
   registry-edge: {internal: true}
   # No standing service joins this network. A Docker-daemon administrator may
-  # attach a version-pinned one-shot ORAS publisher as documented in registry/README.md.
+  # attach a version-pinned one-shot ORAS publisher as documented in
+  # registry/README.md.
   registry-publisher: {internal: true}
   ca: {internal: true}
 

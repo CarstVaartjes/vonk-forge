@@ -8,20 +8,21 @@ import {useToast} from "./toast";
 export function InstallationReconcile({api, installationId}: {api: Pick<ControlApi, "previewInstallationReconcile" | "reconcileInstallation">; installationId: string}) {
   const [plan, setPlan] = useState<ReconcilePlan>();
   const [busy, setBusy] = useState(false);
-  const [requestKey] = useState(() => crypto.randomUUID());
+  const [requestKey, setRequestKey] = useState(() => crypto.randomUUID());
   const toast = useToast();
   async function review() {
     setBusy(true);
     try {
       const preview = await api.previewInstallationReconcile(installationId);
-      if (preview.allowed) setPlan(preview);
+      if (preview.allowed) { setPlan(preview); setRequestKey(crypto.randomUUID()); }
       else toast.error(`Reconcile is blocked. ${preview.blockers.map(item => item.detail).join(" ")}`.trim());
     } catch (value) { toast.error(safeErrorText(value instanceof Error ? value.message : "Reconcile review failed", 256)); }
     finally { setBusy(false); }
   }
   async function confirm() {
+    if (!plan) return;
     setBusy(true);
-    try { await api.reconcileInstallation(installationId, requestKey); toast.info("Reconcile queued. Follow it in Activity."); }
+    try { await api.reconcileInstallation(installationId, requestKey, plan.plan_digest); toast.info("Reconcile queued. Follow it in Activity."); }
     catch (value) { toast.error(safeErrorText(value instanceof Error ? value.message : "Reconcile failed", 256)); }
     finally { setBusy(false); setPlan(undefined); }
   }

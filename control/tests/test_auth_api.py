@@ -6,14 +6,19 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.browser_auth import BrowserAuthService, LoginRateLimiter
+from vonk_control.auth_api import install_auth_routes
+from vonk_control.browser_auth import (
+    BrowserAuthService,
+    BrowserIdentity,
+    LoginRateLimiter,
+)
 from vonk_control.models import Base, User
 from vonk_control.operation_api import BoundedErrorResponse
 from vonk_control.passwords import hash_password
@@ -410,3 +415,54 @@ def test_cli_token_cannot_be_minted_with_a_bearer_or_without_csrf() -> None:
     )
     assert _login(client).status_code == 200
     assert client.post("/api/auth/cli-token").status_code == 403
+
+
+def test_cli_token_checks_csrf_even_when_actor_dependency_already_authenticated():
+    # Break caught: moving session authentication into another dependency can
+    # accidentally remove the token-minting route's explicit CSRF check.
+    from typing import cast
+    from unittest.mock import Mock
+
+    service = Mock()
+    service.resolve.return_value = BrowserIdentity(
+        Actor("admin", "administrator"), NOW, "session"
+    )
+    app = FastAPI()
+    install_auth_routes(
+        app,
+        cast(BrowserAuthService, service),
+        Depends(lambda: Actor("admin", "administrator")),
+        TokenCodec(b"test-token-signing-key-for-auth-api"),
+        lambda: int(NOW.timestamp()),
+    )
+    client = TestClient(app, base_url=ORIGIN)
+    client.cookies.set("vonk_session", SESSION_TOKEN)
+    client.cookies.set("vonk_csrf", CSRF_TOKEN)
+    assert client.post("/api/auth/cli-token").status_code == 403
+    assert (
+        client.post(
+            "/api/auth/cli-token", headers={"x-csrf-token": "wrong"}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/api/auth/cli-token", headers={"x-csrf-token": CSRF_TOKEN}
+        ).status_code
+        == 200
+    )
+
+
+def test_login_without_host_is_refused_before_password_verification():
+    # Break caught: direct Host indexing raises KeyError instead of refusing
+    # the origin check for an HTTP request with no Host header.
+    client, _ = _client()
+    app = client.app
+
+    async def without_host(scope, receive, send):
+        scope["headers"] = [
+            (name, value) for name, value in scope["headers"] if name != b"host"
+        ]
+        await app(scope, receive, send)
+
+    assert _login(TestClient(without_host, base_url=ORIGIN)).status_code == 403

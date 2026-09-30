@@ -8,6 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
+from typing import cast
 
 
 
@@ -20,13 +22,15 @@ T = TypeVar("T", bound="InstallationReconcileRequest")
 
 @_attrs_define
 class InstallationReconcileRequest:
-    """ Idempotency key for reconciling the installation named by the path.
+    """ Reconcile the reviewed plan, or use the Controller's one-step decision.
 
         Attributes:
             request_key (str):
+            plan_digest (None | str | Unset):
      """
 
     request_key: str
+    plan_digest: None | str | Unset = UNSET
 
 
 
@@ -35,12 +39,20 @@ class InstallationReconcileRequest:
     def to_dict(self) -> dict[str, Any]:
         request_key = self.request_key
 
+        plan_digest: None | str | Unset
+        if isinstance(self.plan_digest, Unset):
+            plan_digest = UNSET
+        else:
+            plan_digest = self.plan_digest
+
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
             "request_key": request_key,
         })
+        if plan_digest is not UNSET:
+            field_dict["plan_digest"] = plan_digest
 
         return field_dict
 
@@ -51,8 +63,19 @@ class InstallationReconcileRequest:
         d = dict(src_dict)
         request_key = d.pop("request_key")
 
+        def _parse_plan_digest(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        plan_digest = _parse_plan_digest(d.pop("plan_digest", UNSET))
+
+
         installation_reconcile_request = cls(
             request_key=request_key,
+            plan_digest=plan_digest,
         )
 
         return installation_reconcile_request

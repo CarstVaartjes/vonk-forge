@@ -22,7 +22,7 @@ def test_postgres_runtime_is_the_deployed_pin() -> None:
         ).read_text(encoding="utf-8")
     )
     assert POSTGRES_IMAGE == lock["images"]["postgres"]
-    assert re.fullmatch(r"postgres:\d+\.\d+", POSTGRES_IMAGE)
+    assert re.fullmatch(r"postgres:\d+\.\d+@sha256:[0-9a-f]{64}", POSTGRES_IMAGE)
 
 
 def test_postgres_database_names_are_unique_safe_identifiers() -> None:

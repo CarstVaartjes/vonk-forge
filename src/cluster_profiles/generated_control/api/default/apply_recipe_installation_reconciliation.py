@@ -119,8 +119,8 @@ def sync_detailed(
 
     Args:
         installation_id (str):
-        body (InstallationReconcileRequest): Idempotency key for reconciling the installation
-            named by the path.
+        body (InstallationReconcileRequest): Reconcile the reviewed plan, or use the Controller's
+            one-step decision.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -154,8 +154,8 @@ def sync(
 
     Args:
         installation_id (str):
-        body (InstallationReconcileRequest): Idempotency key for reconciling the installation
-            named by the path.
+        body (InstallationReconcileRequest): Reconcile the reviewed plan, or use the Controller's
+            one-step decision.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -184,8 +184,8 @@ async def asyncio_detailed(
 
     Args:
         installation_id (str):
-        body (InstallationReconcileRequest): Idempotency key for reconciling the installation
-            named by the path.
+        body (InstallationReconcileRequest): Reconcile the reviewed plan, or use the Controller's
+            one-step decision.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -219,8 +219,8 @@ async def asyncio(
 
     Args:
         installation_id (str):
-        body (InstallationReconcileRequest): Idempotency key for reconciling the installation
-            named by the path.
+        body (InstallationReconcileRequest): Reconcile the reviewed plan, or use the Controller's
+            one-step decision.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

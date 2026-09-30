@@ -7,7 +7,7 @@ use std::{
     process::ExitCode,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -18,6 +18,8 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_CONNECTIONS: usize = 64;
 const MAX_RESOLVED_ADDRESSES: usize = 16;
 const MAX_TUNNEL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+/// Byte budget for one connection, shared across both copy directions so a
+/// tunnel cannot move MAX_TUNNEL_BYTES in each direction.
 const IO_TIMEOUT: Duration = Duration::from_secs(120);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -129,7 +131,7 @@ fn handle(mut client: TcpStream, hosts: &BTreeSet<String>) -> io::Result<()> {
         tunnel(client, upstream)
     } else {
         upstream.write_all(&request.forward)?;
-        copy_bounded(&mut upstream, &mut client).map(|_| ())
+        copy_bounded(&mut upstream, &mut client, &AtomicU64::new(0)).map(|_| ())
     }
 }
 
@@ -434,15 +436,22 @@ fn read_header(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
 fn tunnel(mut left: TcpStream, mut right: TcpStream) -> io::Result<()> {
     let mut left_read = left.try_clone()?;
     let mut right_write = right.try_clone()?;
-    let outbound = thread::spawn(move || copy_bounded(&mut left_read, &mut right_write));
-    let inbound = copy_bounded(&mut right, &mut left);
+    let budget = Arc::new(AtomicU64::new(0));
+    let outbound_budget = Arc::clone(&budget);
+    let outbound =
+        thread::spawn(move || copy_bounded(&mut left_read, &mut right_write, &outbound_budget));
+    let inbound = copy_bounded(&mut right, &mut left, &budget);
     let outbound = outbound
         .join()
         .unwrap_or_else(|_| Err(io::ErrorKind::Other.into()));
     inbound.and(outbound).map(|_| ())
 }
 
-fn copy_bounded(reader: &mut TcpStream, writer: &mut TcpStream) -> io::Result<u64> {
+fn copy_bounded(
+    reader: &mut TcpStream,
+    writer: &mut TcpStream,
+    budget: &AtomicU64,
+) -> io::Result<u64> {
     let started = Instant::now();
     let mut copied = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
@@ -457,7 +466,13 @@ fn copy_bounded(reader: &mut TcpStream, writer: &mut TcpStream) -> io::Result<u6
         copied = copied
             .checked_add(read as u64)
             .ok_or(io::ErrorKind::FileTooLarge)?;
-        if copied > MAX_TUNNEL_BYTES {
+        // fetch_add is an atomic read-modify-write, so the two directions
+        // cannot both pass this check and exceed the shared budget.
+        let total = budget
+            .fetch_add(read as u64, Ordering::Relaxed)
+            .checked_add(read as u64)
+            .ok_or(io::ErrorKind::FileTooLarge)?;
+        if total > MAX_TUNNEL_BYTES {
             return Err(io::ErrorKind::FileTooLarge.into());
         }
         writer.write_all(&buffer[..read])?;

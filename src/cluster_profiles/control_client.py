@@ -1072,6 +1072,10 @@ class ControlClient:
             )
             try:
                 problem = json.loads(content)
+            except RecursionError:
+                raise ControlMalformedResponse(
+                    "control API response exceeds the nesting limit"
+                ) from None
             except (UnicodeDecodeError, json.JSONDecodeError):
                 if error_media_type.strip().lower() == "application/json":
                     raise ControlMalformedResponse(
@@ -1123,6 +1127,10 @@ class ControlClient:
         )
         try:
             decoded = json.loads(content)
+        except RecursionError:
+            raise ControlMalformedResponse(
+                "control API response exceeds the nesting limit"
+            ) from None
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise ControlMalformedResponse(
                 "control API returned invalid JSON"
@@ -1242,6 +1250,10 @@ class ControlClient:
                 )
                 try:
                     problem = json.loads(content)
+                except RecursionError:
+                    raise ControlMalformedResponse(
+                        "control API response exceeds the nesting limit"
+                    ) from None
                 except (UnicodeDecodeError, json.JSONDecodeError):
                     if error_media_type.strip().lower() == "application/json":
                         raise ControlMalformedResponse(
@@ -1274,6 +1286,10 @@ class ControlClient:
                 )
             try:
                 decoded = json.loads(content)
+            except RecursionError:
+                raise ControlMalformedResponse(
+                    "control API response exceeds the nesting limit"
+                ) from None
             except (UnicodeDecodeError, json.JSONDecodeError):
                 raise ControlMalformedResponse(
                     "control API returned invalid JSON"
@@ -1357,6 +1373,10 @@ class ControlClient:
                 )
                 try:
                     problem = json.loads(content)
+                except RecursionError:
+                    raise ControlMalformedResponse(
+                        "control API response exceeds the nesting limit"
+                    ) from None
                 except (UnicodeDecodeError, json.JSONDecodeError):
                     if error_media_type.strip().lower() == "application/json":
                         raise ControlMalformedResponse(

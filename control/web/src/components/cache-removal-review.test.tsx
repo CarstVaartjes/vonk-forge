@@ -10,6 +10,7 @@ import {LibraryRecipeRemoveAction} from "./library-recipe-remove-action";
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  document.cookie = "vonk_csrf=; Max-Age=0; Path=/";
 });
 
 test("a protected recipe displays the owner blocker and cannot be removed", async () => {
@@ -156,6 +157,8 @@ test.each(["disconnect", "timeout"])("an accepted POST with %s recovers through 
     state: "queued", progress: {phase: "queued", completed_bytes: 0, total_bytes_known: false},
   };
   vi.spyOn(crypto, "randomUUID").mockReturnValue(accepted.request_key as ReturnType<typeof crypto.randomUUID>);
+  // The real client refuses mutations without the CSRF cookie.
+  document.cookie = "vonk_csrf=test-csrf-token; Path=/";
   const calls: {method: string; path: string; body?: unknown}[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request

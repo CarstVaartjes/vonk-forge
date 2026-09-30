@@ -58,9 +58,9 @@ from .recipe_stop_payloads import (
 from .strict_json import read_stored_model
 
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
-_SINGLETON_RECOVERY_RECHECK_SECONDS = 5
-_SINGLETON_RECOVERY_MAX_ATTEMPTS = 5
-_SINGLETON_RECOVERY_COOLDOWN_SECONDS = 300
+_RECOVERY_RECHECK_SECONDS = 5
+_RECOVERY_MAX_ATTEMPTS = 5
+_RECOVERY_COOLDOWN_SECONDS = 300
 
 
 def _active_recipe_revision(
@@ -208,39 +208,33 @@ class DistributedRecoveryCoordinator:
                     )
                     worked = True
                     continue
-                if (
-                    singleton
-                    and run.recovery_attempts > _SINGLETON_RECOVERY_MAX_ATTEMPTS
-                ):
+                if run.recovery_attempts > _RECOVERY_MAX_ATTEMPTS:
                     run.recovery_attempts = 0
                     run.route_error = (
-                        "singleton recovery cooldown elapsed; resuming exact inspection"
+                        "recovery cooldown elapsed; resuming exact inspection"
                     )
                     run.route_next_attempt_at = None
                     run.updated_at = now
-                if (
-                    singleton
-                    and run.recovery_attempts >= _SINGLETON_RECOVERY_MAX_ATTEMPTS
-                ):
+                if run.recovery_attempts >= _RECOVERY_MAX_ATTEMPTS:
                     # Keep the degraded reason visible during a finite cooldown.
                     # Once due, reset this retry window and resume automatically.
                     run.route_error = (
-                        "singleton recovery is degraded after "
-                        f"{_SINGLETON_RECOVERY_MAX_ATTEMPTS} attempts; automatic "
+                        "recovery is degraded after "
+                        f"{_RECOVERY_MAX_ATTEMPTS} attempts; automatic "
                         "recovery will resume after a five minute cooldown"
                     )
                     run.route_next_attempt_at = now + timedelta(
-                        seconds=_SINGLETON_RECOVERY_COOLDOWN_SECONDS
+                        seconds=_RECOVERY_COOLDOWN_SECONDS
                     )
                     run.updated_at = now
                     # This marker distinguishes the cooldown row when it becomes
                     # due; no new operator request or authority is required.
-                    run.recovery_attempts = _SINGLETON_RECOVERY_MAX_ATTEMPTS + 1
+                    run.recovery_attempts = _RECOVERY_MAX_ATTEMPTS + 1
                     worked = True
                     continue
                 if singleton and not _proves_fresh_absence(run, run_nodes[0], now):
                     worked = (
-                        _schedule_singleton_recovery_wait(
+                        _schedule_recovery_wait(
                             run,
                             "singleton recovery waits for a fresh exact "
                             "absence observation",
@@ -263,6 +257,15 @@ class DistributedRecoveryCoordinator:
                         )
                     else:
                         previous_run_generation = run.run_generation
+                        previous_observations = tuple(
+                            (
+                                node.observed_run_generation,
+                                node.observation_process_running,
+                                node.observation_observed_at,
+                                node.observation_endpoint_ready,
+                            )
+                            for node in run_nodes
+                        )
                         run.run_generation += 1
                         run_plan["run_generation"] = run.run_generation
                         run.plan = run_plan_document(run_plan)
@@ -271,13 +274,31 @@ class DistributedRecoveryCoordinator:
                             node.observation_process_running = None
                             node.observation_observed_at = None
                             node.observation_endpoint_ready = None
-                        authority = _recovery_authority(
-                            session,
-                            run,
-                            now,
-                            failed[0].rank,
-                            stop_run_generation=previous_run_generation,
-                        )
+                        try:
+                            authority = _recovery_authority(
+                                session,
+                                run,
+                                now,
+                                failed[0].rank,
+                                stop_run_generation=previous_run_generation,
+                            )
+                        except _RecoveryDependencyPending:
+                            # A pending wait must not outlive this generation
+                            # bump: the next attempt still has to stop the
+                            # exact Start payloads of the running generation.
+                            run.run_generation = previous_run_generation
+                            run_plan["run_generation"] = previous_run_generation
+                            run.plan = run_plan_document(run_plan)
+                            for node, observation in zip(
+                                run_nodes, previous_observations
+                            ):
+                                (
+                                    node.observed_run_generation,
+                                    node.observation_process_running,
+                                    node.observation_observed_at,
+                                    node.observation_endpoint_ready,
+                                ) = observation
+                            raise
                     if authority is None:
                         raise DistributedLifecycleError(
                             "accepted run has no automatic recovery authority"
@@ -332,10 +353,7 @@ class DistributedRecoveryCoordinator:
                             now=now,
                         )
                 except _RecoveryDependencyPending as pending:
-                    worked = (
-                        _schedule_singleton_recovery_wait(run, str(pending), now)
-                        or worked
-                    )
+                    worked = _schedule_recovery_wait(run, str(pending), now) or worked
                     continue
                 except DistributedLifecycleError as error:
                     _settle_unrecoverable(run, str(error), now)
@@ -343,16 +361,7 @@ class DistributedRecoveryCoordinator:
                     continue
                 run.route_state = "withdrawn"
                 run.route_error = f"distributed recovery queued: {job.id}"
-                if singleton:
-                    run.recovery_attempts += 1
-                    backoff = min(
-                        _SINGLETON_RECOVERY_RECHECK_SECONDS
-                        * (2 ** (run.recovery_attempts - 1)),
-                        _SINGLETON_RECOVERY_COOLDOWN_SECONDS,
-                    )
-                    run.route_next_attempt_at = now + timedelta(seconds=backoff)
-                else:
-                    run.route_next_attempt_at = None
+                _advance_recovery_check(run, now)
                 run.updated_at = now
                 queued = True
                 worked = True
@@ -623,9 +632,16 @@ def settle_absent_run_in_session(
     release_owned_reservations_in_session(session, "run", run.id, now)
 
 
-def _schedule_singleton_recovery_wait(
-    run: RecipeRun, reason: str, now: datetime
-) -> bool:
+def _advance_recovery_check(run: RecipeRun, now: datetime) -> None:
+    run.recovery_attempts += 1
+    backoff = min(
+        _RECOVERY_RECHECK_SECONDS * 2 ** (run.recovery_attempts - 1),
+        _RECOVERY_COOLDOWN_SECONDS,
+    )
+    run.route_next_attempt_at = now + timedelta(seconds=backoff)
+
+
+def _schedule_recovery_wait(run: RecipeRun, reason: str, now: datetime) -> bool:
     """Persist a bounded check time without turning an unchanged wait into work."""
 
     changed = False
@@ -633,10 +649,13 @@ def _schedule_singleton_recovery_wait(
         run.route_error = reason[:512]
         changed = True
     next_attempt = run.route_next_attempt_at
-    if next_attempt is None or _aware(next_attempt) <= now:
-        run.route_next_attempt_at = now + timedelta(
-            seconds=_SINGLETON_RECOVERY_RECHECK_SECONDS
-        )
+    due = (
+        next_attempt
+        if next_attempt is None or next_attempt.tzinfo is not None
+        else next_attempt.replace(tzinfo=UTC)
+    )
+    if due is None or due <= now:
+        _advance_recovery_check(run, now)
         changed = True
     if changed:
         run.updated_at = now
@@ -1600,9 +1619,22 @@ def _recovery_authority(
             .order_by(AgentPresence.observed_at.desc())
             .limit(1)
         )
-        if presence is None or not isinstance(presence.management_address, str):
-            raise DistributedLifecycleError(
-                "distributed recovery endpoint evidence is missing"
+        observed_at = None if presence is None else presence.observed_at
+        # Stored timestamps can come back naive (SQLite); they are UTC either
+        # way, matching the other stored-observation readers in this module.
+        if observed_at is not None and observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=UTC)
+        if (
+            presence is None
+            or not isinstance(presence.management_address, str)
+            or observed_at is None
+            or not timedelta(0)
+            <= _aware(now) - observed_at
+            < timedelta(seconds=ROUTE_EVIDENCE_MAX_AGE_SECONDS)
+        ):
+            raise _RecoveryDependencyPending(
+                "distributed recovery waits for a fresh Controller-observed "
+                "Spark presence report"
             )
         presences[node.node_id] = presence.management_address
     start_job, startup_budget = _original_start_authority(

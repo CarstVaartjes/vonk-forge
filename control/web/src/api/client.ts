@@ -126,12 +126,10 @@ export class ApiClient implements ControlApi {
 
   constructor() {
     this.generated.use({
-      onRequest({request}) {
+      onRequest: async ({request}) => {
         if (["GET", "HEAD"].includes(request.method)) return;
-        const csrf = csrfToken();
-        if (!csrf) return;
         const headers = new Headers(request.headers);
-        headers.set("X-CSRF-Token", csrf);
+        headers.set("X-CSRF-Token", await this.requiredCsrfToken());
         return new Request(request, {headers});
       },
       onResponse: ({response}) => {
@@ -153,14 +151,30 @@ export class ApiClient implements ControlApi {
     throw new AuthenticationRequired();
   }
 
+  private async requiredCsrfToken(): Promise<string> {
+    const token = csrfToken();
+    if (token) return token;
+    // Expiry removes both cookies. Let the existing session owner distinguish
+    // expiry from an authenticated session with a missing CSRF cookie.
+    await this.session();
+    const refreshed = csrfToken();
+    if (!refreshed) throw new Error("CSRF token missing; request not sent");
+    return refreshed;
+  }
+
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (!path.startsWith("/api/") || path.includes("..")) throw new Error("Unsafe API path");
+    // fetch would only reject a body on the implicit GET at send time, with a
+    // generic TypeError; refuse the ambiguity up front like other unsafe input.
+    if (init.body && init.method === undefined) throw new Error("API request with a body requires an explicit method");
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
     if (init.body) headers.set("Content-Type", "application/json");
-    const csrf = csrfToken();
-    if (csrf && init.method && !["GET", "HEAD"].includes(init.method)) headers.set("X-CSRF-Token", csrf);
-    const response = await fetch(path, {...init, headers, credentials: "same-origin"});
+    // Login is the one mutating call the Controller accepts without CSRF (it
+    // validates origin instead) and the call that issues the first token.
+    const method = (init.method ?? "GET").toUpperCase();
+    if (!["GET", "HEAD"].includes(method) && path !== "/api/auth/login") headers.set("X-CSRF-Token", await this.requiredCsrfToken());
+    const response = await fetch(path, {...init, method, headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (!response.ok) {
       let problem: unknown;
@@ -186,8 +200,7 @@ export class ApiClient implements ControlApi {
 
   async logout(): Promise<void> {
     const headers = new Headers({Accept: "application/json"});
-    const csrf = csrfToken();
-    if (csrf) headers.set("X-CSRF-Token", csrf);
+    headers.set("X-CSRF-Token", await this.requiredCsrfToken());
     const response = await fetch("/api/auth/logout", {method: "POST", headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`, requestIdOf(response));
@@ -195,8 +208,7 @@ export class ApiClient implements ControlApi {
 
   async downloadCliToken(): Promise<CliTokenDownload> {
     const headers = new Headers({Accept: "text/plain"});
-    const csrf = csrfToken();
-    if (csrf) headers.set("X-CSRF-Token", csrf);
+    headers.set("X-CSRF-Token", await this.requiredCsrfToken());
     const response = await fetch("/api/auth/cli-token", {method: "POST", headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (!response.ok) {
@@ -361,9 +373,9 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async reconcileInstallation(installationId: string, requestKey: string, signal?: AbortSignal): Promise<unknown> {
+  async reconcileInstallation(installationId: string, requestKey: string, planDigest: string, signal?: AbortSignal): Promise<unknown> {
     return resultData(await this.generated.POST("/api/recipe/installations/{installation_id}/reconcile", {
-      params: {path: {installation_id: installationId}}, body: {request_key: requestKey}, signal,
+      params: {path: {installation_id: installationId}}, body: {request_key: requestKey, plan_digest: planDigest}, signal,
     }));
   }
 
@@ -511,6 +523,7 @@ export class ApiClient implements ControlApi {
 
   async uploadArtifactJobInput(jobId: string, file: ArtifactJobInputFile, content: Blob, signal?: AbortSignal, onProgress?: (progress: ArtifactTransferProgress) => void): Promise<ArtifactJob> {
     const path = `/api/artifact-jobs/${encodeURIComponent(jobId)}/inputs/${encodeURIComponent(file.name)}`;
+    const csrf = await this.requiredCsrfToken();
     return new Promise((resolve, reject) => {
       const request = new XMLHttpRequest();
       const abort = () => request.abort();
@@ -521,8 +534,7 @@ export class ApiClient implements ControlApi {
       request.setRequestHeader("Accept", "application/json");
       request.setRequestHeader("Content-Type", file.media_type);
       request.setRequestHeader("X-Content-SHA256", file.sha256);
-      const csrf = csrfToken();
-      if (csrf) request.setRequestHeader("X-CSRF-Token", csrf);
+      request.setRequestHeader("X-CSRF-Token", csrf);
       request.upload.onprogress = event => onProgress?.({loaded: event.loaded, total: event.lengthComputable ? event.total : content.size});
       request.onabort = () => { finish(); reject(new DOMException("Artifact upload cancelled", "AbortError")); };
       request.onerror = () => { finish(); reject(new ApiError(0, "Artifact upload failed before the controller responded")); };

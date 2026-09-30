@@ -995,9 +995,11 @@ class DurableDistributionPhaseExecutor:
                 "plan_digest": plan.plan_digest,
                 "generation": generation,
                 "node_id": node_id,
-                # The grant lives from this registration; agent progress
-                # renews it while the copy runs. A plan may be accepted hours
-                # before its copy starts, so its age must not expire the grant.
+                # The grant lives from this registration; authenticated agent
+                # progress renews it while the copy runs (the
+                # artifact-distribution renewal in AgentJobService.heartbeat).
+                # A plan may be accepted hours before its copy starts, so its
+                # age must not expire the grant.
                 "expires_at": (
                     self._clock().astimezone(UTC) + timedelta(hours=1)
                 ).isoformat(),

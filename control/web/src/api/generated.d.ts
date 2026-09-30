@@ -3470,9 +3470,11 @@ export interface components {
         };
         /**
          * InstallationReconcileRequest
-         * @description Idempotency key for reconciling the installation named by the path.
+         * @description Reconcile the reviewed plan, or use the Controller's one-step decision.
          */
         InstallationReconcileRequest: {
+            /** Plan Digest */
+            plan_digest?: string | null;
             /** Request Key */
             request_key: string;
         };
@@ -10861,6 +10863,15 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

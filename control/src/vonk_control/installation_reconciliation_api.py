@@ -51,8 +51,8 @@ def install_installation_reconciliation_routes(
             )
         return operations
 
-    def require_apply(actor: Actor) -> None:
-        if actor.role not in MUTATION_ROLES[("POST", _APPLY_PATH)]:
+    def require_mutation(actor: Actor, route: str) -> None:
+        if actor.role not in MUTATION_ROLES[("POST", route)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
     def refusal_detail(error: RunSwitchOperationConflict) -> str:
@@ -103,13 +103,14 @@ def install_installation_reconciliation_routes(
     @app.post(
         _PREVIEW_PATH,
         response_model=RunSwitchPlan,
-        responses=bounded_error_responses(401, 404, 409, 422, 503),
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="previewRecipeInstallationReconciliation",
     )
     def preview_installation_reconciliation(
         installation_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = authenticated,
     ) -> RunSwitchPlan:
+        require_mutation(actor, _PREVIEW_PATH)
         try:
             plan = service().preview_cleanup(
                 RunSwitchCleanupPreviewRequest(
@@ -139,13 +140,14 @@ def install_installation_reconciliation_routes(
         body: InstallationReconcileRequest,
         actor: Actor = authenticated,
     ) -> RunSwitchOperation:
-        require_apply(actor)
+        require_mutation(actor, _APPLY_PATH)
         try:
             operation = service().apply_cleanup(
                 RunSwitchCleanupApplyRequest(
                     installation_id=installation_id,
                     cleanup_mode="reconcile",
                     request_key=body.request_key,
+                    plan_digest=body.plan_digest,
                 ),
                 actor=actor.subject,
             )

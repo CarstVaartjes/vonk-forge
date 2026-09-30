@@ -7605,8 +7605,20 @@
       },
       "InstallationReconcileRequest": {
         "additionalProperties": false,
-        "description": "Idempotency key for reconciling the installation named by the path.",
+        "description": "Reconcile the reviewed plan, or use the Controller's one-step decision.",
         "properties": {
+          "plan_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Digest"
+          },
           "request_key": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Request Key",
@@ -26094,6 +26106,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
