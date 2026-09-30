@@ -171,6 +171,7 @@ const INSTALLATION_METADATA_SCHEMA_VERSION: u8 = 2;
 const INSTALLATION_METADATA_FILE: &str = "model-metadata.json";
 const INSTALLATION_RECONCILIATION_ROOT: &str = "installation-reconciliation";
 const INSTALLATION_RECONCILIATION_SCHEMA_VERSION: u8 = 3;
+const RECONCILIATION_LOCK_GRACE: Duration = Duration::from_millis(500);
 const MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES: u64 = 64 * 1024;
 const MAX_COMPILED_DOCUMENT_BYTES: u64 = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES as u64;
 const TRUSTED_RUNTIME_UID: u32 = 10_001;
@@ -737,14 +738,26 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if !trusted_receipt_metadata(&file.metadata()?) {
             return Err(OciError::Artifact);
         }
-        match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
-            Ok(()) => Ok(file),
-            Err(error)
-                if error == rustix::io::Errno::AGAIN || error == rustix::io::Errno::WOULDBLOCK =>
-            {
-                Err(OciError::ReconciliationBusy)
+        // flock(2) locks belong to the open file description, and a concurrent
+        // fork (another thread spawning a process) briefly shares it until exec
+        // closes it, so a just-released lock can still look held for a few
+        // milliseconds. Wait a short bounded grace period before reporting
+        // busy; a genuinely held lock still reports the retryable busy error.
+        let deadline = std::time::Instant::now() + RECONCILIATION_LOCK_GRACE;
+        loop {
+            match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+                Ok(()) => return Ok(file),
+                Err(error)
+                    if error == rustix::io::Errno::AGAIN
+                        || error == rustix::io::Errno::WOULDBLOCK =>
+                {
+                    if std::time::Instant::now() >= deadline {
+                        return Err(OciError::ReconciliationBusy);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => return Err(OciError::Io(error.into())),
             }
-            Err(error) => Err(OciError::Io(error.into())),
         }
     }
 
