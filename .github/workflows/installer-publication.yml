@@ -776,7 +776,7 @@ jobs:
             --generation "$VONK_ACCEPTANCE_GENERATION" \
             --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
           export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
-          uv run --frozen python tests/acceptance/test_fresh_nas_install.py
+          scripts/run-with-nas-secret-group uv run --frozen python tests/acceptance/test_fresh_nas_install.py
 
       - name: Delete isolated disposable Tailscale tailnet
         if: always() && matrix.lane == 'native'

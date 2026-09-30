@@ -13,8 +13,13 @@ services:
     logging: *tailscale-logging
     read_only: true
     # Userspace networking (TS_USERSPACE=true) needs no TUN device and no
-    # capability from the default set.
+    # capability from the default set. The installer writes the OAuth secrets
+    # 0640 with group 64400 (the NAS installer derives that
+    # list from group_add); group_add lets
+    # the container's root read them without DAC_OVERRIDE. Compose file
+    # secrets are bind mounts that keep the host owner, group and mode.
     cap_drop: [ALL]
+    group_add: ["64400"]
     security_opt: [no-new-privileges:true]
     environment:
       TS_AUTH_ONCE: "true"
@@ -68,7 +73,9 @@ services:
     restart: unless-stopped
     logging: *tailscale-logging
     read_only: true
+    # hermes-api-key is 0640 group 64400 (see tailscale-gateway); no capability.
     cap_drop: [ALL]
+    group_add: ["64400"]
     security_opt: [no-new-privileges:true]
     network_mode: service:tailscale-gateway
     entrypoint:

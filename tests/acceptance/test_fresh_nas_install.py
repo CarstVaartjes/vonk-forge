@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -632,6 +633,34 @@ def assert_repeatable(first: Path, second: Path) -> None:
     }
     if first_secrets != second_secrets:
         raise AcceptanceError("two clean NAS runs produced different secret contracts")
+
+
+def assert_tailscale_secret_group(bundle: Path) -> None:
+    """The capability-free Tailscale services read secrets through group_add.
+
+    The lane runs the installer with the group available, so the files it
+    wrote must be group-readable (0640) with exactly the group Compose adds.
+    """
+    compose = yaml.safe_load((bundle / "docker-compose.yaml").read_text("utf-8"))
+    gids: set[int] = set()
+    files: set[str] = set()
+    for name in ("tailscale-gateway", "tailscale-configurator"):
+        service = compose["services"][name]
+        if service.get("cap_add") or service.get("cap_drop") != ["ALL"]:
+            raise AcceptanceError(f"{name} must drop every capability and add none")
+        gids.update(int(gid) for gid in service.get("group_add", []))
+        for secret in service["secrets"]:
+            source = compose["secrets"][secret]["file"]
+            files.add(source.removeprefix("./secrets/"))
+    if len(gids) != 1 or not files:
+        raise AcceptanceError("Tailscale services must share one secret group")
+    (gid,) = gids
+    for relative in sorted(files):
+        metadata = (bundle / "secrets" / relative).stat()
+        if metadata.st_gid != gid or stat.S_IMODE(metadata.st_mode) != 0o640:
+            raise AcceptanceError(
+                f"secret {relative} is not group {gid} mode 0640 for its reader"
+            )
 
 
 def secret_snapshot(bundle: Path) -> dict[Path, bytes]:
@@ -1785,6 +1814,8 @@ def main() -> None:
             child_environment=child_environment,
             responses=nas_responses(**common, hermes=False),
         )
+        if tailscale_mode == "full":
+            assert_tailscale_secret_group(first)
         first_secrets = secret_snapshot(first)
         generate_bundle(
             root / "default-first",

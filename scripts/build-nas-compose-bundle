@@ -195,6 +195,46 @@ def _validate_secret_paths(document: dict[str, Any]) -> None:
             raise BundleError(f"Compose secret {name} must be ./secrets/{relative}")
 
 
+def _secret_names(service: dict[str, Any]) -> list[str]:
+    names = []
+    for entry in service.get("secrets", []) or []:
+        name = entry if isinstance(entry, str) else _mapping(entry, "secret").get("source")
+        if not isinstance(name, str):
+            raise BundleError("Compose service secret reference is invalid")
+        names.append(name)
+    return names
+
+
+def _group_readable_secrets(services: dict[str, Any]) -> dict[str, object]:
+    """Secrets read by capability-free services through one dedicated group.
+
+    A service that drops every capability (no DAC_OVERRIDE) reads installer
+    secrets only through a supplementary group. The installer writes exactly
+    these files 0640 with that group.
+    """
+
+    gids: set[int] = set()
+    files: set[str] = set()
+    for name, raw_service in services.items():
+        service = _mapping(raw_service, f"service {name}")
+        group_add = service.get("group_add") or []
+        secrets = _secret_names(service)
+        if not group_add:
+            continue
+        if len(group_add) != 1 or not re.fullmatch(r"[1-9][0-9]{0,8}", str(group_add[0])):
+            raise BundleError(f"Compose service {name} group_add must be one numeric gid")
+        gids.add(int(group_add[0]))
+        for secret in secrets:
+            if secret not in SECRET_FILES:
+                raise BundleError(f"Compose service {name} uses an unknown secret")
+            files.add(SECRET_FILES[secret])
+    if len(gids) > 1:
+        raise BundleError("Compose secret group must be one gid")
+    if not gids:
+        return {}
+    return {"gid": gids.pop(), "files": sorted(files)}
+
+
 def _required_value(
     env: str,
     prompt: str,
@@ -213,7 +253,7 @@ def _required_value(
 def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
     if channel not in {"dev", "stable"}:
         raise BundleError("installer channel must be dev or stable")
-    _validate_services(document)
+    services = _validate_services(document)
     # Validate the immutable publication input before projecting deployment tags.
     loader = importlib.machinery.SourceFileLoader(
         "nas_compose_renderer", str(Path(__file__).with_name("render-dev-compose"))
@@ -234,7 +274,8 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
     compose = yaml.safe_dump(
         {"name": PROJECT_NAME, **document}, sort_keys=False, default_flow_style=False
     )
-    return {
+    group_readable = _group_readable_secrets(services)
+    payload = {
         "schema_version": 2,
         "docker_compose_yaml": compose,
         "preflight": [
@@ -369,6 +410,9 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
             "disabled_value": "",
         },
     }
+    if group_readable:
+        payload["group_readable_secrets"] = group_readable
+    return payload
 
 
 def build(compose: Path, output: Path, channel: str) -> str:
