@@ -2573,6 +2573,10 @@ def _fleet(
                     "fleet upgrade job reports concurrent Spark upgrades"
                 )
 
+        if not result.get("targets") and _state(result) == "succeeded":
+            # Nothing needed an upgrade: the receipt is the whole outcome and
+            # there is no job progress to observe.
+            return result
         args.follow = True
         args.fleet_action = "progress"
         return _poll_path(
@@ -2582,8 +2586,12 @@ def _fleet(
             args,
             query={"limit": 100},
             terminal=lambda observed: (
-                _state(observed) in _TERMINAL_STATES
-                or _state(observed) == "waiting-for-operator"
+                # The submit receipt is not a job snapshot; always observe the job.
+                observed.get("action") != "upgrade"
+                and (
+                    _state(observed) in _TERMINAL_STATES
+                    or _state(observed) == "waiting-for-operator"
+                )
             ),
             validate=same_job,
         )

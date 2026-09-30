@@ -2187,3 +2187,16 @@ def test_durable_retire_refuses_a_parked_operation_whose_lease_is_live(
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None
         assert stored.state == "waiting-for-operator"
+
+
+def test_zero_target_upgrade_job_still_projects_a_valid_progress_object() -> None:
+    jobs = Jobs()
+    jobs.job = EnqueuedJob(kind="agent-upgrade", state="succeeded", targets=())
+    client, operator, _ = _client(jobs=jobs)
+
+    response = client.get(f"/api/jobs/{jobs.job.id}", headers=operator)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["targets"] == []
+    assert body["progress"] == {"completed": 0, "failed": 0, "running": 0, "total": 0}

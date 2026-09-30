@@ -534,3 +534,35 @@ def test_a_refused_removal_names_the_enrollment_layer(
     assert response.status_code == status_code, response.text
     assert response.headers["x-vonk-error-code"] == code
     assert response.json()["detail"] == str(error)
+
+
+def test_zero_target_upgrade_receipt_is_a_complete_succeeded_receipt() -> None:
+    class NothingToUpgrade:
+        def get_request(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def current_package(self) -> dict[str, object]:
+            return {}
+
+        def preview(self, *args: object, **kwargs: object) -> object:
+            return SimpleNamespace(plan_digest="d" * 64)
+
+        def apply(self, *args: object, **kwargs: object) -> object:
+            return SimpleNamespace(
+                id="empty-job", state="succeeded", payload_digest="d" * 64, targets=[]
+            )
+
+    app = _action_app(
+        Actor("admin", "administrator"),
+        services=FleetOperatorServices(upgrades=NothingToUpgrade()),
+    )
+
+    response = TestClient(app).post(
+        "/api/fleet/upgrade",
+        json={"all": True, "request_key": "11111111-1111-4111-8111-111111111111"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["state"] == "succeeded"
+    assert response.json()["targets"] == []
+    assert response.json()["operation_id"] == "empty-job"
