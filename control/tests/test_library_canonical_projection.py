@@ -137,6 +137,18 @@ def _insert_canonical_rows(
 # recipe and model) through ~17 filtered reads, and each read re-validates the
 # full catalog. A subset would stop proving the real library projects.
 @pytest.mark.slow(30)
+def all_recipes(projection, **filters):
+    """Every recipe matching the filters, following the page cursor."""
+    page = projection.recipe_library(limit=100, **filters)
+    recipes = list(page.recipes)
+    while page.next_cursor is not None:
+        page = projection.recipe_library(limit=100, cursor=page.next_cursor, **filters)
+        recipes.extend(page.recipes)
+    return recipes
+
+
+# The whole published corpus (about 290 recipes) is created, resolved and projected.
+@pytest.mark.slow(60)
 def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     tmp_path: Path,
 ) -> None:
@@ -244,9 +256,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
         item.alignment for item in recipe_page.recipes if item.alignment
     } | set(model_page.facets.alignment)
     assert "abliterated" in recipe_page.facets.alignment
-    abliterated = projection.recipe_library(
-        limit=100, alignment=["abliterated"]
-    ).recipes
+    abliterated = all_recipes(projection, alignment=["abliterated"])
     assert abliterated
     assert {item.alignment for item in abliterated} == {"abliterated"}
     assert len(abliterated) == sum(
@@ -259,7 +269,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
         recipe_page.facets.sparks
     )
     sparks = max(recipe_page.facets.sparks)
-    by_sparks = projection.recipe_library(limit=100, sparks=[sparks]).recipes
+    by_sparks = all_recipes(projection, sparks=[sparks])
     assert by_sparks
     assert {item.node_count for item in by_sparks} == {sparks}
 
@@ -273,18 +283,16 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert len(recipe_page.facets.engine) > 1
     assert "MiaAI-Lab" in recipe_page.facets.creator
     for engine_name in recipe_page.facets.engine:
-        by_engine = projection.recipe_library(limit=100, engine=[engine_name]).recipes
+        by_engine = all_recipes(projection, engine=[engine_name])
         assert by_engine
         assert {item.engine for item in by_engine} == {engine_name}
         assert len(by_engine) == sum(
             1 for item in recipe_page.recipes if item.engine == engine_name
         )
-    by_creator = projection.recipe_library(limit=100, creator=["miaai-lab"]).recipes
+    by_creator = all_recipes(projection, creator=["miaai-lab"])
     assert by_creator
     assert {item.creator for item in by_creator} == {"MiaAI-Lab"}
-    both = projection.recipe_library(
-        limit=100, creator=["MiaAI-Lab"], engine=["sglang"]
-    ).recipes
+    both = all_recipes(projection, creator=["MiaAI-Lab"], engine=["sglang"])
     assert both
     assert {(item.creator, item.engine) for item in both} == {("MiaAI-Lab", "sglang")}
     echoed = projection.recipe_library(limit=1, engine=["sglang"], creator=["x"])
