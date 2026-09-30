@@ -66,13 +66,13 @@ def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_p
     snapshot = client.list()
     client.prepare(snapshot)
     assert len(snapshot.items) == expected_recipe_count
-    assert len(release.package_downloads) == expected_recipe_count
+    assert release.library_downloads == 1
     client.close()
 
     release.requests.clear()
     restarted = release.client(cache)
     restarted.prepare(restarted.list())
-    assert release.package_downloads == []
+    assert release.library_downloads == 0
     restarted.close()
 
 
@@ -116,7 +116,7 @@ def test_publisher_package_binds_manifest_metadata_identity_and_digest(
     client = release.client(tmp_path / "packages")
     with pytest.raises(RecipePackageError, match="invalid"):
         client.prepare(client.list())
-    assert len(release.package_downloads) == 1
+    assert release.library_downloads == 1
     client.close()
 
 
@@ -274,7 +274,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     )
     assert first.state == "current"
     assert first.imported_count == expected_recipe_count
-    assert len(release.package_downloads) == expected_recipe_count
+    assert release.library_downloads == 1
     with sessions() as session:
         assert (
             session.scalar(
@@ -332,7 +332,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     )
     assert second.state == "current"
     assert second.updated_count == 1
-    assert len(release.package_downloads) == 1
+    assert release.library_downloads == 1
     with sessions() as session:
         after_second_recipes = _active_recipe_state(session)
         assert len(after_second_recipes) == expected_recipe_count
@@ -351,7 +351,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         actor="test",
     )
     assert restarted_result.state == "current"
-    assert release.package_downloads == []
+    assert release.library_downloads == 0
     restarted_good.close()
 
     # A malformed candidate fails during prepare, before any active link is changed.

@@ -17,7 +17,9 @@ Use it per module::
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import tarfile
 from collections.abc import Callable, Iterator, Mapping
 from copy import deepcopy
 from pathlib import Path, PurePosixPath
@@ -30,6 +32,7 @@ from vonk_control.recipe_release import (
     RELEASE_BUNDLE,
     RELEASE_CHECKSUMS,
     RELEASE_INDEX,
+    RELEASE_LIBRARY,
     RecipeReleaseError,
 )
 
@@ -121,28 +124,42 @@ class SignedRecipeRelease:
         return cls(index, lambda location: (root / location).read_bytes())
 
     @property
-    def package_downloads(self) -> list[str]:
-        return [
-            name
-            for name in self.requests
-            if name not in {RELEASE_CHECKSUMS, RELEASE_BUNDLE, RELEASE_INDEX}
-            and not name.startswith("/")
-        ]
+    def library_downloads(self) -> int:
+        """How many times the Controller downloaded the library bundle."""
+        return self.requests.count(RELEASE_LIBRARY)
+
+    def library(self) -> bytes:
+        """The release's one library asset, built like the publisher does."""
+        members = {
+            RELEASE_CHECKSUMS: self.checksums,
+            RELEASE_BUNDLE: self.signature,
+            **self.assets,
+        }
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as tar:
+            for name, payload in sorted(members.items()):
+                info = tarfile.TarInfo(name)
+                info.size, info.mode = len(payload), 0o644
+                tar.addfile(info, io.BytesIO(payload))
+        return buffer.getvalue()
 
     def handler(self, request: httpx2.Request) -> httpx2.Response:
         path = request.url.path
         self.requests.append(path.removeprefix(_DOWNLOAD))
         if self.offline:
             raise httpx2.ConnectError("offline", request=request)
-        served = {
-            RELEASE_CHECKSUMS: self.checksums,
-            RELEASE_BUNDLE: self.signature,
-            **self.assets,
-        }
+        library = self.library()
+        served = {RELEASE_LIBRARY: library}
         release = {
             "tag_name": RELEASE_TAG,
             "draft": False,
-            "assets": [{"name": name, "state": "uploaded"} for name in sorted(served)],
+            "assets": [
+                {
+                    "name": RELEASE_LIBRARY,
+                    "state": "uploaded",
+                    "digest": f"sha256:{hashlib.sha256(library).hexdigest()}",
+                }
+            ],
         }
         if path == _RELEASES:
             return httpx2.Response(200, json=[release])

@@ -299,25 +299,56 @@ def _checksums(assets: dict[str, bytes]) -> bytes:
     ).encode()
 
 
+def _tar(members: dict[str, bytes]) -> bytes:
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for name in sorted(members):
+            info = tarfile.TarInfo(name)
+            info.size, info.mode = len(members[name]), 0o644
+            archive.addfile(info, io.BytesIO(members[name]))
+    return stream.getvalue()
+
+
 class _Release:
-    """A GitHub release API plus its redirecting asset origin."""
+    """A GitHub release API serving the one library bundle via a redirect.
+
+    ``members`` are the bundle's files; SHA256SUMS signs the listed assets
+    and a test may tamper with any member before the next read.
+    """
 
     def __init__(self, tag: str, assets: dict[str, bytes]) -> None:
         self.tag = tag
-        self.assets = {"SHA256SUMS": _checksums(assets), **assets}
-        self.assets["SHA256SUMS.sigstore.json"] = SIGNED_BUNDLE
+        self.members = {"SHA256SUMS": _checksums(assets), **assets}
+        self.members["SHA256SUMS.sigstore.json"] = SIGNED_BUNDLE
+        self.published = True
         self.redirect_host = "release-assets.githubusercontent.com"
         self.requests: list[str] = []
+
+    @property
+    def library(self) -> bytes:
+        return _tar(self.members)
+
+    @property
+    def library_downloads(self) -> int:
+        return sum("recipe-library.tar?" in url for url in self.requests)
 
     def handler(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(str(request.url))
         path = request.url.path
+        library = self.library
         release = {
             "tag_name": self.tag,
             "draft": False,
             "assets": [
-                {"id": 7, "name": name, "state": "uploaded"} for name in self.assets
-            ],
+                {
+                    "id": 7,
+                    "name": "recipe-library.tar",
+                    "state": "uploaded",
+                    "digest": f"sha256:{hashlib.sha256(library).hexdigest()}",
+                }
+            ]
+            if self.published
+            else [],
         }
         if path == RELEASES:
             # The reader follows the newest non-draft release of its own
@@ -334,21 +365,20 @@ class _Release:
         if path == f"{RELEASES}/tags/{self.tag}":
             return httpx2.Response(200, json=release)
         download = f"/CarstVaartjes/vonk-forge-recipes/releases/download/{self.tag}/"
-        if path.startswith(download) and path[len(download) :] in self.assets:
-            name = path[len(download) :]
+        if path == f"{download}recipe-library.tar" and self.published:
             return httpx2.Response(
                 302,
                 headers={
                     "location": f"https://{self.redirect_host}/github-production-"
-                    f"release-asset/1336002555/{name}?sig=opaque%3D"
+                    "release-asset/1336002555/recipe-library.tar?sig=opaque%3D"
                 },
             )
-        if path.startswith("/github-production-release-asset/1336002555/"):
+        if path == "/github-production-release-asset/1336002555/recipe-library.tar":
             assert request.url.query == b"sig=opaque%3D"
             return httpx2.Response(
                 200,
                 headers={"content-type": "application/octet-stream"},
-                content=self.assets[path.rsplit("/", 1)[1]],
+                content=library,
             )
         return httpx2.Response(404)
 
@@ -377,7 +407,16 @@ def _release_for(index: bytes, package: bytes, *, tag: str = "v2.1.0") -> _Relea
     return _Release(tag, {"catalog-index.json": index, "tiny-recipe.tar.gz": package})
 
 
-def test_production_reader_accepts_only_the_signed_release_assets(
+def _client(served: _Release, cache: Path, **options: object) -> RecipePackageClient:
+    return RecipePackageClient(
+        api_url="http://127.0.0.1",
+        cache_root=cache,
+        transport=httpx2.MockTransport(served.handler),
+        **options,  # type: ignore[arg-type]
+    )
+
+
+def test_production_reader_downloads_one_signed_bundle(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
     index, row, package = _canonical_package_fixture()
@@ -389,22 +428,20 @@ def test_production_reader_accepts_only_the_signed_release_assets(
         transport=httpx2.MockTransport(release.handler),
     )
     snapshot = client.list()
+    client.prepare(snapshot)
     item = client.fetch(snapshot.items[0].uri)
 
-    assert signed_releases == [release.assets["SHA256SUMS"]]
-    download = "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/releases/download/v2.1.0"
-    asset = "http://127.0.0.1:8085/github-production-release-asset/1336002555"
+    assert signed_releases == [release.members["SHA256SUMS"]]
+    # One listing call and one bundle download; nothing per package.
     assert release.requests == [
         f"http://127.0.0.1:8083{RELEASES}?per_page=100",
-        *(
-            url
-            for name in (
-                "SHA256SUMS",
-                "SHA256SUMS.sigstore.json",
-                "catalog-index.json",
-                "tiny-recipe.tar.gz",
-            )
-            for url in (f"{download}/{name}", f"{asset}/{name}?sig=opaque%3D")
+        (
+            "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/releases/download/"
+            "v2.1.0/recipe-library.tar"
+        ),
+        (
+            "http://127.0.0.1:8085/github-production-release-asset/1336002555/"
+            "recipe-library.tar?sig=opaque%3D"
         ),
     ]
     package_metadata = require_mapping(
@@ -426,42 +463,32 @@ def test_production_reader_can_hold_an_exact_release_tag(
 ) -> None:
     index, _, package = _canonical_package_fixture()
     release = _release_for(index, package, tag="v2.0.0")
-    client = RecipePackageClient(
-        api_url="http://127.0.0.1",
-        release="v2.0.0",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(release.handler),
-    )
+    client = _client(release, tmp_path / "packages", release="v2.0.0")
     assert client.list().commit == SIGNED_COMMIT
     # Without a relay the reader downloads from github.com and follows only
     # the redirect to GitHub's release asset origin.
-    assert release.requests[:3] == [
+    assert release.requests == [
         f"http://127.0.0.1{RELEASES}/tags/v2.0.0",
         (
             "https://github.com/CarstVaartjes/vonk-forge-recipes/releases/download/"
-            "v2.0.0/SHA256SUMS"
+            "v2.0.0/recipe-library.tar"
         ),
         (
             "https://release-assets.githubusercontent.com/github-production-release-"
-            "asset/1336002555/SHA256SUMS?sig=opaque%3D"
+            "asset/1336002555/recipe-library.tar?sig=opaque%3D"
         ),
     ]
     client.close()
 
 
-def test_unsigned_release_is_refused_even_with_a_previous_generation(
+def test_unsigned_bundle_is_refused_even_with_a_previous_generation(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
     index, _, package = _canonical_package_fixture()
     release = _release_for(index, package)
-    cache = tmp_path / "packages"
-    client = RecipePackageClient(
-        api_url="http://127.0.0.1",
-        cache_root=cache,
-        transport=httpx2.MockTransport(release.handler),
-    )
+    client = _client(release, tmp_path / "packages")
     client.prepare(client.list())
-    release.assets["SHA256SUMS.sigstore.json"] = b'{"forged": true}'
+    release.members["SHA256SUMS.sigstore.json"] = b'{"forged": true}'
     with pytest.raises(RecipeReleaseError, match="unsigned"):
         client.list()
     client.close()
@@ -471,13 +498,13 @@ def test_unsigned_release_is_refused_even_with_a_previous_generation(
     ("tamper", "error"),
     [
         ("index", "catalog-index.json does not match SHA256SUMS"),
-        ("package", "bytes do not match|does not match SHA256SUMS"),
         ("source", "not built from the signed release commit"),
-        ("missing", "package assets that were never uploaded or were removed"),
         ("redirect", "redirect leaves the GitHub asset origin"),
+        ("nested", "member <invalid asset name> is not a unique flat file"),
+        ("sums", "lacks a bounded SHA256SUMS"),
     ],
 )
-def test_release_assets_must_match_the_signed_manifest(
+def test_only_the_signed_envelope_rejects_the_whole_bundle(
     tmp_path: Path, signed_releases: list[bytes], tamper: str, error: str
 ) -> None:
     index, _, package = _canonical_package_fixture()
@@ -487,125 +514,107 @@ def test_release_assets_must_match_the_signed_manifest(
         index = _canonical(document) + b"\n"
     release = _release_for(index, package)
     if tamper == "index":
-        release.assets["catalog-index.json"] = index.replace(b"tiny", b"tinY", 1)
-    elif tamper == "package":
-        release.assets["tiny-recipe.tar.gz"] = _package_with_extra_member(package)
-    elif tamper == "missing":
-        del release.assets["tiny-recipe.tar.gz"]
+        release.members["catalog-index.json"] = index.replace(b"tiny", b"tinY", 1)
     elif tamper == "redirect":
         release.redirect_host = "objects.example.invalid"
-    client = RecipePackageClient(
-        api_url="http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(release.handler),
-    )
+    elif tamper == "nested":
+        release.members["packages/tiny-recipe.tar.gz"] = package
+    elif tamper == "sums":
+        del release.members["SHA256SUMS"]
+    client = _client(release, tmp_path / "packages")
     with pytest.raises(RecipePackageError, match=error):
-        client.prepare(client.list())
+        client.list()
     client.close()
 
 
-def test_release_missing_a_signed_package_names_the_asset(
+@pytest.mark.parametrize(
+    ("tamper", "named"),
+    [
+        ("bytes", "tiny-recipe.tar.gz"),
+        ("missing", "tiny-recipe.tar.gz"),
+        ("sums", "package.sha256"),
+    ],
+)
+def test_one_bad_package_skips_only_its_recipe_and_names_it(
+    tmp_path: Path, signed_releases: list[bytes], tamper: str, named: str
+) -> None:
+    # A signed bundle whose package is absent or altered (for example a
+    # publish that died mid-update) applies every other recipe; the skipped
+    # one is reported by name instead of refusing the whole library.
+    index, row, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    if tamper == "bytes":
+        release.members["tiny-recipe.tar.gz"] = _package_with_extra_member(package)
+    elif tamper == "missing":
+        del release.members["tiny-recipe.tar.gz"]
+    else:
+        release.members["SHA256SUMS"] = (
+            f"{hashlib.sha256(index).hexdigest()}  catalog-index.json\n"
+            + "0" * 64
+            + "  tiny-recipe.tar.gz\n"
+        ).encode()
+    client = _client(release, tmp_path / "packages")
+    snapshot = client.list()
+    client.prepare(snapshot)
+    assert snapshot.items == ()
+    [problem] = snapshot.problems
+    assert problem["code"] == "recipe_package.release_incomplete"
+    assert named in str(problem["detail"])
+    assert "fixture/tiny-recipe" in str(problem["detail"])
+    assert problem["recipe_uri"] == (
+        f"vonk://catalog/fixture/tiny-recipe@sha256:{row['content_sha256']}"
+    )
+    client.close()
+
+
+def test_release_mid_update_keeps_the_previous_verified_library(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    # A publish that died mid-update leaves SHA256SUMS and catalog-index.json
-    # naming a package whose asset is gone. The release stays refused, but the
-    # refusal names the tag and the asset instead of a bare response_invalid.
     index, _, package = _canonical_package_fixture()
     release = _release_for(index, package)
-    del release.assets["tiny-recipe.tar.gz"]
-    release.assets["unlisted-extra.tar.gz"] = b"never signed"  # ignored
-    client = RecipePackageClient(
-        api_url="http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(release.handler),
-    )
-    with pytest.raises(RecipePackageError) as refused:
-        client.list()
-    assert refused.value.code == "recipe_package.release_incomplete"
-    assert refused.value.detail == (
-        "signed release v2.1.0 lists package assets that were never uploaded "
-        "or were removed: tiny-recipe.tar.gz"
-    )
+    client = _client(release, tmp_path / "packages")
+    first = client.list()
+    client.prepare(first)
     client.close()
+    # The bundle asset is being replaced: the restarted reader keeps serving
+    # the last verified generation instead of failing or blocking.
+    release.published = False
+    restarted = _client(release, tmp_path / "packages")
+    assert restarted.list().commit == first.commit
+    restarted.close()
 
 
-def test_release_index_digest_disagreeing_with_sums_names_the_field(
-    tmp_path: Path, signed_releases: list[bytes]
-) -> None:
-    index, _, package = _canonical_package_fixture()
-    release = _release_for(index, package)
-    release.assets["SHA256SUMS"] = (
-        f"{hashlib.sha256(index).hexdigest()}  catalog-index.json\n"
-        + "0" * 64
-        + "  tiny-recipe.tar.gz\n"
-    ).encode()
-    client = RecipePackageClient(
-        api_url="http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(release.handler),
-    )
-    with pytest.raises(RecipePackageError) as refused:
-        client.list()
-    assert refused.value.code == "recipe_package.response_invalid"
-    assert refused.value.detail == (
-        "catalog-index.json package.sha256 differs from the signed SHA256SUMS "
-        "for tiny-recipe.tar.gz"
-    )
-    client.close()
-
-
-def _bind(locations: list[str], *, assets: set[str], sums: dict[str, str]) -> None:
+def test_bundle_member_names_are_bounded_and_safe() -> None:
     packages = {
-        f"vonk-forge/recipe-{number}": {
-            "location": location,
+        "vonk-forge/recipe-0": {
+            "location": "packages/../etc/passwd",
             "package_sha256": "a" * 64,
-        }
-        for number, location in enumerate(locations)
+        },
+        "vonk-forge/recipe-1": {
+            "location": "packages/bad\nname.tar.gz",
+            "package_sha256": "a" * 64,
+        },
+        "vonk-forge/recipe-2": {
+            "location": "packages/recipe-2.tar.gz",
+            "package_sha256": "a" * 64,
+        },
     }
-    recipe_packages._bind_release(
+    snapshot, kept = recipe_packages._bind_release(
         RecipeLibrarySnapshot(commit=SIGNED_COMMIT, items=()),
         packages,
         recipe_packages._VerifiedRelease(
             tag="v2.1.0",
             commit=SIGNED_COMMIT,
-            assets=frozenset(assets),
-            checksums=sums,
+            assets=frozenset({"recipe-2.tar.gz", "unlisted.tar.gz"}),
+            checksums={"recipe-2.tar.gz": "a" * 64},
             checksums_raw=b"",
             bundle_raw=b"",
         ),
     )
-
-
-def test_release_binding_reports_bounded_offenders() -> None:
-    names = [f"recipe-{number}.tar.gz" for number in range(40)]
-    signed = {name: "a" * 64 for name in names}
-    with pytest.raises(RecipePackageError) as refused:
-        _bind([f"packages/{name}" for name in names], assets=set(), sums=signed)
-    assert refused.value.code == "recipe_package.release_incomplete"
-    assert refused.value.detail.endswith(
-        "recipe-0.tar.gz, recipe-1.tar.gz, recipe-2.tar.gz (+37 more)"
-    )
-    assert len(refused.value.detail) <= 256
-
-    with pytest.raises(RecipePackageError) as escaped:
-        _bind(["packages/../etc/passwd"], assets=set(), sums={})
-    assert escaped.value.code == "recipe_package.response_invalid"
-    assert escaped.value.detail == (
-        "catalog-index.json package.path is not packages/<asset> for "
-        "vonk-forge/recipe-0"
-    )
-
-    with pytest.raises(RecipePackageError) as hostile:
-        _bind(["packages/bad\nname.tar.gz"], assets=set(), sums={})
-    assert "\n" not in hostile.value.detail
-    assert "<invalid asset name>" in hostile.value.detail
-
-    # A complete release binds; assets beyond the signed list are ignored.
-    _bind(
-        ["packages/recipe-0.tar.gz"],
-        assets={"recipe-0.tar.gz", "unlisted.tar.gz"},
-        sums={"recipe-0.tar.gz": "a" * 64},
-    )
+    assert list(kept) == ["vonk-forge/recipe-2"]
+    details = [str(problem["detail"]) for problem in snapshot.problems]
+    assert "package.path" in details[0] and "vonk-forge/recipe-0" in details[0]
+    assert "\n" not in details[1] and all(len(item) <= 256 for item in details)
 
 
 def test_restart_offline_reverifies_the_persisted_release(
@@ -634,7 +643,7 @@ def test_restart_offline_reverifies_the_persisted_release(
     snapshot = restarted.list()
     restarted.prepare(snapshot)
     assert snapshot.commit == SIGNED_COMMIT
-    assert signed_releases == [release.assets["SHA256SUMS"]]
+    assert signed_releases == [release.members["SHA256SUMS"]]
     handle = restarted.fetch(snapshot.items[0].uri).package_handle
     assert handle is not None
     assert handle.closure_path.is_dir()
@@ -694,7 +703,8 @@ def test_double_list_keeps_unvalidated_candidate_out_of_previous_good_state(
     client.list()
     candidate = client.list()
     client.prepare(candidate)
-    assert len([url for url in release.requests if "/tiny-recipe.tar.gz?" in url]) == 1
+    # The unchanged bundle digest is recognised: it is downloaded once.
+    assert release.library_downloads == 1
     client.close()
 
 
@@ -724,11 +734,12 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(
     )
     client.prepare(client.list())
     state["release"] = _release_for(_canonical(changed_index) + b"\n", changed)
-    client.prepare(client.list())
-    assert (
-        len([url for url in state["release"].requests if "/tiny-recipe.tar.gz?" in url])
-        == 1
-    )
+    snapshot = client.list()
+    client.prepare(snapshot)
+    assert state["release"].library_downloads == 1
+    handle = client.fetch(snapshot.items[0].uri).package_handle
+    assert handle is not None
+    assert handle.package_sha256 == hashlib.sha256(changed).hexdigest()
     client.close()
 
 

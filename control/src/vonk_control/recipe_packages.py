@@ -41,6 +41,7 @@ from .recipe_release import (
     RELEASE_BUNDLE,
     RELEASE_CHECKSUMS,
     RELEASE_INDEX,
+    RELEASE_LIBRARY,
     parse_release_checksums,
     verify_release_checksums,
 )
@@ -63,6 +64,10 @@ MAX_PACKAGE_BYTES = 256 * 1024 * 1024
 MAX_PACKAGE_FILES = 2048
 MAX_PACKAGE_FILE_BYTES = 128 * 1024 * 1024
 MAX_PACKAGE_TOTAL_BYTES = 256 * 1024 * 1024
+# The library bundle holds every package; it streams to disk, never to memory.
+MAX_LIBRARY_BYTES = 4 * 1024 * 1024 * 1024
+MAX_LIBRARY_MEMBERS = 8192
+_COPY_CHUNK = 1024 * 1024
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
@@ -78,6 +83,9 @@ class _ReleaseAsset(BaseModel):
 
     name: str
     state: str
+    # GitHub reports ``sha256:<hex>`` for uploaded assets; it lets an
+    # unchanged library bundle be recognised without downloading it.
+    digest: str | None = None
 
 
 class _ReleaseResponse(BaseModel):
@@ -282,7 +290,9 @@ class RecipePackageClient:
         # The release listing's validator: a conditional GET answers "no new
         # release" cheaply, so the library can be checked every minute.
         self._listing_etag: str | None = None
-        self._listing: tuple[str, frozenset[str]] | None = None
+        self._listing: tuple[str, frozenset[str], str | None] | None = None
+        # The GitHub digest of the library bundle last ingested.
+        self._library_digest: str | None = None
         self._listing_unchanged = False
         self._cache_root = cache_root.resolve()
         self._cache_root.mkdir(parents=True, exist_ok=True)
@@ -310,11 +320,25 @@ class RecipePackageClient:
         try:
             resolved = self._resolve_release()
             if (
-                self._listing_unchanged
+                (
+                    self._listing_unchanged
+                    or (resolved[2] is not None and resolved[2] == self._library_digest)
+                )
                 and self._snapshot is not None
                 and self._release is not None
             ):
                 return self._snapshot  # the publisher says: nothing changed
+            if (
+                self._snapshot is None
+                and resolved[2] is not None
+                and resolved[2] == self._persisted_library_digest()
+            ):
+                # A restart with the same bundle re-verifies the persisted
+                # generation instead of downloading the library again.
+                persisted = self._read_persisted_snapshot()
+                if persisted is not None:
+                    self._library_digest = resolved[2]
+                    return persisted
             raw, publication, release = self._fetch_release(resolved)
         except (httpx2.HTTPError, OSError) as error:
             persisted = self._read_persisted_snapshot()
@@ -332,8 +356,14 @@ class RecipePackageClient:
                     return persisted
             raise
         snapshot, packages = self._parse_index(raw, publication_commit=publication)
-        _bind_release(snapshot, packages, release)
-        self._persist_index(raw, publication_commit=publication, release=release)
+        snapshot, packages = _bind_release(snapshot, packages, release)
+        self._persist_index(
+            raw,
+            publication_commit=publication,
+            release=release,
+            library_digest=resolved[2],
+        )
+        self._library_digest = resolved[2]
         self._candidate_active = True
         self._release = release
         self._packages = packages
@@ -342,36 +372,190 @@ class RecipePackageClient:
         return snapshot
 
     def _fetch_release(
-        self, resolved: tuple[str, frozenset[str]]
+        self, resolved: tuple[str, frozenset[str], str | None]
     ) -> tuple[bytes, str, _VerifiedRelease]:
-        tag, assets = resolved
-        checksums_raw = self._download_asset(
-            tag, assets, RELEASE_CHECKSUMS, MAX_CHECKSUMS_BYTES
+        """Download the one library bundle and verify it once, at ingress."""
+        tag, assets, _digest = resolved
+        if RELEASE_LIBRARY not in assets:
+            # A release mid-update (or before its first bundle) is a transient
+            # absence: the previous verified generation stays in use.
+            raise RecipePackageError(
+                "recipe_package.unavailable",
+                f"recipe release {tag} does not contain {RELEASE_LIBRARY}",
+            )
+        partial = self._cache_root / f".{RELEASE_LIBRARY}.part"
+        try:
+            self._download_library(tag, partial)
+            return self._ingest_library(tag, partial)
+        finally:
+            partial.unlink(missing_ok=True)
+
+    def _download_library(self, tag: str, target: Path) -> None:
+        url = (
+            f"{self._download_origin}/{PACKAGE_REPOSITORY}/releases/download/"
+            f"{tag}/{RELEASE_LIBRARY}"
         )
-        bundle_raw = self._download_asset(tag, assets, RELEASE_BUNDLE, MAX_BUNDLE_BYTES)
-        commit = verify_release_checksums(checksums_raw, bundle_raw)
-        checksums = parse_release_checksums(checksums_raw)
-        raw = self._download_asset(
-            tag,
-            assets,
-            RELEASE_INDEX,
-            MAX_INDEX_BYTES,
-            sha256=checksums[RELEASE_INDEX],
+        headers = {"Accept": "application/octet-stream"}
+        for _hop in range(2):
+            with self._client.stream("GET", url, headers=headers) as response:
+                if response.status_code in _REDIRECTS:
+                    url = self._asset_redirect(response.headers.get("location", ""))
+                    continue
+                if response.status_code != 200:
+                    raise RecipePackageError(
+                        "recipe_package.unavailable",
+                        f"recipe release asset {RELEASE_LIBRARY} is unavailable",
+                    )
+                written = 0
+                with target.open("wb") as stream:
+                    for chunk in response.iter_bytes(_COPY_CHUNK):
+                        written += len(chunk)
+                        if written > MAX_LIBRARY_BYTES:
+                            raise RecipePackageError(
+                                "recipe_package.response_invalid",
+                                f"recipe release asset {RELEASE_LIBRARY} exceeds "
+                                "its size bound",
+                            )
+                        stream.write(chunk)
+                return
+        raise RecipePackageError(
+            "recipe_package.response_invalid",
+            f"recipe release asset {RELEASE_LIBRARY} redirects more than once",
         )
+
+    def _asset_redirect(self, location: str) -> str:
+        target = urlsplit(location)
+        if (
+            target.scheme != "https"
+            or target.hostname != RELEASE_ASSET_HOST
+            or target.port is not None
+            or target.username
+            or target.password
+            or target.fragment
+            or not target.path.startswith("/")
+        ):
+            raise RecipePackageError(
+                "recipe_package.response_invalid",
+                "recipe release asset redirect leaves the GitHub asset origin",
+            )
+        # The signed query is opaque; the relay forwards it unchanged.
+        query = f"?{target.query}" if target.query else ""
+        return f"{self._redirect_origin}{target.path}{query}"
+
+    def _ingest_library(
+        self, tag: str, path: Path
+    ) -> tuple[bytes, str, _VerifiedRelease]:
+        """Verify the bundle's signed SHA256SUMS, then each listed member once.
+
+        Only the signature, SHA256SUMS or the index reject the whole bundle.
+        A listed package that is absent or whose bytes differ is left out of
+        the verified set; the recipe that names it is skipped and reported.
+        Verified packages land in the content-addressed cache and are never
+        hashed again.
+        """
+        try:
+            with tarfile.open(path, mode="r:") as tar:
+                members: dict[str, tarfile.TarInfo] = {}
+                for member in tar:
+                    if (
+                        len(members) >= MAX_LIBRARY_MEMBERS
+                        or not member.isfile()
+                        or not _ASSET_NAME.fullmatch(member.name)
+                        or member.name in members
+                    ):
+                        raise RecipePackageError(
+                            "recipe_package.response_invalid",
+                            f"{RELEASE_LIBRARY} member "
+                            f"{_asset_label(member.name)} is not a unique flat file",
+                        )
+                    members[member.name] = member
+
+                def read(name: str, maximum: int) -> bytes:
+                    member = members.get(name)
+                    stream = tar.extractfile(member) if member is not None else None
+                    if member is None or stream is None or member.size > maximum:
+                        raise RecipePackageError(
+                            "recipe_package.response_invalid",
+                            f"{RELEASE_LIBRARY} lacks a bounded {name}",
+                        )
+                    return stream.read(maximum + 1)
+
+                checksums_raw = read(RELEASE_CHECKSUMS, MAX_CHECKSUMS_BYTES)
+                bundle_raw = read(RELEASE_BUNDLE, MAX_BUNDLE_BYTES)
+                commit = verify_release_checksums(checksums_raw, bundle_raw)
+                checksums = parse_release_checksums(checksums_raw)
+                raw = read(RELEASE_INDEX, MAX_INDEX_BYTES)
+                if _sha256(raw) != checksums[RELEASE_INDEX]:
+                    raise RecipePackageError(
+                        "recipe_package.digest_mismatch",
+                        f"{RELEASE_LIBRARY} {RELEASE_INDEX} does not match SHA256SUMS",
+                    )
+                verified = {RELEASE_INDEX}
+                for name, digest in checksums.items():
+                    member = members.get(name)
+                    if (
+                        not name.endswith(".tar.gz")
+                        or member is None
+                        or member.size > MAX_PACKAGE_BYTES
+                    ):
+                        continue
+                    if self._store_package(tar, member, digest):
+                        verified.add(name)
+        except (OSError, tarfile.TarError) as error:
+            raise RecipePackageError(
+                "recipe_package.response_invalid",
+                f"{RELEASE_LIBRARY} is not a readable tar archive",
+            ) from error
         return (
             raw,
             commit,
             _VerifiedRelease(
                 tag=tag,
                 commit=commit,
-                assets=assets,
+                assets=frozenset(verified),
                 checksums=checksums,
                 checksums_raw=checksums_raw,
                 bundle_raw=bundle_raw,
             ),
         )
 
-    def _resolve_release(self) -> tuple[str, frozenset[str]]:
+    def _store_package(
+        self, tar: tarfile.TarFile, member: tarfile.TarInfo, digest: str
+    ) -> bool:
+        """Place one member in the cache by digest; False when it is not that."""
+        target = self._package_path(digest)
+        try:
+            if target.stat().st_size == member.size:
+                return True  # verified at an earlier ingress
+        except OSError:
+            pass
+        stream = tar.extractfile(member)
+        if stream is None:
+            return False
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{digest}.", suffix=".tmp", dir=target.parent
+        )
+        temporary = Path(temporary_name)
+        try:
+            hasher = hashlib.sha256()
+            with os.fdopen(fd, "wb") as output:
+                while chunk := stream.read(_COPY_CHUNK):
+                    hasher.update(chunk)
+                    output.write(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            if hasher.hexdigest() != digest:
+                return False
+            os.replace(temporary, target)
+            return True
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _package_path(self, digest: str) -> Path:
+        return self._cache_root / digest[:2] / f"{digest}.tar.gz"
+
+    def _resolve_release(self) -> tuple[str, frozenset[str], str | None]:
         if self._release_selector == "latest":
             path, maximum = "releases?per_page=100", MAX_RELEASE_LIST_BYTES
         else:
@@ -413,72 +597,22 @@ class RecipePackageClient:
                 f"no published recipe library release for contract v{CONTRACT_MAJOR}",
             )
         assets: set[str] = set()
+        library_digest: str | None = None
         for asset in release.assets:
             if asset.state != "uploaded":
                 continue
             if asset.name in assets or not _ASSET_NAME.fullmatch(asset.name):
                 raise RecipePackageError(
                     "recipe_package.response_invalid",
-                    "recipe release asset identity is invalid",
+                    f"recipe release asset {_asset_label(asset.name)} is duplicated "
+                    "or misnamed",
                 )
             assets.add(asset.name)
-        self._listing = (release.tag_name, frozenset(assets))
+            if asset.name == RELEASE_LIBRARY:
+                library_digest = asset.digest
+        self._listing = (release.tag_name, frozenset(assets), library_digest)
         self._listing_etag = response.headers.get("etag")
         return self._listing
-
-    def _download_asset(
-        self,
-        tag: str,
-        assets: frozenset[str],
-        name: str,
-        maximum_bytes: int,
-        *,
-        sha256: str | None = None,
-    ) -> bytes:
-        if name not in assets:
-            raise RecipePackageError(
-                "recipe_package.release_incomplete",
-                f"recipe release does not contain {name}",
-            )
-        response = self._client.get(
-            f"{self._download_origin}/{PACKAGE_REPOSITORY}/releases/download/{tag}/{name}",
-            headers={"Accept": "application/octet-stream"},
-        )
-        if response.status_code in _REDIRECTS:
-            target = urlsplit(response.headers.get("location", ""))
-            if (
-                target.scheme != "https"
-                or target.hostname != RELEASE_ASSET_HOST
-                or target.port is not None
-                or target.username
-                or target.password
-                or target.fragment
-                or not target.path.startswith("/")
-            ):
-                raise RecipePackageError(
-                    "recipe_package.response_invalid",
-                    "recipe release asset redirect leaves the GitHub asset origin",
-                )
-            # The signed query is opaque; the relay forwards it unchanged.
-            query = f"?{target.query}" if target.query else ""
-            response = self._client.get(f"{self._redirect_origin}{target.path}{query}")
-        if response.status_code != 200 or response.is_redirect:
-            raise RecipePackageError(
-                "recipe_package.unavailable",
-                f"recipe release asset {name} is unavailable",
-            )
-        content = response.content
-        if len(content) > maximum_bytes:
-            raise RecipePackageError(
-                "recipe_package.response_invalid",
-                f"recipe release asset {name} exceeds its size bound",
-            )
-        if sha256 is not None and _sha256(content) != sha256:
-            raise RecipePackageError(
-                "recipe_package.digest_mismatch",
-                f"recipe release asset {name} does not match SHA256SUMS",
-            )
-        return content
 
     def _parse_index(
         self, raw: bytes, *, publication_commit: str
@@ -719,12 +853,14 @@ class RecipePackageClient:
         *,
         publication_commit: str,
         release: _VerifiedRelease,
+        library_digest: str | None,
     ) -> None:
         # Keep the signature material so a restart re-verifies the previous
         # generation instead of trusting local state.
         payload: dict[str, object] = {
             "index": raw.decode("utf-8"),
             "publication_commit": publication_commit,
+            "library_digest": library_digest,
             "release": {
                 "tag": release.tag,
                 "assets": sorted(release.assets),
@@ -764,6 +900,15 @@ class RecipePackageClient:
         }
         self._candidate_active = False
 
+    def _persisted_library_digest(self) -> str | None:
+        """The GitHub digest of the bundle the persisted generation came from."""
+        try:
+            payload = _json(self._snapshot_path.read_bytes())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        value = payload.get("library_digest") if isinstance(payload, Mapping) else None
+        return value if isinstance(value, str) else None
+
     def _read_persisted_snapshot(self) -> RecipeLibrarySnapshot | None:
         """Read the offline index cache, or ``None`` when it is unusable.
 
@@ -798,7 +943,7 @@ class RecipePackageClient:
                 # example one cached by an older reader) is never served.
                 return None
             snapshot, packages = self._parse_index(raw, publication_commit=publication)
-            _bind_release(snapshot, packages, release)
+            snapshot, packages = _bind_release(snapshot, packages, release)
         except (
             OSError,
             TypeError,
@@ -885,66 +1030,35 @@ class RecipePackageClient:
             return self._prepared[uri]
         package = self._packages[f"{publisher}/{slug}"]
         package_digest = str(package["package_sha256"])
-        archive, archive_path = self._cached_or_download(
-            package_digest,
-            str(package["location"]),
-            require_integer(package["size"], "package size"),
+        archive, archive_path = self._cached_package(
+            package_digest, require_integer(package["size"], "package size")
         )
         return self._decode_package(
             archive, item, package=package, archive_path=archive_path
         )
 
-    def _cached_or_download(
-        self, digest: str, location: str, expected_size: int
-    ) -> tuple[bytes, Path]:
-        target = self._cache_root / digest[:2] / f"{digest}.tar.gz"
+    def _cached_package(self, digest: str, expected_size: int) -> tuple[bytes, Path]:
+        """Read a package verified when its library bundle was ingested."""
+        target = self._package_path(digest)
+        release = self._release
         try:
             cached = target.read_bytes()
-            if len(cached) == expected_size and _sha256(cached) == digest:
-                return cached, target
         except OSError:
-            pass
-        content = self._download_release_package(digest, location, expected_size)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary_name = tempfile.mkstemp(
-            prefix=f".{digest}.", suffix=".tmp", dir=target.parent
-        )
-        temporary = Path(temporary_name)
-        try:
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(content)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, target)
-        finally:
-            if temporary.exists():
-                temporary.unlink()
-        return content, target
-
-    def _download_release_package(
-        self, digest: str, location: str, expected_size: int
-    ) -> bytes:
-        release = self._release
-        name = PurePosixPath(location).name
-        if release is None or release.checksums.get(name) != digest:
+            cached = None
+        if (
+            cached is None
+            or len(cached) != expected_size
+            or release is None
+            or digest not in release.checksums.values()
+        ):
+            # Local storage lost it: ingest the library bundle again next sync.
+            self._listing_etag = None
+            self._library_digest = None
             raise RecipePackageError(
-                "recipe_package.snapshot_changed",
-                "recipe package is not in the verified release",
+                "recipe_package.unavailable",
+                "recipe package is not in the verified local library",
             )
-        try:
-            content = self._download_asset(
-                release.tag, release.assets, name, MAX_PACKAGE_BYTES, sha256=digest
-            )
-        except (httpx2.HTTPError, OSError) as error:
-            raise RecipePackageError(
-                "recipe_package.unavailable", "recipe package is unavailable"
-            ) from error
-        if len(content) != expected_size:
-            raise RecipePackageError(
-                "recipe_package.digest_mismatch",
-                "recipe package bytes do not match the trusted index",
-            )
-        return content
+        return cached, target
 
     def _decode_package(
         self,
@@ -1276,67 +1390,68 @@ def _bind_release(
     snapshot: RecipeLibrarySnapshot,
     packages: Mapping[str, Mapping[str, object]],
     release: _VerifiedRelease,
-) -> None:
-    """Require the index and every package it names to be the signed ones.
+) -> tuple[RecipeLibrarySnapshot, dict[str, dict[str, object]]]:
+    """Keep only recipes whose package is the signed, verified one.
 
-    A refusal names the offending assets and the field that disagrees, so the
-    publisher can see what to repair; an inconsistent release is never used.
+    The index must come from the signed commit. A recipe whose package path,
+    digest or bytes disagree with the signed SHA256SUMS is skipped and reported
+    by name; every other recipe still applies.
     """
     if snapshot.commit != release.commit:
         raise RecipePackageError(
             "recipe_package.response_invalid",
             "recipe index was not built from the signed release commit",
         )
-    bad_location: list[str] = []
-    bad_digest: list[str] = []
-    missing: list[str] = []
+    kept: dict[str, dict[str, object]] = {}
+    problems = list(snapshot.problems)
+    skipped: set[str] = set()
     for key, package in packages.items():
         location = str(package.get("location"))
         name = PurePosixPath(location).name
         if location != f"packages/{name}":
-            bad_location.append(key)
+            reason = "catalog-index.json package.path is not packages/<asset>"
         elif release.checksums.get(name) != package.get("package_sha256"):
-            bad_digest.append(_asset_label(name))
+            reason = "catalog-index.json package.sha256 differs from SHA256SUMS"
         elif name not in release.assets:
-            missing.append(_asset_label(name))
-    if bad_location:
-        raise RecipePackageError(
-            "recipe_package.response_invalid",
-            _bounded_reason(
-                "catalog-index.json package.path is not packages/<asset> for",
-                bad_location,
-            ),
+            reason = (
+                f"{RELEASE_LIBRARY} lacks the signed package "
+                f"{_asset_label(name)} or its bytes differ"
+            )
+        else:
+            kept[key] = dict(package)
+            continue
+        skipped.add(key)
+        problems.append(
+            {
+                "recipe_uri": _entry_uri(
+                    {
+                        "document": package.get("document"),
+                        "content_sha256": package.get("recipe_content_sha256"),
+                    }
+                ),
+                "code": "recipe_package.release_incomplete",
+                "detail": f"{reason} for {key}"[:256],
+            }
         )
-    if bad_digest:
-        raise RecipePackageError(
-            "recipe_package.response_invalid",
-            _bounded_reason(
-                "catalog-index.json package.sha256 differs from the signed "
-                "SHA256SUMS for",
-                bad_digest,
+    if not skipped:
+        return snapshot, kept
+    return (
+        replace(
+            snapshot,
+            items=tuple(
+                item
+                for item in snapshot.items
+                if f"{item.publisher}/{item.slug}" not in skipped
             ),
-        )
-    if missing:
-        raise RecipePackageError(
-            "recipe_package.release_incomplete",
-            _bounded_reason(
-                f"signed release {release.tag} lists package assets that were "
-                "never uploaded or were removed:",
-                missing,
-            ),
-        )
+            problems=tuple(problems),
+        ),
+        kept,
+    )
 
 
 def _asset_label(name: str) -> str:
     """Return a release asset name that is safe to show, or a placeholder."""
     return name if _ASSET_NAME.fullmatch(name) else "<invalid asset name>"
-
-
-def _bounded_reason(prefix: str, names: list[str], *, shown: int = 3) -> str:
-    """Name the first offenders and count the rest, within the detail bound."""
-    listed = ", ".join(names[:shown])
-    more = f" (+{len(names) - shown} more)" if len(names) > shown else ""
-    return f"{prefix} {listed}{more}"[:256]
 
 
 def _persisted_release(value: object, index: bytes) -> _VerifiedRelease | None:

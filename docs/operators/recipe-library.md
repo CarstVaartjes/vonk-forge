@@ -40,16 +40,20 @@ read is skipped, listed under the sync-status `problems`, and the rest applies.
 ## Development versus production
 
 The catalog index and recipe packages are not committed to the recipe
-repository. Its `publish.yml` workflow builds them from the release commit and
-attaches them to a GitHub release together with `SHA256SUMS` and
-`SHA256SUMS.sigstore.json`, a keyless GitHub artifact attestation over
-`SHA256SUMS`. The Controller follows the newest published release whose major
-version is its own contract major (drafts are skipped); set
-`VONK_RECIPE_LIBRARY_RELEASE` to an exact `v2.MINOR.PATCH` tag to hold one.
+repository. Its `publish.yml` workflow builds them from the release commit,
+lists them in `SHA256SUMS`, signs that with `SHA256SUMS.sigstore.json` (a
+keyless GitHub artifact attestation), and publishes all of it as one release
+asset, `recipe-library.tar`: an uncompressed tar holding `SHA256SUMS`, its
+Sigstore bundle and every file `SHA256SUMS` lists, under flat names. Replacing
+that one asset makes the in-place update of a contract-version release atomic.
+The Controller follows the newest published release whose major version is its
+own contract major (drafts are skipped); set `VONK_RECIPE_LIBRARY_RELEASE` to
+an exact `v2.MINOR.PATCH` tag to hold one. A sync costs one conditional release
+listing and, only when the bundle's digest changed, one bundle download.
 Sync status (`library_version`, `library_updated_at`), the Library page and
 `vonkctl recipe library` show the release version and when its recipes last
-changed. A release caught mid-update (assets being replaced) just fails that
-sync; the previous verified catalog stays active and the next sync heals it.
+changed. A release caught while its bundle is being replaced keeps the previous
+verified catalog active; the next sync picks up the new bundle.
 
 Each sync verifies, before importing anything:
 
@@ -65,11 +69,15 @@ Each sync verifies, before importing anything:
 4. that `catalog-index.json` matches its `SHA256SUMS` digest and records that
    signed commit as `source_commit`;
 5. that every package the index names is listed in `SHA256SUMS` with the
-   index's own digest, and that downloaded package bytes match both.
+   index's own digest, and that the bundle's package bytes match it. Bytes are
+   verified once, at this ingress, and are never hashed again.
 
-An unsigned, wrongly signed, or inconsistent release fails the sync with a
-`recipe_release.*` or `recipe_package.*` code and never replaces the imported
-catalog. When GitHub is unreachable, the Controller reuses the previous
+An unsigned or wrongly signed bundle, or one whose `SHA256SUMS` or index is
+missing or altered, fails the sync with a `recipe_release.*` or
+`recipe_package.*` code that names the asset, and never replaces the imported
+catalog. A single package that is absent from the bundle or whose bytes or
+digest disagree skips only its recipe, reported by name under `problems`; the
+rest of the library applies. When GitHub is unreachable, the Controller reuses the previous
 verified generation from its state directory, re-verifying the stored
 signature. Automatic sync retries a failed attempt after 30 seconds, doubling
 up to the sync interval. The packaged trust root is refreshed deliberately with
