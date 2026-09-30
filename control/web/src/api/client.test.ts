@@ -133,3 +133,13 @@ test("refuses to send a mutating request when the CSRF token is missing", async 
   ].map(attempt => attempt.then(() => "sent", error => String(error.message))));
   for (const message of outcomes) expect(message).toContain("CSRF token missing");
 });
+
+test("refuses a request body without an explicit method", async () => {
+  // Break caught: a body without a method silently became a GET and only
+  // failed inside fetch with a generic TypeError, far from the caller's bug.
+  vi.stubGlobal("fetch", async () => {
+    throw new Error("the request must not be sent");
+  });
+  const failure = await new ApiClient().request("/api/model/library", {body: JSON.stringify({})}).then(() => null, error => error);
+  expect(String(failure.message)).toContain("explicit method");
+});

@@ -160,13 +160,17 @@ export class ApiClient implements ControlApi {
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (!path.startsWith("/api/") || path.includes("..")) throw new Error("Unsafe API path");
+    // fetch would only reject a body on the implicit GET at send time, with a
+    // generic TypeError; refuse the ambiguity up front like other unsafe input.
+    if (init.body && init.method === undefined) throw new Error("API request with a body requires an explicit method");
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
     if (init.body) headers.set("Content-Type", "application/json");
     // Login is the one mutating call the Controller accepts without CSRF (it
     // validates origin instead) and the call that issues the first token.
-    if (init.method && !["GET", "HEAD"].includes(init.method) && path !== "/api/auth/login") headers.set("X-CSRF-Token", requiredCsrfToken());
-    const response = await fetch(path, {...init, headers, credentials: "same-origin"});
+    const method = init.method ?? "GET";
+    if (!["GET", "HEAD"].includes(method) && path !== "/api/auth/login") headers.set("X-CSRF-Token", requiredCsrfToken());
+    const response = await fetch(path, {...init, method, headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (!response.ok) {
       let problem: unknown;
