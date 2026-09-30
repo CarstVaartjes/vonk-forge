@@ -1628,12 +1628,20 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         return failed_job(&request, exit_code.max(1), started, reason);
                     }
                 };
+                let output_root = match self.runtime.job_output_root(&job_scope) {
+                    Ok(root) => root,
+                    Err(_) => {
+                        let _ = self.runtime.cleanup_job_scope(&job_scope);
+                        return failed_job(
+                            &request,
+                            exit_code.max(1),
+                            started,
+                            "job output directory is unavailable",
+                        );
+                    }
+                };
                 for output in &output_manifest.files {
-                    let path = self
-                        .runtime
-                        .job_output_root(&job_scope)
-                        .unwrap()
-                        .join(&output.name);
+                    let path = output_root.join(&output.name);
                     let upload = run_until_cancelled(
                         self.client.upload_recipe_job_output(
                             request.job_id,
