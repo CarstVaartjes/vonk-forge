@@ -4,12 +4,13 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_control.distributed_lifecycle import DistributedLifecycleError
 from vonk_control.distributed_recovery import (
     DistributedRecoveryCoordinator,
     enforce_recovery_deadline,
 )
-from vonk_control.models import AgentOperation, Job, RecipeRun, RunNode
+from vonk_control.models import AgentOperation, AgentPresence, Job, RecipeRun, RunNode
 
 from .test_recipe_operations import (
     NOW,
@@ -158,6 +159,61 @@ def test_singleton_recovery_cooldown_is_durable_and_resumes_after_expiry(
             0
         ] + timedelta(seconds=5)
         assert "fresh exact absence" in (run.route_error or "")
+
+
+def test_distributed_recovery_waits_for_fresh_presence_then_resumes(
+    tmp_path,
+):
+    sessions, service, queue, mapping, build, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installed = installed_recipe(service, mapping, build, nodes, request_id="i" * 36)
+    started = started_recipe(
+        sessions, service, installed.owner_id, nodes, request_id="r" * 36
+    )
+    service, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
+    routes.publish_run(started.owner_id)
+    record_exact_empty_snapshot(sessions, nodes[1], NOW + timedelta(seconds=1))
+    stale_at = NOW - timedelta(seconds=ROUTE_EVIDENCE_MAX_AGE_SECONDS + 1)
+    with sessions.begin() as session:
+        for presence in session.scalars(select(AgentPresence)):
+            presence.observed_at = stale_at
+    now = [NOW]
+    recovery = DistributedRecoveryCoordinator(
+        sessions, routes=routes, agent_jobs=queue, clock=lambda: now[0]
+    )
+
+    assert recovery.tick() is True
+    with sessions() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        assert run is not None
+        # Stale presence evidence must wait instead of entering Start payloads.
+        assert run.state == "running"
+        assert "fresh Controller-observed Spark presence" in (run.route_error or "")
+        assert run.route_next_attempt_at is not None
+        assert not tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
+        # The wait must not outlive the recovery generation bump: the next
+        # attempt still stops the exact Start payloads of generation 1.
+        assert run.run_generation == 1
+        assert run.plan["run_generation"] == 1
+
+    with sessions.begin() as session:
+        for presence in session.scalars(select(AgentPresence)):
+            presence.observed_at = now[0]
+    # The pending wait scheduled its next check; recovery resumes once due.
+    now[0] += timedelta(seconds=6)
+
+    assert recovery.tick() is True
+    with sessions() as session:
+        stop = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.stop",
+                Job.payload["owner_id"].as_string() == started.owner_id,
+            )
+        )
+        run = session.get(RecipeRun, started.owner_id)
+        assert stop is not None and run is not None
+        assert run.run_generation == 2
 
 
 def test_one_shot_recovery_reports_why_replay_is_unsafe(tmp_path):

@@ -5048,7 +5048,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
         assert publication.state == "routes-withdrawn"
 
 
-def test_distributed_rank_loss_withdraws_route_when_recovery_authority_is_missing(
+def test_distributed_rank_loss_waits_for_fresh_presence_when_evidence_is_missing(
     tmp_path: Path,
 ) -> None:
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
@@ -5081,10 +5081,13 @@ def test_distributed_rank_loss_withdraws_route_when_recovery_authority_is_missin
 
     with sessions() as session:
         run = _required(session.get(RecipeRun, start.owner_id))
-        assert run.state == "failed"
+        # Missing presence evidence waits like the singleton path instead of
+        # replaying stale authority, and the route stays withdrawn meanwhile.
+        assert run.state == "running"
         assert run.route_state == "withdrawn"
         assert run.route_error is not None
-        assert "endpoint evidence is missing" in run.route_error
+        assert "fresh Controller-observed Spark presence" in run.route_error
+        assert run.run_generation == 1
         assert not session.scalar(
             select(Job.id).where(
                 Job.kind == "recipe.stop",

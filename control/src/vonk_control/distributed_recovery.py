@@ -263,6 +263,15 @@ class DistributedRecoveryCoordinator:
                         )
                     else:
                         previous_run_generation = run.run_generation
+                        previous_observations = tuple(
+                            (
+                                node.observed_run_generation,
+                                node.observation_process_running,
+                                node.observation_observed_at,
+                                node.observation_endpoint_ready,
+                            )
+                            for node in run_nodes
+                        )
                         run.run_generation += 1
                         run_plan["run_generation"] = run.run_generation
                         run.plan = run_plan_document(run_plan)
@@ -271,13 +280,31 @@ class DistributedRecoveryCoordinator:
                             node.observation_process_running = None
                             node.observation_observed_at = None
                             node.observation_endpoint_ready = None
-                        authority = _recovery_authority(
-                            session,
-                            run,
-                            now,
-                            failed[0].rank,
-                            stop_run_generation=previous_run_generation,
-                        )
+                        try:
+                            authority = _recovery_authority(
+                                session,
+                                run,
+                                now,
+                                failed[0].rank,
+                                stop_run_generation=previous_run_generation,
+                            )
+                        except _RecoveryDependencyPending:
+                            # A pending wait must not outlive this generation
+                            # bump: the next attempt still has to stop the
+                            # exact Start payloads of the running generation.
+                            run.run_generation = previous_run_generation
+                            run_plan["run_generation"] = previous_run_generation
+                            run.plan = run_plan_document(run_plan)
+                            for node, observation in zip(
+                                run_nodes, previous_observations
+                            ):
+                                (
+                                    node.observed_run_generation,
+                                    node.observation_process_running,
+                                    node.observation_observed_at,
+                                    node.observation_endpoint_ready,
+                                ) = observation
+                            raise
                     if authority is None:
                         raise DistributedLifecycleError(
                             "accepted run has no automatic recovery authority"
@@ -1600,9 +1627,22 @@ def _recovery_authority(
             .order_by(AgentPresence.observed_at.desc())
             .limit(1)
         )
-        if presence is None or not isinstance(presence.management_address, str):
-            raise DistributedLifecycleError(
-                "distributed recovery endpoint evidence is missing"
+        observed_at = None if presence is None else presence.observed_at
+        # Stored timestamps can come back naive (SQLite); they are UTC either
+        # way, matching the other stored-observation readers in this module.
+        if observed_at is not None and observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=UTC)
+        if (
+            presence is None
+            or not isinstance(presence.management_address, str)
+            or observed_at is None
+            or not timedelta(0)
+            <= _aware(now) - observed_at
+            < timedelta(seconds=ROUTE_EVIDENCE_MAX_AGE_SECONDS)
+        ):
+            raise _RecoveryDependencyPending(
+                "distributed recovery waits for a fresh Controller-observed "
+                "Spark presence report"
             )
         presences[node.node_id] = presence.management_address
     start_job, startup_budget = _original_start_authority(
