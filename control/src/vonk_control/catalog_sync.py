@@ -674,6 +674,23 @@ def catalog_sync_retry_delay(failures: int, interval_seconds: int) -> int:
     )
 
 
+def catalog_sync_failure_reason(error: Exception) -> str:
+    """Describe an automatic sync failure for the log: type, code, bounded detail.
+
+    Only the typed ``detail`` the sync and reader raise is shown, never an
+    arbitrary exception message, and it is bounded and stripped of control
+    characters so an untrusted release cannot shape the log line.
+    """
+    code = getattr(error, "code", "unclassified")
+    detail = getattr(error, "detail", None)
+    text = (
+        "".join(ch if ch.isprintable() else " " for ch in detail[:256])
+        if isinstance(detail, str)
+        else ""
+    )
+    return f"{type(error).__name__} ({str(code)[:128]})" + (f": {text}" if text else "")
+
+
 def _result(value: object) -> ManagedCatalogSyncResult:
     try:
         return ManagedCatalogSyncResult.model_validate_json(canonical_message(value))

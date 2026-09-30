@@ -71,6 +71,7 @@ from .catalog_api import CatalogProblem, install_catalog_routes
 from .catalog_service import CatalogService
 from .catalog_sync import (
     ManagedRecipeCatalogSyncService,
+    catalog_sync_failure_reason,
     catalog_sync_retry_delay,
 )
 from .cluster_mappings import ClusterMappingService
@@ -1572,10 +1573,9 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 # than the steady-state interval, backing off per failure.
                 failures += 1
                 _LOGGER.warning(
-                    "automatic managed recipe catalog sync failed: %s (%s); "
+                    "automatic managed recipe catalog sync failed: %s; "
                     "retrying in %s seconds",
-                    type(error).__name__,
-                    getattr(error, "code", "unclassified"),
+                    catalog_sync_failure_reason(error),
                     catalog_sync_retry_delay(
                         failures, RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
                     ),
