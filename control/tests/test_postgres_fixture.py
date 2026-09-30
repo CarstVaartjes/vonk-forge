@@ -59,6 +59,5 @@ def test_postgres_engine_uses_isolated_postgres_18_database(
         ).one()
 
     assert re.fullmatch(r"vonk_test_[0-9a-f]{32}", database)
-    assert version.startswith(POSTGRES_IMAGE.removeprefix("postgres:") + " ") or (
-        version == POSTGRES_IMAGE.removeprefix("postgres:")
-    )
+    release_version = POSTGRES_IMAGE.removeprefix("postgres:").split("@", 1)[0]
+    assert version.startswith(release_version + " ") or version == release_version
