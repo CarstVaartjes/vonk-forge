@@ -290,6 +290,18 @@ class PreparationStarter(Protocol):
     ) -> Sequence[OperationBlocker]: ...
 
 
+class PreparationCanceller(Protocol):
+    """Cancel the pending preparation one exact recipe revision still runs.
+
+    Returns the ids of the operations it asked to cancel. A preparation another
+    accepted consumer still needs is left alone by its owner.
+    """
+
+    def __call__(
+        self, recipe_revision_id: str, *, actor: str, reason: str
+    ) -> Sequence[str]: ...
+
+
 class _AssessmentProvider(Protocol):
     def __call__(
         self,
@@ -2749,6 +2761,7 @@ class FleetProfileService:
         self._cache_resolver = cache_resolver
         self._assessment_provider = assessment_provider
         self._preparation_starter: PreparationStarter | None = None
+        self._preparation_canceller: PreparationCanceller | None = None
         # Round-robin position of the bounded automatic-recovery scan, so rows
         # that stay ineligible cannot starve later due rows.
         self._recovery_cursor: str | None = None
@@ -5740,6 +5753,84 @@ class FleetProfileService:
 
         self._preparation_starter = starter
 
+    def bind_preparation_canceller(self, canceller: PreparationCanceller) -> None:
+        """Attach the authority that cancels a preparation a load asked for."""
+
+        self._preparation_canceller = canceller
+
+    def _cancel_owned_preparations(
+        self, application_id: str, plan: FleetProfilePreview, *, actor: str
+    ) -> None:
+        """Cancel what a cancelled waiting load asked the Controller to prepare.
+
+        Best effort and self-healing: the application is already cancelled, so
+        a preparation left behind is only useful work the next load reuses.
+        Revisions another live application still waits on are kept.
+        """
+
+        canceller = self._preparation_canceller
+        if canceller is None:
+            return
+        revisions = {
+            assignment.recipe_revision_id
+            for assignment in _assignments_needing_preparation(
+                plan.assignments,
+                {item.assignment_id for item in plan.preparations},
+                plan.reasons,
+                plan.assessments,
+            )
+        }
+        cancelled: list[str] = []
+        for revision_id in sorted(revisions):
+            with self._sessions() as session:
+                others = tuple(
+                    session.scalars(
+                        select(FleetProfileApplication).where(
+                            FleetProfileApplication.id != application_id,
+                            FleetProfileApplication.state.in_(
+                                ("queued", "running", "waiting-for-operator")
+                            ),
+                        )
+                    )
+                )
+                shared = False
+                for other in others:
+                    try:
+                        other_plan = _persisted_profile_plan(other)
+                    except FleetProfileConflict:
+                        continue
+                    if any(
+                        item.recipe_revision_id == revision_id
+                        for item in other_plan.resolved_assignments
+                    ):
+                        shared = True
+                        break
+            if shared:
+                continue
+            try:
+                cancelled.extend(
+                    canceller(
+                        revision_id,
+                        actor=actor,
+                        reason=f"Profile application {application_id} was cancelled",
+                    )
+                )
+            except Exception:  # the cancel already succeeded
+                _LOGGER.warning(
+                    "could not cancel preparation of %s for cancelled application %s",
+                    revision_id,
+                    application_id,
+                    exc_info=True,
+                )
+        if cancelled:
+            with self._sessions.begin() as session:
+                row = session.get(FleetProfileApplication, application_id)
+                if row is not None and row.state == "cancelled":
+                    row.status_reason = (
+                        (row.status_reason or "")
+                        + f" Cancelled pending preparation: {', '.join(cancelled)}."
+                    )[:512]
+
     def _request_preparations(
         self, preview: FleetProfilePreview, *, actor: str
     ) -> list[OperationBlocker]:
@@ -6325,6 +6416,7 @@ class FleetProfileService:
 
         now = _aware(self._clock())
         cancellation: FleetProfileApplicationCancellationIntent | None = None
+        waiting_only = False
         with self._admission_session(actor, node_ids=snapshot_scope) as session:
             row = session.get(
                 FleetProfileApplication,
@@ -6363,9 +6455,23 @@ class FleetProfileService:
                 if row.state not in {"queued", "running", "waiting-for-operator"}:
                     raise FleetProfileConflict("Profile application is not cancellable")
                 ordinal = progress.workload_intent_ordinal
-                if scope and ordinal is None:
+                if ordinal is None and (
+                    progress.switch_adapter is not None
+                    or row.current_operation_id is not None
+                ):
+                    # A workload fence precedes every workload effect, so an
+                    # issued child without one is evidence that cannot be
+                    # reconciled by cancelling: name it instead of guessing.
+                    child = (
+                        progress.switch_adapter.active_operation_id
+                        if progress.switch_adapter is not None
+                        else None
+                    ) or row.current_operation_id
                     raise FleetProfileConflict(
-                        "Profile cancellation cannot prove its workload intent"
+                        f"Profile cancellation cannot reconcile operation {child}: "
+                        "it issued workload effects without a recorded workload "
+                        "intent. Let that operation finish (or use its own cancel), "
+                        "then cancel this application again."
                     )
                 cancel_ordinal: int | None = None
                 if ordinal is not None:
@@ -6418,12 +6524,31 @@ class FleetProfileService:
                     strict=True,
                     from_json=True,
                 ).model_dump(mode="json")
-                row.state = "running"
-                row.status_reason = (
-                    "Cancellation requested; reconciling issued profile effects."
-                )
-                row.updated_at = now
+                if ordinal is None:
+                    # Nothing was fenced or issued: the application only waits
+                    # (for preparation, build capacity or its turn), so it
+                    # cancels at once and leaves the running workload alone.
+                    self._finish_profile_cancellation(
+                        session,
+                        row,
+                        _persisted_profile_progress(row),
+                        now,
+                        reason=(
+                            "Profile application cancelled before any workload "
+                            "effect was issued; the running workload was not touched."
+                        ),
+                    )
+                    waiting_only = True
+                else:
+                    row.state = "running"
+                    row.status_reason = (
+                        "Cancellation requested; reconciling issued profile effects."
+                    )
+                    row.updated_at = now
 
+        if waiting_only:
+            self._cancel_owned_preparations(application_id, plan, actor=actor)
+            return self.application(application_id)
         adapter = self._switch_adapter
         if adapter is not None and cancellation is not None:
             request_cancellation = getattr(adapter, "request_cancellation", None)
@@ -7601,15 +7726,8 @@ class FleetProfileService:
                 row.status_reason = f"Cancellation {owner}: " + ", ".join(operation_ids)
                 row.updated_at = now
                 return True
-        elif scope:
-            self._defer_cancellation_observation(row, progress, now)
-            row.status_reason = (
-                "Cancellation cannot prove the workload intent needed to reconcile "
-                "issued effects"
-            )
-            row.updated_at = now
-            return True
 
+        # No workload intent and no child: no workload effect was ever issued.
         return self._finish_profile_cancellation(session, row, progress, now)
 
     def _finish_profile_cancellation(
@@ -7618,6 +7736,8 @@ class FleetProfileService:
         row: FleetProfileApplication,
         progress: FleetProfileApplicationProgress,
         now: datetime,
+        *,
+        reason: str = "Profile application cancelled after issued effects were reconciled",
     ) -> bool:
         progress_data = progress.model_dump(mode="json")
         cancellation_data = dict(progress_data["cancellation"] or {})
@@ -7638,9 +7758,7 @@ class FleetProfileService:
         ).model_dump(mode="json")
         row.current_operation_id = None
         self._set_application_state(session, row, "cancelled")
-        row.status_reason = (
-            "Profile application cancelled after issued effects were reconciled"
-        )
+        row.status_reason = reason
         row.result = {
             "changed": bool(progress.completed_steps or progress.step_results),
             "completed_steps": min(progress.completed_steps, row.current_step),
