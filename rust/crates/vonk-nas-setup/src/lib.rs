@@ -92,9 +92,20 @@ pub struct CanonicalTemplatePayload {
     secrets: Vec<SecretPrompt>,
     #[serde(default)]
     generated_secrets: GeneratedSecrets,
+    /// Secrets read by capability-free containers through one supplementary
+    /// group (Compose `group_add`). Written 0640 with this group.
+    #[serde(default)]
+    group_readable_secrets: Option<GroupReadableSecrets>,
     install_modes: Option<InstallModes>,
     step_ca_controller: Option<StepCaControllerRequest>,
     hermes: Option<HermesPrompt>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GroupReadableSecrets {
+    gid: u32,
+    files: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -268,6 +279,23 @@ impl CanonicalTemplatePayload {
             return Err(SetupError::InvalidPayload(
                 "preflight checklist is malformed".to_owned(),
             ));
+        }
+
+        if let Some(group) = &self.group_readable_secrets {
+            let mut seen = HashSet::new();
+            if group.gid == 0 || group.files.is_empty() {
+                return Err(SetupError::InvalidPayload(
+                    "secret group needs a non-root gid and files".to_owned(),
+                ));
+            }
+            for file in &group.files {
+                validate_secret_name(file)?;
+                if !seen.insert(file.as_str()) {
+                    return Err(SetupError::InvalidPayload(format!(
+                        "duplicate group-readable secret {file}"
+                    )));
+                }
+            }
         }
 
         let mut environment = HashSet::new();
@@ -1029,6 +1057,7 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
             };
             write_secret_file(&secret_directory, &name, &content)?;
         }
+        apply_secret_group(payload, &secret_directory, prompt)?;
         sync_directory(&secret_directory)?;
         sync_directory(&staging)?;
         fs::rename(&staging, bundle)?;
@@ -1897,6 +1926,7 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         };
         write_secret_file(&secret_root, &name, &content)?;
     }
+    apply_secret_group(payload, &secret_root, prompt)?;
     if let Some(replacement) = controller_leaf_replacement {
         atomic_replace_controller_leaf(&secret_root, replacement)?;
     }
@@ -2355,6 +2385,89 @@ fn ensure_secure_directory(path: &Path) -> Result<(), SetupError> {
     }
 }
 
+/// Make the group-readable secrets 0640 with the payload's group, leaving the
+/// owner alone. Idempotent: files that already match are not touched. Only
+/// root (or a member of the group) may assign the group; any other caller
+/// keeps the owner-only 0600 and is told to rerun the installer with sudo, so
+/// a bundle prepared on a workstation still installs and is repaired on the
+/// NAS.
+fn apply_secret_group<R: BufRead, W: Write, S: SecretInput<R, W>>(
+    payload: &CanonicalTemplatePayload,
+    root: &Path,
+    prompt: &mut PromptIo<R, W, S>,
+) -> Result<(), SetupError> {
+    let Some(group) = &payload.group_readable_secrets else {
+        return Ok(());
+    };
+    let mut fixed = Vec::new();
+    let mut pending = Vec::new();
+    for file in &group.files {
+        let path = root.join(file);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => {
+                return Err(SetupError::UnsafeDestination(format!(
+                    "{} is not a regular secret file",
+                    path.display()
+                )));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(at_path(&path, error)),
+        }
+        match set_secret_group(&path, group.gid)? {
+            GroupOutcome::Unchanged => {}
+            GroupOutcome::Fixed => fixed.push(file.as_str()),
+            GroupOutcome::NotPermitted => pending.push(file.as_str()),
+        }
+    }
+    if !fixed.is_empty() {
+        prompt.note(&format!(
+            "Secret permissions: set group {} and mode 0640 on {} for the capability-free Tailscale containers.",
+            group.gid,
+            fixed.join(", ")
+        ))?;
+    }
+    if !pending.is_empty() {
+        prompt.note(&format!(
+            "Secret permissions NOT applied to {} (changing the group to {} needs root). They stay owner-only; rerun this installer once with sudo from the install directory.",
+            pending.join(", "),
+            group.gid
+        ))?;
+    }
+    Ok(())
+}
+
+enum GroupOutcome {
+    Unchanged,
+    Fixed,
+    NotPermitted,
+}
+
+#[cfg(unix)]
+fn set_secret_group(path: &Path, gid: u32) -> Result<GroupOutcome, SetupError> {
+    use std::os::unix::fs::{MetadataExt, chown};
+    let metadata = fs::metadata(path).map_err(|error| at_path(path, error))?;
+    if metadata.gid() == gid && metadata.mode() & 0o777 == 0o640 {
+        return Ok(GroupOutcome::Unchanged);
+    }
+    if metadata.gid() != gid {
+        match chown(path, None, Some(gid)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                return Ok(GroupOutcome::NotPermitted);
+            }
+            Err(error) => return Err(at_path(path, error)),
+        }
+    }
+    set_file_mode(path, 0o640)?;
+    Ok(GroupOutcome::Fixed)
+}
+
+#[cfg(not(unix))]
+fn set_secret_group(_path: &Path, _gid: u32) -> Result<GroupOutcome, SetupError> {
+    Ok(GroupOutcome::NotPermitted)
+}
+
 fn write_secret_file(root: &Path, relative: &str, content: &[u8]) -> Result<(), SetupError> {
     write_nested_file(root, relative, content, 0o600)
 }
@@ -2491,6 +2604,7 @@ fn atomic_replace(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupErr
     require_regular_file(path)?;
     let parent = path.parent().expect("file has parent");
     let temporary = stage_replacement(path, content, mode)?;
+    keep_owner(path, &temporary);
     match fs::rename(&temporary, path) {
         Ok(()) => {
             sync_directory(parent)?;
@@ -2502,6 +2616,20 @@ fn atomic_replace(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupErr
         }
     }
 }
+
+/// A sudo run creates files as root; keep the replaced file's owner and group
+/// so the bundle owner does not lose access. Best effort: a non-root caller
+/// already creates the file as itself.
+#[cfg(unix)]
+fn keep_owner(original: &Path, replacement: &Path) {
+    use std::os::unix::fs::{MetadataExt, chown};
+    if let Ok(metadata) = fs::metadata(original) {
+        let _ = chown(replacement, Some(metadata.uid()), Some(metadata.gid()));
+    }
+}
+
+#[cfg(not(unix))]
+fn keep_owner(_original: &Path, _replacement: &Path) {}
 
 fn sync_directory(path: &Path) -> Result<(), SetupError> {
     let directory = File::open(path)?;

@@ -278,3 +278,60 @@ def test_only_the_configured_postgres_backup_mount_is_allowed(tmp_path: Path) ->
     )
     with pytest.raises(builder.BundleError, match="host bind mount"):
         builder._validate_services(document)
+
+
+def test_capability_free_services_read_secrets_through_the_installer_group(
+    tmp_path: Path,
+) -> None:
+    """Every all-capabilities-dropped secret reader gets the installer's group.
+
+    Compose file secrets keep the host mode, and the installer writes them
+    0600, so a service without DAC_OVERRIDE reads them only through a
+    supplementary group. The payload must name exactly those secret files for
+    the installer to write 0640 with that group.
+    """
+    output = tmp_path / "payload.json"
+    rendered = _render(tmp_path)
+    document = yaml.safe_load(rendered.read_text(encoding="utf-8"))
+    assert _build(rendered, output).returncode == 0
+    payload = json.loads(output.read_text(encoding="utf-8"))
+
+    readers = {
+        name: service
+        for name, service in document["services"].items()
+        if service.get("secrets")
+        and service.get("cap_drop") == ["ALL"]
+        and "DAC_OVERRIDE" not in service.get("cap_add", [])
+    }
+    assert set(readers) == {"tailscale-gateway", "tailscale-configurator"}
+    group = payload["group_readable_secrets"]
+    assert {service["group_add"][0] for service in readers.values()} == {
+        str(group["gid"])
+    }
+    assert all("cap_add" not in service for service in readers.values())
+    expected = {
+        document["secrets"][secret]["file"].removeprefix("./secrets/")
+        for service in readers.values()
+        for secret in service["secrets"]
+    }
+    assert expected == {
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
+        "hermes-api-key",
+    }
+    assert set(group["files"]) == expected
+    assert group["gid"] == 64400
+
+
+def test_ci_secret_group_helper_uses_the_compose_gid() -> None:
+    helper = (ROOT / "scripts/run-with-nas-secret-group").read_text(encoding="utf-8")
+    tailscale = yaml.safe_load(
+        (ROOT / "deploy/compose/tailscale/compose.yaml").read_text(encoding="utf-8")
+    )
+    gids = {
+        gid
+        for service in tailscale["services"].values()
+        for gid in service.get("group_add", [])
+    }
+    assert gids == {"64400"}
+    assert "gid=64400\n" in helper

@@ -46,3 +46,16 @@ controller-generated command later to upgrade the same Spark.
 
 Stable installation uses the same two commands without `/dev`; that channel
 selection is the only installation-flow difference.
+
+## Secret group for the Tailscale containers
+
+`tailscale-gateway` and `tailscale-configurator` drop every Linux capability
+and add none. They read their Compose file secrets (`tailscale-oauth-client-id`,
+`tailscale-oauth-client-secret`, `hermes-api-key`) through the supplementary
+group `64400` (Compose `group_add`). The installer writes exactly those files
+mode `0640` with group `64400` and leaves the owner unchanged; the list comes
+from the Compose file, so it cannot drift. Only root, or a member of the group,
+can assign it. A bundle prepared as an ordinary user keeps `0600` and says so;
+run the installer once with `sudo` from the install directory on the NAS
+(the same command that created the bundle, from `/volume1/docker`; it upgrades
+in place) to apply or repair it. The repair is idempotent and reported in the installer output.
