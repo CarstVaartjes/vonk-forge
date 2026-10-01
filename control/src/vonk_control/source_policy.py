@@ -37,6 +37,15 @@ class SourcePolicyReport:
     dockerfile: str
     findings: tuple[SourcePolicyFinding, ...]
 
+    def describe(self) -> str:
+        """Every finding as ``code path[:line] detail``, for CI and operators."""
+
+        return "; ".join(
+            f"{finding.code} {finding.path}"
+            f"{'' if finding.line is None else f':{finding.line}'}: {finding.detail}"
+            for finding in self.findings
+        )
+
 
 class SourcePolicyError(ValueError):
     def __init__(self, report: SourcePolicyReport) -> None:

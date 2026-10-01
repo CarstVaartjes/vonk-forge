@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import tarfile
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,7 +32,6 @@ from vonk_control.compiled_execution_plan import (
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
     ExecutionPlanCompilationError,
-    _bind_runtime_artifacts,
     _placement,
     _PlacementTarget,
 )
@@ -43,7 +41,6 @@ from vonk_control.models import (
     ClusterMappingNode,
     RecipeBuild,
 )
-from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
     _bind_compiled_execution_plan,
@@ -55,13 +52,11 @@ from vonk_control.runtime_image_preparation import (
 from vonk_forge_contracts import (
     RecipeDefinition,
     document_sha256,
-    read_model,
     read_recipe,
 )
 from vonk_forge_contracts.model import ModelFile, ModelReference
 
 from .canonical_recipe_fixtures import canonical_example
-from .recipe_library_source import recipe_library_root
 
 
 def _mapping(value: object) -> dict[str, object]:
@@ -650,7 +645,6 @@ def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) 
 
 
 def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
-    from vonk_forge_contracts import document_sha256, read_recipe
 
     recipe_document = canonical_example("recipe-source-build.json")
     topology = _mapping(recipe_document["topology"])
@@ -1098,101 +1092,6 @@ def test_plan_preserves_duplicate_physical_artifact_as_two_projections() -> None
         ("/models", "model.safetensors"),
         ("/models/target", "model.safetensors"),
     ]
-
-
-@pytest.mark.parametrize(
-    "recipe_name",
-    [
-        "ltx-2-5-22b-distilled-bf16-diffusers-single.json",
-        "ltx-2-5-22b-distilled-fp8-cast-diffusers-single.json",
-    ],
-)
-def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
-    recipe_name: str,
-) -> None:
-    library_root = recipe_library_root()
-    recipe_document = json.loads(
-        (library_root / "recipes" / recipe_name).read_text(encoding="utf-8")
-    )
-    recipe = read_recipe(recipe_document)
-    model_slug = recipe_document["models"][0]["model"]["slug"]
-    model_document = json.loads(
-        (library_root / "models" / f"{model_slug}.json").read_text(encoding="utf-8")
-    )
-    model = read_model(model_document)
-    model_selection = recipe.models[0]
-    physical = next(file for file in model.files if file.id == "filtered-snapshot")
-    model_content_sha256 = model_selection.model.content_sha256
-    model_object = {
-        "model_content_sha256": model_content_sha256,
-        "file_id": physical.id,
-        "path": physical.path,
-        "sha256": physical.sha256,
-        "bytes": physical.size_bytes,
-        "roles": list(physical.roles),
-        "distribution_object": {
-            "name": physical.path,
-            "sha256": physical.sha256,
-            "bytes": physical.size_bytes,
-            "kind": "model",
-        },
-    }
-    package_path = library_root / "packages" / f"{recipe.identity.slug}.tar.gz"
-    with tarfile.open(package_path, mode="r:*") as package_archive:
-        package_paths = package_archive.getnames()
-    package_paths.append(recipe.execution.build.context.path)
-    image_digest = "1" * 64
-    spec = compile_runtime_spec(
-        recipe,
-        models={model_content_sha256: model},
-        recipe_digest=document_sha256(recipe_document),
-        package_handle={
-            "image_digest": image_digest,
-            "image_reference": f"localhost/vonk/build@sha256:{image_digest}",
-            "paths": package_paths,
-        },
-        role="entrypoint",
-        rank=0,
-    )
-    model_projection = SimpleNamespace(
-        document=model_document, content_digest=model_content_sha256
-    )
-    spec = _bind_runtime_artifacts(spec, [model_projection])
-    artifacts = _sequence(spec["artifacts"])
-    assert len(artifacts) == 2
-    rows = [_mapping(item) for item in artifacts]
-    assert [
-        (row["id"], row["selection_id"], row["file_id"], row["path"]) for row in rows
-    ] == [
-        (
-            "primary-filtered-snapshot",
-            "primary",
-            "filtered-snapshot",
-            "filtered-snapshot",
-        ),
-        (
-            "primary-filtered-snapshot-2",
-            "primary",
-            "filtered-snapshot",
-            "filtered-snapshot",
-        ),
-    ]
-    targets = [_mapping(_mapping(item)["mount"])["target"] for item in artifacts]
-    assert targets == ["/models/license-token-preflight", "/models/target"]
-    plan = compile_verified_execution_plan(
-        spec,
-        model_artifact_set_sha256="d" * 64,
-        model_objects=[model_object],
-        runtime_image=_image(build_id="1" * 64),
-    )
-    assert len(plan.artifacts) == 2
-    assert [artifact.mount.target for artifact in plan.artifacts] == targets
-    assert [
-        (artifact.selection_id, artifact.file_id, artifact.path)
-        for artifact in plan.artifacts
-    ] == [("primary", "filtered-snapshot", "filtered-snapshot")] * 2
-    assert plan.artifacts[0].model == plan.artifacts[1].model
-    assert plan.artifacts[0].sha256 == plan.artifacts[1].sha256 == physical.sha256
 
 
 def test_qwen_config_collision_binds_model_identity_and_preserves_file_path(

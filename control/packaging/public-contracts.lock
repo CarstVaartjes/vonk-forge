@@ -1,7 +1,7 @@
 source = "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
-# Resolved from the merged recipe contract at 7c9b97ac80874a85094729bf4ba3c3bb1597e411.
+# Resolved from the merged recipe contract at d3aadc24e9b1d8de3b447cf38212162d218c3fbb.
 branch = "main"
-revision = "7c9b97ac80874a85094729bf4ba3c3bb1597e411"
+revision = "d3aadc24e9b1d8de3b447cf38212162d218c3fbb"
 subdirectory = "contracts"
 package = "vonk-forge-public-contracts==2.1.0"
 wheel = "inventory/wheels/vonk_forge_public_contracts-2.1.0-py3-none-any.whl"

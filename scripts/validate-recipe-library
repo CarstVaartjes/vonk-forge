@@ -511,6 +511,48 @@ def _validate_recipe_option_policy(
                 ) from error
 
 
+def _launcher_error(entrypoint: str, wrapper: str, engine: str) -> str | None:
+    """Why a recipe's launcher would fail the platform's runtime adapter.
+
+    The adaptation stage verifies the engine's canonical launcher exists in the
+    built image (``test -x <wrapper>``), so a recipe that installs its launcher
+    under another name can never produce a runnable image, on CI or a Spark.
+    Engines whose wrapper ships in the base image (outside /opt/vonk/bin) are
+    not the recipe's to install.
+    """
+
+    if wrapper.startswith("/opt/vonk/bin/") and entrypoint != wrapper:
+        return (
+            f"entrypoint {entrypoint} is not the {engine} launcher {wrapper}, which "
+            "the runtime adapter verifies in the built image; install the "
+            f"launcher at {wrapper} and declare it as the entrypoint"
+        )
+    return None
+
+
+def _validate_source_policy(library_root: Path, platform_root: Path) -> None:
+    """Every recipe passes the build source policy the Controller enforces.
+
+    ``prepare_plan`` refuses a recipe whose Dockerfile or Compose files break
+    the policy, so such a recipe can never be built or pulled.  The check is
+    the Controller's own code (``inspect_package_source_policy``), run over
+    each package's build context; all refused recipes are reported together.
+    """
+
+    source = platform_root / "control" / "src"
+    if str(source) not in sys.path:
+        sys.path.insert(0, str(source))
+    from vonk_control.prebuilt_images import library_source_policy_failures
+
+    failures = library_source_policy_failures(library_root)
+    if failures:
+        listing = "\n".join(f"  {slug}: {reason}" for slug, reason in failures.items())
+        raise LibraryValidationError(
+            f"{len(failures)} recipe(s) are refused by the Controller build source "
+            f"policy and could never be built or pulled:\n{listing}"
+        )
+
+
 def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
     """Validate the central Model/Recipe producer and immutable packages."""
     contract_root = library_root / "contracts" / "src"
@@ -679,6 +721,11 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
                 f"{path}: topology mode is not supported by platform harness: "
                 f"{recipe.topology.mode}"
             )
+        launcher = _launcher_error(
+            recipe.runtime.entrypoint[0], harness.wrapper, recipe.runtime.engine
+        )
+        if launcher is not None:
+            raise LibraryValidationError(f"{path}: {launcher}")
         _validate_recipe_option_policy(recipe, path, platform_root)
         row = indexed.get(key)
         digest = document_sha256(recipe_document)
@@ -736,6 +783,7 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
         raise LibraryValidationError(
             "catalog index and recipe directory identities differ"
         )
+    _validate_source_policy(library_root, platform_root)
     return {
         "schema_version": 2,
         "catalog_entity_count": len(models),
