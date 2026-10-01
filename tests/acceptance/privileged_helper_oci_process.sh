@@ -283,6 +283,23 @@ sudo -u vonk-agent -g vonk-agent env \
   "$probe_binary" start | tee "$report_root/start-reuse.log"
 
 docker inspect "$run_name" >"$report_root/container-inspect.json"
+
+# A run started by an earlier agent has no receipt in today's format (or a
+# different image name): it must still be observed as running, by its own
+# container identity, so its route stays published across an upgrade.
+mv "/var/lib/vonk-forge/runtime-images/$archive_sha" "$report_root/receipt-held-aside"
+sudo -u vonk-agent -g vonk-agent env \
+  VONK_HELPER_ARCHIVE_SHA="$archive_sha" \
+  VONK_HELPER_ARCHIVE_BYTES="$archive_bytes" \
+  VONK_HELPER_PLATFORM_DIGEST="$platform_digest" \
+  VONK_HELPER_CONFIG_ID="$config_id" \
+  VONK_HELPER_IMAGE_REF="$image_ref" \
+  VONK_HELPER_FIXTURE="$fixture" \
+  VONK_HELPER_PROBE_ENDPOINT_ADDRESS="$endpoint_address" \
+  VONK_HELPER_SOCKET="$VONK_HELPER_SOCKET" \
+  VONK_HELPER_REQUEST_ROOT="$VONK_HELPER_REQUEST_ROOT" \
+  "$probe_binary" observe | tee "$report_root/observe-without-receipt.log"
+mv "$report_root/receipt-held-aside" "/var/lib/vonk-forge/runtime-images/$archive_sha"
 sleep 6
 docker logs "$run_name" >"$report_root/container.log" 2>&1 || true
 
