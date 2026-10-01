@@ -205,6 +205,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         self.controller_release = baseline.release
         os.environ[OVERLAY_VARIABLE] = os.fspath(baseline.overlay)
         self.evidence = CarryEvidence()
+        self.failure_evidence: dict[str, object] | None = None
         self._phase = "baseline-install"
         self._probing = threading.Event()
         self._prober: threading.Thread | None = None
@@ -552,12 +553,28 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             entry["probes"] += 1
             entry["failed"] += 0 if probe.ok else 1
         failing = [asdict(probe) for probe in self.evidence.probes if not probe.ok]
-        return {"by_phase": phases, "failures": failing[-8:]}
+        return {"by_phase": phases, "failures": failing[:3] + failing[-3:]}
 
     def _failure(self, phase: str, reason: str) -> LifecycleError:
+        """A short verdict that names the phase; the full evidence is logged.
+
+        The canary wrapper keeps only the end of a long message, so the
+        verdict stays brief and the probe evidence goes to the log and the
+        report as well.
+        """
+        summary = self._probe_summary()
+        self.failure_evidence = {"phase": phase, "reason": reason, **summary}
+        print(
+            "upgrade-carry probe evidence: " + json.dumps(summary, sort_keys=True),
+            file=sys.stderr,
+            flush=True,
+        )
+        counts = ", ".join(
+            f"{name} {entry['failed']}/{entry['probes']} failed"
+            for name, entry in summary["by_phase"].items()  # type: ignore[union-attr]
+        )
         return LifecycleError(
-            f"upgrade-carry failed in phase {phase}: {reason}; probe evidence: "
-            + json.dumps(self._probe_summary(), sort_keys=True)[:4000]
+            f"upgrade-carry failed in phase {phase}: {reason} (probes: {counts})"
         )
 
 
@@ -593,6 +610,7 @@ def main() -> int:
             "the previous promoted release is the candidate itself",
         )
     origin = os.environ.get("INSTALLER_PUBLIC_ORIGIN", "")
+    lifecycle_run: UpgradeCarryLifecycle | None = None
     workspace = Path(os.environ.get("VONK_ACCEPTANCE_WORKSPACE", "."))
     try:
         inputs = workspace / "upgrade-carry-releases"
@@ -610,12 +628,22 @@ def main() -> int:
             run_id=arguments.run_id,
             platform=arguments.platform,
         )
-        with UpgradeCarryLifecycle(
+        lifecycle_run = UpgradeCarryLifecycle(
             lane, baseline=baseline, candidate=candidate
-        ) as lifecycle:
+        )
+        with lifecycle_run as lifecycle:
             proof = lifecycle.observe()
     except LifecycleError as error:
         print(f"Spark upgrade-carry acceptance failed: {error}", file=sys.stderr)
+        _atomic_write(
+            arguments.output,
+            {
+                "schema_version": 1,
+                "status": "failed",
+                "error": str(error)[-2000:],
+                "evidence": getattr(lifecycle_run, "failure_evidence", None),
+            },
+        )
         return 1
     _atomic_write(
         arguments.output,

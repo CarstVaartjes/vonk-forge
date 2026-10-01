@@ -29,7 +29,9 @@ def _probe(phase: str, *, ok: bool = True, route: str = "published"):
     )
 
 
-def test_a_withdrawn_route_after_the_agent_upgrade_fails_and_names_the_phase():
+def test_a_withdrawn_route_after_the_agent_upgrade_fails_and_names_the_phase(
+    capsys,
+):
     # What release d30de9199 did: the upgraded agent stopped reporting the
     # run the previous agent started, and the Controller withdrew its route.
     lane = _lane(
@@ -45,7 +47,11 @@ def test_a_withdrawn_route_after_the_agent_upgrade_fails_and_names_the_phase():
     message = str(failed.value)
     assert "phase agent-settled" in message
     assert "'withdrawn'" in message
-    assert "probe evidence" in message and "gateway does not list" in message
+    assert "agent-settled 1/2 failed" in message
+    # The full probe evidence goes to the log and the report.
+    assert "gateway does not list" in capsys.readouterr().err
+    assert lane.failure_evidence is not None
+    assert lane.failure_evidence["phase"] == "agent-settled"
 
 
 def test_the_gateway_restart_during_the_controller_recreate_is_tolerated():

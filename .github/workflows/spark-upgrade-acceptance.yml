@@ -73,8 +73,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
           # TEMPORARY proof pair (removed before merge): release a27c4b958 to
-          # release d30de9199, the upgrade that withdrew GLM in production.
-          CANDIDATE_INPUT: ${{ inputs.candidate_generation || (github.event_name == 'pull_request' && '76d90fa4559ab00220e3a7224d43d7a624c2d0559c228e0228aab73228da353c' || '') }}
+          # the current main release with the fixes.
+          CANDIDATE_INPUT: ${{ inputs.candidate_generation || (github.event_name == 'pull_request' && '00bd8e7ed5880681df861253c3f82f6fb6e05417768a7bc179b2875e72c0ca59' || '') }}
           BASELINE_INPUT: ${{ inputs.baseline_generation || (github.event_name == 'pull_request' && '33a45de7d846150a181da480b7e33f70e86a6fc2a4cf7dc33ad27ed02772506e' || '') }}
         run: |
           set -euo pipefail
