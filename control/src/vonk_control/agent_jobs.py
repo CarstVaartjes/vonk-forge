@@ -2162,10 +2162,24 @@ class AgentJobService:
                     ),
                 },
             )
-        # Every modelled condition held, yet the claim query matched nothing.
-        # No unmodelled condition can exist - the predicate is built from the
-        # conditions just evaluated - so this is a defensive last resort, not a
-        # path any real operation takes.
+        # Every modelled condition held, so the operation is claimable now. The
+        # claim query that found nothing ran earlier in this transaction, and
+        # READ COMMITTED lets work enqueued (or released) since then show up
+        # here: the node simply polled a moment too soon and claims it on its
+        # next poll. That is not a refusal, and recording one would show the
+        # operator a false "claim refused" on a healthy start.
+        if (
+            session.scalar(
+                self._claimable_operations(node.node_id, now).with_only_columns(
+                    StoredOperation.id
+                )
+            )
+            is not None
+        ):
+            return None
+        # The query still finds nothing although every modelled condition held.
+        # The predicate is built from the conditions just evaluated, so this is
+        # a defensive last resort, not a path any real operation takes.
         return (
             operation,
             "unclassified-unclaimable",
