@@ -2317,14 +2317,14 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
     stale_generation = report(run | {"run_generation": 1})
     assert stale_generation.status_code == 422
     assert "generation is stale" in stale_generation.text
-    unassigned = report(run | {"run_id": str(uuid.uuid4())})
-    assert unassigned.status_code == 422
-    assert "not assigned" in unassigned.text
-
-    # A report taken before the rank last changed never overwrites it.
-    stale_report = report(run, observed_at=clock.now - timedelta(seconds=2))
-    assert stale_report.status_code == 422
-    assert "stale" in stale_report.text
+    # A report that crossed the Controller's own change (the run left this
+    # Spark, or the rank changed after the report was taken) is expected:
+    # it is dropped without error and never overwrites the rank.
+    assert report(run | {"run_id": str(uuid.uuid4())}).status_code == 204
+    assert report(run, observed_at=clock.now - timedelta(seconds=2)).status_code == 204
+    with services.sessions() as session:
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert node is not None and node.observation_observed_at is None
 
     assert report(run | {"run_id": str(uuid.uuid4())}, run).status_code == 204
     with services.sessions() as session:

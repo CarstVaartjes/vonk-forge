@@ -1038,10 +1038,13 @@ def install_agent_routes(
                         for run_id in sorted(included - current)
                     )
                     included &= current
-                if by_run and not included:
-                    raise ValueError("; ".join(rejected[:4]))
-                assigned = prepare_exact_recipe_run_observation_nodes(
-                    session, identity.node_id, observed_at, included
+                # Only runs no longer here: the report crossed their stop.
+                assigned = (
+                    ()
+                    if by_run and not included
+                    else prepare_exact_recipe_run_observation_nodes(
+                        session, identity.node_id, observed_at, included
+                    )
                 )
                 for node in assigned:
                     evidence = by_run.get(node.run_id)
@@ -1141,13 +1144,22 @@ def install_agent_routes(
                     ):
                         run.route_next_attempt_at = None
                         run.updated_at = max(_now(run.updated_at).astimezone(UTC), now)
-                if rejected and not accepted:
+                if (
+                    rejected
+                    and not accepted
+                    and not all(
+                        reason.endswith(("is not assigned", "observation is stale"))
+                        for reason in rejected
+                    )
+                ):
                     # Nothing in this report was usable; report the cause so
                     # the agent's log names it.  No state changed.
                     raise ValueError("; ".join(rejected[:4]))
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         if rejected:
+            # A report that crossed the Controller's own change (a stop, a
+            # restart) is expected and dropped; it is not the agent's error.
             logging.getLogger(__name__).warning(
                 "agent.recipe_run_observations.partial node_id=%s accepted=%d "
                 "rejected=%d first_reason=%s",

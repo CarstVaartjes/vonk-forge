@@ -7348,9 +7348,9 @@ class RunSwitchOperationService:
                 )
             except _RunSwitchBuildParentChanged:
                 return False
-            except RunSwitchInstallPreflightExpired:
+            except RunSwitchInstallPreflightExpired as expired:
                 return self._hold_for_preflight_refresh(
-                    operation_id, phase_index, item_index
+                    operation_id, phase_index, item_index, cause=str(expired)
                 )
             except (
                 AdmissionLockBusy,
@@ -7918,6 +7918,8 @@ class RunSwitchOperationService:
         operation_id: str,
         phase_index: int,
         item_index: int,
+        *,
+        cause: str | None = None,
     ) -> bool:
         """Keep the runtime-plan checkpoint so the existing gate reprobes.
 
@@ -7965,6 +7967,19 @@ class RunSwitchOperationService:
             )
             self._schedule_checkpoint_retry(
                 job, progress, _INSTALL_PREFLIGHT_REFRESH_REASON, now
+            )
+            if cause:
+                # Say which runtime evidence was refused, not only that the
+                # probe runs again: a repeating cause is the stall to look at.
+                job.status_reason = (
+                    f"{job.status_reason}; attempt {attempt}: {cause}"
+                )[:512]
+            _LOGGER.warning(
+                "run/switch %s: install admission refused its runtime preflight "
+                "evidence (attempt %d: %s); probing the Sparks again",
+                operation_id,
+                attempt,
+                cause or "expired",
             )
         return True
 
