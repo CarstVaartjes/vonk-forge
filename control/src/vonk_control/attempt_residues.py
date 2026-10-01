@@ -22,7 +22,11 @@ same recipe on the same Sparks reuses it (same plan digest), and its admission
 does not count the plan's disk claim as capacity to wait for, so adoption is
 never gated behind a cleanup wait for the very record it adopts. Only a plan
 that stays unowned for the adoption window, because no retry came, is
-released. Every release is logged with its kind, id and reason.
+released. A plan a later installation of the same recipe on the same Sparks
+has **superseded** is released without that wait: the next attempt already
+planned differently (another revision, image or choice, so another digest),
+and nothing practical can adopt the older plan any more. Every release is logged with its
+kind, id and reason.
 
 Deliberately not residues: model-cache downloads (idempotent and useful to
 finish), runtime image authorizations and receipts (content-addressed and
@@ -44,6 +48,7 @@ from .agent_jobs import release_owned_reservations_in_session
 from .logging import log_event
 from .models import (
     ArtifactDistributionAssignment,
+    CatalogDocumentRevision,
     InstallationNode,
     Job,
     RecipeInstallation,
@@ -125,6 +130,61 @@ def unowned_never_installed(
     return tuple(found)
 
 
+def superseded_plan_ids(
+    session: Session, installation_ids: Collection[str]
+) -> frozenset[str]:
+    """Plans a later installation of the same recipe and Sparks replaced.
+
+    A plan is adopted only by an attempt whose plan digest matches, and the
+    digest names the recipe revision and image. Once a later installation of
+    the same recipe (any revision) exists on exactly the same Sparks, the
+    earlier plan has no practical adopter: profiles follow the newest
+    revision. It would otherwise outlive the adoption window whenever attempts
+    follow each other on those Sparks, and show as a second installation of
+    one recipe. Releasing it is always safe, since a plan that never reached a
+    Spark costs only its next re-plan.
+    """
+
+    superseded: set[str] = set()
+    for installation_id in installation_ids:
+        installation = session.get(RecipeInstallation, installation_id)
+        if installation is None:
+            continue
+        nodes = frozenset(
+            session.scalars(
+                select(InstallationNode.node_id).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+        )
+        same_recipe = select(CatalogDocumentRevision.id).where(
+            CatalogDocumentRevision.document_id
+            == select(CatalogDocumentRevision.document_id)
+            .where(CatalogDocumentRevision.id == installation.recipe_revision_id)
+            .scalar_subquery()
+        )
+        later = session.scalars(
+            select(RecipeInstallation).where(
+                RecipeInstallation.recipe_revision_id.in_(same_recipe),
+                RecipeInstallation.id != installation_id,
+                RecipeInstallation.state != "uninstalled",
+                RecipeInstallation.created_at > installation.created_at,
+            )
+        )
+        for other in later:
+            other_nodes = frozenset(
+                session.scalars(
+                    select(InstallationNode.node_id).where(
+                        InstallationNode.installation_id == other.id
+                    )
+                )
+            )
+            if other_nodes == nodes:
+                superseded.add(installation_id)
+                break
+    return frozenset(superseded)
+
+
 class AttemptResidueReconciler:
     """One sweep, one rule, for every per-attempt record kind."""
 
@@ -170,7 +230,9 @@ class AttemptResidueReconciler:
         now = self._clock()
         with self._sessions() as session:
             candidates = []
-            for installation_id in unowned_never_installed(session):
+            unowned = unowned_never_installed(session)
+            superseded = superseded_plan_ids(session, unowned)
+            for installation_id in unowned:
                 nodes = set(
                     session.scalars(
                         select(InstallationNode.node_id).where(
@@ -178,7 +240,9 @@ class AttemptResidueReconciler:
                         )
                     )
                 )
-                if not self._quiet_since(session, nodes, now - ADOPTION_WINDOW):
+                if installation_id not in superseded and not self._quiet_since(
+                    session, nodes, now - ADOPTION_WINDOW
+                ):
                     continue  # a retry may still adopt it
                 candidates.append(installation_id)
         released = False
@@ -196,7 +260,12 @@ class AttemptResidueReconciler:
             ) as error:  # one residue must not stop the sweep
                 self._log("installation-plan", installation_id, "refused", error)
                 continue
-            self._log("installation-plan", installation_id, "released")
+            self._log(
+                "installation-plan",
+                installation_id,
+                "released",
+                reason="superseded" if installation_id in superseded else "unadopted",
+            )
             released = True
         return released
 
@@ -264,7 +333,11 @@ class AttemptResidueReconciler:
 
     @staticmethod
     def _log(
-        kind: str, record_id: str, outcome: str, error: Exception | None = None
+        kind: str,
+        record_id: str,
+        outcome: str,
+        error: Exception | None = None,
+        **context: str,
     ) -> None:
         log_event(
             _LOGGER,
@@ -272,6 +345,7 @@ class AttemptResidueReconciler:
             service="control-worker",
             kind=kind,
             record_id=record_id,
+            **context,
             **(
                 {
                     "code": getattr(error, "code", type(error).__name__),
