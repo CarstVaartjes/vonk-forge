@@ -139,35 +139,64 @@ complete only after verification; receipt ordering follows the manifest even
 when transfers finish out of order. A failed or cancelled download stops the
 remaining transfers and retains their on-disk checkpoints.
 
-## Unused storage is removed automatically
+## Unused storage is removed only when disk is short
 
-Once an hour the worker removes three kinds of storage that nothing uses, each
-of which can be fetched again on the next load:
+Installations, image receipts and cached models can always be fetched again, so
+nothing is removed because it has been idle; the worker removes them only to make
+room. It does so when work was refused for lack of disk (a profile load, an
+install, a build or a model download asked for free space on a Spark or the NAS)
+and, as a safety net, when a Spark or the NAS runs low on free space on its own.
+A profile change alone removes nothing.
 
-- **Spark installations** (state `installed`) that no saved profile points to
-  and nothing runs. This is a real uninstall on the Sparks, queued like
-  `vonkctl recipe uninstall`; its model files go with it unless another
-  installation on that Spark needs them. It takes no new workload intent, so it
+A Spark or the NAS counts as low when its free space is below the larger of 10 %
+of its capacity and the largest install (Spark) or model set (NAS) it has held,
+at most 25 % of its capacity (`STORAGE_LOW_FREE_*` in `settings.py`; these are
+tuning constants, not `.env` values). A refused request asks for more than that.
+Either way the worker frees the shortfall plus a reserve (2 % of the capacity, at
+least 5 GiB) and stops:
+
+- **Spark installations** (state `installed`). This is a real uninstall on the
+  Sparks, queued like `vonkctl recipe uninstall`; its model files go with it
+  unless another installation on that Spark needs them, and the agent then also
+  deletes the Spark's shared store copy of each model file no installation links
+  any more (installations hard-link store objects, so removing an installation
+  alone frees none of its model bytes). It takes no new workload intent, so it
   cancels no other order and never disturbs recovery of a running workload.
-- **Runtime image receipts** in the NAS `image-cache` that no current recipe
-  revision authorizes. The hourly image store collector then reclaims the blobs
-  nothing else names.
-- **Cached model files** that no current recipe revision needs, through the
-  same durable, fenced removal as `vonkctl model remove`.
+  Installations of one model on a Spark go together or not at all.
+- **Runtime image receipts** in the NAS `image-cache`; the image store then
+  reclaims their blobs at once.
+- **Cached model files**, through the same durable, fenced removal as `vonkctl
+  model remove`.
 
-Nothing is removed while a saved profile (loaded or not) points to it, a
-workload runs from it, it was used in the last 24 hours (including a recipe
-superseded, a profile edited, or a model or image fetched in that time), or a
-live or recent operation names it. Every removal is proven unused again while
-the Sparks or artifact gates are locked, so a load that starts meanwhile is
-never raced. One item that cannot be removed is kept for the next hour and does
-not stop the others. Each sweep logs one `unused_storage.swept` line with the
-removed counts and why the rest was kept.
+Least recently used goes first; items used in the last 24 hours go only after
+everything older. Nothing is removed while a saved profile (loaded or not) points
+to it (the newest revision of a recipe a profile names), a workload runs from it,
+or a live or recent operation names it. A recipe the catalog offers but no profile
+names is only a download away, so its model and image can go. Every removal is
+proven unused again while the Sparks or artifact gates are locked, so a load that
+starts meanwhile is never raced. One item that cannot be removed is kept for the
+next pass and does not stop the others.
+
+A removal queued on a Spark is given time to land and show in a fresh inventory
+before the next one, so the Spark's own reported free space (not a guess at what
+hard links free) decides whether more must go. A round that frees less than half
+of what it promised pauses eviction there for 15 minutes. If everything that may
+go would still not cover a refused request, nothing is removed.
+
+A load that waits for disk is not failed: it shows `storage.evicting` (bytes
+needed and bytes that can be freed) while the Controller frees room, or
+`storage.insufficient_after_eviction` when all unused installations together
+would not be enough (stop or remove something on that Spark). It resumes by
+itself on its next retry once the Spark reports enough free space.
+
+Each pass that removes something, or whose answer changes, logs one
+`unused_storage.eviction_pass` line with, per Spark or NAS, why it ran, the bytes
+needed and freeable, what it expects to free, what it removed, and why the rest
+was kept.
 
 A profile's retention (`keep-cached` or `exact`) only decides whether *loading*
 that profile removes installations outside its scope; it never promised to keep
-what no profile points to. A `keep-cached` profile therefore keeps everything
-it points to, and unused leftovers go after the grace period.
+what no profile points to.
 
 ## Credentials and evidence
 

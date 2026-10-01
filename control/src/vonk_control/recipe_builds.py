@@ -84,6 +84,7 @@ from .source_policy import (
     enforce_build_source_policy,
     inspect_build_source_policy,
 )
+from .storage_demands import StorageDemands, spark_scope
 
 _LOGGER = logging.getLogger(__name__)
 _OCI_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -559,6 +560,12 @@ class RecipeBuildService:
         self._inventory_max_age = inventory_max_age
         self._build_archive_available = build_archive_available
         self._prepared_builds = prepared_builds
+        self._storage_demands: StorageDemands | None = None
+
+    def bind_storage_demands(self, demands: StorageDemands) -> None:
+        """Attach the register a build refused for lack of disk asks space in."""
+
+        self._storage_demands = demands
 
     def _stored_archive_present(self, archive_sha256: str, image_bytes: int) -> bool:
         """Cheap presence/type/length check usable inside a short transaction."""
@@ -836,10 +843,16 @@ class RecipeBuildService:
             memory_available = _available_build_memory(session, snapshot)
         # Preserve a separate host reserve so an admitted build cannot crowd
         # out the Spark itself.
-        if (
-            snapshot.disk_free_bytes - disk_reserved
-            < disk_envelope + _build_disk_reserve(snapshot.disk_total_bytes)
-        ):
+        disk_needed = disk_envelope + _build_disk_reserve(snapshot.disk_total_bytes)
+        if snapshot.disk_free_bytes - disk_reserved < disk_needed:
+            if self._storage_demands is not None:
+                self._storage_demands.request(
+                    spark_scope(builder_node_id),
+                    disk_reserved + disk_needed,
+                    source="build",
+                    subject=builder_node_id,
+                    reason="build.insufficient_disk",
+                )
             raise RecipeBuildError(
                 "build.insufficient_disk", "builder lacks temporary disk capacity"
             )

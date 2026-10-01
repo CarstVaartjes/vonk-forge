@@ -51,6 +51,22 @@ ARTIFACT_JOB_RETENTION_SECONDS = 7 * 24 * 60 * 60
 ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS = 3600
 ARTIFACT_JOB_RECONCILE_BATCH_LIMIT = 1000
 MODEL_CACHE_RESERVE_BYTES = 10 * 1024**3
+# Storage is freed only when it is short (see ``unused_storage_collection``): a
+# Spark or the NAS is short when its free space drops below the larger of this
+# fraction of its capacity and the largest install or model set already known
+# to it, never above the cap. A refused load, install, build or download asks
+# for more than that; either way eviction goes on to the demand plus a reserve.
+STORAGE_LOW_FREE_FRACTION = 0.10
+STORAGE_LOW_FREE_CAP_FRACTION = 0.25
+STORAGE_EVICTION_RESERVE_FRACTION = 0.02
+STORAGE_EVICTION_RESERVE_FLOOR_BYTES = 5 * 1024**3
+# A request for space lapses unless the refused work asks again; the waiting
+# load asks at least once a minute.
+STORAGE_DEMAND_TTL_SECONDS = 600
+STORAGE_SCAN_INTERVAL_SECONDS = 30
+# Removals that free far less than they promised (files another installation
+# still links) pause eviction on that Spark or the NAS for this long.
+STORAGE_INEFFECTIVE_COOLDOWN_SECONDS = 900
 MODEL_CACHE_PARALLEL_DOWNLOADS = 8
 RECIPE_IMAGE_PARALLEL_PREPARATIONS = 4
 # Cheap: an unchanged release answers 304 to a conditional request.

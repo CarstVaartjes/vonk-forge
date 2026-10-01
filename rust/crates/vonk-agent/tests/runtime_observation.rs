@@ -288,6 +288,98 @@ fn uninstall_removes_only_its_materialization_despite_unrelated_metadata() {
     assert_eq!(fs::read(cache).unwrap(), b"shared model bytes");
 }
 
+/// An installation of the fixture plan whose files are hard links to objects of
+/// the Spark's shared store, as a new install makes them. Returns the store
+/// objects of the plan's first model.
+fn installation_linked_to_the_store(root: &Path, plan: &CompiledExecutionPlan) -> Vec<String> {
+    let installation = root.join("installations").join(INSTALLATION);
+    let store = root.join("distribution").join("models");
+    fs::create_dir_all(&store).unwrap();
+    let model = &plan.artifacts[0].model.content_sha256;
+    let mut objects = Vec::new();
+    for artifact in &plan.artifacts {
+        let object = store.join(&artifact.sha256);
+        if !object.exists() {
+            fs::write(&object, b"model bytes").unwrap();
+        }
+        let file = installation
+            .join("models")
+            .join(&artifact.selection_id)
+            .join(&artifact.path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::hard_link(&object, &file).unwrap();
+        if &artifact.model.content_sha256 == model && !objects.contains(&artifact.sha256) {
+            objects.push(artifact.sha256.clone());
+        }
+    }
+    objects
+}
+
+#[test]
+fn uninstall_with_model_cleanup_frees_the_store_objects_nothing_else_links() {
+    let root = tempdir().unwrap();
+    let plan = schema2_single_plan();
+    persist_plan(root.path(), &plan);
+    let objects = installation_linked_to_the_store(root.path(), &plan);
+    let store = root.path().join("distribution").join("models");
+    let unrelated = store.join("e".repeat(64));
+    fs::write(&unrelated, b"another model").unwrap();
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+
+    // Removing an installation alone leaves its model bytes in the store.
+    runtime
+        .uninstall(INSTALLATION, &plan.identity.recipe_revision_sha256)
+        .unwrap();
+    assert!(objects.iter().all(|digest| store.join(digest).exists()));
+
+    assert_eq!(
+        runtime.reclaim_unshared_model_objects(&objects),
+        (objects.len() * "model bytes".len()) as u64
+    );
+    assert!(objects.iter().all(|digest| !store.join(digest).exists()));
+    assert!(unrelated.exists());
+}
+
+#[test]
+fn uninstall_with_model_cleanup_keeps_a_store_object_another_installation_links() {
+    use std::os::unix::fs::MetadataExt;
+
+    let root = tempdir().unwrap();
+    let plan = schema2_single_plan();
+    persist_plan(root.path(), &plan);
+    let objects = installation_linked_to_the_store(root.path(), &plan);
+    let store = root.path().join("distribution").join("models");
+    let other = root.path().join("installations").join(RUN);
+    fs::create_dir_all(&other).unwrap();
+    fs::hard_link(store.join(&objects[0]), other.join("model")).unwrap();
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    let stored = runtime
+        .model_store_objects(
+            INSTALLATION,
+            &plan.identity.recipe_revision_sha256,
+            &plan.artifacts[0].model.content_sha256,
+        )
+        .unwrap();
+    assert_eq!(stored.len(), objects.len());
+
+    runtime
+        .uninstall_with_model_cleanup(
+            INSTALLATION,
+            &plan.identity.recipe_revision_sha256,
+            &plan.artifacts[0].model.content_sha256,
+        )
+        .unwrap();
+
+    assert_eq!(fs::metadata(store.join(&objects[0])).unwrap().nlink(), 2);
+    assert_eq!(fs::read(other.join("model")).unwrap(), b"model bytes");
+}
+
 #[test]
 fn uninstall_validates_storage_without_requiring_launchable_placement() {
     let root = tempdir().unwrap();

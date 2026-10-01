@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -28,6 +29,8 @@ from vonk_control.run_switch_contract import (
     RunSwitchInstallationVerifyResult,
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.storage_demands import STORAGE_INSUFFICIENT, StorageDemands
+from vonk_control.unused_storage_collection import UnusedStorageCollector
 
 from cluster_profiles.control_client import validate_control_document
 
@@ -242,6 +245,54 @@ def test_installed_profile_still_refuses_insufficient_disk(tmp_path: Path) -> No
         for item in review.assessments
         for reason in item.assessment.blockers
     }
+
+
+def test_a_load_waiting_for_disk_names_it_and_resumes_when_space_appears(
+    tmp_path: Path,
+) -> None:
+    """A load refused for lack of disk waits (it is not failed), says how many
+    bytes it needs and how many can be freed, and goes on by itself once the
+    Spark has the room: catches a refusal that needs an operator, or one that
+    does not say what it is waiting for."""
+
+    sessions, lifecycle, _, _, _, nodes = setup_services(tmp_path)
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = 0
+    service, planner = _profile_service(sessions, lifecycle)
+    collector = UnusedStorageCollector(
+        sessions,
+        clock=lifecycle._clock,
+        lifecycle=lifecycle,
+        demands=StorageDemands(lifecycle._clock),
+    )
+    service.bind_storage_relief(collector.relief_for_spark)
+    profile = _installed_profile(service, sessions, nodes)
+
+    waiting = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
+
+    assert waiting.state == "queued", waiting
+    blocker = next(
+        item for item in waiting.blockers if item.code == STORAGE_INSUFFICIENT
+    )
+    assert blocker.node_ids == [nodes[0]]
+    assert blocker.severity == "error"
+    # Nothing unused can be removed (the profile's own recipe is kept), so the
+    # load says how much it is short and that none can be freed.
+    assert "more free bytes" in blocker.detail
+    assert "only 0 bytes" in blocker.detail
+    assert any(item.code == "run-switch.insufficient-disk" for item in waiting.blockers)
+
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = snapshot.disk_total_bytes
+    later = lifecycle._clock() + timedelta(seconds=30)
+    for clocked in (service, planner, lifecycle):
+        clocked._clock = lambda: later
+    _drive_to_job(service, planner, sessions, "recipe.install")
+    assert service.application(waiting.id).state == "running"
 
 
 @pytest.mark.parametrize(

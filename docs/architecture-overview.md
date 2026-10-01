@@ -14,8 +14,11 @@ sections define the boundary.
 Uninstall validates the requested installation's current typed metadata, recipe
 identity, and artifact paths, then removes only that installation directory.
 It does not scan unrelated installations or require the removed workload to
-pass launch admission. Shared distribution objects and other installations'
-materialized copies remain intact, including any hard links to the same bytes.
+pass launch admission. Other installations' materialized copies remain intact,
+including any hard links to the same bytes. When the Controller authorizes model
+cleanup (no other installation of that model is left on the Spark), the agent
+also deletes the shared store object of each of that model's files that no
+installation links any more; an object another installation still links stays.
 Invalid metadata or inaccessible storage within the requested installation
 still rejects removal.
 
@@ -151,8 +154,9 @@ filesystem, the link limit) is written as a private file instead. Containers
 still mount each file read-only and run as a non-root user with read access
 granted by ACL, so a workload cannot change the shared bytes. An installation
 that already holds a private copy keeps it until it is uninstalled. Removing an
-installation removes only its links; the filesystem frees the bytes when the
-last name goes.
+installation removes its links, and its model cleanup removes the store object
+when that was the last link, so the bytes are freed when the last name goes
+(see [unused storage](runbooks/model-cache.md#unused-storage-is-removed-only-when-disk-is-short)).
 
 ## Artifact recovery
 
