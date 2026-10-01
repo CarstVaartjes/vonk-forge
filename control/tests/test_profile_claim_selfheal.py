@@ -1,11 +1,12 @@
 """A live profile load never loops on a capacity claim that went missing.
 
-The disk, port and memory claims of a profile application are bookkeeping for
-a promise, not a precondition of its work. When a row is gone (never reserved,
-or released together with the installation that held it) or has drifted from
-the accepted plan, the live load reserves again under the ordinary admission
-locks and capacity check. Without room it waits with a named reason that the
-profile and the Fleet both show, and it resumes by itself once room returns.
+An application that fails releases its unassigned claims; when its live child
+is resumed the same application takes them back. A disk claim is also only
+bookkeeping for a promise, not a precondition of the work: when its row is gone
+(never reserved, or released together with the installation that held it) or
+has drifted from the accepted plan, the live load reserves again under the
+ordinary admission locks and capacity check. Without room it waits with a named
+reason that the profile and the Fleet both show, and resumes once room returns.
 """
 
 from __future__ import annotations
@@ -141,6 +142,14 @@ def test_a_resumed_load_reserves_what_its_transient_failure_released(
         load.application.id, request_key=str(uuid.uuid4()), actor="admin"
     )
     assert resumed.id == load.application.id and resumed.state == "running"
+    # Every claim the failure released is back, so the strict start checks
+    # (reviewed ports and memory) find the promises they were reviewed with.
+    restored = _claims(load, owner_kind="fleet-profile")
+    assert {(claim.kind, claim.state) for claim in restored} == {
+        ("disk", "active"),
+        ("port", "promised"),
+        ("unified-memory", "promised"),
+    }
     assert _settle(load), _application(load).status_reason
     (installation,) = _installed(load)
     assert installation.state == "installed"
@@ -199,27 +208,6 @@ def test_active_claims_with_different_owners_are_named_not_adopted(
         _the_switch(load).status_reason or ""
     )
     assert _application(load).state == "running"
-
-
-@pytest.mark.parametrize("kind", ["port", "unified-memory"])
-def test_a_load_starts_when_its_port_or_memory_promise_is_gone(
-    tmp_path: Path, kind: str
-) -> None:
-    load = _load(tmp_path)
-    assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
-    with load.sessions.begin() as session:
-        promises = list(
-            session.scalars(
-                select(ResourceReservation).where(
-                    ResourceReservation.owner_kind == "fleet-profile",
-                    ResourceReservation.kind == kind,
-                )
-            )
-        )
-        assert promises
-        for promise in promises:
-            session.delete(promise)
-    assert _settle(load), _application(load).status_reason
 
 
 def test_without_room_a_lost_claim_waits_visibly_and_resumes(tmp_path: Path) -> None:

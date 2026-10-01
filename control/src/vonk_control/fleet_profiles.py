@@ -134,6 +134,7 @@ from .profile_capacity import (
     reserve_profile_disk,
     reserve_profile_memory,
     reserve_profile_ports,
+    restore_released_profile_claims,
 )
 from .recipe_build_cancellation import (
     BuildConsumerError,
@@ -5735,6 +5736,8 @@ class FleetProfileService:
             if child.state not in _CHILD_PENDING_STATES:
                 return None
             self._set_application_state(session, row, "running")
+            # Failing released its unassigned claims; the resumed child needs them.
+            restore_released_profile_claims(session, row)
             row.status_reason = "Resumed advancing the live child operation"
             row.updated_at = now
             session.flush()
