@@ -1,0 +1,98 @@
+{
+ "capabilities": [
+  "text-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-70e0ed421d65-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "70e0ed421d653865ad7ace84728e32ded01ec0a860e989a5ed736fe11b42214f",
+   "size_bytes": 116
+  },
+  {
+   "id": "readme-2014434d3e36-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "2014434d3e3639147d35d61259690d585e7820993180e7d579e3b796dddf5a31",
+   "size_bytes": 2619
+  },
+  {
+   "id": "dflash2-figure-6d8dcc9a9472-e520c8f797",
+   "path": "assets/dflash2-figure.png",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "6d8dcc9a9472bddb644c881fe83050b5343d09bf5ffb0912e5598e55fe671e99",
+   "size_bytes": 286889
+  },
+  {
+   "id": "config-c4aeac010119-587cb980af",
+   "path": "config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "c4aeac0101196a6e26705b34c45230bcd0c7c68ee2d2d1efdb242087f3712573",
+   "size_bytes": 1273
+  },
+  {
+   "id": "model-b038e1d9d1e7-9d75c1098f",
+   "path": "model.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "b038e1d9d1e7833fa3880c2c0135ba9b673013f03da1b29fb831931584759dac",
+   "size_bytes": 2342169800
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "incoai",
+   "slug": "glm-5-3-dflash",
+   "title": "GLM 5.3 DFlash"
+  },
+  "model": {
+   "publisher": "incoai",
+   "slug": "glm-5-3-flash-dflash2",
+   "title": "GLM 5.3 Flash DFlash2"
+  },
+  "publisher": "incoai",
+  "slug": "glm-5-3-flash-dflash2-bf582e4e",
+  "variant": "GLM 5.3 Flash DFlash2 bf582e4e",
+  "version": "GLM 5.3 Flash DFlash2 bf582e4e"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "IncoAI"
+  ],
+  "spdx": "CC-BY-NC-ND-4.0",
+  "url": "https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2/blob/bf582e4eacc1810f76656d1811693ff6c6737d2a/README.md"
+ },
+ "metadata": {
+  "description": "Exact public GLM 5.3 Flash DFlash2 bf582e4e checkpoint.",
+  "tags": [
+   "incoai",
+   "glm-5-3-dflash",
+   "language",
+   "candidate"
+  ]
+ },
+ "modalities": [
+  "text"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2",
+  "revision": "bf582e4eacc1810f76656d1811693ff6c6737d2a"
+ }
+}
