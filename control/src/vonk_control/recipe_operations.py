@@ -3402,7 +3402,17 @@ class RecipeOperationService:
         actor: str,
         request_id: str,
         workload_intent_ordinal: int | None = None,
+        unattended_guard: Callable[[Session], None] | None = None,
     ) -> RecipeOperationView:
+        """Queue the removal of one installation from its Sparks.
+
+        ``unattended_guard`` marks a removal nobody asked for (the storage
+        sweep). It takes no new workload intent, so it supersedes no order and
+        costs no running workload its recovery, and it is called with the
+        target Sparks locked so the caller can re-check that the installation is
+        still unused; raising refuses the removal before anything is queued.
+        """
+
         existing = self._idempotent(
             request_id,
             "recipe.uninstall",
@@ -3478,6 +3488,7 @@ class RecipeOperationService:
                     authority_digest=plan.installation_authority_digest,
                     now=now,
                     workload_intent_ordinal=workload_intent_ordinal,
+                    unattended_guard=unattended_guard,
                 )
         except IntegrityError as error:
             raced = self._idempotent(
@@ -6741,11 +6752,16 @@ class RecipeOperationService:
         targets: Sequence[str],
         workload_intent_ordinal: int | None,
         now: datetime,
+        supersede: bool = True,
     ) -> int:
         """Bind a request to the workload intent that owns its target Sparks.
 
         A standalone request takes the next ordinal and fences older orders; a
-        child must carry its parent's exact, still-current ordinal.
+        child must carry its parent's exact, still-current ordinal. An
+        unattended request (``supersede=False``) takes no new intent: it joins
+        the one every target Spark already shares, so it cancels nothing and
+        leaves recovery of a workload on those Sparks untouched, and any later
+        load supersedes it.
         """
 
         try:
@@ -6767,6 +6783,13 @@ class RecipeOperationService:
             raise RunAdmissionBusy("run capacity writer is busy") from error
         if tuple(node.node_id for node in target_nodes) != tuple(targets):
             raise RecipeOperationConflict("workload intent target disappeared")
+        if workload_intent_ordinal is None and not supersede:
+            shared = {node.workload_intent_ordinal for node in target_nodes}
+            if len(shared) != 1 or min(shared) < 1:
+                raise RecipeOperationConflict(
+                    "workload intent differs across the target Sparks"
+                )
+            return shared.pop()
         if workload_intent_ordinal is None:
             next_ordinal = (
                 max(node.workload_intent_ordinal for node in target_nodes) + 1
@@ -6809,6 +6832,7 @@ class RecipeOperationService:
         phases: Sequence[Sequence[tuple[str, Mapping[str, object]]]] | None = None,
         job_context: Mapping[str, object] | None = None,
         workload_intent_ordinal: int | None = None,
+        unattended_guard: Callable[[Session], None] | None = None,
     ) -> Job:
         if not node_payloads:
             raise RecipeOperationConflict("operation group has no target nodes")
@@ -6879,7 +6903,13 @@ class RecipeOperationService:
                 targets=targets,
                 workload_intent_ordinal=workload_intent_ordinal,
                 now=now,
+                supersede=unattended_guard is None,
             )
+            if unattended_guard is not None:
+                # The target Spark rows are locked now, so a load admitted
+                # before this point is visible to the guard and one admitted
+                # after it waits for this transaction.
+                unattended_guard(session)
         job_payload: dict[str, object] = {
             "schema_version": 1,
             "owner_kind": owner_kind,

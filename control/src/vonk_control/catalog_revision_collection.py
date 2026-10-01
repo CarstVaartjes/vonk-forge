@@ -165,7 +165,7 @@ class CatalogRevisionCollector:
         deadline = time.monotonic() + self._budget_seconds
         with self._sessions() as session:
             candidates = self._candidates(session, cutoff)
-            live = _live_tokens(session, now) | _pinned_by_heads(session)
+            live = live_tokens(session, now) | pinned_by_heads(session)
         removed = 0
         kept: Counter[str] = Counter()
         for candidate in candidates:
@@ -504,8 +504,8 @@ class CatalogRevisionCollector:
                 old = {sha for sha, at in stored if _utc(at) <= cutoff}
                 if not old:
                     return 0
-                named = _live_tokens(session, now)
-                named = named | _tokens(
+                named = live_tokens(session, now)
+                named = named | tokens(
                     session.scalars(select(CatalogDocumentRevision.projected))
                 )
                 named = named | frozenset(
@@ -546,8 +546,8 @@ class CatalogRevisionCollector:
         return removed
 
 
-def _live_tokens(session: Session, now: datetime) -> frozenset[str]:
-    """Every id and digest named by a live or recently finished record.
+def operation_tokens(session: Session, now: datetime) -> frozenset[str]:
+    """Every id and digest named by a live or recently finished operation.
 
     Searching the stored JSON text, rather than reading each contract's fields,
     finds a reference whichever producer wrote it and whichever contract it was
@@ -582,19 +582,30 @@ def _live_tokens(session: Session, now: datetime) -> frozenset[str]:
         select(ArtifactJob.compiled_contract).where(
             or_(ArtifactJob.state.not_in(_FINISHED), ArtifactJob.updated_at >= recent)
         ),
+    )
+    found: set[str] = set()
+    for statement in sources:
+        found |= tokens(session.scalars(statement))
+    return frozenset(found)
+
+
+def live_tokens(session: Session, now: datetime) -> frozenset[str]:
+    """Operation tokens plus what every installation, run and build still names."""
+
+    sources = (
         select(RecipeInstallation.plan).where(
             RecipeInstallation.state != "uninstalled"
         ),
         select(RecipeRun.plan).where(RecipeRun.state.not_in(_DEAD_RUNS)),
         select(RecipeBuild.plan).where(RecipeBuild.state.in_(_IN_FLIGHT_BUILDS)),
     )
-    found: set[str] = set()
+    found: set[str] = set(operation_tokens(session, now))
     for statement in sources:
-        found |= _tokens(session.scalars(statement))
+        found |= tokens(session.scalars(statement))
     return frozenset(found)
 
 
-def _pinned_by_heads(session: Session) -> frozenset[str]:
+def pinned_by_heads(session: Session) -> frozenset[str]:
     """Digests the head and candidate recipe documents name (their models).
 
     A recipe binds its model revision when it is activated, so a pending
@@ -605,7 +616,7 @@ def _pinned_by_heads(session: Session) -> frozenset[str]:
     heads = select(CatalogDocumentHead.active_revision_id).union(
         select(CatalogDocumentHead.candidate_revision_id)
     )
-    return _tokens(
+    return tokens(
         session.scalars(
             select(CatalogDocumentRevision.document).where(
                 CatalogDocumentRevision.kind == "recipe",
@@ -615,7 +626,7 @@ def _pinned_by_heads(session: Session) -> frozenset[str]:
     )
 
 
-def _tokens(values: Iterable[object]) -> frozenset[str]:
+def tokens(values: Iterable[object]) -> frozenset[str]:
     found: set[str] = set()
     for value in values:
         found.update(_TOKEN.findall(json.dumps(value, default=str)))
@@ -631,4 +642,13 @@ def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
-__all__ = ["GRACE", "INTERVAL", "CatalogRevisionCollector", "Collected"]
+__all__ = [
+    "GRACE",
+    "INTERVAL",
+    "CatalogRevisionCollector",
+    "Collected",
+    "live_tokens",
+    "operation_tokens",
+    "pinned_by_heads",
+    "tokens",
+]
