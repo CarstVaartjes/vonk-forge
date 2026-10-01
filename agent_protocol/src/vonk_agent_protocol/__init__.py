@@ -34,8 +34,6 @@ from .build_import import (
     RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
     RecipeBuildRequest,
-    RecipeImageImportEvidence,
-    RecipeImageImportRequest,
 )
 from .compiled_execution_plan import (
     CompiledExecutionPlan,
@@ -176,8 +174,6 @@ __all__ = [
     "RecipeBuildCleanupRequest",
     "RecipeBuildEvidence",
     "RecipeBuildRequest",
-    "RecipeImageImportEvidence",
-    "RecipeImageImportRequest",
     "RecipeInstallPayload",
     "RecipeJobEvidence",
     "RecipeJobFile",

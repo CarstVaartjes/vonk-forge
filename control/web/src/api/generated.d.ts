@@ -1080,7 +1080,7 @@ export interface components {
          * AgentOperation
          * @enum {string}
          */
-        AgentOperation: "runtime.preflight.v1" | "agent.upgrade.v1" | "artifact.distribution.v1" | "recipe.build.v1" | "recipe.build.cleanup.v1" | "recipe.image.import.v1" | "recipe.install" | "recipe.start" | "recipe.job.run.v1" | "recipe.stop" | "recipe.uninstall" | "recipe.reconcile";
+        AgentOperation: "runtime.preflight.v1" | "agent.upgrade.v1" | "artifact.distribution.v1" | "recipe.build.v1" | "recipe.build.cleanup.v1" | "recipe.install" | "recipe.start" | "recipe.job.run.v1" | "recipe.stop" | "recipe.uninstall" | "recipe.reconcile";
         /** AgentOperationChange */
         AgentOperationChange: {
             /** Entity Id */
@@ -1818,16 +1818,16 @@ export interface components {
         };
         /**
          * DistributionObject
-         * @description One model file, OCI archive, or OCI layer referenced by an assignment.
+         * @description One model file referenced by an assignment.
          */
         DistributionObject: {
             /** Bytes */
             bytes: number;
             /**
              * Kind
-             * @enum {string}
+             * @constant
              */
-            kind: "model" | "oci-archive" | "oci-layer";
+            kind: "model";
             /** Name */
             name: string;
             /** Sha256 */
@@ -4490,6 +4490,8 @@ export interface components {
             objects: components["schemas"]["DistributionObject"][];
             /** Oci Archive Sha256 */
             oci_archive_sha256: string;
+            /** Oci Image Config Digest */
+            oci_image_config_digest: string;
             /** Oci Image Digest */
             oci_image_digest: string;
             /** Plan Digest */
@@ -5156,11 +5158,6 @@ export interface components {
              */
             schema_version: 2;
         };
-        /**
-         * RecipeImageImportEvidence
-         * @description The image is imported; the Controller already holds its identity.
-         */
-        RecipeImageImportEvidence: Record<string, never>;
         /** RecipeInputSlot */
         RecipeInputSlot: {
             /** Description */
@@ -5387,11 +5384,11 @@ export interface components {
             cancelled?: true | null;
             /** Launch Evidence */
             launch_evidence?: {
-                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
             } | null;
             /** Node Evidence */
             node_evidence?: {
-                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
             } | null;
             /** Reason */
             reason: string;

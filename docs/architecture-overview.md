@@ -122,11 +122,11 @@ size, and verification receipt are owned by managed storage under the cache
 root. `ModelCacheOperation` retains the operation record and its checkpoints.
 Image preparation writes managed filesystem receipts. SQL
 `RuntimeImageAuthorization` records current recipe authorization for the exact
-archive; the former SQL `RuntimeImageReceipt` table has been removed. Admission
-requires both current authorization and the managed receipt with present bytes.
-`RecipeBuild`, `Job`, and agent-operation rows retain request and output
-identities, coordination, and reported results; they do not independently prove
-that an archive is available.
+image; the former SQL `RuntimeImageReceipt` table has been removed. Admission
+requires both current authorization and the managed receipt with a complete
+stored image. `RecipeBuild`, `Job`, and agent-operation rows retain request and
+output identities, coordination, and reported results; they do not
+independently prove that an image is available.
 
 Recent cache-recovery work already reconciles absent bytes after a NAS restore
 and reuses completed transfers. The authorized preparation path can rebuild
@@ -483,22 +483,22 @@ The Spark build described above is the fallback; see
 [image transfer and cache](image-transfer-cache.md).
 
 Installation maps a resolved recipe revision to exact node identities and ranks.
-The controller transfers that one verified Docker-loadable archive over the
-authenticated agent channel and each target re-verifies it before import, so a
-three-node recipe never rebuilds independently on the other two nodes. Model
-downloads are independent of recipes: the Controller can fill the NAS model
-cache before any runtime image or Spark assignment exists, and recipes reuse
-the same content-addressed model files. The NAS model and recipe-image cache is
-the profile choice and admission surface. Published images and local builds both
-use Docker-save archives in the shared `image-cache` directory. The original
-registry pin remains separate from the exported platform manifest, config ID,
-and archive checksum; the Controller inspects the exported config and platform
-before use. Docker-save does not retain the original manifest, so its
-reconstructed manifest digest is never compared with the builder's original.
-Model files live under `/state/model-cache`; image archives live under
-`/state/agent-artifacts/image-cache`, shared by the API and worker. Each is its
-own Compose volume, mounted read-only into Caddy, which serves the bytes of a
-download the Controller has authorized (`X-Vonk-File`, never sent to agents). Both caches
+Each target Spark pulls the one stored runtime image by its manifest digest
+from the Controller's layered image store over the authenticated agent channel,
+fetching only layers it lacks, so a three-node recipe never rebuilds
+independently on the other two nodes. Model downloads are independent of
+recipes: the Controller can fill the NAS model cache before any runtime image
+or Spark assignment exists, and recipes reuse the same content-addressed model
+files. The NAS model and recipe-image cache is the profile choice and admission
+surface. Published images and local builds both land in one OCI layout,
+`image-cache/oci`, where images share layers; a published image keeps its
+original manifest digest, and a local build is converted into the layout once
+it has succeeded. Model files live under `/state/model-cache`; the image store
+lives under `/state/agent-artifacts/image-cache`, shared by the API and worker.
+Each is its own Compose volume, mounted read-only into Caddy, which serves the
+bytes of a model download the Controller has authorized (`X-Vonk-File`, never
+sent to agents) and the image store's digest-only `/v2/` routes to verified
+agents. Both caches
 reuse successful content verification while device, inode, size, timestamps,
 ownership, and mode remain unchanged. Changes trigger a new byte scan. The
 verification cache is bounded and process-local; authorization is still checked

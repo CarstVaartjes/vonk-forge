@@ -34,7 +34,6 @@ fn main() {
                 "image_digest": format!("sha256:{}", "a".repeat(64)),
                 "oci_layout_sha256": "b".repeat(64),
             }),
-            RecipeOperationRequest::ImageImport(_) => json!({}),
             _ => panic!("unexpected operation"),
         };
         println!(

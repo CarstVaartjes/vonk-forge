@@ -9,13 +9,11 @@ same reusable build receipt a Spark upload leaves.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-import vonk_control.availability_production as availability_production_module
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
@@ -33,9 +31,14 @@ from vonk_control.models import (
     RecipeBuild,
     ResourceReservation,
 )
+from vonk_control.oci_image_store import (
+    STORE_BUSY,
+    OciImageStore,
+    OciImageStoreError,
+    StoredImage,
+)
 from vonk_control.prebuilt_images import (
     PrebuiltImageImporter,
-    PrebuiltImagePullError,
     write_library_image_plan,
 )
 from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
@@ -50,12 +53,12 @@ from vonk_control.run_switch_operations import (
 from vonk_control.runtime_image_preparation import (
     IMAGE_CACHE_DIRECTORY,
     FilesystemRuntimeImageStorage,
-    PulledImageEvidence,
 )
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from tests.recipe_library_source import recipe_library_root
+from tests.runtime_image_fixtures import place_test_image
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from tests.test_recipe_builds import RecordingQueue
 
@@ -64,7 +67,8 @@ ROOT = recipe_library_root()
 NOW = datetime(2026, 9, 30, 12, tzinfo=UTC)
 NODE = "spk_" + "7" * 32
 REFERENCE = "ghcr.io/example/vonk-forge-recipe-example@sha256:" + "e" * 64
-ARCHIVE = b"prebuilt docker archive"
+ADDRESS = "e" * 64
+IMAGE_BYTES = 4096
 
 
 class _Reader:
@@ -181,10 +185,44 @@ def _services(sessions: sessionmaker, tmp_path: Path):
     return builds, operations
 
 
-def _pull(reference: str, destination: Path, *, local_name: str) -> None:
-    assert reference == REFERENCE
-    assert local_name.startswith("localhost/vonk/recipe-build-")
-    destination.write_bytes(ARCHIVE)
+class _Registry(OciImageStore):
+    """GHCR as the importer sees it: a pinned copy lands in the layout."""
+
+    def __init__(
+        self,
+        artifact_root: Path,
+        *,
+        failure: OciImageStoreError | None = None,
+        during_copy=None,
+    ) -> None:
+        super().__init__(artifact_root)
+        self._artifact_root = artifact_root
+        self._failure = failure
+        self._during_copy = during_copy
+        self.copied: list[str] = []
+
+    def import_reference(self, reference: str) -> StoredImage:
+        self.copied.append(reference)
+        if self._during_copy is not None:
+            self._during_copy()
+        if self._failure is not None:
+            raise self._failure
+        address = reference.rsplit("@", 1)[1].removeprefix("sha256:")
+        place_test_image(
+            FilesystemRuntimeImageStorage(self._artifact_root), address, IMAGE_BYTES
+        )
+        image = self.read(f"sha256:{address}")
+        assert image is not None
+        return image
+
+    def import_archive(self, archive: Path) -> StoredImage:
+        # A Spark upload converts to the image its bytes describe.
+        place_test_image(
+            FilesystemRuntimeImageStorage(self._artifact_root), ADDRESS, IMAGE_BYTES
+        )
+        image = self.read(f"sha256:{ADDRESS}")
+        assert image is not None
+        return image
 
 
 def _start(builds, operations, revision_id: str):
@@ -216,27 +254,28 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
         assert session.scalars(select(AgentOperation)).all() == []
         assert session.scalars(select(ResourceReservation)).all() == []
 
+    registry = _Registry(tmp_path)
     importer = PrebuiltImageImporter(
-        sessions, tmp_path, clock=lambda: NOW, puller=_pull
+        sessions, tmp_path, clock=lambda: NOW, store=registry
     )
     assert importer.run_pending() == 1
     assert importer.run_pending() == 0
 
-    archive_sha256 = hashlib.sha256(ARCHIVE).hexdigest()
-    assert (tmp_path / IMAGE_CACHE_DIRECTORY / archive_sha256).read_bytes() == ARCHIVE
+    assert registry.copied == [REFERENCE]
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         stored = session.get(Job, job.id)
         assert build is not None and stored is not None
-        assert (build.state, build.image_digest, build.oci_layout_sha256) == (
-            "succeeded",
-            REFERENCE.rsplit("@", 1)[1],
-            archive_sha256,
-        )
+        # The build is the stored image: addressed by its manifest digest,
+        # sized by its layers.
+        assert (
+            build.state,
+            build.image_digest,
+            build.oci_layout_sha256,
+            build.image_bytes,
+        ) == ("succeeded", REFERENCE.rsplit("@", 1)[1], ADDRESS, IMAGE_BYTES)
         assert stored.state == "succeeded"
-        assert stored.result["node_evidence"][NODE]["oci_layout_sha256"] == (
-            archive_sha256
-        )
+        assert stored.result["node_evidence"][NODE]["oci_layout_sha256"] == ADDRESS
 
     # The pulled image is the reusable receipt for these build inputs.
     resolution = builds.resolve(revision_id)
@@ -262,11 +301,14 @@ def test_failed_pull_is_visible_and_the_next_plan_builds_on_a_spark(
     builds, operations = _services(sessions, tmp_path)
     plan, job = _start(builds, operations, revision_id)
 
-    def unavailable(reference: str, destination: Path, *, local_name: str) -> None:
-        raise PrebuiltImagePullError("prebuilt_image_pull_failed", "manifest unknown")
-
     importer = PrebuiltImageImporter(
-        sessions, tmp_path, clock=lambda: NOW, puller=unavailable
+        sessions,
+        tmp_path,
+        clock=lambda: NOW,
+        store=_Registry(
+            tmp_path,
+            failure=OciImageStoreError("image_store.copy_failed", "manifest unknown"),
+        ),
     )
     assert importer.run_pending() == 1
 
@@ -280,7 +322,6 @@ def test_failed_pull_is_visible_and_the_next_plan_builds_on_a_spark(
         failure = stored.result["node_evidence"][NODE]
         assert failure["error_code"] == "prebuilt_image_pull_failed"
         assert failure["failure_kind"] == "temporary-dependency"
-    assert not list((tmp_path / IMAGE_CACHE_DIRECTORY).glob(".prebuilt-*"))
 
     with pytest.raises(RecipeBuildError) as refused:
         builds.prepare_plan(revision_id, NODE, now=NOW)
@@ -292,17 +333,19 @@ def test_cancelled_prebuilt_build_discards_a_late_pull(tmp_path: Path) -> None:
     builds, operations = _services(sessions, tmp_path)
     plan, job = _start(builds, operations, revision_id)
 
-    def cancel_during_pull(reference: str, destination: Path, *, local_name: str):
+    def cancel_during_pull() -> None:
         operations._cancel_build(
             job.id,
             actor="test",
             request_id="00000000-0000-4000-8000-00000000c001",
             reason="operator cancelled",
         )
-        destination.write_bytes(ARCHIVE)
 
     importer = PrebuiltImageImporter(
-        sessions, tmp_path, clock=lambda: NOW, puller=cancel_during_pull
+        sessions,
+        tmp_path,
+        clock=lambda: NOW,
+        store=_Registry(tmp_path, during_copy=cancel_during_pull),
     )
     assert importer.run_pending() == 1
     with sessions() as session:
@@ -363,35 +406,8 @@ def test_off_target_build_runs_once_before_an_early_memory_stop() -> None:
     assert kinds.index(("prepare", "container-build")) < kinds.index(("stop", None))
 
 
-class _Transport:
-    """Inspects the pulled archive the way skopeo reports a runtime image."""
-
-    def inspect_archive(
-        self,
-        archive: Path,
-        *,
-        expected_architecture: str,
-        expected_runtime_interface: str,
-        expected_archive_sha256: str,
-        expected_archive_bytes: int,
-    ) -> PulledImageEvidence:
-        assert archive.read_bytes() == ARCHIVE
-        return PulledImageEvidence(
-            manifest_digest=REFERENCE.rsplit("@", 1)[1],
-            config_id="sha256:" + "c" * 64,
-            local_reference=f"docker-archive:{archive}",
-            architecture=expected_architecture,
-            runtime_interface=expected_runtime_interface,
-            archive_sha256=expected_archive_sha256,
-            archive_bytes=expected_archive_bytes,
-        )
-
-
 def _availability(sessions, tmp_path: Path, monkeypatch, clock):
     builds, operations = _services(sessions, tmp_path)
-    monkeypatch.setattr(
-        availability_production_module, "SkopeoOCIImageTransport", _Transport
-    )
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path,
@@ -419,7 +435,7 @@ def test_image_preparation_pulls_the_prebuilt_image_without_a_spark_build(
     assert waiting.state != "succeeded"
 
     importer = PrebuiltImageImporter(
-        sessions, tmp_path, clock=lambda: now[0], puller=_pull
+        sessions, tmp_path, clock=lambda: now[0], store=_Registry(tmp_path)
     )
     assert importer.run_pending() == 1
     now[0] += timedelta(minutes=5)
@@ -447,11 +463,13 @@ def test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry(
     )
     assert production.service.run_pending() == 1
 
-    def unavailable(reference: str, destination: Path, *, local_name: str) -> None:
-        raise PrebuiltImagePullError("prebuilt_image_pull_failed", "denied")
-
     importer = PrebuiltImageImporter(
-        sessions, tmp_path, clock=lambda: now[0], puller=unavailable
+        sessions,
+        tmp_path,
+        clock=lambda: now[0],
+        store=_Registry(
+            tmp_path, failure=OciImageStoreError("image_store.copy_failed", "denied")
+        ),
     )
     assert importer.run_pending() == 1
     for _ in range(3):
@@ -475,3 +493,79 @@ def test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry(
     assert view.failure["code"] == "recipe_image.build_capacity_wait"
     assert "build.inventory_missing" in {blocker.code for blocker in view.blockers}
     production.close()
+
+
+def test_a_busy_store_hands_the_pull_back_instead_of_failing_it(
+    tmp_path: Path,
+) -> None:
+    sessions, revision_id = _published_library(tmp_path)
+    builds, operations = _services(sessions, tmp_path)
+    plan, job = _start(builds, operations, revision_id)
+
+    busy = PrebuiltImageImporter(
+        sessions,
+        tmp_path,
+        clock=lambda: NOW,
+        store=_Registry(
+            tmp_path, failure=OciImageStoreError(STORE_BUSY, "storing another image")
+        ),
+    )
+    assert busy.run_pending() == 1
+    with sessions() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        stored = session.get(Job, job.id)
+        assert build is not None and stored is not None
+        assert build.state != "failed" and stored.state == "running"
+
+    # The next tick, on any Controller process, takes the pull up at once.
+    importer = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: NOW, store=_Registry(tmp_path)
+    )
+    assert importer.run_pending() == 1
+    with sessions() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None and build.state == "succeeded"
+
+
+def test_a_spark_build_upload_is_converted_into_the_store_after_success(
+    tmp_path: Path,
+) -> None:
+    sessions, revision_id = _published_library(tmp_path)
+    upload_sha256 = "a" * 64
+    upload = tmp_path / IMAGE_CACHE_DIRECTORY / upload_sha256
+    upload.parent.mkdir(parents=True)
+    upload.write_bytes(b"docker archive from a Spark build")
+    with sessions.begin() as session:
+        session.add(
+            RecipeBuild(
+                id="00000000-0000-4000-8000-00000000d001",
+                recipe_revision_id=revision_id,
+                builder_node_id=NODE,
+                source_bundle_sha256="b" * 64,
+                build_input_sha256="c" * 64,
+                state="succeeded",
+                policy_report={"passed": True},
+                plan={},
+                image_digest="sha256:" + "d" * 64,
+                oci_layout_sha256=upload_sha256,
+                image_bytes=len(b"docker archive from a Spark build"),
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    importer = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: NOW, store=_Registry(tmp_path)
+    )
+    assert importer.run_pending() == 1
+    assert importer.run_pending() == 0
+
+    assert not upload.exists()
+    with sessions() as session:
+        build = session.get(RecipeBuild, "00000000-0000-4000-8000-00000000d001")
+        assert build is not None
+        assert (build.image_digest, build.oci_layout_sha256, build.image_bytes) == (
+            f"sha256:{ADDRESS}",
+            ADDRESS,
+            IMAGE_BYTES,
+        )

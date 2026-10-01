@@ -739,6 +739,9 @@ class ArtifactDistributionAssignment(Base):
     model_artifact_set_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     objects: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
     oci_image_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    # The node pulls the image by manifest digest; the config digest is the
+    # identity Docker reports for it on a classic image store.
+    oci_image_config_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     oci_archive_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(
         String(16), nullable=False, default="active", index=True

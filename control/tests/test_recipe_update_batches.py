@@ -33,6 +33,7 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .runtime_image_fixtures import place_test_image
 from .test_recipe_image_availability import (
     ARCHIVE,
     IMAGE_DIGEST,
@@ -366,7 +367,7 @@ def test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope
             # Every revision owns the archive its own build produced.
             archive = ARCHIVE + f"-{index}".encode()
             archive_sha256 = hashlib.sha256(archive).hexdigest()
-            (service._storage.root / archive_sha256).write_bytes(archive)
+            place_test_image(service._storage, archive_sha256, len(archive))
             revision = _add_revision(session, revision_id, recipe, archive=archive)
             _add_head(session, revision)
             assert revision.execution_key is not None

@@ -397,7 +397,10 @@ def setup(
             800,
             1,
             read_only,
-            ("runtime.vonk.v1",),
+            (
+                "runtime.vonk.v1",
+                "recipe.image.pull.v1",
+            ),
             memory_pool="shared",
         )
     )
@@ -730,7 +733,10 @@ def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None
             800,
             1,
             False,
-            ("runtime.vonk.v1",),
+            (
+                "runtime.vonk.v1",
+                "recipe.image.pull.v1",
+            ),
             memory_pool="shared",
         )
     )
@@ -822,6 +828,35 @@ def test_database_rejects_mutable_built_image_identity(tmp_path) -> None:
         row.image_digest = "latest"
 
 
+def test_an_agent_that_cannot_pull_images_asks_for_an_upgrade(tmp_path) -> None:
+    sessions, now, node, mapping, build = setup(tmp_path, free=200)
+    InventoryRepository(sessions, clock=lambda: now).record(
+        InventorySnapshotInput(
+            node,
+            now + timedelta(seconds=1),
+            1000,
+            200,
+            1000,
+            800,
+            1000,
+            800,
+            1,
+            False,
+            ("runtime.vonk.v1",),
+            memory_pool="shared",
+        )
+    )
+
+    plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
+        mapping, build, now=now + timedelta(seconds=1)
+    )
+
+    assert plan.allowed is False
+    assert "install.agent_upgrade_required" in {
+        blocker.code for blocker in plan.nodes[0].blockers
+    }
+
+
 def test_install_rejects_mapping_with_wrong_endpoint_owner(tmp_path) -> None:
     sessions, _now, _node, mapping, _build = setup(tmp_path, free=200)
     with (
@@ -850,7 +885,10 @@ def _record_inventory(sessions, node_id, at, *, free=200) -> None:
             800,
             1,
             False,
-            ("runtime.vonk.v1",),
+            (
+                "runtime.vonk.v1",
+                "recipe.image.pull.v1",
+            ),
             memory_pool="shared",
         )
     )

@@ -1223,8 +1223,8 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from .run_admission import RunAdmissionService
     from .runtime_image_preparation import (
         FilesystemRuntimeImageStorage,
+        OciLayoutImageTransport,
         RuntimeImageReceipt,
-        SkopeoOCIImageTransport,
         make_runtime_image_receipt_preparer,
         resolve_persisted_runtime_image_receipt,
         runtime_image_expectations,
@@ -1281,7 +1281,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         clock,
         model_cache=model_cache,
     )
-    runtime_image_transport = SkopeoOCIImageTransport()
+    runtime_image_transport = OciLayoutImageTransport()
     prepare_runtime_image_receipt = make_runtime_image_receipt_preparer(
         sessions,
         runtime_image_storage,

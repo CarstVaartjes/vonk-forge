@@ -46,14 +46,9 @@ def _assignment(
                     "bytes": 7,
                     "kind": "model",
                 },
-                {
-                    "name": "image.oci.tar",
-                    "sha256": archive_digest,
-                    "bytes": 11,
-                    "kind": "oci-archive",
-                },
             ],
             "oci_image_digest": "sha256:" + "d" * 64,
+            "oci_image_config_digest": "sha256:" + "9" * 64,
             "oci_archive_sha256": archive_digest,
         }
     )
@@ -94,11 +89,23 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
         "/agent/distribution/manifests/{plan_digest}"
     ]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert response_schema == {"$ref": "#/components/schemas/DistributionAssignment"}
+    # The runtime image is pulled by digest, never served as an object.
     assert {item["sha256"] for item in manifest.json()["objects"]} == {
         model_digest,
         config_digest,
-        archive_digest,
     }
+    assert manifest.json()["oci_image_digest"] == assignment.oci_image_digest
+    assert manifest.json()["oci_image_config_digest"] == "sha256:" + "9" * 64
+    assert (
+        client.get(
+            "/agent/distribution/objects/"
+            + archive_digest
+            + "?plan_digest="
+            + "a" * 64,
+            headers=agent_headers(NODE_A, "serial-a"),
+        ).status_code
+        >= 400
+    )
     response = client.get(
         "/agent/distribution/objects/" + model_digest + "?plan_digest=" + "a" * 64,
         headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=2-7"},

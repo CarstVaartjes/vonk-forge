@@ -17,7 +17,7 @@ fn main() {
         capabilities: vec![
             "build.rootless-podman.v1".to_owned(),
             "recipe.build.v1".to_owned(),
-            "recipe.image.import.v1".to_owned(),
+            "recipe.image.pull.v1".to_owned(),
         ],
         fabric_address: None,
         fabric_bandwidth_mbps: None,

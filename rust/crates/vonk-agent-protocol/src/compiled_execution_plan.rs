@@ -229,7 +229,7 @@ impl CompiledModelArtifact {
             name: self.path.clone(),
             sha256: self.sha256.clone(),
             bytes: self.size_bytes,
-            kind: crate::generated::DistributionObjectKind::Model,
+            kind: "model".to_owned(),
         }
     }
 }
@@ -429,23 +429,13 @@ impl CompiledJob {
 }
 
 impl CompiledRuntimeImage {
-    /// The local imported reference for this exact Controller archive and
-    /// image identity; the Controller does not transport it.
+    /// The local reference the image is pulled under: its address in the
+    /// Controller's layered store and its manifest digest.
     pub fn local_image_reference(&self) -> String {
         format!(
             "localhost/vonk/compiled-runtime-{}@{}",
             self.oci_layout_sha256, self.image_digest
         )
-    }
-
-    /// The Controller distribution object that delivers this image archive.
-    pub fn distribution_object(&self) -> crate::generated::DistributionObject {
-        crate::generated::DistributionObject {
-            name: "image.oci.tar".to_owned(),
-            sha256: self.oci_layout_sha256.clone(),
-            bytes: self.image_bytes,
-            kind: crate::generated::DistributionObjectKind::OciArchive,
-        }
     }
 
     fn validate(&self) -> Result<(), WorkloadError> {
@@ -459,7 +449,7 @@ impl CompiledRuntimeImage {
         {
             return Err(WorkloadError::Invalid("compiled runtime image"));
         }
-        validate_distribution_object(&self.distribution_object())
+        Ok(())
     }
 }
 

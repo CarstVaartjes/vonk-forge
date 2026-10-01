@@ -1059,7 +1059,7 @@ def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> Non
         runtime_service().issue_grant(
             node_id="spk_" + "1" * 32,
             fence="40000000-0000-4000-8000-000000000004",
-            action=ContainerRuntimeAction.IMAGE_IMPORT,
+            action=ContainerRuntimeAction.IMAGE_PULL,
             request_sha256="e" * 64,
             certificate_serial="certificate-1",
         )

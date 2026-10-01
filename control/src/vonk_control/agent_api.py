@@ -705,16 +705,8 @@ def _owned_artifact(
     ]
     if not owners:
         raise HTTPException(status_code=404, detail="artifact not found")
-    recipe_image = any(
-        operation.kind == "recipe.image.import.v1" for operation in owners
-    )
-    maximum = (
-        services.max_recipe_image_bytes if recipe_image else services.max_artifact_bytes
-    )
-    directory = services.artifact_root
-    if recipe_image:
-        directory = directory / IMAGE_CACHE_DIRECTORY
-    path = directory / digest
+    maximum = services.max_artifact_bytes
+    path = services.artifact_root / digest
     try:
         # No-follow keeps a planted link from naming anything else.
         metadata = os.stat(path, follow_symlinks=False)

@@ -472,8 +472,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .map_err(|error| install_error("runtime-cache", error))?;
         self.materialize_compiled_models(spec, installation_id)
             .map_err(|error| install_error("model-materialization", error))?;
-        self.verify_compiled_image_archive(spec)
-            .map_err(|error| install_error("image-archive", error))?;
         let encoded_spec = serde_json::to_vec(spec)
             .map_err(OciError::Json)
             .map_err(|error| install_error("installation-metadata", error))?;
@@ -825,7 +823,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         self.verify_installation(installation_id)?;
-        self.verify_compiled_image_archive(spec)?;
         Ok(true)
     }
 
@@ -856,23 +853,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(())
     }
 
-    fn verify_compiled_image_archive(
-        &self,
-        plan: &CompiledExecutionPlan,
-    ) -> Result<PathBuf, OciError> {
-        let archive = self
-            .data_root
-            .join("oci-archives")
-            .join(&plan.runtime_image.oci_layout_sha256);
-        let metadata = fs::symlink_metadata(&archive)?;
-        if metadata.file_type().is_symlink()
-            || !trusted_model_metadata(&metadata, plan.runtime_image.image_bytes)
-        {
-            return Err(OciError::ImageDigest);
-        }
-        Ok(archive)
-    }
-
     pub fn start_arguments(
         &self,
         spec: &CompiledExecutionPlan,
@@ -894,10 +874,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         start_arguments_for_paths(
             spec,
             &CompiledOciPaths {
-                image_archive: self
-                    .data_root
-                    .join("oci-archives")
-                    .join(&spec.runtime_image.oci_layout_sha256),
                 model_root: self
                     .data_root
                     .join("installations")
@@ -3100,13 +3076,6 @@ mod tests {
             fs::write(&path, bytes).unwrap();
             fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
         }
-        let archive = data
-            .path()
-            .join("oci-archives")
-            .join(&plan.runtime_image.oci_layout_sha256);
-        fs::create_dir_all(archive.parent().unwrap()).unwrap();
-        fs::write(&archive, vec![0; plan.runtime_image.image_bytes as usize]).unwrap();
-        fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
 
         let runner = NoProcess;
         {

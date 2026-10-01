@@ -159,7 +159,10 @@ def setup(
             free_memory,
             1,
             False,
-            ("runtime.vonk.v1",),
+            (
+                "runtime.vonk.v1",
+                "recipe.image.pull.v1",
+            ),
             memory_pool=memory_pool,
         )
     )

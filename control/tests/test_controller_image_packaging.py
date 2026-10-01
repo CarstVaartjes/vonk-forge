@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -72,23 +71,14 @@ def test_skopeo_image_stage_has_no_host_socket_or_privileged_runtime_contract() 
     assert "/var/tmp" in runtime
 
 
-def test_skopeo_production_transport_inspects_the_stored_archive() -> None:
-    source = (ROOT / "control/src/vonk_control/runtime_image_preparation.py").read_text(
-        encoding="utf-8"
-    )
-    assert 'executable: str = "/usr/bin/skopeo"' in source
-    assert '"inspect"' in source
-    assert 'f"docker-archive:{archive}"' in source
-    assert "--override-arch" in source
-    assert "--override-os" in source
+def test_skopeo_is_used_only_where_images_enter_the_layered_store() -> None:
+    source = ROOT / "control/src/vonk_control"
+    store = (source / "oci_image_store.py").read_text(encoding="utf-8")
+    preparation = (source / "runtime_image_preparation.py").read_text(encoding="utf-8")
 
-
-def test_skopeo_digest_and_platform_arguments_are_bounded() -> None:
-    source = (ROOT / "control/src/vonk_control/runtime_image_preparation.py").read_text(
-        encoding="utf-8"
-    )
-    assert re.search(
-        r"def _platform_args\(architecture: str\).*?override-arch", source, re.DOTALL
-    )
-    assert "runtime_image.digest_mismatch" in source
-    assert "runtime_image.architecture_mismatch" in source
+    # The packaged binary is the one the store copies registry images with.
+    assert 'skopeo: str = "/usr/bin/skopeo"' in store
+    assert "--preserve-digests" in store
+    # Preparation reads the layout directly and starts no process.
+    assert "import subprocess" not in preparation
+    assert "/usr/bin/skopeo" not in preparation

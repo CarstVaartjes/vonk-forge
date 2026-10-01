@@ -129,9 +129,6 @@
               "$ref": "#/$defs/RecipeBuildCleanupRequest"
             },
             {
-              "$ref": "#/$defs/RecipeImageImportRequest"
-            },
-            {
               "$ref": "#/$defs/RecipeJobRunRequest"
             },
             {
@@ -428,7 +425,6 @@
         "artifact.distribution.v1",
         "recipe.build.v1",
         "recipe.build.cleanup.v1",
-        "recipe.image.import.v1",
         "recipe.install",
         "recipe.start",
         "recipe.job.run.v1",
@@ -548,9 +544,6 @@
             },
             {
               "$ref": "#/$defs/RecipeBuildCleanupEvidence"
-            },
-            {
-              "$ref": "#/$defs/RecipeImageImportEvidence"
             },
             {
               "$ref": "#/$defs/RecipeJobRunResult"
@@ -1485,7 +1478,7 @@
     },
     "CompiledRuntimeImage": {
       "additionalProperties": false,
-      "description": "The Controller-built OCI archive; imported locally as\n``localhost/vonk/compiled-runtime-<oci_layout_sha256>@<image_digest>``.",
+      "description": "A runtime image in the Controller's layered store.\n\n``image_digest`` is its manifest digest and ``oci_layout_sha256`` the same\ndigest's hex, its address in the store; ``image_bytes`` is the size of its\nlayers. Sparks pull it into Docker as\n``localhost/vonk/compiled-runtime-<oci_layout_sha256>@<image_digest>``.",
       "properties": {
         "build_id": {
           "maxLength": 128,
@@ -1644,7 +1637,7 @@
     },
     "DistributionAssignment": {
       "additionalProperties": false,
-      "description": "The object set one node downloads for a distribution plan.",
+      "description": "What one node fetches for a distribution plan.\n\nModel files are downloaded as objects. The runtime image is not an\nobject: the node pulls it by manifest digest from the Controller's\nlayered image store, and only the layers it lacks travel.",
       "properties": {
         "objects": {
           "items": {
@@ -1655,9 +1648,9 @@
           "title": "Objects",
           "type": "array"
         },
-        "oci_archive_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Oci Archive Sha256",
+        "oci_image_config_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Oci Image Config Digest",
           "type": "string"
         },
         "oci_image_digest": {
@@ -1669,14 +1662,14 @@
       "required": [
         "objects",
         "oci_image_digest",
-        "oci_archive_sha256"
+        "oci_image_config_digest"
       ],
       "title": "DistributionAssignment",
       "type": "object"
     },
     "DistributionObject": {
       "additionalProperties": false,
-      "description": "One model file, OCI archive, or OCI layer referenced by an assignment.",
+      "description": "One model file referenced by an assignment.",
       "properties": {
         "bytes": {
           "maximum": 17592186044416,
@@ -1685,11 +1678,7 @@
           "type": "integer"
         },
         "kind": {
-          "enum": [
-            "model",
-            "oci-archive",
-            "oci-layer"
-          ],
+          "const": "model",
           "title": "Kind",
           "type": "string"
         },
@@ -1949,7 +1938,6 @@
         "action": {
           "enum": [
             "runtime-preflight",
-            "image-import",
             "image-pull",
             "image-inspect",
             "run-inspect",
@@ -2494,7 +2482,6 @@
         "action": {
           "enum": [
             "runtime-preflight",
-            "image-import",
             "image-pull",
             "image-inspect",
             "run-inspect",
@@ -2641,7 +2628,6 @@
         "action": {
           "enum": [
             "runtime-preflight",
-            "image-import",
             "image-pull",
             "image-inspect",
             "run-inspect",
@@ -4591,65 +4577,6 @@
       "title": "RecipeBuildRequest",
       "type": "object"
     },
-    "RecipeImageImportEvidence": {
-      "additionalProperties": false,
-      "description": "The image is imported; the Controller already holds its identity.",
-      "properties": {},
-      "title": "RecipeImageImportEvidence",
-      "type": "object"
-    },
-    "RecipeImageImportRequest": {
-      "additionalProperties": false,
-      "properties": {
-        "build_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Build Id",
-          "type": "string"
-        },
-        "image_bytes": {
-          "exclusiveMinimum": 0,
-          "maximum": 17592186044416,
-          "title": "Image Bytes",
-          "type": "integer"
-        },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "mapping_generation": {
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
-        "mapping_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Mapping Id",
-          "type": "string"
-        },
-        "oci_layout_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Oci Layout Sha256",
-          "type": "string"
-        },
-        "source_node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Source Node Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "build_id",
-        "image_bytes",
-        "image_digest",
-        "mapping_generation",
-        "mapping_id",
-        "oci_layout_sha256",
-        "source_node_id"
-      ],
-      "title": "RecipeImageImportRequest",
-      "type": "object"
-    },
     "RecipeInstallPayload": {
       "additionalProperties": false,
       "properties": {
@@ -6203,8 +6130,6 @@
     "RecipeBuildNetwork": "vonk_agent_protocol.build_import.RecipeBuildNetwork",
     "RecipeBuildOptions": "vonk_agent_protocol.build_import.RecipeBuildOptions",
     "RecipeBuildRequest": "vonk_agent_protocol.build_import.RecipeBuildRequest",
-    "RecipeImageImportEvidence": "vonk_agent_protocol.build_import.RecipeImageImportEvidence",
-    "RecipeImageImportRequest": "vonk_agent_protocol.build_import.RecipeImageImportRequest",
     "RecipeInstallPayload": "vonk_agent_protocol.recipe_operations.RecipeInstallPayload",
     "RecipeJobEvidence": "vonk_agent_protocol.recipe_jobs.RecipeJobEvidence",
     "RecipeJobFile": "vonk_agent_protocol.recipe_jobs.RecipeJobFile",
@@ -6328,8 +6253,6 @@
     "RecipeBuildNetwork": "#/$defs/RecipeBuildNetwork",
     "RecipeBuildOptions": "#/$defs/RecipeBuildOptions",
     "RecipeBuildRequest": "#/$defs/RecipeBuildRequest",
-    "RecipeImageImportEvidence": "#/$defs/RecipeImageImportEvidence",
-    "RecipeImageImportRequest": "#/$defs/RecipeImageImportRequest",
     "RecipeInstallPayload": "#/$defs/RecipeInstallPayload",
     "RecipeJobEvidence": "#/$defs/RecipeJobEvidence",
     "RecipeJobFile": "#/$defs/RecipeJobFile",

@@ -43,31 +43,28 @@ const PROBE_RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
 const PROBE_INSTALLATION_ID: &str = "40000000-0000-4000-8000-000000000001";
 
 fn main() {
-    let mode = env::args().nth(1).expect("mode setup|import|start");
+    let mode = env::args().nth(1).expect("mode setup|pull|start");
     if mode == "setup" {
         setup_files();
         return;
     }
     let archive_sha = env_required("VONK_HELPER_ARCHIVE_SHA");
-    let archive_bytes: u64 = env_required("VONK_HELPER_ARCHIVE_BYTES").parse().unwrap();
     let platform_digest = env_required("VONK_HELPER_PLATFORM_DIGEST");
-    // Recipe images are built locally, never pulled: the agent names the
-    // platform manifest for both digests, exactly as production imports do.
+    // The agent names the platform manifest for both digests, exactly as
+    // production pulls from the Controller's layered store do.
     let registry_digest = platform_digest.clone();
     let image_ref = env_required("VONK_HELPER_IMAGE_REF");
     let action = match mode.as_str() {
-        "import" => HostRuntimeAction::ImageImport,
+        "pull" => HostRuntimeAction::ImagePull,
         "start" => HostRuntimeAction::Start,
         other => panic!("unsupported mode {other}"),
     };
-    let (arguments, start_plan) = if action == HostRuntimeAction::ImageImport {
+    let (arguments, start_plan) = if action == HostRuntimeAction::ImagePull {
         (
             vec![
-                format!("/var/lib/vonk-forge-agent/oci-archives/{archive_sha}"),
-                archive_sha.clone(),
-                archive_bytes.to_string(),
-                registry_digest.clone(),
+                env_required("VONK_HELPER_LOOPBACK_REGISTRY"),
                 platform_digest.clone(),
+                env_required("VONK_HELPER_CONFIG_ID"),
                 image_ref.clone(),
             ],
             None,
@@ -85,7 +82,7 @@ fn main() {
             Some(plan),
         )
     };
-    let fence = if action == HostRuntimeAction::ImageImport {
+    let fence = if action == HostRuntimeAction::ImagePull {
         Uuid::parse_str("60000000-0000-4000-8000-000000000005").unwrap()
     } else {
         Uuid::parse_str("60000000-0000-4000-8000-000000000006").unwrap()
@@ -118,8 +115,8 @@ fn main() {
         vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
             type_: "execute-container-runtime-request".into(),
             action: match action {
-                HostRuntimeAction::ImageImport => {
-                    vonk_agent_helper::protocol::ContainerRuntimeAction::ImageImport
+                HostRuntimeAction::ImagePull => {
+                    vonk_agent_helper::protocol::ContainerRuntimeAction::ImagePull
                 }
                 HostRuntimeAction::Start => {
                     vonk_agent_helper::protocol::ContainerRuntimeAction::Start
@@ -236,9 +233,6 @@ fn production_start_arguments() -> (Vec<String>, RecipeStartRequest) {
     value["runtime_image"]["runtime_interface_label"] = json!("v1");
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     let paths = CompiledOciPaths {
-        image_archive: PathBuf::from(format!(
-            "/var/lib/vonk-forge-agent/oci-archives/{archive_sha}"
-        )),
         model_root: PathBuf::from(format!(
             "/var/lib/vonk-forge-agent/installations/{PROBE_INSTALLATION_ID}/models"
         )),

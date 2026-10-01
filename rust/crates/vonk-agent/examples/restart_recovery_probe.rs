@@ -177,7 +177,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .download_distribution(
             &payload.plan_digest,
             &request.data_root.join("distribution"),
-            &request.data_root.join("oci-archives"),
         )
         .await?;
     let result = state.finish(&claim, "succeeded", distribution_success_evidence(evidence))?;

@@ -2172,14 +2172,9 @@ def _transfer_result(nodes: tuple[str, ...]) -> dict[str, object]:
         model_artifact_set_sha256="d" * 64,
         objects=(
             DistributionObject(name="model", sha256="e" * 64, bytes=10, kind="model"),
-            DistributionObject(
-                name="runtime.tar",
-                sha256=archive_sha256,
-                bytes=1024,
-                kind="oci-archive",
-            ),
         ),
         oci_image_digest="sha256:" + "f" * 64,
+        oci_image_config_digest="sha256:" + "9" * 64,
         oci_archive_sha256=archive_sha256,
     )
     return {

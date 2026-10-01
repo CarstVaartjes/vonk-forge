@@ -94,7 +94,6 @@ pub enum AgentClaimPayload {
     ArtifactDistributionPayload(ArtifactDistributionPayload),
     RecipeBuildRequest(RecipeBuildRequest),
     RecipeBuildCleanupRequest(RecipeBuildCleanupRequest),
-    RecipeImageImportRequest(RecipeImageImportRequest),
     RecipeJobRunRequest(RecipeJobRunRequest),
     RecipeInstallPayload(RecipeInstallPayload),
     RecipeStartPayload(RecipeStartPayload),
@@ -125,11 +124,6 @@ impl ::std::convert::From<RecipeBuildRequest> for AgentClaimPayload {
 impl ::std::convert::From<RecipeBuildCleanupRequest> for AgentClaimPayload {
     fn from(value: RecipeBuildCleanupRequest) -> Self {
         Self::RecipeBuildCleanupRequest(value)
-    }
-}
-impl ::std::convert::From<RecipeImageImportRequest> for AgentClaimPayload {
-    fn from(value: RecipeImageImportRequest) -> Self {
-        Self::RecipeImageImportRequest(value)
     }
 }
 impl ::std::convert::From<RecipeJobRunRequest> for AgentClaimPayload {
@@ -282,8 +276,6 @@ pub enum AgentOperation {
     RecipeBuildV1,
     #[serde(rename = "recipe.build.cleanup.v1")]
     RecipeBuildCleanupV1,
-    #[serde(rename = "recipe.image.import.v1")]
-    RecipeImageImportV1,
     #[serde(rename = "recipe.install")]
     RecipeInstall,
     #[serde(rename = "recipe.start")]
@@ -305,7 +297,6 @@ impl ::std::fmt::Display for AgentOperation {
             Self::ArtifactDistributionV1 => f.write_str("artifact.distribution.v1"),
             Self::RecipeBuildV1 => f.write_str("recipe.build.v1"),
             Self::RecipeBuildCleanupV1 => f.write_str("recipe.build.cleanup.v1"),
-            Self::RecipeImageImportV1 => f.write_str("recipe.image.import.v1"),
             Self::RecipeInstall => f.write_str("recipe.install"),
             Self::RecipeStart => f.write_str("recipe.start"),
             Self::RecipeJobRunV1 => f.write_str("recipe.job.run.v1"),
@@ -324,7 +315,6 @@ impl ::std::str::FromStr for AgentOperation {
             "artifact.distribution.v1" => Ok(Self::ArtifactDistributionV1),
             "recipe.build.v1" => Ok(Self::RecipeBuildV1),
             "recipe.build.cleanup.v1" => Ok(Self::RecipeBuildCleanupV1),
-            "recipe.image.import.v1" => Ok(Self::RecipeImageImportV1),
             "recipe.install" => Ok(Self::RecipeInstall),
             "recipe.start" => Ok(Self::RecipeStart),
             "recipe.job.run.v1" => Ok(Self::RecipeJobRunV1),
@@ -388,7 +378,6 @@ pub enum AgentResultResult {
     RecipeUninstallResult(RecipeUninstallResult),
     RecipeBuildEvidence(RecipeBuildEvidence),
     RecipeBuildCleanupEvidence(RecipeBuildCleanupEvidence),
-    RecipeImageImportEvidence(RecipeImageImportEvidence),
     RecipeJobRunResult(RecipeJobRunResult),
     ArtifactDistributionResult(ArtifactDistributionResult),
     AgentFailureResult(AgentFailureResult),
@@ -432,11 +421,6 @@ impl ::std::convert::From<RecipeBuildEvidence> for AgentResultResult {
 impl ::std::convert::From<RecipeBuildCleanupEvidence> for AgentResultResult {
     fn from(value: RecipeBuildCleanupEvidence) -> Self {
         Self::RecipeBuildCleanupEvidence(value)
-    }
-}
-impl ::std::convert::From<RecipeImageImportEvidence> for AgentResultResult {
-    fn from(value: RecipeImageImportEvidence) -> Self {
-        Self::RecipeImageImportEvidence(value)
     }
 }
 impl ::std::convert::From<RecipeJobRunResult> for AgentResultResult {
@@ -999,7 +983,7 @@ pub struct ConfirmPackageActivationOperation {
 #[derive(Eq)]
 pub struct DistributionAssignment {
     pub objects: ::std::vec::Vec<DistributionObject>,
-    pub oci_archive_sha256: ::std::string::String,
+    pub oci_image_config_digest: ::std::string::String,
     pub oci_image_digest: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -1007,63 +991,9 @@ pub struct DistributionAssignment {
 #[derive(Eq)]
 pub struct DistributionObject {
     pub bytes: u64,
-    pub kind: DistributionObjectKind,
+    pub kind: ::std::string::String,
     pub name: ::std::string::String,
     pub sha256: ::std::string::String,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum DistributionObjectKind {
-    #[serde(rename = "model")]
-    Model,
-    #[serde(rename = "oci-archive")]
-    OciArchive,
-    #[serde(rename = "oci-layer")]
-    OciLayer,
-}
-impl ::std::fmt::Display for DistributionObjectKind {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Model => f.write_str("model"),
-            Self::OciArchive => f.write_str("oci-archive"),
-            Self::OciLayer => f.write_str("oci-layer"),
-        }
-    }
-}
-impl ::std::str::FromStr for DistributionObjectKind {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "model" => Ok(Self::Model),
-            "oci-archive" => Ok(Self::OciArchive),
-            "oci-layer" => Ok(Self::OciLayer),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for DistributionObjectKind {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for DistributionObjectKind {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1270,8 +1200,6 @@ pub struct ExecuteContainerRuntimeRequestOperation {
 pub enum ExecuteContainerRuntimeRequestOperationAction {
     #[serde(rename = "runtime-preflight")]
     RuntimePreflight,
-    #[serde(rename = "image-import")]
-    ImageImport,
     #[serde(rename = "image-pull")]
     ImagePull,
     #[serde(rename = "image-inspect")]
@@ -1289,7 +1217,6 @@ impl ::std::fmt::Display for ExecuteContainerRuntimeRequestOperationAction {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::RuntimePreflight => f.write_str("runtime-preflight"),
-            Self::ImageImport => f.write_str("image-import"),
             Self::ImagePull => f.write_str("image-pull"),
             Self::ImageInspect => f.write_str("image-inspect"),
             Self::RunInspect => f.write_str("run-inspect"),
@@ -1304,7 +1231,6 @@ impl ::std::str::FromStr for ExecuteContainerRuntimeRequestOperationAction {
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "runtime-preflight" => Ok(Self::RuntimePreflight),
-            "image-import" => Ok(Self::ImageImport),
             "image-pull" => Ok(Self::ImagePull),
             "image-inspect" => Ok(Self::ImageInspect),
             "run-inspect" => Ok(Self::RunInspect),
@@ -1615,8 +1541,6 @@ pub struct HostRuntimeGrantRequest {
 pub enum HostRuntimeGrantRequestAction {
     #[serde(rename = "runtime-preflight")]
     RuntimePreflight,
-    #[serde(rename = "image-import")]
-    ImageImport,
     #[serde(rename = "image-pull")]
     ImagePull,
     #[serde(rename = "image-inspect")]
@@ -1634,7 +1558,6 @@ impl ::std::fmt::Display for HostRuntimeGrantRequestAction {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::RuntimePreflight => f.write_str("runtime-preflight"),
-            Self::ImageImport => f.write_str("image-import"),
             Self::ImagePull => f.write_str("image-pull"),
             Self::ImageInspect => f.write_str("image-inspect"),
             Self::RunInspect => f.write_str("run-inspect"),
@@ -1649,7 +1572,6 @@ impl ::std::str::FromStr for HostRuntimeGrantRequestAction {
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "runtime-preflight" => Ok(Self::RuntimePreflight),
-            "image-import" => Ok(Self::ImageImport),
             "image-pull" => Ok(Self::ImagePull),
             "image-inspect" => Ok(Self::ImageInspect),
             "run-inspect" => Ok(Self::RunInspect),
@@ -1709,8 +1631,6 @@ pub struct HostRuntimeRequest {
 pub enum HostRuntimeRequestAction {
     #[serde(rename = "runtime-preflight")]
     RuntimePreflight,
-    #[serde(rename = "image-import")]
-    ImageImport,
     #[serde(rename = "image-pull")]
     ImagePull,
     #[serde(rename = "image-inspect")]
@@ -1728,7 +1648,6 @@ impl ::std::fmt::Display for HostRuntimeRequestAction {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::RuntimePreflight => f.write_str("runtime-preflight"),
-            Self::ImageImport => f.write_str("image-import"),
             Self::ImagePull => f.write_str("image-pull"),
             Self::ImageInspect => f.write_str("image-inspect"),
             Self::RunInspect => f.write_str("run-inspect"),
@@ -1743,7 +1662,6 @@ impl ::std::str::FromStr for HostRuntimeRequestAction {
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "runtime-preflight" => Ok(Self::RuntimePreflight),
-            "image-import" => Ok(Self::ImageImport),
             "image-pull" => Ok(Self::ImagePull),
             "image-inspect" => Ok(Self::ImageInspect),
             "run-inspect" => Ok(Self::RunInspect),
@@ -2728,22 +2646,6 @@ pub struct RecipeBuildRequest {
     pub source_bundle_bytes: u32,
     pub source_bundle_sha256: ::std::string::String,
 }
-#[derive(::serde::Serialize, Clone, Debug, Default, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct RecipeImageImportEvidence {}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct RecipeImageImportRequest {
-    pub build_id: ::uuid::Uuid,
-    pub image_bytes: u64,
-    pub image_digest: ::std::string::String,
-    pub mapping_generation: u64,
-    pub mapping_id: ::uuid::Uuid,
-    pub oci_layout_sha256: ::std::string::String,
-    pub source_node_id: ::std::string::String,
-}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -3689,7 +3591,6 @@ impl AgentOperation {
             Self::ArtifactDistributionV1 => "artifact.distribution.v1",
             Self::RecipeBuildV1 => "recipe.build.v1",
             Self::RecipeBuildCleanupV1 => "recipe.build.cleanup.v1",
-            Self::RecipeImageImportV1 => "recipe.image.import.v1",
             Self::RecipeInstall => "recipe.install",
             Self::RecipeStart => "recipe.start",
             Self::RecipeJobRunV1 => "recipe.job.run.v1",
@@ -3743,8 +3644,6 @@ impl<'de> ::serde::Deserialize<'de> for AgentOperation {
             RecipeBuildV1,
             #[serde(rename = "recipe.build.cleanup.v1")]
             RecipeBuildCleanupV1,
-            #[serde(rename = "recipe.image.import.v1")]
-            RecipeImageImportV1,
             #[serde(rename = "recipe.install")]
             RecipeInstall,
             #[serde(rename = "recipe.start")]
@@ -3766,7 +3665,6 @@ impl<'de> ::serde::Deserialize<'de> for AgentOperation {
             Raw::ArtifactDistributionV1 => Self::ArtifactDistributionV1,
             Raw::RecipeBuildV1 => Self::RecipeBuildV1,
             Raw::RecipeBuildCleanupV1 => Self::RecipeBuildCleanupV1,
-            Raw::RecipeImageImportV1 => Self::RecipeImageImportV1,
             Raw::RecipeInstall => Self::RecipeInstall,
             Raw::RecipeStart => Self::RecipeStart,
             Raw::RecipeJobRunV1 => Self::RecipeJobRunV1,
@@ -4640,14 +4538,14 @@ impl<'de> ::serde::Deserialize<'de> for DistributionAssignment {
         #[derive(Eq)]
         struct Raw {
             pub objects: ::std::vec::Vec<DistributionObject>,
-            pub oci_archive_sha256: ::std::string::String,
+            pub oci_image_config_digest: ::std::string::String,
             pub oci_image_digest: ::std::string::String,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             objects: raw.objects,
-            oci_archive_sha256: raw.oci_archive_sha256,
+            oci_image_config_digest: raw.oci_image_config_digest,
             oci_image_digest: raw.oci_image_digest,
         })
     }
@@ -4662,7 +4560,7 @@ impl<'de> ::serde::Deserialize<'de> for DistributionObject {
         #[derive(Eq)]
         struct Raw {
             pub bytes: u64,
-            pub kind: DistributionObjectKind,
+            pub kind: ::std::string::String,
             pub name: ::std::string::String,
             pub sha256: ::std::string::String,
         }
@@ -4674,31 +4572,6 @@ impl<'de> ::serde::Deserialize<'de> for DistributionObject {
             name: raw.name,
             sha256: raw.sha256,
         })
-    }
-}
-impl DistributionObjectKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Model => "model",
-            Self::OciArchive => "oci-archive",
-            Self::OciLayer => "oci-layer",
-        }
-    }
-}
-impl ::std::ops::Deref for DistributionObjectKind {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for DistributionObjectKind {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for DistributionObjectKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for EnrollmentBootstrapResponse {
@@ -4925,7 +4798,6 @@ impl ExecuteContainerRuntimeRequestOperationAction {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::RuntimePreflight => "runtime-preflight",
-            Self::ImageImport => "image-import",
             Self::ImagePull => "image-pull",
             Self::ImageInspect => "image-inspect",
             Self::RunInspect => "run-inspect",
@@ -5296,7 +5168,6 @@ impl HostRuntimeGrantRequestAction {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::RuntimePreflight => "runtime-preflight",
-            Self::ImageImport => "image-import",
             Self::ImagePull => "image-pull",
             Self::ImageInspect => "image-inspect",
             Self::RunInspect => "run-inspect",
@@ -5366,7 +5237,6 @@ impl HostRuntimeRequestAction {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::RuntimePreflight => "runtime-preflight",
-            Self::ImageImport => "image-import",
             Self::ImagePull => "image-pull",
             Self::ImageInspect => "image-inspect",
             Self::RunInspect => "run-inspect",
@@ -6636,50 +6506,6 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildRequest {
             recipe_revision_id: raw.recipe_revision_id,
             source_bundle_bytes: raw.source_bundle_bytes,
             source_bundle_sha256: raw.source_bundle_sha256,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for RecipeImageImportEvidence {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RecipeImageImportEvidence", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {}
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {})
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for RecipeImageImportRequest {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RecipeImageImportRequest", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub build_id: ::uuid::Uuid,
-            pub image_bytes: u64,
-            pub image_digest: ::std::string::String,
-            pub mapping_generation: u64,
-            pub mapping_id: ::uuid::Uuid,
-            pub oci_layout_sha256: ::std::string::String,
-            pub source_node_id: ::std::string::String,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            build_id: raw.build_id,
-            image_bytes: raw.image_bytes,
-            image_digest: raw.image_digest,
-            mapping_generation: raw.mapping_generation,
-            mapping_id: raw.mapping_id,
-            oci_layout_sha256: raw.oci_layout_sha256,
-            source_node_id: raw.source_node_id,
         })
     }
 }

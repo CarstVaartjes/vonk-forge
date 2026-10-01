@@ -166,12 +166,11 @@ pub fn measure_exec_invocation(
     })
 }
 
-/// Host paths for the content-addressed image and the selected, materialized
-/// model files.  Paths are lexical inputs to this pure projection; the caller
+/// Host paths for the selected, materialized model files (the runtime image
+/// is pulled into Docker by digest and has no host path).  Paths are lexical inputs to this pure projection; the caller
 /// remains responsible for checking that receipts match bytes on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledOciPaths {
-    pub image_archive: PathBuf,
     pub model_root: PathBuf,
     pub input_root: Option<PathBuf>,
     pub output_root: PathBuf,
@@ -184,10 +183,8 @@ pub struct OciImageReceipt {
     pub image_digest: String,
     pub local_image_config_id: String,
     pub runtime_interface_label: String,
-    pub archive_name: String,
     pub oci_layout_sha256: String,
     pub image_bytes: u64,
-    pub archive_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -457,10 +454,8 @@ pub fn project(
             image_digest: plan.runtime_image.image_digest.clone(),
             local_image_config_id: plan.runtime_image.local_image_config_id.clone(),
             runtime_interface_label: plan.runtime_image.runtime_interface_label.clone(),
-            archive_name: plan.runtime_image.distribution_object().name,
             oci_layout_sha256: plan.runtime_image.oci_layout_sha256.clone(),
             image_bytes: plan.runtime_image.image_bytes,
-            archive_path: paths.image_archive.clone(),
         },
         image: plan.runtime_image.local_image_reference(),
         command,
@@ -497,7 +492,6 @@ pub fn start_arguments_for_paths(
 
 fn validate_paths(paths: &CompiledOciPaths) -> Result<(), CompiledOciError> {
     let mut all = vec![
-        ("image archive", &paths.image_archive),
         ("model root", &paths.model_root),
         ("output root", &paths.output_root),
         ("cache root", &paths.cache_root),
@@ -701,7 +695,6 @@ mod tests {
 
     fn paths() -> CompiledOciPaths {
         CompiledOciPaths {
-            image_archive: PathBuf::from("/run/vonk/images/image.oci.tar"),
             model_root: PathBuf::from("/run/vonk/models"),
             input_root: None,
             output_root: PathBuf::from("/run/vonk/outputs"),
@@ -839,10 +832,6 @@ mod tests {
         );
         assert_eq!(invocation.mounts[1].target, "/models/draft/config.json");
         assert!(invocation.mounts[0].read_only && invocation.mounts[1].read_only);
-        assert_eq!(
-            invocation.image_receipt.archive_path,
-            std::path::Path::new("/run/vonk/images/image.oci.tar")
-        );
     }
 
     #[test]

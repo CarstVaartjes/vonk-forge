@@ -1,4 +1,4 @@
-"""Typed recipe build and image-import request/result wire contracts."""
+"""Typed recipe build request/result wire contracts."""
 
 from __future__ import annotations
 
@@ -312,17 +312,3 @@ class RecipeBuildEvidence(WireModel):
     image_bytes: int = Field(gt=0, le=16 * 1024**4)
     image_digest: OciDigest = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     oci_layout_sha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class RecipeImageImportRequest(WireModel):
-    build_id: UuidId
-    image_bytes: int = Field(gt=0, le=16 * 1024**4)
-    image_digest: OciDigest = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    mapping_generation: int = Field(ge=1)
-    mapping_id: UuidId
-    oci_layout_sha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
-    source_node_id: NodeId
-
-
-class RecipeImageImportEvidence(WireModel):
-    """The image is imported; the Controller already holds its identity."""

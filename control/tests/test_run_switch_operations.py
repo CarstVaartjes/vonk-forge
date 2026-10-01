@@ -109,6 +109,7 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.runtime_preflight import latest_result
 
 from .preflight_fixtures import record_passing_preflight
+from .runtime_image_fixtures import place_test_image
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 from .test_lifecycle_preflight import _finish
@@ -1415,7 +1416,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
     )
     expected_archive = b"canonical-runtime-image-archive"[:image_bytes]
     assert hashlib.sha256(expected_archive).hexdigest() == layout_digest
-    (controller_storage.root / layout_digest).write_bytes(expected_archive)
+    place_test_image(controller_storage, layout_digest, len(expected_archive))
 
     class ColdModelCache(_CanonicalModelCache):
         ready = False
@@ -1448,7 +1449,6 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
             expected_archive_sha256: str,
             expected_archive_bytes: int,
         ) -> PulledImageEvidence:
-            assert archive.read_bytes() == expected_archive
             return PulledImageEvidence(
                 manifest_digest=image_digest,
                 config_id="sha256:" + "4" * 64,
@@ -1859,7 +1859,7 @@ def _cold_compile_switch(
                     8_000,
                     1,
                     False,
-                    ("runtime.vonk.v1", "recipe.operations.v1"),
+                    ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
                     memory_pool="shared",
                 )
             )
@@ -2319,7 +2319,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
             )
         )
         assert snapshot is not None
-        snapshot.capabilities = ["recipe.build.v1"]
+        snapshot.capabilities = ["recipe.build.v1", "recipe.image.pull.v1"]
         build_plan = RecipeBuildPlan(
             build_id=build.id,
             recipe_revision_id=revision.id,
@@ -2794,6 +2794,40 @@ def test_model_cache_manifest_failure_is_a_typed_blocker(tmp_path: Path) -> None
     }
 
 
+def test_a_spark_whose_agent_cannot_pull_images_asks_for_an_upgrade(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    with sessions.begin() as session:
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
+            )
+        )
+        assert snapshot is not None
+        snapshot.capabilities = [
+            item for item in snapshot.capabilities if item != "recipe.image.pull.v1"
+        ]
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: lifecycle._clock(),
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+    assert plan.allowed is False
+    upgrade = [
+        reason
+        for reason in plan.blockers
+        if reason.code == "run-switch.agent-upgrade-required"
+    ]
+    assert [reason.node_ids for reason in upgrade] == [[nodes[0]]]
+
+
 def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
     tmp_path: Path,
 ) -> None:
@@ -2921,7 +2955,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
             )
         )
         assert snapshot is not None
-        snapshot.capabilities = ["recipe.build.v1"]
+        snapshot.capabilities = ["recipe.build.v1", "recipe.image.pull.v1"]
 
     class _LifecycleStub(RecipeOperationService):
         """Only ``build`` is reached by the container-build subphase."""

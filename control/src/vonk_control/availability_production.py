@@ -66,8 +66,8 @@ from .recipe_runtime_specs import compile_runtime_spec, resolve_recipe_entities
 from .recovery_policy import RecoveryDecision, classify, kind_for_agent_error
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
+    OciLayoutImageTransport,
     RuntimeImageReceipt,
-    SkopeoOCIImageTransport,
     persist_runtime_image_receipt,
 )
 from .strict_json import read_stored_model
@@ -173,7 +173,7 @@ class RecipeImageAvailabilityProduction:
     service: RecipeImageAvailabilityService
     scheduler: RecipeImageAvailabilityScheduler | None
     storage: FilesystemRuntimeImageStorage
-    transport: SkopeoOCIImageTransport
+    transport: OciLayoutImageTransport
 
     def close(self) -> None:
         if self.scheduler is not None:
@@ -205,7 +205,7 @@ def build_recipe_image_availability(
     if image_root is None:
         raise ValueError("recipe image artifact root is required")
     storage = FilesystemRuntimeImageStorage(image_root)
-    transport = SkopeoOCIImageTransport()
+    transport = OciLayoutImageTransport()
 
     def authority(
         recipe_revision_id: str,

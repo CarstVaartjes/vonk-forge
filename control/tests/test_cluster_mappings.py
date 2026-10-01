@@ -223,6 +223,7 @@ def setup(tmp_path: Path, *, options: bool = False):
                 artifact_store_read_only=False,
                 capabilities=(
                     "runtime.vonk.v1",
+                    "recipe.image.pull.v1",
                     "fabric.connected.mbps.200000",
                 ),
                 fabric_address=f"192.168.100.{index}",
@@ -354,7 +355,10 @@ def test_mapping_rejects_wrong_node_count_and_missing_required_fabric(
             gpu_memory_free_bytes=900,
             gpu_count=1,
             artifact_store_read_only=False,
-            capabilities=("runtime.vonk.v1",),
+            capabilities=(
+                "runtime.vonk.v1",
+                "recipe.image.pull.v1",
+            ),
             memory_pool="shared",
         )
     )

@@ -237,12 +237,14 @@ def test_archive_gate_requires_the_authorization_even_when_bytes_are_stored(
         "image_bytes": receipt.image_bytes,
         "effective_execution_key": "f" * 64,
     }
-    assert executor._archive(plan, **call).sha256 == ARCHIVE_DIGEST
+    assert executor._archive(plan, **call).address == ARCHIVE_DIGEST
     with Session(sessions.kw["bind"]) as session:
         session.query(RuntimeImageAuthorization).delete(synchronize_session=False)
         session.commit()
     # The bytes and their receipt are still in managed storage.
-    assert (tmp_path / "image-cache" / ARCHIVE_DIGEST).is_file()
+    assert (
+        tmp_path / "image-cache" / "oci" / "blobs" / "sha256" / ARCHIVE_DIGEST
+    ).is_file()
     with pytest.raises(RuntimeError, match="not authorized"):
         executor._archive(plan, **call)
 
@@ -264,7 +266,7 @@ def test_archive_gate_requires_the_stored_receipt_even_when_authorized(
         "image_bytes": receipt.image_bytes,
         "effective_execution_key": "f" * 64,
     }
-    assert executor._archive(plan, **call).sha256 == ARCHIVE_DIGEST
+    assert executor._archive(plan, **call).address == ARCHIVE_DIGEST
     (tmp_path / "image-cache" / f"{ARCHIVE_DIGEST}.receipt.json").unlink()
     with pytest.raises(RuntimeError, match="receipt authority"):
         executor._archive(plan, **call)

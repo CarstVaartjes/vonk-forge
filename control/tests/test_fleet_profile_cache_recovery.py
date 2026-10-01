@@ -37,6 +37,7 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
 
+from .runtime_image_fixtures import remove_test_image
 from .test_fleet_profile_recovery_current import _failed_profile
 from .test_fleet_profiles import NOW, _node_id
 from .test_recipe_operations import setup_services
@@ -259,7 +260,7 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
         archive_bytes = build.image_bytes
     assert archive_digest is not None and archive_bytes is not None
     storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
-    (storage.root / archive_digest).unlink()
+    remove_test_image(storage, archive_digest)
     assert storage.build_archive_available(archive_digest, archive_bytes) is False
     run_switch._build_archive_available = storage.build_archive_available
 

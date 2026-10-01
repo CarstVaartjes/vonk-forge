@@ -11,7 +11,6 @@ pub mod failure_evidence;
 pub mod health;
 pub mod host_runtime;
 pub mod identity;
-pub mod image_importer;
 pub mod image_store;
 pub mod inventory;
 pub mod oci;

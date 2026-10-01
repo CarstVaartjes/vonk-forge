@@ -88,6 +88,7 @@ CAPABILITIES = sorted(
     [
         "agent.runtime.rust.v1",
         "runtime.vonk.v1",
+        "recipe.image.pull.v1",
         "agent.upgrade.v1",
         "artifact.distribution.v1",
         "recipe.build.v1",
@@ -117,15 +118,20 @@ STOP_PAYLOAD = RecipeStopPayload(
 ).model_dump(mode="json")
 
 
-def image_import_payload(digest: str) -> dict[str, object]:
+def upgrade_payload(digest: str, package_bytes: int) -> dict[str, object]:
+    from .package_upgrade_fixtures import source_transport
+
     return {
-        "build_id": "00000000-0000-4000-8000-000000000010",
-        "mapping_id": "00000000-0000-4000-8000-000000000011",
-        "mapping_generation": 1,
-        "source_node_id": NODE_A,
-        "image_digest": "sha256:" + "b" * 64,
-        "oci_layout_sha256": digest,
-        "image_bytes": 8,
+        "schema_version": 1,
+        "architecture": "linux-arm64",
+        "package_bytes": package_bytes,
+        "package_sha256": digest,
+        "package_signature": "a" * 128,
+        "package_url": "https://install.vonkforge.ai/releases/test/vonk-forge-agent.deb",
+        "package_version": "1.2.3",
+        "target_binary_digest": "b" * 64,
+        "target_build_digest": "sha256:" + "c" * 64,
+        **source_transport(),
     }
 
 
@@ -650,7 +656,11 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         "gpu_count": 1,
         "memory_pool": "separate",
         "artifact_store_read_only": False,
-        "capabilities": ["runtime.vonk.v1", "fabric.connected.mbps.200000"],
+        "capabilities": [
+            "runtime.vonk.v1",
+            "recipe.image.pull.v1",
+            "fabric.connected.mbps.200000",
+        ],
         "fabric_address": "192.168.100.2",
         "fabric_bandwidth_mbps": 200000,
         "nvidia_driver_version": "580.65.06",
@@ -1202,10 +1212,9 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     assert complete.headers["x-vonk-upload-complete"] == "true"
 
     assert response.status_code == 204
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-
-    storage = FilesystemRuntimeImageStorage(services.artifact_root)
-    assert storage.existing_archive(layout_digest, len(payload)).read_bytes() == payload
+    # The upload waits beside the layered store until the worker converts it.
+    upload = services.artifact_root / "image-cache" / layout_digest
+    assert upload.read_bytes() == payload
     assert not (services.artifact_root / layout_digest).exists()
     with services.sessions() as session:
         build = session.get(RecipeBuild, build_id)
@@ -3279,16 +3288,13 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
 ) -> None:
     client, services, _, clock = agent_system
     digest = hashlib.sha256(b"artifact").hexdigest()
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-
-    storage = FilesystemRuntimeImageStorage(services.artifact_root)
-    (storage.root / digest).write_bytes(b"artifact")
+    (services.artifact_root / digest).write_bytes(b"artifact")
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "recipe.image.import.v1",
+        "agent.upgrade.v1",
         "a" * 64,
-        image_import_payload(digest),
+        upgrade_payload(digest, len(b"artifact")),
     )
     response = client.get(
         f"/agent/artifacts/{digest}",
@@ -3299,7 +3305,7 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
     assert response.status_code == 200
     assert response.content == b""
     assert response.headers["x-vonk-file"] == (
-        (storage.root / digest).relative_to("/").as_posix()
+        (services.artifact_root / digest).relative_to("/").as_posix()
     )
     assert response.headers["etag"] == f'"sha256:{digest}"'
     assert (
@@ -3326,16 +3332,14 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
 def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
     client, services, _, clock = agent_system
     digest = "a" * 64
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-
-    storage = FilesystemRuntimeImageStorage(services.artifact_root)
-    (storage.root / digest).symlink_to(tmp_path / "outside")
+    (tmp_path / "outside").write_bytes(b"artifact")
+    (services.artifact_root / digest).symlink_to(tmp_path / "outside")
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "recipe.image.import.v1",
+        "agent.upgrade.v1",
         "a" * 64,
-        image_import_payload(digest),
+        upgrade_payload(digest, len(b"artifact")),
     )
     assert (
         client.get(

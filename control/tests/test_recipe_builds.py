@@ -39,8 +39,6 @@ from vonk_control.models import (
     AgentOperation,
     Base,
     CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
     Job,
     NodeArtifact,
     RecipeBuild,
@@ -64,12 +62,12 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
     RuntimeImageReceipt,
-    persist_runtime_image_receipt,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .recipe_removal_review_support import remove_after_review
+from .runtime_image_fixtures import place_test_image, remove_test_image
 
 _CACHED_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 
@@ -213,6 +211,7 @@ def setup(
                 "recipe.build.egress-proxy.v1",
                 "recipe.image.import.v1",
                 "runtime.vonk.v1",
+                "recipe.image.pull.v1",
             ),
             memory_pool="separate",
         )
@@ -420,8 +419,9 @@ def _write_controller_build_receipt(
 ) -> RuntimeImageReceipt:
     """Publish the exact filesystem receipt a completed Controller build leaves."""
 
-    staged = storage.root / "staged-build.part"
-    staged.write_bytes(archive)
+    digest = hashlib.sha256(archive).hexdigest()
+    place_test_image(storage, digest, len(archive))
+    staged = storage.existing_archive(digest, len(archive))
     return storage.commit(
         staged,
         receipt=RuntimeImageReceipt(
@@ -519,7 +519,7 @@ def test_nonforced_availability_dispatch_reuses_build_resolved_after_queue(
             expected_archive_sha256: str,
             expected_archive_bytes: int,
         ) -> PulledImageEvidence:
-            assert archive_path.read_bytes() == archive
+            assert archive_path.name == expected_archive_sha256
             return PulledImageEvidence(
                 manifest_digest=image_digest,
                 config_id="sha256:" + "c" * 64,
@@ -532,7 +532,7 @@ def test_nonforced_availability_dispatch_reuses_build_resolved_after_queue(
 
     delayed = DelayedCachedResolution()
     monkeypatch.setattr(
-        availability_production_module, "SkopeoOCIImageTransport", Transport
+        availability_production_module, "OciLayoutImageTransport", Transport
     )
     production = build_recipe_image_availability(
         sessions,
@@ -574,7 +574,7 @@ def test_present_archive_without_receipt_is_reprepared_not_rebuilt(
     archive_digest = hashlib.sha256(archive).hexdigest()
     # The upload producer publishes the archive; preparation publishes the
     # receipt. A Controller death in between must not force a rebuild.
-    (storage.root / archive_digest).write_bytes(archive)
+    place_test_image(storage, archive_digest, len(archive))
     image_digest = "sha256:" + "b" * 64
     builds = RecipeBuildService(
         sessions,
@@ -615,7 +615,7 @@ def test_present_archive_without_receipt_is_reprepared_not_rebuilt(
             expected_archive_sha256: str,
             expected_archive_bytes: int,
         ) -> PulledImageEvidence:
-            assert archive_path.read_bytes() == archive
+            assert archive_path.name == expected_archive_sha256
             return PulledImageEvidence(
                 manifest_digest=image_digest,
                 config_id="sha256:" + "c" * 64,
@@ -627,7 +627,7 @@ def test_present_archive_without_receipt_is_reprepared_not_rebuilt(
             )
 
     monkeypatch.setattr(
-        availability_production_module, "SkopeoOCIImageTransport", Transport
+        availability_production_module, "OciLayoutImageTransport", Transport
     )
     production = build_recipe_image_availability(
         sessions,
@@ -677,7 +677,7 @@ def test_legacy_unreadable_build_receipt_is_replaced_from_verified_bytes(
     storage = FilesystemRuntimeImageStorage(artifact_root)
     archive = b"cached source build archive"
     archive_digest = hashlib.sha256(archive).hexdigest()
-    (storage.root / archive_digest).write_bytes(archive)
+    place_test_image(storage, archive_digest, len(archive))
     image_digest = "sha256:" + "b" * 64
     builds = RecipeBuildService(
         sessions,
@@ -744,7 +744,7 @@ def test_legacy_unreadable_build_receipt_is_replaced_from_verified_bytes(
             expected_archive_sha256: str,
             expected_archive_bytes: int,
         ) -> PulledImageEvidence:
-            assert archive_path.read_bytes() == archive
+            assert archive_path.name == expected_archive_sha256
             return PulledImageEvidence(
                 manifest_digest=image_digest,
                 config_id="sha256:" + "c" * 64,
@@ -756,7 +756,7 @@ def test_legacy_unreadable_build_receipt_is_replaced_from_verified_bytes(
             )
 
     monkeypatch.setattr(
-        availability_production_module, "SkopeoOCIImageTransport", Transport
+        availability_production_module, "OciLayoutImageTransport", Transport
     )
     production = build_recipe_image_availability(
         sessions,
@@ -814,7 +814,7 @@ def test_build_resolution_reports_stale_receipt_when_archive_is_gone(
         build_input_sha256=plan.build_input_sha256,
         distribution_content_sha256=revision.content_digest,
     )
-    (storage.root / archive_digest).unlink()
+    remove_test_image(storage, archive_digest)
 
     resolution = service.resolve(revision.id)
 
@@ -2154,229 +2154,6 @@ def test_build_result_refreshes_upload_evidence_after_a_retried_attempt(
     finally:
         stale_session.rollback()
         stale_session.close()
-
-
-def _authorize_distribution_fixture(sessions, plan, revision, now):
-    """Wire/import tests start after the image verifier has produced its receipt."""
-    with sessions.begin() as session:
-        build = session.get(RecipeBuild, plan.build_id)
-        assert build is not None
-        assert build.image_digest is not None
-        assert build.oci_layout_sha256 is not None
-        assert build.image_bytes is not None
-        receipt = RuntimeImageReceipt(
-            schema_version=2,
-            distribution_publisher=revision.publisher,
-            distribution_slug=revision.slug,
-            distribution_content_sha256=revision.content_digest,
-            image_digest=build.image_digest,
-            oci_archive_sha256=build.oci_layout_sha256,
-            image_bytes=build.image_bytes,
-            local_image_config_id="sha256:" + "c" * 64,
-            architecture="linux-arm64",
-            runtime_interface="vonk.runtime.v1",
-            runtime_interface_label="v1",
-            archive_path="/verified/fixture/archive",
-            recorded_at=now.isoformat(),
-            build_id=build.id,
-            build_input_sha256=build.build_input_sha256,
-            runtime_adapter=_CACHED_ADAPTER.adapter_id,
-            runtime_adapter_sha256=_CACHED_ADAPTER.digest,
-        )
-        persist_runtime_image_receipt(
-            session,
-            recipe_revision_id=revision.id,
-            original_content_digest=revision.content_digest,
-            effective_execution_key="a" * 64,
-            receipt=receipt,
-            verified_at=now,
-        )
-    return receipt
-
-
-def test_distribution_reimports_one_build_digest_for_every_mapped_node(
-    tmp_path: Path,
-) -> None:
-    sessions, bundles, now, builder, revision = setup(tmp_path)
-    service = RecipeBuildService(
-        sessions, bundles=bundles, prepared_builds=lambda *_args, **_kwargs: receipt
-    )
-    plan = service.plan(revision.id, builder, now=now)
-    service.record_success(
-        plan.build_id,
-        build_input_sha256=plan.build_input_sha256,
-        image_digest="sha256:" + "b" * 64,
-        oci_layout_sha256="c" * 64,
-        image_bytes=500,
-        now=now,
-    )
-    receipt = _authorize_distribution_fixture(sessions, plan, revision, now)
-    target = "spk_" + "2" * 32
-    with sessions.begin() as session:
-        session.add(
-            AgentNode(
-                node_id=target,
-                state="active",
-                architecture="linux-arm64",
-            )
-        )
-        session.add(
-            NodeArtifact(
-                node_id=builder,
-                kind="image",
-                digest="b" * 64,
-                source="docker-archive:" + "c" * 64,
-                size_bytes=500,
-                state="verified",
-                ref_count=0,
-                verified_at=now,
-                updated_at=now,
-            )
-        )
-        mapping = ClusterMapping(
-            recipe_revision_id=revision.id,
-            topology_name="synthetic-test",
-            generation=1,
-            node_count=2,
-            state="ready",
-            parameters={},
-            placement_digest="d" * 64,
-            endpoint_owner_node_id=builder,
-            created_by="admin",
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(mapping)
-        session.flush()
-        session.add_all(
-            (
-                ClusterMappingNode(
-                    mapping_id=mapping.id,
-                    node_id=builder,
-                    rank=0,
-                    role="entrypoint",
-                    endpoint_owner=True,
-                    created_at=now,
-                ),
-                ClusterMappingNode(
-                    mapping_id=mapping.id,
-                    node_id=target,
-                    rank=1,
-                    role="worker",
-                    endpoint_owner=False,
-                    created_at=now,
-                ),
-            )
-        )
-        mapping_id = mapping.id
-
-    distribution = service.plan_distribution(plan.build_id, mapping_id, generation=1)
-
-    assert [item[0] for item in distribution.targets] == [builder, target]
-    assert {item[1]["image_digest"] for item in distribution.targets} == {
-        "sha256:" + "b" * 64
-    }
-
-
-def test_image_distribution_replans_when_the_submitted_digest_is_stale(
-    tmp_path: Path,
-) -> None:
-    sessions, bundles, now, builder, revision = setup(tmp_path)
-    builds = RecipeBuildService(
-        sessions, bundles=bundles, prepared_builds=lambda *_args, **_kwargs: receipt
-    )
-    build_plan = builds.plan(revision.id, builder, now=now)
-    builds.record_success(
-        build_plan.build_id,
-        build_input_sha256=build_plan.build_input_sha256,
-        image_digest="sha256:" + "b" * 64,
-        oci_layout_sha256="c" * 64,
-        image_bytes=500,
-        now=now,
-    )
-    receipt = _authorize_distribution_fixture(sessions, build_plan, revision, now)
-    target = "spk_" + "2" * 32
-    with sessions.begin() as session:
-        session.add(
-            AgentNode(
-                node_id=target,
-                state="active",
-                architecture="linux-arm64",
-            )
-        )
-        mapping = ClusterMapping(
-            recipe_revision_id=revision.id,
-            topology_name="synthetic-test",
-            generation=1,
-            node_count=2,
-            state="ready",
-            parameters={},
-            placement_digest="d" * 64,
-            endpoint_owner_node_id=builder,
-            created_by="admin",
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(mapping)
-        session.flush()
-        session.add_all(
-            (
-                ClusterMappingNode(
-                    mapping_id=mapping.id,
-                    node_id=builder,
-                    rank=0,
-                    role="entrypoint",
-                    endpoint_owner=True,
-                    created_at=now,
-                ),
-                ClusterMappingNode(
-                    mapping_id=mapping.id,
-                    node_id=target,
-                    rank=1,
-                    role="worker",
-                    endpoint_owner=False,
-                    created_at=now,
-                ),
-            )
-        )
-        mapping_id = mapping.id
-
-    operations = RecipeOperationService(
-        sessions,
-        install_admission=InstallAdmissionService(sessions),
-        run_admission=RunAdmissionService(sessions),
-        agent_jobs=RecordingQueue(),
-        clock=lambda: now,
-        builds=builds,
-    )
-    preview = operations.preview_image_distribution(
-        build_plan.build_id,
-        mapping_id,
-        mapping_generation=1,
-    )
-
-    assert preview.image_digest == "sha256:" + "b" * 64
-    assert preview.node_ids == (builder, target)
-    assert len(preview.plan_digest) == 64
-    operation = operations.distribute_image(
-        build_plan.build_id,
-        mapping_id,
-        mapping_generation=1,
-        plan_digest="0" * 64,
-        actor="admin",
-        request_id="accepted-distribution",
-    )
-    assert operation.kind == "recipe.image.import.v1"
-    assert operation.nodes == (builder, target)
-    replay = operations.distribute_image(
-        build_plan.build_id,
-        mapping_id,
-        mapping_generation=1,
-        plan_digest=preview.plan_digest,
-        actor="admin",
-        request_id="accepted-distribution",
-    )
-    assert replay == operation
 
 
 @pytest.mark.parametrize(

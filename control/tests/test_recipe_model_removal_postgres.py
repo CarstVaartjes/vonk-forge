@@ -37,6 +37,7 @@ from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_removal_review_support import remove_after_review
+from .runtime_image_fixtures import place_test_image
 from .test_model_removal_reference_lifecycle import (
     _one_model,
     _register_model,
@@ -145,9 +146,8 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
 
     image_root = tmp_path / "runtime-images"
     image_storage = FilesystemRuntimeImageStorage(image_root)
-    archive = image_storage.root / ARCHIVE_SHA
     receipt_path = image_storage.root / f"{ARCHIVE_SHA}.receipt.json"
-    archive.write_bytes(ARCHIVE)
+    place_test_image(image_storage, ARCHIVE_SHA, len(ARCHIVE))
     receipt_path.write_text(
         json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
     )
@@ -219,7 +219,6 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     # The parent removes its published image first, then waits on the child
     # owner without claiming the child's model effects have completed.
     assert recipe_service.advance_removals(limit=1) == 1
-    assert not archive.exists()
     assert not receipt_path.exists()
     assert recipe_service.advance_removals(limit=1) == 1
     pending = recipe_service.get_operator_request(request_id, actor="operator")
@@ -359,7 +358,6 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
             )
             == 1
         )
-    assert not archive.exists()
     assert not receipt_path.exists()
     assert shared_object.read_bytes() == model_bytes
     restarted_cache.close()
@@ -393,9 +391,8 @@ def test_postgres_recipe_review_recovers_from_failed_profile_scan(
 
     image_root = tmp_path / "review-runtime-images"
     storage = FilesystemRuntimeImageStorage(image_root)
-    archive = storage.root / ARCHIVE_SHA
     receipt_path = storage.root / f"{ARCHIVE_SHA}.receipt.json"
-    archive.write_bytes(ARCHIVE)
+    place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
     receipt_path.write_text(json.dumps(receipt.model_dump(mode="json")))
     service = RecipeImageAvailabilityService(
         sessions,
@@ -416,7 +413,8 @@ def test_postgres_recipe_review_recovers_from_failed_profile_scan(
             blocker.code == "artifact.reference_scan_failed"
             for blocker in refused.blockers
         )
-        assert archive.read_bytes() == ARCHIVE
+        assert receipt_path.exists()
+        assert storage.published_archive_bytes(ARCHIVE_SHA) == len(ARCHIVE)
 
         Base.metadata.create_all(postgres_engine)
         recovered = service.review_removal(recipe.identity.slug, with_model=False)

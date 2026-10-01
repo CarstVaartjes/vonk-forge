@@ -46,6 +46,7 @@ from .agent_upgrade_status import (
     operator_agent_upgrade_reason,
 )
 from .auth import AgentSource
+from .distribution import record_distributed_runtime_image
 from .failure_evidence import safe_text, sanitize_diagnostics
 from .install_admission import InstallAdmissionBusy
 from .logging import redact_text
@@ -110,7 +111,6 @@ _RECIPE_CAPABILITIES = frozenset(
     {
         AgentOperation.RECIPE_BUILD.value,
         AgentOperation.RECIPE_BUILD_CLEANUP.value,
-        AgentOperation.RECIPE_IMAGE_IMPORT.value,
         AgentOperation.RECIPE_INSTALL.value,
         AgentOperation.ARTIFACT_DISTRIBUTION.value,
         AgentOperation.RECIPE_START.value,
@@ -125,7 +125,6 @@ _MUTATING_OPERATIONS = frozenset(
         AgentOperation.AGENT_UPGRADE.value,
         AgentOperation.RECIPE_BUILD.value,
         AgentOperation.RECIPE_BUILD_CLEANUP.value,
-        AgentOperation.RECIPE_IMAGE_IMPORT.value,
         AgentOperation.RECIPE_INSTALL.value,
         AgentOperation.ARTIFACT_DISTRIBUTION.value,
         AgentOperation.RECIPE_START.value,
@@ -137,7 +136,6 @@ _MUTATING_OPERATIONS = frozenset(
 )
 _WORKLOAD_INTENT_OPERATIONS = frozenset(
     {
-        AgentOperation.RECIPE_IMAGE_IMPORT.value,
         AgentOperation.RECIPE_INSTALL.value,
         AgentOperation.ARTIFACT_DISTRIBUTION.value,
         AgentOperation.RECIPE_START.value,
@@ -3800,6 +3798,12 @@ class AgentJobService:
                 )
                 attempt.progress = observe_progress(
                     attempt.progress, final_progress, _aware(now)
+                )
+                record_distributed_runtime_image(
+                    session,
+                    node_id=operation.node_id,
+                    plan_digest=operation.authority_revision,
+                    now=now,
                 )
             attempt.result = message_result
             attempt.state = state

@@ -38,6 +38,7 @@ class NodeDistributionAssignment:
             node_id (str):
             objects (list[DistributionObject]):
             oci_archive_sha256 (str):
+            oci_image_config_digest (str):
             oci_image_digest (str):
             plan_digest (str):
      """
@@ -49,6 +50,7 @@ class NodeDistributionAssignment:
     node_id: str
     objects: list[DistributionObject]
     oci_archive_sha256: str
+    oci_image_config_digest: str
     oci_image_digest: str
     plan_digest: str
 
@@ -77,6 +79,8 @@ class NodeDistributionAssignment:
 
         oci_archive_sha256 = self.oci_archive_sha256
 
+        oci_image_config_digest = self.oci_image_config_digest
+
         oci_image_digest = self.oci_image_digest
 
         plan_digest = self.plan_digest
@@ -92,6 +96,7 @@ class NodeDistributionAssignment:
             "node_id": node_id,
             "objects": objects,
             "oci_archive_sha256": oci_archive_sha256,
+            "oci_image_config_digest": oci_image_config_digest,
             "oci_image_digest": oci_image_digest,
             "plan_digest": plan_digest,
         })
@@ -132,6 +137,8 @@ class NodeDistributionAssignment:
 
         oci_archive_sha256 = d.pop("oci_archive_sha256")
 
+        oci_image_config_digest = d.pop("oci_image_config_digest")
+
         oci_image_digest = d.pop("oci_image_digest")
 
         plan_digest = d.pop("plan_digest")
@@ -144,6 +151,7 @@ class NodeDistributionAssignment:
             node_id=node_id,
             objects=objects,
             oci_archive_sha256=oci_archive_sha256,
+            oci_image_config_digest=oci_image_config_digest,
             oci_image_digest=oci_image_digest,
             plan_digest=plan_digest,
         )

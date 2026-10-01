@@ -141,12 +141,11 @@ def _certificate_files(root: Path) -> dict[str, Path]:
 def _assignment(source: MemoryObjectSource, now: datetime):
     large = b"model shard\n" * 500_000
     small = b"config!"
-    archive = b"oci archive"
     large_digest = source.put(large)
     small_digest = source.put(small)
-    archive_digest = source.put(archive)
     plan_digest = "a" * 64
-    image_digest = "sha256:" + "d" * 64
+    image_address = "d" * 64
+    image_digest = f"sha256:{image_address}"
     assignment = NodeDistributionAssignment.parse(
         {
             "assignment_id": str(uuid4()),
@@ -168,22 +167,17 @@ def _assignment(source: MemoryObjectSource, now: datetime):
                     "bytes": len(small),
                     "kind": "model",
                 },
-                {
-                    "name": "image.oci.tar",
-                    "sha256": archive_digest,
-                    "bytes": len(archive),
-                    "kind": "oci-archive",
-                },
             ],
             "oci_image_digest": image_digest,
-            "oci_archive_sha256": archive_digest,
+            "oci_image_config_digest": "sha256:" + "c" * 64,
+            "oci_archive_sha256": image_address,
         }
     )
     source.register_artifact_set(
         assignment.model_artifact_set_sha256, assignment.objects
     )
-    source.register_runtime_image(image_digest, archive_digest)
-    return assignment, large_digest, small_digest, archive_digest
+    source.register_runtime_image(image_digest, image_address)
+    return assignment, large_digest, small_digest
 
 
 class DistributionServer(ThreadingHTTPServer):
@@ -268,9 +262,7 @@ class DistributionHandler(BaseHTTPRequestHandler):
 def distribution_https(tmp_path: Path, controller):
     sessions, clock = controller
     source = MemoryObjectSource()
-    assignment, large_digest, small_digest, archive_digest = _assignment(
-        source, clock.now
-    )
+    assignment, large_digest, small_digest = _assignment(source, clock.now)
     service = DistributionService(source, clock=clock, sessions=sessions)
     service.register(assignment)
     certs = _certificate_files(tmp_path)
@@ -283,7 +275,7 @@ def distribution_https(tmp_path: Path, controller):
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        yield server, certs, assignment, (large_digest, small_digest, archive_digest)
+        yield server, certs, assignment, (large_digest, small_digest)
     finally:
         server.release_partial.set()
         server.shutdown()
@@ -346,7 +338,7 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
 ) -> None:
     sessions, clock = controller
     server, certs, assignment, digests = distribution_https
-    large_digest, small_digest, archive_digest = digests
+    large_digest, small_digest = digests
     jobs = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
     operation = jobs.enqueue(
@@ -382,7 +374,6 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
     first_process.stdin.close()
     partial = data_root / "distribution/models" / f"{large_digest}.partial"
     small = data_root / "distribution/models" / small_digest
-    archive = data_root / "oci-archives" / archive_digest
     try:
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
@@ -391,7 +382,6 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
                 and partial.exists()
                 and partial.stat().st_size > 0
                 and small.exists()
-                and archive.exists()
             ):
                 break
             if first_process.poll() is not None:
@@ -474,7 +464,6 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         digest == large_digest and start == saved_bytes for digest, start, _ in requests
     )
     assert sum(digest == small_digest for digest, _, _ in requests) == 1
-    assert sum(digest == archive_digest for digest, _, _ in requests) == 1
     assert (
         hashlib.sha256(
             (data_root / "distribution/models" / large_digest).read_bytes()

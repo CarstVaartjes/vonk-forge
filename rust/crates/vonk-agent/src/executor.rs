@@ -21,7 +21,6 @@ use crate::{
     },
     health::{wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome, HostRuntimePlan},
-    image_importer::ImageImporter,
     oci::{OciError, OciRuntime, RecipeRunStartIdentity},
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
@@ -522,7 +521,6 @@ impl<R> RecipeExecutor<'_, R> {
         self.report_phase(
             claim,
             match action {
-                HostRuntimeAction::ImageImport => "extracting",
                 HostRuntimeAction::ImagePull => "pulling",
                 HostRuntimeAction::Start => "starting",
                 HostRuntimeAction::Stop => "stopping",
@@ -964,7 +962,6 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             });
             let download = {
                 let mut result = None;
-                let archive_root = self.runtime.data_root.join("oci-archives");
                 for attempt in 0..3_u32 {
                     let progress_sender = progress_sender.clone();
                     let current = self
@@ -972,7 +969,6 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         .download_distribution_with_progress(
                             &request.plan_digest,
                             &destination,
-                            &archive_root,
                             move |item| {
                                 progress_sender.send_replace(Some(item));
                             },
@@ -1001,33 +997,18 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             };
             // The reporter exits only when every sender is dropped. Keep it
             // alive through retries, then close it before waiting; otherwise
-            // a finished transfer can wait forever before importing its image.
+            // a finished transfer can wait forever before pulling its image.
             drop(progress_sender);
             let _ = progress_task.await;
             return match download {
                 Ok(evidence) => {
-                    let importer = ImageImporter {
-                        data_root: self.runtime.data_root,
-                    };
-                    let archive = match importer.retain_distribution_archive(
-                        &evidence.oci_archive_sha256,
-                        &evidence.oci_image_digest,
-                        evidence.oci_archive_bytes,
-                        &evidence.oci_archive_path,
-                    ) {
-                        Ok(path) => path,
-                        Err(_) => return failed("distributed OCI archive could not be retained"),
-                    };
+                    // Models are in place; the runtime image comes from the
+                    // Controller's layered store, pulling only missing layers.
                     if let Err(error) = self
-                        .execute_host_runtime(
+                        .pull_runtime_image(
                             claim,
-                            HostRuntimeAction::ImageImport,
-                            importer.distribution_runtime_arguments(
-                                &evidence.oci_archive_sha256,
-                                &evidence.oci_image_digest,
-                                evidence.oci_archive_bytes,
-                                &archive,
-                            ),
+                            &evidence.oci_image_digest,
+                            &evidence.oci_image_config_digest,
                         )
                         .await
                     {
@@ -1037,8 +1018,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             state: "failed",
                             body: json!({
                                 "reason": format!(
-                                    "distributed OCI image could not be imported: {error}"
+                                    "runtime image could not be pulled: {error}"
                                 ),
+                                "helper_error_code": runtime_helper_code(&error),
                             }),
                         };
                     }
@@ -1230,21 +1212,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 "Controller did not confirm the built OCI image upload",
                             );
                         }
-                        // The Controller now holds these exact bytes. Move the
-                        // build output into the digest-named distribution cache
-                        // so this Spark does not download what it produced. The
-                        // move also takes it out of the build directory. Best
-                        // effort: distribution re-verifies the digest, and a
-                        // missing or bad file simply downloads normally.
-                        let _ = (ImageImporter {
-                            data_root: self.runtime.data_root,
-                        })
-                        .retain_distribution_archive(
-                            &evidence.oci_layout_sha256,
-                            &evidence.image_digest,
-                            evidence.image_bytes,
-                            &builder.layout_path(request.build_id),
-                        );
+                        // The Controller now holds these exact bytes and
+                        // converts them into its layered store; the local
+                        // archive is no longer needed.
+                        let _ = std::fs::remove_file(builder.layout_path(request.build_id));
                         ExecutionResult {
                             state: "succeeded",
                             body: serde_json::to_value(evidence).unwrap_or_else(
@@ -1255,95 +1226,6 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Err(error) => ExecutionResult {
                         state: "failed",
                         body: error.failure_evidence(),
-                    },
-                }
-            }
-            RecipeOperationRequest::ImageImport(request) => {
-                self.report_phase(claim, "downloading").await;
-                if self
-                    .runtime
-                    .ensure_disk_available(request.image_bytes)
-                    .is_err()
-                {
-                    return failed("local disk capacity changed before image import");
-                }
-                let importer = ImageImporter {
-                    data_root: self.runtime.data_root,
-                };
-                let archive = match importer.cached_archive(&request) {
-                    Ok(Some(path)) => path,
-                    Ok(None) => {
-                        let staging = match importer.staging_path(claim.fence) {
-                            Ok(path) => path,
-                            Err(_) => return failed("image import staging is unavailable"),
-                        };
-                        let mut downloaded = false;
-                        for attempt in 0..3_u32 {
-                            match self
-                                .client
-                                .download_artifact(
-                                    &request.oci_layout_sha256,
-                                    request.image_bytes,
-                                    &staging,
-                                )
-                                .await
-                            {
-                                Ok(()) => {
-                                    downloaded = true;
-                                    break;
-                                }
-                                Err(error) if error.retryable() && attempt < 2 => {
-                                    tokio::time::sleep(Duration::from_millis(
-                                        100 * (attempt + 1) as u64,
-                                    ))
-                                    .await;
-                                }
-                                Err(_) => break,
-                            }
-                        }
-                        if !downloaded {
-                            return failed("exact OCI image archive is unavailable");
-                        }
-                        match importer.retain_archive(&request, &staging) {
-                            Ok(path) => path,
-                            Err(_) => {
-                                return failed("verified OCI image archive could not be retained");
-                            }
-                        }
-                    }
-                    Err(_) => return failed("OCI image archive cache is invalid"),
-                };
-                self.report_phase(claim, "verifying").await;
-                match importer.check_archive(&request, &archive) {
-                    Ok(evidence) => match self
-                        .execute_host_runtime(
-                            claim,
-                            HostRuntimeAction::ImageImport,
-                            importer.runtime_arguments(&request, &archive),
-                        )
-                        .await
-                    {
-                        Ok(()) => ExecutionResult {
-                            state: "succeeded",
-                            body: serde_json::to_value(evidence).unwrap_or_else(
-                                |_| json!({"reason": "image import evidence serialization failed"}),
-                            ),
-                        },
-                        Err(error) => {
-                            let mut body = json!({
-                                "reason": "host runtime could not import the accepted OCI image",
-                            });
-                            let code = image_import_helper_code(&error);
-                            body["helper_error_code"] = Value::String(code);
-                            ExecutionResult {
-                                state: "failed",
-                                body,
-                            }
-                        }
-                    },
-                    Err(error) => ExecutionResult {
-                        state: "failed",
-                        body: json!({"reason": error.to_string()}),
                     },
                 }
             }
@@ -3312,10 +3194,10 @@ fn record_result_rejection(
     Ok(())
 }
 
-/// The bounded helper error code an OCI image import failure reports. This is
+/// The bounded helper error code a runtime image pull failure reports. This is
 /// the producer for `stable_runtime_helper_error_code`, which decides whether
 /// the code survives into the Controller's normalized failure body.
-fn image_import_helper_code(error: &crate::host_runtime::HostRuntimeError) -> String {
+fn runtime_helper_code(error: &crate::host_runtime::HostRuntimeError) -> String {
     use crate::host_runtime::HostRuntimeError;
     match error {
         HostRuntimeError::HelperRejected { code, .. } => code.clone(),
@@ -3398,7 +3280,6 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
             "agent.upgrade.v1" => "agent_upgrade_failed",
             "artifact.distribution.v1" => "artifact_distribution_failed",
             "recipe.build.v1" => "recipe_build_failed",
-            "recipe.image.import.v1" => "recipe_image_import_failed",
             "recipe.job.run.v1" => "recipe_job_run_failed",
             "recipe.install" => "recipe_install_failed",
             "recipe.start" => "recipe_start_failed",
@@ -3453,7 +3334,7 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
             body["helper_exit_code"] = Value::from(exit_code);
         }
     }
-    if claim.operation == "recipe.image.import.v1"
+    if claim.operation == "artifact.distribution.v1"
         && let Some(code) = executed
             .body
             .get("helper_error_code")
@@ -4453,15 +4334,11 @@ mod tests {
 
     #[test]
     fn distribution_result_is_controller_safe() {
-        let archive_digest = "a".repeat(64);
-        let image_digest = format!("sha256:{}", "b".repeat(64));
         let body = distribution_success_evidence(DistributionDownloadEvidence {
             model_digests: vec!["d".repeat(64)],
             model_paths: vec![std::path::PathBuf::from("/run/private/model.bin")],
-            oci_archive_path: std::path::PathBuf::from("/run/private/image.oci.tar"),
-            oci_archive_sha256: archive_digest.clone(),
-            oci_archive_bytes: 123,
-            oci_image_digest: image_digest.clone(),
+            oci_image_digest: format!("sha256:{}", "b".repeat(64)),
+            oci_image_config_digest: format!("sha256:{}", "c".repeat(64)),
             downloaded_bytes: 456,
         });
         assert_eq!(body, json!({"downloaded_bytes": 456}));
@@ -5326,12 +5203,12 @@ mod tests {
     }
 
     #[test]
-    fn image_import_helper_protocol_cause_survives_normalization() {
+    fn image_pull_helper_protocol_cause_survives_normalization() {
         // Wrong implementation: a new cause's code was absent from
         // `stable_runtime_helper_error_code`, so normalization silently dropped
         // it and the Controller saw no cause at all.
-        let mut import_claim = claim();
-        import_claim.operation = "recipe.image.import.v1".parse().unwrap();
+        let mut pull_claim = claim();
+        pull_claim.operation = "artifact.distribution.v1".parse().unwrap();
         let mut errors: Vec<crate::host_runtime::HostRuntimeError> = [
             crate::host_runtime::HelperProtocolCause::RequestEncoding,
             crate::host_runtime::HelperProtocolCause::HelperCallJoin,
@@ -5353,17 +5230,17 @@ mod tests {
         .collect();
         errors.push(crate::host_runtime::HostRuntimeError::StopUncertain);
         for error in errors {
-            let code = super::image_import_helper_code(&error);
+            let code = super::runtime_helper_code(&error);
             assert!(
                 code.starts_with("runtime_helper_"),
-                "an import failure code stays in the runtime_helper_ namespace, got {code}"
+                "a pull failure code stays in the runtime_helper_ namespace, got {code}"
             );
             let result = super::normalize_execution_result(
-                &import_claim,
+                &pull_claim,
                 ExecutionResult {
                     state: "failed",
                     body: json!({
-                        "reason": "runtime image import failed",
+                        "reason": "runtime image pull failed",
                         "helper_error_code": code,
                     }),
                 },
@@ -6365,9 +6242,9 @@ mod tests {
     }
 
     #[test]
-    fn image_import_failure_preserves_only_bounded_helper_diagnostics() {
-        let mut import_claim = claim();
-        import_claim.operation = "recipe.image.import.v1".parse().unwrap();
+    fn image_pull_failure_preserves_only_bounded_helper_diagnostics() {
+        let mut pull_claim = claim();
+        pull_claim.operation = "artifact.distribution.v1".parse().unwrap();
         for code in [
             "runtime_helper_unavailable",
             "runtime_authority_unavailable",
@@ -6376,11 +6253,11 @@ mod tests {
             "request_replayed",
         ] {
             let result = normalize_execution_result(
-                &import_claim,
+                &pull_claim,
                 ExecutionResult {
                     state: "failed",
                     body: json!({
-                        "reason": "runtime image import failed",
+                        "reason": "runtime image pull failed",
                         "helper_error_code": code,
                         "untrusted_detail": "/root/authority/private-key",
                     }),
@@ -6392,11 +6269,11 @@ mod tests {
         }
 
         let rejected = normalize_execution_result(
-            &import_claim,
+            &pull_claim,
             ExecutionResult {
                 state: "failed",
                 body: json!({
-                    "reason": "runtime image import failed",
+                    "reason": "runtime image pull failed",
                     "helper_error_code": "arbitrary_host_detail",
                 }),
             },

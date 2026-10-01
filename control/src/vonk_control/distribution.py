@@ -38,6 +38,7 @@ from .artifact_reference_scan import require_model_sets_open
 from .distribution_assignment import NodeDistributionAssignment
 from .models import (
     ArtifactDistributionAssignment,
+    NodeArtifact,
     RecipeBuild,
 )
 from .runtime_image_preparation import (
@@ -217,20 +218,10 @@ class RecipeBuildObjectSource(FilesystemObjectSource):
             )
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
-        with self.sessions() as session:
-            authorized = session.scalar(
-                select(RecipeBuild.id).where(
-                    RecipeBuild.state == "succeeded",
-                    RecipeBuild.oci_layout_sha256 == digest,
-                    RecipeBuild.image_bytes == expected_bytes,
-                )
-            )
-        if authorized is None:
-            raise DistributionError(
-                "distribution.object_unavailable",
-                "OCI archive is not a succeeded build artifact",
-            )
-        return super().open_object(digest, expected_bytes)
+        raise DistributionError(
+            "distribution.object_unavailable",
+            "runtime images are pulled from the layered store, not downloaded",
+        )
 
 
 class ModelCacheObjectSource:
@@ -633,7 +624,7 @@ class DistributionService:
         if not image_verified:
             raise DistributionError(
                 "distribution.runtime_image_mismatch",
-                "assignment OCI archive does not match the verified image identity",
+                "assignment runtime image does not match the verified image identity",
             )
         key = (assignment.plan_digest, assignment.node_id)
         with self._authorized_lock:
@@ -708,6 +699,7 @@ class DistributionService:
                 row.model_artifact_set_sha256 = assignment.model_artifact_set_sha256
                 row.objects = [item.to_mapping() for item in assignment.objects]
                 row.oci_image_digest = assignment.oci_image_digest
+                row.oci_image_config_digest = assignment.oci_image_config_digest
                 row.oci_archive_sha256 = assignment.oci_archive_sha256
                 row.state = "active"
                 row.revoked_at = None
@@ -723,6 +715,7 @@ class DistributionService:
                     model_artifact_set_sha256=assignment.model_artifact_set_sha256,
                     objects=[item.to_mapping() for item in assignment.objects],
                     oci_image_digest=assignment.oci_image_digest,
+                    oci_image_config_digest=assignment.oci_image_config_digest,
                     oci_archive_sha256=assignment.oci_archive_sha256,
                     state="active",
                     created_at=now,
@@ -744,6 +737,7 @@ class DistributionService:
                 "model_artifact_set_sha256": row.model_artifact_set_sha256,
                 "objects": row.objects,
                 "oci_image_digest": row.oci_image_digest,
+                "oci_image_config_digest": row.oci_image_config_digest,
                 "oci_archive_sha256": row.oci_archive_sha256,
             }
         )
@@ -904,6 +898,60 @@ class DistributionService:
         return assignment, object_spec, opened
 
 
+def record_distributed_runtime_image(
+    session: Session, *, node_id: str, plan_digest: str, now: datetime
+) -> None:
+    """Record that a node now holds the runtime image its grant pulled.
+
+    The next plan for that node then sees the image as present and does not
+    distribute it again; a 1.7.x update only moves its changed layers anyway.
+    """
+
+    assignment = session.scalar(
+        select(ArtifactDistributionAssignment).where(
+            ArtifactDistributionAssignment.plan_digest == plan_digest,
+            ArtifactDistributionAssignment.node_id == node_id,
+        )
+    )
+    if assignment is None:
+        return
+    build = session.scalar(
+        select(RecipeBuild).where(
+            RecipeBuild.state == "succeeded",
+            RecipeBuild.oci_layout_sha256 == assignment.oci_archive_sha256,
+            RecipeBuild.image_digest == assignment.oci_image_digest,
+        )
+    )
+    if build is None or build.image_bytes is None:
+        return
+    digest = assignment.oci_image_digest.removeprefix("sha256:")
+    artifact = session.scalar(
+        select(NodeArtifact).where(
+            NodeArtifact.node_id == node_id, NodeArtifact.digest == digest
+        )
+    )
+    if artifact is None:
+        session.add(
+            NodeArtifact(
+                node_id=node_id,
+                kind="image",
+                digest=digest,
+                source=f"oci-layout:{assignment.oci_archive_sha256}",
+                size_bytes=build.image_bytes,
+                state="verified",
+                ref_count=0,
+                verified_at=now,
+                updated_at=now,
+            )
+        )
+        return
+    artifact.kind = "image"
+    artifact.size_bytes = build.image_bytes
+    artifact.state = "verified"
+    artifact.verified_at = now
+    artifact.updated_at = now
+
+
 __all__ = [
     "CompositeObjectSource",
     "DistributionError",
@@ -917,6 +965,7 @@ __all__ = [
     "artifact_set_sha256",
     "build_distribution_service",
     "build_distribution_service_from_components",
+    "record_distributed_runtime_image",
 ]
 
 

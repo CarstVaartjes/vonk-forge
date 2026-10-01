@@ -96,15 +96,9 @@ def test_actual_distribution_producer_uses_the_same_native_timestamp_bytes() -> 
         {
             "objects": [
                 {"name": "model.bin", "sha256": "d" * 64, "bytes": 1, "kind": "model"},
-                {
-                    "name": "image.tar",
-                    "sha256": "e" * 64,
-                    "bytes": 1,
-                    "kind": "oci-archive",
-                },
             ],
             "oci_image_digest": "sha256:" + "f" * 64,
-            "oci_archive_sha256": "e" * 64,
+            "oci_image_config_digest": "sha256:" + "e" * 64,
         }
     )
     expected = canonical_message(value)

@@ -8,38 +8,27 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
-    AgentClaim,
     RecipeBuildCleanupEvidence,
     RecipeBuildEvidence,
     RecipeBuildRequest,
-    RecipeImageImportEvidence,
-    RecipeImageImportRequest,
-    canonical_message,
-)
-from vonk_agent_protocol import (
-    AgentOperation as ProtocolOperation,
 )
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
-    ClusterMapping,
-    ClusterMappingNode,
-    NodeArtifact,
     RecipeBuild,
     ResourceReservation,
 )
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_operations import (
     RecipeOperationService,
-    _record_image_import_evidence,
     record_build_evidence,
 )
 from vonk_control.run_admission import RunAdmissionService
 
 from tests.wire_probes import prebuilt_probe
 
-from .test_recipe_builds import RecordingQueue, _authorize_distribution_fixture, setup
+from .test_recipe_builds import RecordingQueue, setup
 
 
 @pytest.fixture(scope="session")
@@ -47,14 +36,12 @@ def build_import_wire_probe() -> Path:
     return prebuilt_probe("VONK_BUILD_IMPORT_WIRE_PROBE")
 
 
-def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
+def test_queued_build_crosses_rust_parser_and_typed_evidence(
     tmp_path: Path, build_import_wire_probe: Path
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
 
-    builds = RecipeBuildService(
-        sessions, bundles=bundles, prepared_builds=lambda *_args, **_kwargs: receipt
-    )
+    builds = RecipeBuildService(sessions, bundles=bundles)
     plan = builds.plan(revision.id, node_id, now=now)
     operations = RecipeOperationService(
         sessions,
@@ -82,16 +69,6 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
         )
         return json.loads(completed.stdout)
 
-    def probe_claim(claim: AgentClaim) -> dict[str, object]:
-        completed = subprocess.run(
-            [str(build_import_wire_probe)],
-            input=json.dumps({"claim": json.loads(canonical_message(claim))}) + "\n",
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-        return json.loads(completed.stdout)
-
     build_wire = probe("recipe.build.v1", plan.agent_payload)
     build_request = RecipeBuildRequest.model_validate(build_wire["payload"])
     build_evidence = RecipeBuildEvidence.model_validate(build_wire["evidence"])
@@ -107,84 +84,10 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
             now=now,
         )
 
-    receipt = _authorize_distribution_fixture(sessions, plan, revision, now)
-    with sessions.begin() as session:
-        mapping = ClusterMapping(
-            recipe_revision_id=revision.id,
-            topology_name="wire-bridge",
-            generation=1,
-            node_count=1,
-            state="ready",
-            parameters={},
-            placement_digest="e" * 64,
-            endpoint_owner_node_id=node_id,
-            created_by="test",
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(mapping)
-        session.flush()
-        session.add(
-            ClusterMappingNode(
-                mapping_id=mapping.id,
-                node_id=node_id,
-                rank=0,
-                role="entrypoint",
-                endpoint_owner=True,
-                created_at=now,
-            )
-        )
-        mapping_id = mapping.id
-    preview = operations.preview_image_distribution(
-        plan.build_id, mapping_id, mapping_generation=1
-    )
-    import_operation = operations.distribute_image(
-        plan.build_id,
-        mapping_id,
-        mapping_generation=1,
-        plan_digest=preview.plan_digest,
-        actor="test",
-        request_id=str(uuid.uuid4()),
-    )
     with sessions() as session:
-        operation = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == import_operation.id
-            )
-        )
-        assert operation is not None
-        import_claim = AgentClaim(
-            fence=str(uuid.uuid4()),
-            operation=ProtocolOperation.RECIPE_IMAGE_IMPORT,
-            payload=RecipeImageImportRequest.model_validate(operation.payload),
-            deadline=now,
-        )
-    import_wire = probe_claim(import_claim)
-    import_request = RecipeImageImportRequest.model_validate(import_wire["payload"])
-    import_evidence = RecipeImageImportEvidence.model_validate(import_wire["evidence"])
-    assert import_request.build_id == plan.build_id
-
-    with sessions.begin() as session:
-        operation = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == import_operation.id
-            )
-        )
-        assert operation is not None
-        _record_image_import_evidence(
-            session,
-            operation,
-            import_evidence.model_dump(mode="json"),
-            True,
-            now,
-        )
-        artifact = session.scalar(
-            select(NodeArtifact).where(
-                NodeArtifact.node_id == node_id,
-                NodeArtifact.digest == build_evidence.image_digest[7:],
-            )
-        )
-        assert artifact is not None and artifact.state == "verified"
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        assert build.image_digest == build_evidence.image_digest
 
 
 def test_cancelled_build_cleanup_crosses_the_real_wire_boundary(

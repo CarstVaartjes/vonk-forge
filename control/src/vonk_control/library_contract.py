@@ -355,12 +355,6 @@ class BuildPreviewInput(_StrictModel):
     builder_node_id: NodeId
 
 
-class ImageDistributionPreviewInput(_StrictModel):
-    recipe_build_id: UuidId
-    mapping_id: UuidId
-    mapping_generation: int = Field(ge=1, le=2_147_483_647)
-
-
 class InstallPreviewInput(_StrictModel):
     mapping_id: UuidId
     recipe_build_id: UuidId
@@ -380,11 +374,6 @@ class BuildPreviewTarget(_StrictModel):
     input: BuildPreviewInput
 
 
-class ImageDistributionPreviewTarget(_StrictModel):
-    kind: Literal["image_distribution"] = "image_distribution"
-    input: ImageDistributionPreviewInput
-
-
 class InstallPreviewTarget(_StrictModel):
     kind: Literal["install"] = "install"
     input: InstallPreviewInput
@@ -396,11 +385,7 @@ class RunPreviewTarget(_StrictModel):
 
 
 PreviewTarget = Annotated[
-    BuildPreviewTarget
-    | MappingPreviewTarget
-    | ImageDistributionPreviewTarget
-    | InstallPreviewTarget
-    | RunPreviewTarget,
+    BuildPreviewTarget | MappingPreviewTarget | InstallPreviewTarget | RunPreviewTarget,
     Field(discriminator="kind"),
 ]
 

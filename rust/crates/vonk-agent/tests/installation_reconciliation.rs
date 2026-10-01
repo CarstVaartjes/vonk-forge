@@ -114,21 +114,18 @@ fn child_command(test_name: &str) -> Command {
 }
 
 #[test]
-fn opaque_install_is_removed_while_shared_model_and_image_cache_survive_and_receipt_replays() {
+fn opaque_install_is_removed_while_shared_model_cache_survives_and_receipt_replays() {
     let _serial = serial();
     let data = tempdir().unwrap();
     let runner = NoProcess;
     let (identity, spec_bytes) = identity_and_spec(Uuid::new_v4());
     seed_installation(data.path(), &identity, &spec_bytes);
 
-    // These are the shared distribution cache and imported OCI archive. They
-    // are outside the exact installation being reconciled.
+    // The shared distribution cache is outside the exact installation being
+    // reconciled.
     let shared_model = data.path().join("distribution/models").join("d".repeat(64));
-    let shared_image = data.path().join("oci-archives").join("e".repeat(64));
     fs::create_dir_all(shared_model.parent().unwrap()).unwrap();
-    fs::create_dir_all(shared_image.parent().unwrap()).unwrap();
     fs::write(&shared_model, b"shared model bytes").unwrap();
-    fs::write(&shared_image, b"shared image bytes").unwrap();
 
     let runtime = runtime(data.path(), &runner);
     let prepared = runtime.prepare_reconciliation(&identity).unwrap();
@@ -138,7 +135,6 @@ fn opaque_install_is_removed_while_shared_model_and_image_cache_survive_and_rece
     assert!(completed.complete);
     assert!(!installation_path(data.path(), identity.installation_id).exists());
     assert_eq!(fs::read(&shared_model).unwrap(), b"shared model bytes");
-    assert_eq!(fs::read(&shared_image).unwrap(), b"shared image bytes");
 
     let replayed_prepare = runtime.prepare_reconciliation(&identity).unwrap();
     let replayed_finalize = runtime.finalize_reconciliation(&identity).unwrap();

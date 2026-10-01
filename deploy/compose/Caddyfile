@@ -50,7 +50,7 @@
 	@stored_file header X-Vonk-File *
 	handle_response @stored_file {
 		rewrite * /{rp.header.X-Vonk-File}
-		@object_store path_regexp ^/(model-cache/objects/[0-9a-f]{2}/[0-9a-f]{64}|agent-artifacts/(image-cache/)?[0-9a-f]{64})$
+		@object_store path_regexp ^/(model-cache/objects/[0-9a-f]{2}/[0-9a-f]{64}|agent-artifacts/[0-9a-f]{64})$
 		handle @object_store {
 			root * /srv/state
 			# The Controller vouched for this exact object at its range,

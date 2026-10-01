@@ -197,9 +197,9 @@ def test_one_availability_slot_serves_two_parents_sharing_one_real_build(
         for parent in parents:
             completed = production.service.get(parent.id)
             assert completed.state == "succeeded", completed.failure
-        assert (
-            production.storage.root / receipt.oci_archive_sha256
-        ).read_bytes() == b"shared verified build archive"
+        assert production.storage.published_archive_bytes(
+            receipt.oci_archive_sha256
+        ) == len(b"shared verified build archive")
     finally:
         production.close()
 

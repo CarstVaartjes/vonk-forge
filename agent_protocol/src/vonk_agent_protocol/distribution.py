@@ -20,12 +20,12 @@ _EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85
 
 
 class DistributionObject(WireModel):
-    """One model file, OCI archive, or OCI layer referenced by an assignment."""
+    """One model file referenced by an assignment."""
 
     name: str = Field(min_length=1, max_length=512)
     sha256: Digest
     bytes: int = Field(ge=0, le=16 * 1024**4)
-    kind: Literal["model", "oci-archive", "oci-layer"]
+    kind: Literal["model"]
 
     @field_validator("name")
     @classmethod
@@ -58,23 +58,21 @@ class DistributionObject(WireModel):
 
 
 class DistributionAssignment(WireModel):
-    """The object set one node downloads for a distribution plan."""
+    """What one node fetches for a distribution plan.
+
+    Model files are downloaded as objects. The runtime image is not an
+    object: the node pulls it by manifest digest from the Controller's
+    layered image store, and only the layers it lacks travel.
+    """
 
     objects: tuple[DistributionObject, ...] = Field(min_length=1, max_length=4096)
     oci_image_digest: ImageDigest
-    oci_archive_sha256: Digest
+    oci_image_config_digest: ImageDigest
 
     @model_validator(mode="after")
     def object_set_is_complete(self) -> DistributionAssignment:
         if len({item.sha256 for item in self.objects}) != len(self.objects):
             raise ValueError("distribution assignment objects are duplicated")
-        if not any(item.kind == "model" for item in self.objects):
-            raise ValueError("distribution assignment has no model objects")
-        if not any(
-            item.sha256 == self.oci_archive_sha256 and item.kind == "oci-archive"
-            for item in self.objects
-        ):
-            raise ValueError("distribution assignment OCI archive is not declared")
         return self
 
     @classmethod

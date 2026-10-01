@@ -68,7 +68,6 @@ from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
 from .distribution_object import DistributionObject
-from .distribution_object_kind import DistributionObjectKind
 from .effective_parallelism import EffectiveParallelism
 from .effective_settings_selection import EffectiveSettingsSelection
 from .effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects
@@ -349,7 +348,6 @@ from .recipe_image_availability_child_state import RecipeImageAvailabilityChildS
 from .recipe_image_availability_response import RecipeImageAvailabilityResponse
 from .recipe_image_availability_response_state import RecipeImageAvailabilityResponseState
 from .recipe_image_availability_result import RecipeImageAvailabilityResult
-from .recipe_image_import_evidence import RecipeImageImportEvidence
 from .recipe_input_slot import RecipeInputSlot
 from .recipe_installation_change import RecipeInstallationChange
 from .recipe_installation_payload import RecipeInstallationPayload
@@ -609,7 +607,6 @@ __all__ = (
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
     "DistributionObject",
-    "DistributionObjectKind",
     "EffectiveParallelism",
     "EffectiveSettingsSelection",
     "EffectiveSettingsSelectionChangeEffects",
@@ -890,7 +887,6 @@ __all__ = (
     "RecipeImageAvailabilityResponse",
     "RecipeImageAvailabilityResponseState",
     "RecipeImageAvailabilityResult",
-    "RecipeImageImportEvidence",
     "RecipeInputSlot",
     "RecipeInstallationChange",
     "RecipeInstallationPayload",

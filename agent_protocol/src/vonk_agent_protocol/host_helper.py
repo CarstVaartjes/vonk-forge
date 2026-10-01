@@ -48,7 +48,6 @@ Uuid4Text = Annotated[
 ]
 ContainerRuntimeActionName = Literal[
     "runtime-preflight",
-    "image-import",
     "image-pull",
     "image-inspect",
     "run-inspect",
@@ -179,7 +178,6 @@ class RestartUnit(StrEnum):
 
 class ContainerRuntimeAction(StrEnum):
     RUNTIME_PREFLIGHT = "runtime-preflight"
-    IMAGE_IMPORT = "image-import"
     IMAGE_PULL = "image-pull"
     IMAGE_INSPECT = "image-inspect"
     RUN_INSPECT = "run-inspect"

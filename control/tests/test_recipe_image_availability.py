@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control import artifact_reference_scan, runtime_image_preparation
+from vonk_control import artifact_reference_scan
 from vonk_control.artifact_lifecycle import ArtifactLifecycleError
 from vonk_control.artifact_reference_scan import (
     runtime_image_reference_findings,
@@ -74,6 +74,7 @@ from vonk_control.runtime_image_preparation import (
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_removal_review_support import remove_after_review
+from .runtime_image_fixtures import place_test_image, remove_test_image
 
 IMAGE_DIGEST = "sha256:" + "d" * 64
 CONFIG_DIGEST = "sha256:" + "c" * 64
@@ -118,7 +119,7 @@ def _builder(
         if calls is not None:
             calls.append(force)
         digest = hashlib.sha256(payload).hexdigest()
-        (storage.root / digest).write_bytes(payload)
+        place_test_image(storage, digest, len(payload))
         return {
             "state": "succeeded",
             "build_id": _build_id(str(claim.recipe_revision_id)),
@@ -241,7 +242,7 @@ class Transport:
         return PulledImageEvidence(
             manifest_digest=IMAGE_DIGEST,
             config_id=CONFIG_DIGEST,
-            local_reference="docker-archive:" + str(archive),
+            local_reference="oci-layout:" + archive.name,
             architecture=expected_architecture,
             runtime_interface=expected_runtime_interface,
             archive_sha256=expected_archive_sha256,
@@ -725,10 +726,11 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
     )
     assert isinstance(removed, dict)
     assert removed["state"] == "succeeded"
-    # The worker takes the bytes and storage receipt only after committing its
-    # exact checkpoint and deletion fence; SQL keeps the authorization decision.
-    assert not (storage.root / ARCHIVE_SHA).exists()
+    # The worker takes the storage receipt only after committing its exact
+    # checkpoint and deletion fence; SQL keeps the authorization decision.
+    # The image's blobs wait for garbage collection, which then reclaims them.
     assert not (storage.root / f"{ARCHIVE_SHA}.receipt.json").exists()
+    remove_test_image(storage, ARCHIVE_SHA)
     # Restart and use the real download path, including SQL receipt persistence.
     restarted = _service(
         sessions,
@@ -744,7 +746,7 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
     result = restarted.get(download.id)
     if revoked is None:
         assert result.state == "succeeded", result.failure
-        assert (storage.root / ARCHIVE_SHA).read_bytes() == ARCHIVE
+        assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
         with sessions() as session:
             restored = resolve_persisted_runtime_image_receipt(
                 session,
@@ -860,7 +862,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
     storage = FilesystemRuntimeImageStorage(tmp_path)
 
     def builder(*_: object, **__: object) -> dict[str, object]:
-        (storage.root / ARCHIVE_SHA).write_bytes(ARCHIVE)
+        place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
         return {
             "state": "succeeded",
             "build_id": build_id,
@@ -883,7 +885,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
             return PulledImageEvidence(
                 manifest_digest=IMAGE_DIGEST,
                 config_id=CONFIG_DIGEST,
-                local_reference="docker-archive:" + str(archive),
+                local_reference="oci-layout:" + archive.name,
                 architecture=expected_architecture,
                 runtime_interface=expected_runtime_interface,
                 archive_sha256=expected_archive_sha256,
@@ -993,7 +995,7 @@ def test_build_mode_dispatches_when_no_verified_build_receipt_exists(
 
     def builder(*_: object, force: bool, **__: object) -> dict[str, object]:
         forced.append(force)
-        (storage.root / ARCHIVE_SHA).write_bytes(ARCHIVE)
+        place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
         return {
             "state": "succeeded",
             "build_id": build_id,
@@ -1013,11 +1015,11 @@ def test_build_mode_dispatches_when_no_verified_build_receipt_exists(
             expected_archive_sha256: str,
             expected_archive_bytes: int,
         ) -> PulledImageEvidence:
-            assert archive.read_bytes() == ARCHIVE
+            assert archive.name == expected_archive_sha256
             return PulledImageEvidence(
                 manifest_digest=IMAGE_DIGEST,
                 config_id=CONFIG_DIGEST,
-                local_reference="docker-archive:" + str(archive),
+                local_reference="oci-layout:" + archive.name,
                 architecture=expected_architecture,
                 runtime_interface=expected_runtime_interface,
                 archive_sha256=expected_archive_sha256,
@@ -1048,7 +1050,7 @@ def test_build_mode_dispatches_when_no_verified_build_receipt_exists(
     completed = service.get(queued.id)
     assert completed.state == "succeeded", completed.failure
     assert forced == [False]
-    assert (storage.root / ARCHIVE_SHA).read_bytes() == ARCHIVE
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
 
 
 def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
@@ -1171,71 +1173,7 @@ def test_recipe_removal_reference_scan_enforces_accumulated_owner_budget(
     engine.dispose()
 
 
-def test_recipe_removal_fails_closed_on_symlinked_archive(
-    tmp_path: Path,
-) -> None:
-    recipe = _recipe("recipe-source-build.json")
-    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'symlink-removal.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine)
-    now = datetime.now(UTC)
-    receipt = _reference_receipt()
-    with sessions.begin() as session:
-        revision = _add_revision(session, "rev-symlink-removal", recipe)
-        _add_head(session, revision)
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=revision.id,
-                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
-                effective_execution_key=revision.execution_key,
-                image_digest=receipt.image_digest,
-                local_image_config_id=receipt.local_image_config_id,
-                oci_archive_sha256=receipt.oci_archive_sha256,
-                image_bytes=receipt.image_bytes,
-                build_id=receipt.build_id,
-                authorized_at=now,
-            )
-        )
-    storage = FilesystemRuntimeImageStorage(tmp_path / "managed")
-    outside = tmp_path / "outside archive"
-    outside.write_bytes(ARCHIVE)
-    archive = storage.root / ARCHIVE_SHA
-    archive.symlink_to(outside)
-    receipt_path = storage.root / f"{ARCHIVE_SHA}.receipt.json"
-    receipt_path.write_text(
-        json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
-    )
-    service = _service(
-        sessions,
-        storage=storage,
-        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
-        clock=lambda: now,
-    )
-
-    with pytest.raises(RecipeImageAvailabilityError) as refused:
-        remove_after_review(
-            service,
-            recipe.identity.slug,
-            actor="operator",
-            request_id="00000000-0000-4000-8000-000000000034",
-            with_model=False,
-        )
-
-    assert refused.value.code == "runtime_image.removal_path_unsafe"
-    with sessions() as session:
-        operation = session.scalar(
-            select(Job).where(Job.request_id == "00000000-0000-4000-8000-000000000034")
-        )
-        gate = session.get(ArtifactLifecycleGate, ("runtime-image", ARCHIVE_SHA))
-        assert operation is None
-        assert gate is None or gate.removal_owner_id is None
-    assert archive.is_symlink()
-    assert outside.read_bytes() == ARCHIVE
-    assert receipt_path.exists()
-    engine.dispose()
-
-
-@pytest.mark.parametrize("fault", ["publication-lock", "archive-stat"])
+@pytest.mark.parametrize("fault", ["publication-lock", "receipt-unlink"])
 def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
 ) -> None:
@@ -1262,8 +1200,7 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
             )
         )
     storage = FilesystemRuntimeImageStorage(tmp_path / "managed-retry")
-    archive = storage.root / ARCHIVE_SHA
-    archive.write_bytes(ARCHIVE)
+    place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
     receipt_path = storage.root / f"{ARCHIVE_SHA}.receipt.json"
     receipt_path.write_text(json.dumps(receipt.model_dump(mode="json")))
     failure_code = "runtime_image.publication_contended"
@@ -1287,27 +1224,17 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
         monkeypatch.setattr(storage, "publication_lock", contend_once)
     else:
         failure_code = "runtime_image.removal_storage_failed"
-        original_stat = runtime_image_preparation.os.stat
-        stat_failed = False
+        original_unlink = Path.unlink
+        unlink_failed = False
 
-        def stat_with_one_failure(
-            path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
-            *,
-            dir_fd: int | None = None,
-            follow_symlinks: bool = True,
-        ) -> os.stat_result:
-            nonlocal stat_failed
-            if (
-                removal_started
-                and path == ARCHIVE_SHA
-                and dir_fd is not None
-                and not stat_failed
-            ):
-                stat_failed = True
-                raise PermissionError("injected archive-stat failure")
-            return original_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+        def unlink_with_one_failure(path: Path, missing_ok: bool = False) -> None:
+            nonlocal unlink_failed
+            if removal_started and path == receipt_path and not unlink_failed:
+                unlink_failed = True
+                raise PermissionError("injected receipt-unlink failure")
+            original_unlink(path, missing_ok=missing_ok)
 
-        monkeypatch.setattr(runtime_image_preparation.os, "stat", stat_with_one_failure)
+        monkeypatch.setattr(Path, "unlink", unlink_with_one_failure)
     service = _service(
         sessions,
         storage=storage,
@@ -1335,12 +1262,13 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
     assert failure["recovery_actions"] == []
     assert waiting["next_actions"] == []
     assert isinstance(retry_time, str)
-    assert archive.read_bytes() == ARCHIVE
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
     assert receipt_path.exists()
 
     now[0] = datetime.fromisoformat(retry_time) + timedelta(seconds=1)
     assert service.advance_removals(limit=1) == 1
-    assert not archive.exists()
+    # Only the receipt is retired; the image's blobs wait for garbage collection.
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
     assert not receipt_path.exists()
     assert service.advance_removals(limit=1) == 1
     completed = service.get_operator_request(request_key, actor="operator")
@@ -1521,7 +1449,7 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
         )
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "review-managed")
-    (storage.root / ARCHIVE_SHA).write_bytes(ARCHIVE)
+    place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
     (storage.root / f"{ARCHIVE_SHA}.receipt.json").write_text(
         json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
     )
@@ -1560,7 +1488,7 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
         gate = session.get(ArtifactLifecycleGate, ("runtime-image", ARCHIVE_SHA))
         assert existing is not None and gate is not None
         assert gate.removal_owner_id == existing.id
-    assert (storage.root / ARCHIVE_SHA).read_bytes() == ARCHIVE
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
 
     during = service.review_removal(selector, with_model=False)
     assert any(
@@ -1610,9 +1538,8 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
         )
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
-    archive = storage.root / ARCHIVE_SHA
     receipt_file = storage.root / f"{ARCHIVE_SHA}.receipt.json"
-    archive.write_bytes(ARCHIVE)
+    place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
     receipt_document = json.dumps(receipt.model_dump(mode="json"))
     receipt_file.write_text(receipt_document)
     request_id = str(uuid.uuid4())
@@ -1658,15 +1585,16 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
             with_model=False,
         )
         assert accepted["state"] == "queued"
-        assert archive.read_bytes() == ARCHIVE
+        assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
         assert receipt_file.read_text() == receipt_document
         assert service.advance_removals(limit=1) == 1
     except AssertionError:
-        assert archive.read_bytes() == ARCHIVE
+        assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
         assert receipt_file.read_text() == receipt_document
         raise
     assert removal_calls == [ARCHIVE_SHA]
-    assert not archive.exists()
+    # Only the receipt is retired; the blobs wait for garbage collection.
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
     assert not receipt_file.exists()
 
 
@@ -1698,9 +1626,8 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
         )
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
-    archive = storage.root / ARCHIVE_SHA
     receipt_file = storage.root / f"{ARCHIVE_SHA}.receipt.json"
-    archive.write_bytes(ARCHIVE)
+    place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
     receipt_file.write_text(
         json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
     )
@@ -1735,7 +1662,8 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
         process.join(timeout=5)
         pytest.fail("recipe removal process did not reach its injected crash point")
     assert process.exitcode == 73
-    assert not archive.exists()
+    # Only the receipt is retired; the blobs wait for garbage collection.
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
     assert not receipt_file.exists()
 
     with sessions() as observer:
@@ -1791,8 +1719,7 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
             )
         )
     storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
-    archive = storage.root / ARCHIVE_SHA
-    archive.write_bytes(ARCHIVE)
+    place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
     (storage.root / f"{ARCHIVE_SHA}.receipt.json").write_text(
         json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
     )
@@ -1812,7 +1739,8 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
     )
     assert accepted["state"] == "queued"
     assert service.advance_removals(limit=1) == 1
-    assert not archive.exists()
+    # Only the receipt is retired; the blobs wait for garbage collection.
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
 
     with sessions.begin() as holder:
         locked_gate = holder.scalar(
@@ -2781,7 +2709,8 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
     assert (
         _progress_members(partial.progress["members"])[-1]["member_id"] == "model-cache"
     )
-    (service._storage.root / ARCHIVE_SHA).unlink()
+    assert isinstance(service._storage, FilesystemRuntimeImageStorage)
+    remove_test_image(service._storage, ARCHIVE_SHA)
     child.state = "succeeded"
     with sessions.begin() as session:
         row = session.get(Job, queued.id)
@@ -3160,7 +3089,7 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
     assert observed.result is None
     assert observed.cancellation is not None
     retained = storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE))
-    assert retained.read_bytes() == ARCHIVE
+    assert retained.is_file()
     with sessions() as session:
         assert session.scalar(select(RuntimeImageAuthorization)) is None
         row = session.get(Job, operation.id)
