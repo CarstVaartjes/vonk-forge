@@ -16367,6 +16367,18 @@
             "title": "Role",
             "type": "string"
           },
+          "route_reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Reason"
+          },
           "route_state": {
             "enum": [
               "withdrawn",

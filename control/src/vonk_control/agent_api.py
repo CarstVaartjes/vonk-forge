@@ -84,6 +84,7 @@ from .inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
+from .logging import log_event
 from .models import (
     STOPPABLE_RUN_STATES,
     AgentCertificate,
@@ -126,6 +127,10 @@ _CANONICAL_UUID = re.compile(
 _IDENTIFIER_TEXT = r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
 _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
 _MAX_ENROLLMENT_BODY_BYTES = 64 * 1024
+# How long a running endpoint owner's own readiness probe may keep failing
+# before the rank counts as failed and its route is withdrawn.
+RANK_UNREADY_GRACE = timedelta(seconds=120)
+_LOGGER = logging.getLogger(__name__)
 _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES = 2 * 1024
 _MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 MAX_RECIPE_IMAGE_BYTES = 16 * 1024**4
@@ -1074,12 +1079,55 @@ def install_agent_routes(
                         # Controller-owned recovery.
                         node.state = "failed"
                     elif node.state != "failed":
+                        # A running process whose own health probe fails is
+                        # failed only once that has lasted the grace period;
+                        # one missed probe never takes a workload down.
+                        unready = (
+                            owner
+                            and evidence.process_running
+                            and evidence.endpoint_ready is not True
+                        )
+                        since = (
+                            _now(node.observation_unready_since).astimezone(UTC)
+                            if unready and node.observation_unready_since is not None
+                            else observed_at
+                        )
                         node.state = (
                             "running"
                             if evidence.process_running
-                            and (not owner or evidence.endpoint_ready is True)
+                            and (
+                                not unready or observed_at - since < RANK_UNREADY_GRACE
+                            )
                             else "failed"
                         )
+                        if unready and node.state == "failed":
+                            log_event(
+                                _LOGGER,
+                                "recipe.rank.unhealthy",
+                                service="control-api",
+                                run_id=run.id,
+                                node_id=identity.node_id,
+                                reason="endpoint readiness probe failing",
+                                unready_seconds=int(
+                                    (observed_at - since).total_seconds()
+                                ),
+                            )
+                        elif not evidence.process_running:
+                            log_event(
+                                _LOGGER,
+                                "recipe.rank.unhealthy",
+                                service="control-api",
+                                run_id=run.id,
+                                node_id=identity.node_id,
+                                reason="workload process is not running",
+                            )
+                    node.observation_unready_since = (
+                        (node.observation_unready_since or observed_at)
+                        if owner
+                        and evidence.process_running
+                        and evidence.endpoint_ready is not True
+                        else None
+                    )
                     node.observed_run_generation = run.run_generation
                     node.observation_process_running = evidence.process_running
                     node.observation_observed_at = observed_at

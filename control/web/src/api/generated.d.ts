@@ -6147,6 +6147,8 @@ export interface components {
             recipe_update?: components["schemas"]["RecipeUpdateNotice"] | null;
             /** Role */
             role: string;
+            /** Route Reason */
+            route_reason?: string | null;
             /**
              * Route State
              * @enum {string}
