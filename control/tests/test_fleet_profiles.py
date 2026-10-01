@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TypedDict, cast
+from typing import Any, TypedDict, cast
 from uuid import uuid4
 
 import pytest
@@ -3908,3 +3908,110 @@ def test_persisted_child_progress_is_read_with_json_semantics() -> None:
     assert start_deadline is not None
     assert start_deadline.year == 2026
     assert start_deadline.microsecond == 262460
+
+
+def test_a_replaced_workload_keeps_serving_until_its_successor_starts() -> None:
+    """Wrong implementation: every stop ran first, so loading a new revision of
+    a running workload took it down for the successor's whole preparation."""
+
+    from types import SimpleNamespace
+
+    from vonk_control.fleet_profiles import _switch_queue
+
+    def stop(run_id: str, *nodes: int):
+        return SimpleNamespace(
+            run_id=run_id,
+            node_ids=[_node_id(n) for n in nodes],
+            profile_stop_scope=None,
+        )
+
+    def assignment(assignment_id: str, *nodes: int, state: str = "running"):
+        return SimpleNamespace(
+            id=assignment_id,
+            nodes=[SimpleNamespace(node_id=_node_id(n)) for n in nodes],
+            desired_state=state,
+        )
+
+    # The ordering reads only identities and Spark sets, so plain records
+    # stand in for the full effect and assignment models.
+    queue = _switch_queue(
+        cast(Any, [stop("old-glm", 1, 2), stop("spread", 3, 4)]),
+        cast(
+            Any,
+            [
+                assignment("new-glm", 1, 2),
+                assignment("solo-three", 3),
+                assignment("solo-four", 4),
+            ],
+        ),
+        ["leftover"],
+    )
+
+    assert [(item["kind"], item["id"]) for item in queue] == [
+        # Two new runs take the spread workload's Sparks separately; neither
+        # one alone can stop it, so it stops first.
+        ("stop", "spread"),
+        ("run", "new-glm"),
+        ("run", "solo-three"),
+        ("run", "solo-four"),
+        # The new GLM's own Run/Switch stops the old one right before start.
+        ("stop", "old-glm"),
+        ("cleanup", "leftover"),
+    ]
+
+
+def test_a_stop_step_for_an_already_replaced_workload_is_skipped(
+    tmp_path: Path,
+) -> None:
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_operations import (
+        installed_recipe,
+        setup_services,
+        started_recipe,
+    )
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=_uuid(652)
+    )
+    run = started_recipe(
+        sessions, lifecycle, installation.owner_id, nodes, request_id=_uuid(653)
+    )
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
+    )
+    profile = service.create(
+        FleetProfileInput(name="All idle", assignments=[]), actor="admin"
+    )
+    service.preview(profile.id)
+    application = service.apply(profile.id, request_key=_uuid(654), actor="admin")
+    # Its replacement already stopped it before this step was reached.
+    with sessions.begin() as session:
+        stored = session.get(RecipeRun, run.owner_id)
+        assert stored is not None
+        stored.state = "stopped"
+
+    service.tick()
+    service.tick()
+
+    current = service.application(application.id)
+    state = current.progress.switch_adapter
+    assert state is not None and state.active_operation_id is None
+    assert current.state == "succeeded", current.status_reason

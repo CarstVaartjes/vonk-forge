@@ -97,6 +97,7 @@ from .fleet_profile_contract import (
 from .logging import redact_text
 from .models import (
     ACTIVE_RUN_STATES,
+    STOPPABLE_RUN_STATES,
     AgentNode,
     AgentNodeProfile,
     CatalogDocument,
@@ -1594,6 +1595,21 @@ class RunSwitchFleetProfileAdapter:
             session.flush()
             return self._view_from_state(application, state)
         item = queue[integer(position) or 0]
+        if isinstance(item, Mapping) and item.get("kind") == "stop":
+            stopped = session.get(RecipeRun, item.get("id"))
+            if stopped is None or stopped.state not in STOPPABLE_RUN_STATES:
+                # The Run/Switch that replaced this workload already stopped
+                # it, right before its successor started.
+                _LOGGER.info(
+                    "profile application %s: workload %s is already stopped by "
+                    "its replacement",
+                    application_id,
+                    item.get("id"),
+                )
+                state["position"] = (integer(position) or 0) + 1
+                self._write_state(session, application, state)
+                session.flush()
+                return self._view_from_state(application, state)
         if not isinstance(item, Mapping):
             failures = list(sequence(state.get("assignment_failures")) or ())
             failures.append(
@@ -2070,42 +2086,21 @@ class RunSwitchFleetProfileAdapter:
                 "Profile workload effects can no longer be represented safely; review again"
             )
         _validate_remaining_effects(reviewed_effects, control.effects)
-        return [
-            *(
-                {
-                    "kind": "stop",
-                    "id": effect.run_id,
-                    **(
-                        {
-                            "profile_stop_scope": effect.profile_stop_scope.model_dump(
-                                mode="json"
-                            )
-                        }
-                        if effect.profile_stop_scope is not None
-                        else {}
-                    ),
-                }
-                for effect in control.effects.runs
-                if effect.action == "stop"
-            ),
-            *(
-                {
-                    "kind": "install"
-                    if assignment.desired_state == "installed"
-                    else "run",
-                    "id": assignment.id,
-                }
+        return _switch_queue(
+            [effect for effect in control.effects.runs if effect.action == "stop"],
+            [
+                assignment
                 for assignment in assignments
                 if assignment.id not in control.unavailable_assignment_ids
                 if control.states[assignment.id].current_state
                 != assignment.desired_state
-            ),
-            *(
-                {"kind": "cleanup", "id": effect.installation_id}
+            ],
+            [
+                effect.installation_id
                 for effect in control.effects.installations
                 if effect.action == "remove"
-            ),
-        ]
+            ],
+        )
 
     @staticmethod
     def _state(application: FleetProfileApplication) -> dict[str, object] | None:
@@ -2605,6 +2600,60 @@ def _replace_selected_profile_application(
         raise FleetProfileStalePlanConflict(
             "Selected profile changed before its retry was admitted"
         )
+
+
+def _switch_queue(
+    stops: Sequence[FleetProfileRunEffect],
+    work: Sequence[FleetProfileAssignment],
+    removals: Sequence[str],
+) -> list[dict[str, object]]:
+    """Order a profile's switch steps so replaced workloads keep serving.
+
+    A Run/Switch stops the workloads on its own Sparks right before it starts.
+    A workload that one new run replaces on the same Sparks is therefore left
+    serving until then: its stop step comes after the new work and finds
+    nothing left to do. A workload no single new run covers (for example one
+    spread over Sparks two new runs take separately) is stopped first.
+    """
+
+    run_groups = [
+        {node.node_id for node in assignment.nodes}
+        for assignment in work
+        if assignment.desired_state == "running"
+    ]
+
+    def stop_item(effect: FleetProfileRunEffect) -> dict[str, object]:
+        return {
+            "kind": "stop",
+            "id": effect.run_id,
+            **(
+                {
+                    "profile_stop_scope": effect.profile_stop_scope.model_dump(
+                        mode="json"
+                    )
+                }
+                if effect.profile_stop_scope is not None
+                else {}
+            ),
+        }
+
+    replaced = [
+        effect
+        for effect in stops
+        if any(set(effect.node_ids) <= group for group in run_groups)
+    ]
+    return [
+        *(stop_item(effect) for effect in stops if effect not in replaced),
+        *(
+            {
+                "kind": "install" if assignment.desired_state == "installed" else "run",
+                "id": assignment.id,
+            }
+            for assignment in work
+        ),
+        *(stop_item(effect) for effect in replaced),
+        *({"kind": "cleanup", "id": installation_id} for installation_id in removals),
+    ]
 
 
 def _validate_remaining_effects(
