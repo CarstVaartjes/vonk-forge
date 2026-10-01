@@ -3,6 +3,14 @@
 The ordinary ResourceReservation row is the claim. Handoff changes its owner
 in the installation transaction; it neither copies the claim nor opens a gap.
 Only unassigned profile claims are released when their application terminates.
+
+Release and restore are one pair: an application that fails releases its
+unassigned claims, and the same application returning to work (its live child
+resumed) takes them back. A disk claim is bookkeeping for a promise, never a
+precondition of the work: a live application whose disk claim is absent,
+released or stale reserves again under the reservation locks and the ordinary
+capacity check instead of failing. Port and memory promises are exact-plan
+authority and stay strict.
 """
 
 from collections.abc import Mapping, Sequence
@@ -10,6 +18,7 @@ from datetime import datetime
 from uuid import UUID, uuid5
 
 from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import canonical_message
@@ -636,6 +645,12 @@ def _profile_disk_binding(
 ) -> tuple[
     FleetProfileApplication, str, dict[str, int | None], dict[str, ResourceReservation]
 ]:
+    """The accepted requirement and whichever deterministic claim rows exist.
+
+    A claim is bookkeeping for a promise, never a precondition of the work: a
+    row that is absent (never reserved, or released with the installation that
+    held it) is simply not returned, and the caller reserves afresh.
+    """
     application, assignment, required = _profile_assignment(
         session,
         application_id,
@@ -652,14 +667,8 @@ def _profile_disk_binding(
         for claim in session.scalars(
             select(ResourceReservation).where(ResourceReservation.id.in_(ids))
         )
+        if claim.kind == "disk" and claim.node_id in nodes
     }
-    if set(claims) != set(nodes) or any(
-        claim.id != _disk_claim_id(application_id, assignment_id, node_id)
-        or claim.kind != "disk"
-        or claim.state != "active"
-        for node_id, claim in claims.items()
-    ):
-        raise ValueError("profile disk claim is missing or changed")
     return application, assignment_id, requirements, claims
 
 
@@ -670,30 +679,49 @@ def inherited_profile_disk(
     node_ids: Sequence[str],
     *,
     workload_intent_ordinal: int | None,
+    now: datetime,
 ) -> dict[str, ResourceReservation]:
-    """Validate the current parent and exact claim before changing its owner.
+    """The claims the installation may take over, by node; others are reserved afresh.
 
     Caller holds the target-node and reservation locks. Do not lock the parent:
     its scheduler can already hold that row while admitting a child. Release
     and handoff serialize on the reservation row itself.
+
+    Only a claim that still holds exactly the reviewed promise is inherited. A
+    claim that is gone, was released with an earlier installation, or has
+    drifted from the current plan never blocks the live application: a
+    drifted one is released here, and admission reserves the node again under
+    the same locks and the ordinary capacity check, so a shortage waits with
+    its named reason instead of failing on bookkeeping.
     """
-    application, assignment_id, requirements, claims = _profile_disk_binding(
+    application, assignment_id, requirements, found = _profile_disk_binding(
         session,
         application_id,
         recipe_revision_id,
         node_ids,
         workload_intent_ordinal=workload_intent_ordinal,
     )
-    if any(
-        claim.owner_kind != "fleet-profile"
-        or claim.owner_id != application_id
-        or claim.resource_key != assignment_id
-        or claim.plan_digest != application.plan_digest
-        or claim.amount_bytes != requirements.get(node_id)
-        for node_id, claim in claims.items()
-    ):
-        raise ValueError("profile disk claim is missing or changed")
+    claims: dict[str, ResourceReservation] = {}
+    for node_id, claim in found.items():
+        if (
+            claim.state == "active"
+            and claim.owner_kind == "fleet-profile"
+            and claim.owner_id == application_id
+        ):
+            if (
+                claim.resource_key == assignment_id
+                and claim.plan_digest == application.plan_digest
+                and claim.amount_bytes == requirements.get(node_id)
+            ):
+                claims[node_id] = claim
+            else:
+                claim.state = "released"
+                claim.released_at = now
     return claims
+
+
+class ProfileHandoffInconsistent(ValueError):
+    """Active claims name different owners: a handoff is atomic, so this is a fault."""
 
 
 def prepared_profile_installation(
@@ -704,7 +732,14 @@ def prepared_profile_installation(
     *,
     workload_intent_ordinal: int,
 ) -> tuple[str, str] | None:
-    """Find the exact handoff after a lost parent checkpoint, before re-admission."""
+    """Find the exact handoff after a lost parent checkpoint, before re-admission.
+
+    ``None`` means nothing is handed off: the promise is still the profile's,
+    or a claim was released or never existed (the caller admits the
+    installation as usual and reserves afresh). Active claims that disagree
+    about their owner cannot come from the atomic handoff, so they are named
+    rather than adopted or silently replaced.
+    """
     _, _, requirements, claims = _profile_disk_binding(
         session,
         application_id,
@@ -712,6 +747,10 @@ def prepared_profile_installation(
         node_ids,
         workload_intent_ordinal=workload_intent_ordinal,
     )
+    if set(claims) != set(node_ids) or any(
+        claim.state != "active" for claim in claims.values()
+    ):
+        return None
     if all(
         claim.owner_kind == "fleet-profile" and claim.owner_id == application_id
         for claim in claims.values()
@@ -724,7 +763,9 @@ def prepared_profile_installation(
         or claim.amount_bytes > (requirements[node_id] or 0)
         for node_id, claim in claims.items()
     ):
-        raise ValueError("profile installation handoff is inconsistent")
+        raise ProfileHandoffInconsistent(
+            "the profile's active disk claims name different owners"
+        )
     return identities.pop()
 
 
@@ -745,3 +786,39 @@ def release_unassigned_profile_claims(
     ):
         claim.state = "released"
         claim.released_at = now
+
+
+def restore_released_profile_claims(
+    session: Session, application: FleetProfileApplication
+) -> None:
+    """Take back the claims an application released while it was failed.
+
+    The inverse of ``release_unassigned_profile_claims``, for the same
+    application when its live child is advanced again. Only rows that still
+    carry the accepted plan return. A claim consumed by an installation or a
+    run changed owner and is untouched. A port another load promised in the
+    meantime stays released (the unique promise index refuses it): the run
+    path then names the conflict instead of this restoring a second owner.
+    Consumption re-checks real capacity, so a restored claim never admits more
+    than the ordinary admission would.
+    """
+    if application.state not in {"queued", "running", "waiting-for-operator"}:
+        return
+    for claim in session.scalars(
+        select(ResourceReservation)
+        .where(
+            ResourceReservation.owner_kind == "fleet-profile",
+            ResourceReservation.owner_id == application.id,
+            ResourceReservation.state == "released",
+            ResourceReservation.plan_digest == application.plan_digest,
+        )
+        .order_by(ResourceReservation.id)
+        .with_for_update(nowait=True)
+    ):
+        try:
+            with session.begin_nested():
+                claim.state = "active" if claim.kind == "disk" else "promised"
+                claim.released_at = None
+                session.flush()
+        except IntegrityError:
+            continue

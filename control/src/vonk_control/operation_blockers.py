@@ -18,6 +18,12 @@ from .strict_json import StrictJSONModel
 
 MAX_BLOCKERS = 16
 
+#: An operation is repeating a phase that failed (it is not merely waiting).
+PHASE_RETRY_CODE = "run-switch.phase-retry"
+#: A retry is a stall worth an operator's attention from this attempt on, so a
+#: brief contention hold never raises one.
+STALL_RETRY_ATTEMPT = 3
+
 _NODE_PATTERN = re.compile(r"^spk_[0-9a-f]{32}$")
 _NODE_ID = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
 
@@ -86,6 +92,8 @@ def dump_blockers(blockers: Iterable[OperationBlocker]) -> list[dict[str, object
 
 __all__ = [
     "MAX_BLOCKERS",
+    "PHASE_RETRY_CODE",
+    "STALL_RETRY_ATTEMPT",
     "OperationBlocker",
     "bound_blockers",
     "dump_blockers",

@@ -120,6 +120,8 @@ from .models import (
     User,
 )
 from .operation_blockers import (
+    PHASE_RETRY_CODE,
+    STALL_RETRY_ATTEMPT,
     OperationBlocker,
     bound_blockers,
     make_blocker,
@@ -132,6 +134,7 @@ from .profile_capacity import (
     reserve_profile_disk,
     reserve_profile_memory,
     reserve_profile_ports,
+    restore_released_profile_claims,
 )
 from .recipe_build_cancellation import (
     BuildConsumerError,
@@ -2244,12 +2247,21 @@ class RunSwitchFleetProfileAdapter:
             default="running",
         )
         result = self._child_receipt(child)
+        attempt = child.result.retry_attempt if child.result is not None else None
         return FleetProfileChildOperation(
             id=application_id,
             state=child_state,
             progress=progress,
             status_reason=child.status_reason,
             result=result,
+            # A phase the child keeps failing is the stall an operator must see;
+            # a first retry or a short contention hold is not.
+            stalls=[
+                blocker
+                for blocker in child.blockers
+                if blocker.code == PHASE_RETRY_CODE
+                and (attempt or 0) >= STALL_RETRY_ATTEMPT
+            ],
         )
 
     @staticmethod
@@ -5724,6 +5736,8 @@ class FleetProfileService:
             if child.state not in _CHILD_PENDING_STATES:
                 return None
             self._set_application_state(session, row, "running")
+            # Failing released its unassigned claims; the resumed child needs them.
+            restore_released_profile_claims(session, row)
             row.status_reason = "Resumed advancing the live child operation"
             row.updated_at = now
             session.flush()
@@ -6320,7 +6334,7 @@ class FleetProfileService:
             ),
             "blockers": (
                 [item.model_dump(mode="json") for item in typed_progress.blockers]
-                if state in {"queued", "failed", "waiting-for-operator"}
+                if state in {"queued", "running", "failed", "waiting-for-operator"}
                 else []
             ),
             "next_attempt_at": next_attempt.isoformat()
@@ -6964,6 +6978,34 @@ class FleetProfileService:
                     progress_data["child_progress"] = child.progress.model_dump(
                         mode="json"
                     )
+                if child.state in _CHILD_PENDING_STATES:
+                    # A live child that keeps retrying a phase is a stall the
+                    # application names, with its cause, until the child moves.
+                    held = [
+                        item
+                        for item in progress.blockers
+                        if item.code == PHASE_RETRY_CODE
+                    ]
+                    if child.stalls != held:
+                        progress_data["blockers"] = [
+                            item.model_dump(mode="json")
+                            for item in bound_blockers(
+                                [
+                                    *(
+                                        item
+                                        for item in progress.blockers
+                                        if item.code != PHASE_RETRY_CODE
+                                    ),
+                                    *child.stalls,
+                                ]
+                            )
+                        ]
+                    if child.stalls or held:
+                        reason = (
+                            (child.status_reason or "")[:512] if child.stalls else None
+                        )
+                        if row.status_reason != reason:
+                            row.status_reason = reason
                 if progress_data != progress.model_dump(mode="json"):
                     progress = read_stored_model(
                         FleetProfileApplicationProgress,
@@ -8792,7 +8834,7 @@ class FleetProfileService:
             result=_persisted_profile_result(row),
             blockers=(
                 list(progress.blockers)
-                if state in {"queued", "failed", "waiting-for-operator"}
+                if state in {"queued", "running", "failed", "waiting-for-operator"}
                 else []
             ),
             next_attempt_at=next_attempt_at,

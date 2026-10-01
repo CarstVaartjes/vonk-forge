@@ -12111,6 +12111,7 @@
               "telemetry.delayed",
               "telemetry.stale",
               "install.partial",
+              "profile.retrying",
               "run.degraded",
               "recipe.update_available",
               "cpu.low-clock"

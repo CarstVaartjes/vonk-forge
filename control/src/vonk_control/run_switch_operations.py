@@ -98,6 +98,7 @@ from .operation_api import (
     _activity_keyset_filter,
 )
 from .operation_blockers import (
+    PHASE_RETRY_CODE,
     OperationBlocker,
     bound_blockers,
     dump_blockers,
@@ -117,6 +118,7 @@ from .preparation_contract import (
     controller_assets_ready,
 )
 from .profile_capacity import (
+    ProfileHandoffInconsistent,
     accepted_profile_runtime_image,
     prepared_profile_installation,
     reservation_visible,
@@ -1436,13 +1438,18 @@ class RecipeLifecyclePhaseExecutor:
             )
             if profile_application_id is not None:
                 with self._sessions() as session:
-                    handed_off = prepared_profile_installation(
-                        session,
-                        profile_application_id,
-                        _required_string(plan.recipe_revision_id),
-                        tuple(node.node_id for node in plan.spark_group.nodes),
-                        workload_intent_ordinal=_bound_workload_intent(progress),
-                    )
+                    try:
+                        handed_off = prepared_profile_installation(
+                            session,
+                            profile_application_id,
+                            _required_string(plan.recipe_revision_id),
+                            tuple(node.node_id for node in plan.spark_group.nodes),
+                            workload_intent_ordinal=_bound_workload_intent(progress),
+                        )
+                    except ProfileHandoffInconsistent as error:
+                        raise RunSwitchOperationConflict(
+                            f"run-switch.installation-handoff-inconsistent: {error}"
+                        ) from error
                     if handed_off is not None:
                         installation_id, install_plan_digest = handed_off
                         installation, _ = self._bound_installation(
@@ -8749,7 +8756,7 @@ def _wait_blockers(job: Job, progress: Mapping[str, object]) -> list[OperationBl
         # A phase that will be tried again is waiting, not failed.
         return [
             make_blocker(
-                "run-switch.phase-retry",
+                PHASE_RETRY_CODE,
                 retry_reason,
                 node_ids=nodes,
             )

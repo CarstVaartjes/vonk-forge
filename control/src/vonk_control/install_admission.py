@@ -812,6 +812,7 @@ class InstallAdmissionService:
                 plan.recipe_revision_id,
                 node_ids,
                 workload_intent_ordinal=workload_intent_ordinal,
+                now=now,
             )
             if profile_application_id is not None
             else {}
@@ -903,7 +904,8 @@ class InstallAdmissionService:
         session.add(installation)
         session.flush()
         for node in plan.nodes:
-            if claims and node.required_bytes > claims[node.node_id].amount_bytes:
+            inherited = claims.get(node.node_id)
+            if inherited is not None and node.required_bytes > inherited.amount_bytes:
                 raise InstallPlanConflict(
                     "installation exceeds its reviewed disk claim"
                 )
@@ -919,8 +921,8 @@ class InstallAdmissionService:
                     updated_at=now,
                 )
             )
-            if claims:
-                claim = claims[node.node_id]
+            if inherited is not None:
+                claim = inherited
                 claim.owner_kind = "installation"
                 claim.owner_id = installation.id
                 claim.resource_key = plan.plan_digest
