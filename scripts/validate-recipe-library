@@ -511,6 +511,25 @@ def _validate_recipe_option_policy(
                 ) from error
 
 
+def _launcher_error(entrypoint: str, wrapper: str, engine: str) -> str | None:
+    """Why a recipe's launcher would fail the platform's runtime adapter.
+
+    The adaptation stage verifies the engine's canonical launcher exists in the
+    built image (``test -x <wrapper>``), so a recipe that installs its launcher
+    under another name can never produce a runnable image, on CI or a Spark.
+    Engines whose wrapper ships in the base image (outside /opt/vonk/bin) are
+    not the recipe's to install.
+    """
+
+    if wrapper.startswith("/opt/vonk/bin/") and entrypoint != wrapper:
+        return (
+            f"entrypoint {entrypoint} is not the {engine} launcher {wrapper}, which "
+            "the runtime adapter verifies in the built image; install the "
+            f"launcher at {wrapper} and declare it as the entrypoint"
+        )
+    return None
+
+
 def _validate_source_policy(library_root: Path, platform_root: Path) -> None:
     """Every recipe passes the build source policy the Controller enforces.
 
@@ -702,6 +721,11 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
                 f"{path}: topology mode is not supported by platform harness: "
                 f"{recipe.topology.mode}"
             )
+        launcher = _launcher_error(
+            recipe.runtime.entrypoint[0], harness.wrapper, recipe.runtime.engine
+        )
+        if launcher is not None:
+            raise LibraryValidationError(f"{path}: {launcher}")
         _validate_recipe_option_policy(recipe, path, platform_root)
         row = indexed.get(key)
         digest = document_sha256(recipe_document)

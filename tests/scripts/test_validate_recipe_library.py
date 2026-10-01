@@ -259,3 +259,20 @@ def test_a_recipe_option_choice_gets_the_platform_environment_policy() -> None:
         _VALIDATOR._validate_recipe_option_policy(
             _option_recipe({"HOME": "/tmp"}), path, ROOT
         )
+
+
+def test_a_launcher_under_another_name_fails_validation_with_the_fix() -> None:
+    wrapper = "/opt/vonk/bin/vllm"
+
+    assert _VALIDATOR._launcher_error(wrapper, wrapper, "vllm") is None
+    message = _VALIDATOR._launcher_error("/opt/vonk/bin/vllm-api", wrapper, "vllm")
+    assert message is not None and wrapper in message and "vllm-api" in message
+    # A launcher the base image ships is not the recipe's to install.
+    assert (
+        _VALIDATOR._launcher_error(
+            "/opt/vonk/bin/trtllm-serve",
+            "/usr/local/bin/trtllm-serve",
+            "tensorrt-llm",
+        )
+        is None
+    )
