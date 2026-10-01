@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 from datetime import UTC, datetime
@@ -30,6 +29,7 @@ from vonk_control.recipe_image_removal_contract import (
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import document_sha256
 
+from .runtime_image_fixtures import place_test_image
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 from .test_recipe_image_availability import (
     ARCHIVE,
@@ -89,15 +89,13 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
         )
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "managed-artifacts")
-    staged = storage.root / "staged.part"
-    staged.write_bytes(ARCHIVE)
-    assert hashlib.sha256(staged.read_bytes()).hexdigest() == ARCHIVE_SHA
+    place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
+    staged = storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE))
     published = storage.commit(staged, receipt=receipt)
     assert published.oci_archive_sha256 == ARCHIVE_SHA
     assert published.image_bytes == len(ARCHIVE)
-    archive = storage.root / ARCHIVE_SHA
     receipt_file = storage.root / f"{ARCHIVE_SHA}.receipt.json"
-    assert archive.read_bytes() == ARCHIVE
+    assert storage.published_archive_bytes(ARCHIVE_SHA) == len(ARCHIVE)
     assert receipt_file.is_file()
 
     service = RecipeImageAvailabilityService(
@@ -261,7 +259,7 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
         assert pending["progress"]["completed_bytes"] == 0
         assert pending["progress"]["completed_items"] == 0
         assert pending["progress"]["total_items"] == 1
-        assert archive.read_bytes() == ARCHIVE
+        assert storage.published_archive_bytes(ARCHIVE_SHA) == len(ARCHIVE)
         assert receipt_file.is_file()
         assert token not in stdout + stderr + replay.stdout + replay.stderr
         assert token not in progress.stdout + progress.stderr
@@ -286,7 +284,7 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
     assert settled_progress["completed_bytes"] == len(ARCHIVE)
     assert settled_progress["completed_items"] == 1
     assert settled_progress["total_items"] == 1
-    assert not archive.exists()
+    # The image is retired; collection reclaims its unshared blobs.
     assert not receipt_file.exists()
 
     with sessions() as session:

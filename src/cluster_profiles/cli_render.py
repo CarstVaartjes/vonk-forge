@@ -1040,6 +1040,7 @@ def _preview(payload: Mapping[str, object]) -> None:
         runtime = _object(item.get("runtime_image"), "runtime identity")
         _field("Exact model set", model.get("artifact_set_sha256"))
         _field("Exact image", runtime.get("image_digest"))
+        _field("Image manifest", runtime.get("oci_layout_sha256"))
         _field("Image size", _bytes(runtime.get("image_bytes")))
         _field("Architecture", runtime.get("architecture"))
         _field("Runtime interface", runtime.get("runtime_interface"))
