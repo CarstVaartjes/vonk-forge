@@ -55,6 +55,8 @@ from .oci_image_store import (
     OciImageStore,
     OciImageStoreError,
 )
+from .recipe_library_types import RecipeLibraryItem
+from .source_bundles import GeneratedSourceBundle
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -257,7 +259,6 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
     import tarfile
 
     from .catalog_entities import build_policy_projection
-    from .recipe_packages import load_recipe_package
     from .runtime_adapters import (
         RUNTIME_ADAPTER_DIGEST_LABEL,
         RUNTIME_ADAPTER_LABEL,
@@ -274,28 +275,15 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
         identity = document.get("identity", {}) if isinstance(document, Mapping) else {}
         slug = str(identity.get("slug", ""))
         try:
-            package = entry["package"]
-            item = load_recipe_package(
-                library_root / str(package["path"]),
-                package_sha256=str(package["sha256"]),
-                publisher=str(identity["publisher"]),
-                slug=slug,
-                recipe_content_sha256=str(entry["content_sha256"]),
-                library_commit=str(index["source_commit"]),
-                source_path=str(entry["source_path"]),
-            )
-            if item.source_bundle is None or item.source_bundle_sha256 is None:
-                raise ValueError("package has no build context")
+            item, bundle = _library_recipe(library_root, index, entry)
+            # The Controller refuses a recipe its source policy rejects, so an
+            # image for it could never be pulled: do not build one.
+            _require_source_policy(item.document, bundle, item.source_bundle_sha256)
             recipe = read_recipe(item.document)
-            with tarfile.open(fileobj=io.BytesIO(item.source_bundle)) as bundle:
-                files = {
-                    member.name: bundle.extractfile(member).read()  # type: ignore[union-attr]
-                    for member in bundle.getmembers()
-                    if member.isfile()
-                }
+            files = dict(bundle.files)
             intent = package_build_intent(
                 item.document,
-                source_bundle_sha256=item.source_bundle_sha256,
+                source_bundle_sha256=bundle.sha256,
                 dockerfile_payload=files[
                     _bundle_relative(
                         recipe.execution.build.dockerfile,
@@ -305,7 +293,7 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
             )
             key = executable_build_key(intent)
         except Exception as error:  # noqa: BLE001 - one recipe never blocks the others
-            skipped.append({"slug": slug, "reason": str(error)[:300]})
+            skipped.append({"slug": slug, "reason": _reason(error)})
             continue
         recipe_entry = {
             "publisher": recipe.identity.publisher,
@@ -328,8 +316,8 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
         adapter = resolve_runtime_adapter(recipe.runtime.engine, recipe.topology)
         directory = output / key / "context"
         directory.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(fileobj=io.BytesIO(item.source_bundle)) as bundle:
-            bundle.extractall(directory, filter="data")
+        with tarfile.open(fileobj=io.BytesIO(bundle.archive)) as archive:
+            archive.extractall(directory, filter="data")
         execution = intent["execution_build"]
         assert isinstance(execution, Mapping)
         images[key] = {
@@ -375,6 +363,74 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
         "images": sorted(images.values(), key=lambda value: str(value["build_key"])),
         "skipped": skipped,
     }
+
+
+def _library_recipe(
+    library_root: Path, index: Mapping[str, object], entry: Mapping[str, object]
+) -> tuple[RecipeLibraryItem, GeneratedSourceBundle]:
+    """Load one indexed recipe package with its verified build-context bundle."""
+
+    from .recipe_packages import load_recipe_package
+    from .source_bundles import parse_source_bundle
+
+    document = entry["document"]
+    assert isinstance(document, Mapping)
+    identity = document["identity"]
+    package = entry["package"]
+    assert isinstance(identity, Mapping) and isinstance(package, Mapping)
+    item = load_recipe_package(
+        library_root / str(package["path"]),
+        package_sha256=str(package["sha256"]),
+        publisher=str(identity["publisher"]),
+        slug=str(identity["slug"]),
+        recipe_content_sha256=str(entry["content_sha256"]),
+        library_commit=str(index["source_commit"]),
+        source_path=str(entry["source_path"]),
+    )
+    if item.source_bundle is None or item.source_bundle_sha256 is None:
+        raise ValueError("package has no build context")
+    return item, parse_source_bundle(item.source_bundle)
+
+
+def _require_source_policy(
+    document: Mapping[str, object],
+    bundle: GeneratedSourceBundle,
+    source_sha256: str | None,
+) -> None:
+    from .recipe_builds import inspect_package_source_policy
+    from .source_policy import SourcePolicyError
+
+    report = inspect_package_source_policy(
+        document, bundle, source_sha256=source_sha256
+    )
+    if not report.passed:
+        raise SourcePolicyError(report)
+
+
+def _reason(error: Exception) -> str:
+    report = getattr(error, "report", None)
+    text = report.describe() if report is not None else str(error)
+    return text[:600]
+
+
+def library_source_policy_failures(library_root: Path) -> dict[str, str]:
+    """Recipes of a built library that cannot be loaded or that the policy refuses.
+
+    Maps each refused recipe slug to the findings.  Recipe library validation
+    fails on a non-empty result: a recipe the Controller cannot build or pull
+    must not pass validation, whether or not it has a prebuilt image.
+    """
+
+    index = json.loads((library_root / "catalog-index.json").read_text("utf-8"))
+    failures: dict[str, str] = {}
+    for entry in index.get("recipes", []):
+        slug = str(entry.get("document", {}).get("identity", {}).get("slug", ""))
+        try:
+            item, bundle = _library_recipe(library_root, index, entry)
+            _require_source_policy(item.document, bundle, item.source_bundle_sha256)
+        except Exception as error:  # noqa: BLE001 - report every recipe, not the first
+            failures[slug] = _reason(error)
+    return failures
 
 
 def _bundle_relative(dockerfile: str, context: str) -> str:
@@ -759,6 +815,7 @@ __all__ = [
     "PrebuiltImage",
     "PrebuiltImageImporter",
     "executable_build_key",
+    "library_source_policy_failures",
     "package_build_intent",
     "podman_build_arguments",
     "policy_prebuilt_reference",

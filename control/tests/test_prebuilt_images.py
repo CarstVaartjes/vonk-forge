@@ -244,6 +244,36 @@ def _start(builds, operations, revision_id: str):
     return plan, job
 
 
+def test_a_recipe_the_controller_refuses_gets_no_image_and_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vonk_control import recipe_builds
+    from vonk_control.source_policy import (
+        SourcePolicyFinding,
+        SourcePolicyReport,
+    )
+
+    def refuse(document, bundle, *, source_sha256=None):
+        finding = SourcePolicyFinding(
+            "dockerfile.heredoc_forbidden", "Dockerfile", 23, "no heredocs"
+        )
+        return SourcePolicyReport(False, bundle.sha256, "Dockerfile", (finding,))
+
+    monkeypatch.setattr(recipe_builds, "inspect_package_source_policy", refuse)
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    index["recipes"] = index["recipes"][:1]
+    library = tmp_path / "library"
+    library.mkdir()
+    (library / "catalog-index.json").write_text(json.dumps(index), encoding="utf-8")
+    (library / "packages").symlink_to(ROOT / "packages")
+
+    plan = write_library_image_plan(library, tmp_path / "plan")
+
+    assert plan["images"] == []
+    (skipped,) = require_sequence(plan["skipped"], "skipped recipes")
+    assert "dockerfile.heredoc_forbidden Dockerfile:23" in str(skipped)
+
+
 def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
     tmp_path: Path,
 ) -> None:

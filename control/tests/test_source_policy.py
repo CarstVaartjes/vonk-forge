@@ -3,10 +3,11 @@ from __future__ import annotations
 import copy
 
 import pytest
-from vonk_control.source_bundles import generate_source_bundle
+from vonk_control.recipe_builds import inspect_package_source_policy
+from vonk_control.source_bundles import generate_source_bundle, parse_source_bundle
 from vonk_control.source_policy import SourcePolicyError, enforce_build_source_policy
 
-from tests.canonical_recipe_fixtures import source_policy_recipe
+from tests.canonical_recipe_fixtures import canonical_example, source_policy_recipe
 
 
 @pytest.fixture
@@ -177,3 +178,45 @@ def test_public_build_accepts_only_urls_on_the_declared_host_allowlist(
     )
 
     assert enforce_build_source_policy(recipe, bundle).passed is True
+
+
+def _package_bundle(dockerfile: str, **files: bytes):
+    """A library package's build context, as CI and validation read it."""
+
+    document = canonical_example("recipe-source-build.json")
+    build = document["execution"]["build"]
+    relative = build["dockerfile"].removeprefix(
+        build["context"]["path"].rstrip("/") + "/"
+    )
+    bundle = generate_source_bundle({relative: dockerfile.encode(), **files})
+    return document, parse_source_bundle(bundle.archive)
+
+
+_BASE = "FROM ghcr.io/example/vllm@sha256:" + "a" * 64 + "\n"
+
+
+def test_package_policy_accepts_what_the_controller_accepts() -> None:
+    document, bundle = _package_bundle(_BASE + "USER 10001:10001\n")
+
+    assert inspect_package_source_policy(document, bundle).passed is True
+
+
+def test_package_policy_refuses_what_the_controller_refuses() -> None:
+    document, bundle = _package_bundle(
+        _BASE + "RUN cat > /etc/x <<EOF\nx\nEOF\nUSER 10001:10001\n"
+    )
+
+    report = inspect_package_source_policy(document, bundle)
+
+    assert [finding.code for finding in report.findings] == [
+        "dockerfile.heredoc_forbidden"
+    ]
+    assert "dockerfile.heredoc_forbidden" in report.describe()
+
+
+def test_package_policy_refuses_a_bundle_the_catalog_does_not_name() -> None:
+    document, bundle = _package_bundle(_BASE + "USER 10001:10001\n")
+
+    report = inspect_package_source_policy(document, bundle, source_sha256="f" * 64)
+
+    assert [finding.code for finding in report.findings] == ["source.digest_mismatch"]

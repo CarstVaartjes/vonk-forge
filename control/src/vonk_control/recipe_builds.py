@@ -72,7 +72,11 @@ from .runtime_adapters import (
     RuntimeAdapterError,
     resolve_runtime_adapter,
 )
-from .source_bundles import SourceBundleError, SourceBundleStoreProtocol
+from .source_bundles import (
+    GeneratedSourceBundle,
+    SourceBundleError,
+    SourceBundleStoreProtocol,
+)
 from .source_policy import (
     SourcePolicyError,
     SourcePolicyReport,
@@ -351,6 +355,29 @@ def _source_policy_document(
         "network": copy.deepcopy(build.get("network", {"hosts": []})),
     }
     return {**copy.deepcopy(dict(document)), "build": normalized_build}
+
+
+def inspect_package_source_policy(
+    document: Mapping[str, object],
+    bundle: GeneratedSourceBundle,
+    *,
+    source_sha256: str | None = None,
+) -> SourcePolicyReport:
+    """Apply the Controller's build source policy to a recipe and its context.
+
+    ``prepare_plan`` runs the same :func:`inspect_build_source_policy` over the
+    same :func:`_source_policy_document`; the recipe library validation and the
+    prebuilt-image planner call this instead of a copy, so a recipe the
+    Controller would refuse can neither pass validation nor publish an image.
+    ``source_sha256`` is the digest the catalog binds to the recipe, when it
+    differs from the bundle's own.
+    """
+
+    build = canonical_build(_canonical_recipe_document(document), compile_policy=False)
+    return inspect_build_source_policy(
+        _source_policy_document(document, build, source_sha256 or bundle.sha256),
+        bundle,
+    )
 
 
 def _build_disk_envelope(

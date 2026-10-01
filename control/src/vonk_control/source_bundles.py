@@ -87,6 +87,16 @@ def generate_source_bundle(files: Mapping[str, bytes]) -> GeneratedSourceBundle:
     )
 
 
+def parse_source_bundle(
+    archive: bytes, limits: BundleLimits | None = None
+) -> GeneratedSourceBundle:
+    """Read a canonical source bundle archive into its verified files."""
+
+    active = limits or BundleLimits()
+    manifest = _inspect_archive(archive, active)
+    return _generated_bundle(archive, manifest, active)
+
+
 def inspect_source_bundle(
     payload: IO[bytes], limits: BundleLimits | None = None
 ) -> SourceBundleManifest:
