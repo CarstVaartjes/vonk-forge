@@ -51,6 +51,7 @@ from tests.acceptance.test_spark_lifecycle import (
     LOCAL_CONTROLLER_SERVICES,
     REPOSITORY_ROOT,
     SHA256,
+    SOURCE_SHA,
     LifecycleError,
     LocalBrowserController,
     SparkLifecycle,
@@ -88,6 +89,8 @@ class ProbeResult:
 @dataclass
 class ReleaseInput:
     generation: str
+    source_sha: str
+    caddyfile: str
     release: Path
     signature: Path
     overlay: Path
@@ -163,8 +166,20 @@ def resolve_release(
         ),
         "release agent package",
     )
+    source_sha = str(document.get("source_sha"))
+    if SOURCE_SHA.fullmatch(source_sha) is None:
+        raise LifecycleError(f"release {generation} names no source commit")
+    caddy = directory / "Caddyfile"
+    # The acceptance Caddyfile must be the one this release ships.
+    _fetch(
+        "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
+        f"{source_sha}/deploy/compose/Caddyfile",
+        caddy,
+    )
     return ReleaseInput(
         generation=generation,
+        source_sha=source_sha,
+        caddyfile=caddy.read_text(encoding="utf-8"),
         release=release,
         signature=signature,
         overlay=overlay,
@@ -235,6 +250,14 @@ class UpgradeCarryLifecycle(SparkLifecycle):
                 f"reason={application.get('status_reason')}"
             )
         return application
+
+    def _acceptance_caddyfile(self) -> str | None:
+        current = (
+            self.candidate
+            if self.controller_generation == self.candidate.generation
+            else self.baseline
+        )
+        return current.caddyfile
 
     def _release_environment(self, release: ReleaseInput) -> dict[str, str]:
         assert self.temporary_root is not None
@@ -344,6 +367,9 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         self.controller_generation = self.candidate.generation
         self.controller_release = self.candidate.release
         child_environment, responses = self._controller_inputs
+        # The installer upgrades only a bundle it recognises; the lane's own
+        # Caddyfile copy is laid down again after it.
+        (self.bundle / "acceptance-Caddyfile").unlink(missing_ok=True)
         generate_bundle(
             self.temporary_root / "controller",
             candidate_url=(

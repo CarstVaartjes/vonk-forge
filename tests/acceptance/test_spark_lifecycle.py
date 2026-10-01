@@ -514,7 +514,11 @@ def _set_bundle_environment(bundle: Path, values: dict[str, str]) -> None:
 
 
 def _configure_acceptance_renewal(
-    bundle: Path, *, lifetime_seconds: int, agent_source_address: str
+    bundle: Path,
+    *,
+    lifetime_seconds: int,
+    agent_source_address: str,
+    caddyfile: str | None = None,
 ) -> None:
     try:
         parsed_agent_source = ipaddress.ip_address(agent_source_address)
@@ -571,8 +575,12 @@ def _configure_acceptance_renewal(
     # The release Caddyfile ships in the Controller image. Acceptance runs a
     # copy that names the fixed agent source address instead.
     try:
-        caddy = (REPOSITORY_ROOT / "deploy/compose/Caddyfile").read_text(
-            encoding="utf-8"
+        caddy = (
+            caddyfile
+            if caddyfile is not None
+            else (REPOSITORY_ROOT / "deploy/compose/Caddyfile").read_text(
+                encoding="utf-8"
+            )
         )
     except (OSError, UnicodeDecodeError) as error:
         raise LifecycleError("Caddy acceptance boundary is invalid") from error
@@ -1335,7 +1343,12 @@ class SparkLifecycle:
             self.bundle,
             lifetime_seconds=CERTIFICATE_LIFETIME_SECONDS,
             agent_source_address=f"172.31.{self.synthetic_fabric_octet}.1",
+            caddyfile=self._acceptance_caddyfile(),
         )
+
+    def _acceptance_caddyfile(self) -> str | None:
+        """The Caddyfile of the Controller release this lane runs."""
+        return None
 
     def _local_controller_up_command(self) -> list[str]:
         return self._compose(
