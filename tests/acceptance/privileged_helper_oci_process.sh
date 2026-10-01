@@ -269,6 +269,36 @@ grep -q 'cache-created' "$report_root/container-first.log"
 grep -q 'tmp-fresh' "$report_root/container-first.log"
 test "$(cat "$installation_root/runtime-cache/helper-cache-ok")" = cache-created
 docker rm "$run_name" >"$report_root/container-first-remove.log"
+# Restart as an installation the previous agent started: its image receipt
+# is the schema-2 receipt an archive load wrote, keyed by the archive digest.
+python3 - "/var/lib/vonk-forge/runtime-images/$archive_sha" "$archive_sha" "$archive_bytes" <<'PY'
+import json
+import os
+import sys
+
+path, archive_sha256, archive_bytes = sys.argv[1], sys.argv[2], int(sys.argv[3])
+mode = os.stat(path).st_mode & 0o777
+with open(path, encoding="utf-8") as handle:
+    current = json.load(handle)
+legacy = {
+    "schema_version": 2,
+    "registry_index_digest": current["platform_manifest_digest"],
+    "platform_manifest_digest": current["platform_manifest_digest"],
+    "archive_sha256": archive_sha256,
+    "archive_bytes": archive_bytes,
+    "archive_identity": {
+        "bytes": archive_bytes, "changed_nanoseconds": 0, "changed_seconds": 1,
+        "device": 1, "inode": 1, "modified_nanoseconds": 0, "modified_seconds": 1,
+    },
+    "archive_config_id": current["image_config_id"],
+    "image_config_id": current["image_config_id"],
+    "local_image_reference": current["local_image_reference"],
+}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(legacy, handle, sort_keys=True, separators=(",", ":"))
+    handle.write("\n")
+os.chmod(path, mode)
+PY
 sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_ARCHIVE_SHA="$archive_sha" \
   VONK_HELPER_ARCHIVE_BYTES="$archive_bytes" \
