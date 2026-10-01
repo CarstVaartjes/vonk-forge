@@ -1,0 +1,44 @@
+name: Image store measurement
+
+# Measures what the Controller's layered image store moves for a series of
+# runtime images: pass consecutive releases of one recipe to see what an
+# update costs. Manual only; it copies real images from the registry.
+on:
+  workflow_dispatch:
+    inputs:
+      references:
+        description: Space-separated digest-pinned image references, oldest first
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: Copy the images through the layered store
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Measure
+        shell: bash
+        env:
+          REFERENCES: ${{ inputs.references }}
+        run: |
+          set -euo pipefail
+          skopeo --version
+          read -r -a references <<<"$REFERENCES"
+          scripts/measure-image-store --store "$RUNNER_TEMP/image-store" "${references[@]}" \
+            | tee "$RUNNER_TEMP/image-store-measurement.jsonl"
+          {
+            echo '| Image | Layers already stored | Bytes added | Seconds |'
+            echo '|---|---|---|---|'
+            jq -r '"| `\(.manifest[7:19])` | \(.layers_already_stored)/\(.layers) | \(.bytes_added) | \(.seconds) |"' \
+              "$RUNNER_TEMP/image-store-measurement.jsonl"
+          } >>"$GITHUB_STEP_SUMMARY"
