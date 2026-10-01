@@ -266,6 +266,8 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
         _field("Run", run.get("run_id"))
         _field("State", run.get("run_state"))
         _field("Route", run.get("route_state"))
+        if run.get("route_reason") is not None:
+            _field("Route reason", run.get("route_reason"))
         _field("Members", _words(run.get("member_node_ids")))
         if run.get("degraded_reason") is not None:
             _reasons([run["degraded_reason"]], subject=name)
@@ -460,7 +462,10 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
         if first.get("group_state") != "healthy":
             notes.append(f"{title} group is {_text(first.get('group_state'))}")
         if first.get("route_state") != "published":
-            notes.append(f"{title} route is {_text(first.get('route_state'))}")
+            route_note = f"{title} route is {_text(first.get('route_state'))}"
+            if first.get("route_reason") is not None:
+                route_note += f": {_text(first.get('route_reason'))}"
+            notes.append(route_note)
         if (
             isinstance(present, list)
             and type(expected) is int

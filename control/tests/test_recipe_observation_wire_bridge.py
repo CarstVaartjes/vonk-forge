@@ -1616,3 +1616,50 @@ def test_rust_observation_json_is_consumed_by_the_controller_wire_model(
             check=False,
         )
         assert rejected.returncode != 0, field
+
+
+def test_a_failing_readiness_probe_fails_the_rank_only_after_its_grace_period(
+    tmp_path: Path,
+    recipe_observation_wire_probe: Path,
+) -> None:
+    """One missed readiness probe never takes a serving workload down."""
+
+    from vonk_control.agent_api import RANK_UNREADY_GRACE
+
+    now = [NOW]
+    app, sessions, run_id, _start_id, node_id, _key, produced = (
+        _production_controller_app(
+            tmp_path,
+            nodes=1,
+            producer=recipe_observation_wire_probe,
+            clock=lambda: now[0],
+        )
+    )
+    identity = {
+        "node_id": node_id,
+        **require_mapping(produced["binding"], "recipe run observation"),
+    }
+
+    def observe(seconds: int, *, ready: bool) -> str:
+        now[0] = NOW + timedelta(seconds=seconds)
+        _submit_observation(
+            app,
+            sessions,
+            identity=identity,
+            recipe_observation_wire_probe=recipe_observation_wire_probe,
+            observed_at=now[0],
+            endpoint_ready=ready,
+        )
+        with sessions() as session:
+            node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+            assert node is not None
+            return node.state
+
+    grace = int(RANK_UNREADY_GRACE.total_seconds())
+    assert observe(1, ready=True) == "running"
+    assert observe(2, ready=False) == "running"
+    # Readiness came back inside the grace period: the clock starts over.
+    assert observe(grace, ready=True) == "running"
+    assert observe(grace + 1, ready=False) == "running"
+    assert observe(2 * grace, ready=False) == "running"
+    assert observe(2 * grace + 2, ready=False) == "failed"

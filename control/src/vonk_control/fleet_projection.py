@@ -340,6 +340,8 @@ class RunPresence(_StrictModel):
     group_state: Literal["healthy", "degraded"]
     healthy: bool
     degraded_reason: RunDegradedReason | None = None
+    # Why the route is not published, when the Controller withdrew it.
+    route_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     # The recipe option choices this run was started with; empty when the
     # recipe declares none.
     option_choices: dict[Text64, Text64] = Field(default_factory=dict, max_length=16)
@@ -929,6 +931,9 @@ class FleetProjection:
                         group_state="healthy" if reason is None else "degraded",
                         healthy=reason is None,
                         degraded_reason=reason,
+                        route_reason=(
+                            run.route_error if run.route_state != "published" else None
+                        ),
                         option_choices=mapping_option_choices(mapping.parameters),
                         recipe_update=update,
                     )

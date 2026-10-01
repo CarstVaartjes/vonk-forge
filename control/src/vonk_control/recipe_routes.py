@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import logging
 import re
 import threading
 from collections.abc import Callable, Iterator, Mapping
@@ -29,6 +30,7 @@ from .litellm import (
     render_config,
     render_empty_config,
 )
+from .logging import log_event
 from .models import (
     CatalogDocumentRevision,
     ClusterMapping,
@@ -57,11 +59,17 @@ _ALIAS = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}\Z")
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
+_LOGGER = logging.getLogger(__name__)
 _SQLITE_ROUTE_PUBLICATION_LOCK = threading.RLock()
 
 
 def route_health_recovery_pending(route_error: str | None) -> bool:
     """Return whether a run is waiting for its exact rank-health recovery owner."""
+
+    if route_error is not None and route_error.startswith(
+        f"{_HEALTH_RECOVERY_ERROR}: "
+    ):
+        return True
 
     return route_error == _HEALTH_RECOVERY_ERROR
 
@@ -370,6 +378,7 @@ class RecipeRouteService:
         self._management_policy = management_policy
         self._clock = clock
         self._maximum_age = timedelta(seconds=maximum_age_seconds)
+        self._retained: dict[str, str] = {}
 
     def publish_run(self, run_id: str) -> LiteLlmGeneration:
         committed_error: RecipeRouteError | None = None
@@ -668,7 +677,7 @@ class RecipeRouteService:
                     .where(
                         RecipeRun.state == "running",
                         RecipeRun.route_state == "withdrawn",
-                        RecipeRun.route_error == _HEALTH_RECOVERY_ERROR,
+                        RecipeRun.route_error.startswith(_HEALTH_RECOVERY_ERROR),
                     )
                     .order_by(RecipeRun.created_at, RecipeRun.id)
                     .with_for_update(of=RecipeRun)
@@ -686,6 +695,15 @@ class RecipeRouteService:
                 run.id for run in published if run.state != "running"
             )
             if not_running:
+                for run in published:
+                    if run.id in not_running:
+                        log_event(
+                            _LOGGER,
+                            "recipe.route.withdrawn",
+                            service="control-routes",
+                            run_id=run.id,
+                            reason=f"run is {run.state}",
+                        )
                 self._withdraw_runs_in_session(session, not_running)
                 return True
             try:
@@ -699,6 +717,13 @@ class RecipeRouteService:
                 if error.run_id is None:
                     raise
                 published_ids = frozenset(run.id for run in published)
+                log_event(
+                    _LOGGER,
+                    "recipe.route.withdrawn",
+                    service="control-routes",
+                    run_id=error.run_id,
+                    reason=str(error),
+                )
                 self.withdraw_run_in_session(session, error.run_id)
                 withdrawn = tuple(
                     session.scalars(
@@ -710,7 +735,9 @@ class RecipeRouteService:
                     )
                 )
                 for run in withdrawn:
-                    run.route_error = _HEALTH_RECOVERY_ERROR
+                    # The reason travels with the run so Fleet can show it;
+                    # recovery republishes once the ranks are healthy again.
+                    run.route_error = f"{_HEALTH_RECOVERY_ERROR}: {error}"[:512]
                     run.updated_at = self._clock()
                 return True
             owner = session.get(RoutePublicationOwner, 1)
@@ -826,6 +853,30 @@ class RecipeRouteService:
             owner.owner_generation = marker.generation
             owner.updated_at = now
 
+    def _note_retained(self, run_id: str, reasons: list[str]) -> None:
+        """Say once, when it starts or changes, why a serving route is kept."""
+
+        reason = "; ".join(reasons) if reasons else None
+        if self._retained.get(run_id) == reason:
+            return
+        if reason is None:
+            self._retained.pop(run_id, None)
+            log_event(
+                _LOGGER,
+                "recipe.route.evidence_current",
+                service="control-routes",
+                run_id=run_id,
+            )
+            return
+        self._retained[run_id] = reason
+        log_event(
+            _LOGGER,
+            "recipe.route.kept_without_current_evidence",
+            service="control-routes",
+            run_id=run_id,
+            reason=reason,
+        )
+
     def candidate_in_session(
         self,
         session: Session,
@@ -870,6 +921,14 @@ class RecipeRouteService:
                 nodes_by_run[node.run_id].append(node)
         for run in candidate_runs:
             nodes = tuple(nodes_by_run[run.id])
+            # A route that already serves stays published while its ranks
+            # run: missing, late or unmatched observations are bookkeeping,
+            # not evidence the endpoint is unhealthy. A rank that stopped or
+            # stayed unready past its grace period is evidence, and fails
+            # below as before. A route not yet published still needs current
+            # proof before it is first served.
+            serving = run.route_state == "published" and run.id != include_run_id
+            retained: list[str] = []
             if _ALIAS.fullmatch(run.alias) is None or run.alias in aliases:
                 raise RecipeRouteError(
                     "recipe run alias is invalid or duplicated", run_id=run.id
@@ -938,20 +997,32 @@ class RecipeRouteService:
                         node.observed_run_generation != run.run_generation
                         or node.observation_observed_at is None
                     ):
-                        raise RecipeRouteNotReady(
-                            "recipe rank is awaiting current exact observation",
-                            run_id=run.id,
+                        if not serving:
+                            raise RecipeRouteNotReady(
+                                "recipe rank is awaiting current exact observation",
+                                run_id=run.id,
+                            )
+                        retained.append(
+                            f"rank {node.rank} has no current exact observation"
                         )
                     if node is endpoint_owner:
                         if node.observation_endpoint_ready is not True:
-                            raise RecipeRouteNotReady(
-                                "recipe endpoint owner is awaiting exact readiness",
-                                run_id=run.id,
+                            if not serving:
+                                raise RecipeRouteNotReady(
+                                    "recipe endpoint owner is awaiting exact readiness",
+                                    run_id=run.id,
+                                )
+                            retained.append(
+                                f"rank {node.rank} endpoint readiness is not proven"
                             )
                     elif node.observation_endpoint_ready is not None:
-                        raise RecipeRouteError(
-                            "headless recipe rank exposed endpoint readiness",
-                            run_id=run.id,
+                        if not serving:
+                            raise RecipeRouteError(
+                                "headless recipe rank exposed endpoint readiness",
+                                run_id=run.id,
+                            )
+                        retained.append(
+                            f"headless rank {node.rank} reported endpoint readiness"
                         )
             for node in nodes:
                 observed = _aware(node.updated_at)
@@ -959,9 +1030,13 @@ class RecipeRouteService:
                     observed > now.astimezone(UTC)
                     or now.astimezone(UTC) - observed >= self._maximum_age
                 ):
-                    raise RecipeRouteError(
-                        "recipe rank readiness evidence is stale", run_id=run.id
-                    )
+                    if not serving:
+                        raise RecipeRouteError(
+                            "recipe rank readiness evidence is stale", run_id=run.id
+                        )
+                    age = int((now.astimezone(UTC) - observed).total_seconds())
+                    retained.append(f"rank {node.rank} evidence is {age}s old")
+            self._note_retained(run.id, retained)
             try:
                 endpoint = _endpoint(
                     endpoint_owner,

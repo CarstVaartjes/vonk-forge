@@ -58,6 +58,7 @@ class RunPresence:
             degraded_reason (None | RunPresenceDegradedReasonType0 | Unset):
             option_choices (RunPresenceOptionChoices | Unset):
             recipe_update (None | RecipeUpdateNotice | Unset):
+            route_reason (None | str | Unset):
      """
 
     alias: str
@@ -81,6 +82,7 @@ class RunPresence:
     degraded_reason: None | RunPresenceDegradedReasonType0 | Unset = UNSET
     option_choices: RunPresenceOptionChoices | Unset = UNSET
     recipe_update: None | RecipeUpdateNotice | Unset = UNSET
+    route_reason: None | str | Unset = UNSET
 
 
 
@@ -149,6 +151,12 @@ class RunPresence:
         else:
             recipe_update = self.recipe_update
 
+        route_reason: None | str | Unset
+        if isinstance(self.route_reason, Unset):
+            route_reason = UNSET
+        else:
+            route_reason = self.route_reason
+
 
         field_dict: dict[str, Any] = {}
 
@@ -178,6 +186,8 @@ class RunPresence:
             field_dict["option_choices"] = option_choices
         if recipe_update is not UNSET:
             field_dict["recipe_update"] = recipe_update
+        if route_reason is not UNSET:
+            field_dict["route_reason"] = route_reason
 
         return field_dict
 
@@ -288,6 +298,16 @@ class RunPresence:
         recipe_update = _parse_recipe_update(d.pop("recipe_update", UNSET))
 
 
+        def _parse_route_reason(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        route_reason = _parse_route_reason(d.pop("route_reason", UNSET))
+
+
         run_presence = cls(
             alias=alias,
             expected_rank_count=expected_rank_count,
@@ -310,6 +330,7 @@ class RunPresence:
             degraded_reason=degraded_reason,
             option_choices=option_choices,
             recipe_update=recipe_update,
+            route_reason=route_reason,
         )
 
         return run_presence

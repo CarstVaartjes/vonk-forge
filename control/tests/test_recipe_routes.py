@@ -1433,9 +1433,16 @@ def test_worker_republishes_when_the_live_marker_is_unreadable(tmp_path: Path) -
         assert _publication_owner(session).owner_generation == marker.generation
 
 
-def test_worker_withdraws_when_rank_health_is_stale_while_agent_is_active(
-    tmp_path: Path,
+def test_a_serving_route_outlives_missing_rank_reports(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """Missing observations are bookkeeping: traffic keeps flowing.
+
+    Wrong implementation: ranks whose reports stopped arriving (here, an
+    upgraded agent that could not inspect a run the old agent started) made
+    the route stale, and the worker withdrew a model that was still serving.
+    """
+
     clock = MutableClock(NOW)
     base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
     service = atomic_service(base, tmp_path / "live", clock)
@@ -1443,17 +1450,20 @@ def test_worker_withdraws_when_rank_health_is_stale_while_agent_is_active(
 
     clock.now = NOW + timedelta(seconds=301)
     worker = RecipeOperationWorker(service.sessions, service, clock=clock)
-    assert worker.tick() is True
+    with caplog.at_level("INFO"):
+        worker.tick()
+        worker.tick()
 
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
-        nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
-        agents = tuple(session.get(AgentNode, node.node_id) for node in nodes)
-        assert run.route_state == "withdrawn"
-        assert all(agent is not None and agent.state == "active" for agent in agents)
+        assert run.route_state == "published"
         owner = _publication_owner(session)
-        publication = _publication(session, owner.authority_id)
-        assert publication.state == "routes-withdrawn"
+        assert _publication(session, owner.authority_id).state == "completed"
+    # It is never silent: the kept route says why, once.
+    kept = [
+        r for r in caplog.messages if "recipe.route.kept_without_current_evidence" in r
+    ]
+    assert len(kept) == 1 and "evidence is 301s old" in kept[0]
 
 
 def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
@@ -1473,7 +1483,9 @@ def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
         assert run.route_state == "withdrawn"
-        assert run.route_error == "recipe rank health requires recovery"
+        assert run.route_error is not None
+        assert run.route_error.startswith("recipe rank health requires recovery: ")
+        assert "every recipe rank must be running" in run.route_error
 
     clock.now += timedelta(seconds=1)
     with service.sessions.begin() as session:
@@ -1529,7 +1541,7 @@ def test_recovered_run_rejoins_candidate_while_another_run_remains_published(
         assert _recipe_run(session, recovered_run).route_state == "published"
 
 
-def test_worker_withdraws_all_stale_runs_in_one_recovered_candidate(
+def test_worker_keeps_every_serving_route_while_reports_are_missing(
     tmp_path: Path,
 ) -> None:
     clock = MutableClock(NOW)
@@ -1546,15 +1558,13 @@ def test_worker_withdraws_all_stale_runs_in_one_recovered_candidate(
     service.publish_run(second_run)
 
     clock.now = NOW + timedelta(seconds=301)
-    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
+    RecipeOperationWorker(service.sessions, service, clock=clock).tick()
 
     with service.sessions() as session:
         assert {
             _recipe_run(session, first_run).route_state,
             _recipe_run(session, second_run).route_state,
-        } == {"withdrawn"}
-        publication = _publication(session, _recipe_owner_id(session))
-        assert publication.state == "routes-withdrawn"
+        } == {"published"}
 
 
 def _recipe_owner_id(session) -> str:
