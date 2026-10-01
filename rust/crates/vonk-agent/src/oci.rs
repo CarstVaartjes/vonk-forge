@@ -479,7 +479,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if encoded_spec.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
             return Err(install_error("installation-metadata", OciError::Artifact));
         }
-        write_installation_metadata(&installation, spec)
+        write_installation_metadata(self.data_root, &installation, spec)
             .map_err(|error| install_error("installation-metadata", error))?;
         atomic_write(&installation, "spec.json", &encoded_spec)
             .map_err(|error| install_error("installation-metadata", error))?;
@@ -530,7 +530,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if self.reuse_completed_install(spec, installation_id, recipe_content_sha256)? {
             return Ok(());
         }
-        self.ensure_disk_available(expected_bytes)?;
+        // Model files already in the shared store are linked, not written, so
+        // they need no free space; only what the install must still write does.
+        self.ensure_disk_available(
+            expected_bytes.saturating_sub(linkable_model_bytes(self.data_root, spec)),
+        )?;
         self.install_unlocked(spec, installation_id, recipe_content_sha256, progress)
     }
 
@@ -1583,7 +1587,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                     fast_path = false;
                     break;
                 };
-                let (_, metadata) = open_trusted_model_file(&destination, artifact.size_bytes)?;
+                let (_, metadata) = open_trusted_model_file(
+                    &destination,
+                    artifact.size_bytes,
+                    shared_store_inode(self.data_root, &artifact.sha256),
+                )?;
                 if !metadata_matches_receipt(&metadata, entry) {
                     fast_path = false;
                     break;
@@ -1598,7 +1606,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let mut refreshed = Vec::with_capacity(unique_artifacts.len());
         for artifact in unique_artifacts {
             let destination = models.join(&artifact.selection_id).join(&artifact.path);
-            let (_file, metadata) = open_trusted_model_file(&destination, artifact.size_bytes)?;
+            let (_file, metadata) = open_trusted_model_file(
+                &destination,
+                artifact.size_bytes,
+                shared_store_inode(self.data_root, &artifact.sha256),
+            )?;
             if let Some(entry) = receipt_index.as_ref().and_then(|index| {
                 index
                     .get(&(artifact.selection_id.as_str(), artifact.path.as_str()))
@@ -1637,7 +1649,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let mut files = Vec::with_capacity(receipt.entries.len());
         for entry in &receipt.entries {
             let path = models.join(&entry.selection_id).join(&entry.path);
-            let (file, metadata) = open_trusted_model_file(&path, entry.size_bytes)?;
+            let (file, metadata) = open_trusted_model_file(
+                &path,
+                entry.size_bytes,
+                shared_store_inode(self.data_root, &entry.sha256),
+            )?;
             if !metadata_matches_receipt(&metadata, entry) {
                 return Err(OciError::Artifact);
             }
@@ -1670,7 +1686,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .zip(transition.files.iter())
         {
             let after = file.metadata()?;
-            let (reopened, path_after) = open_trusted_model_file(path, entry.size_bytes)?;
+            let shared = shared_store_inode(self.data_root, &entry.sha256);
+            let (reopened, path_after) = open_trusted_model_file(path, entry.size_bytes, shared)?;
             if before.dev() != after.dev()
                 || before.ino() != after.ino()
                 || before.len() != after.len()
@@ -1683,8 +1700,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 || after.mtime_nsec() != path_after.mtime_nsec()
                 || after.ctime() != path_after.ctime()
                 || after.ctime_nsec() != path_after.ctime_nsec()
-                || !trusted_model_file(file, &after, entry.size_bytes)
-                || !trusted_model_file(&reopened, &path_after, entry.size_bytes)
+                || !trusted_model_file(file, &after, entry.size_bytes, shared)
+                || !trusted_model_file(&reopened, &path_after, entry.size_bytes, shared)
             {
                 return Err(OciError::Artifact);
             }
@@ -1733,12 +1750,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         self.recipe_digest(installation_id).map(Some)
     }
 
+    /// The logical size of the installation tree: every file counted at its
+    /// full length, whether it is a private copy or a link to a shared model
+    /// object. Only metadata is read; no content is.
     pub fn installed_bytes(&self, installation_id: &str) -> Result<u64, OciError> {
         let installation = managed_path(self.data_root, "installations", installation_id)?;
-        let mut files = BTreeMap::new();
-        let mut total = 0;
-        visit_files(&installation, &installation, &mut files, &mut total)?;
-        Ok(total)
+        tree_bytes(&installation)
     }
 
     pub fn artifact_set_digest(&self, installation_id: &str) -> Result<String, OciError> {
@@ -1837,6 +1854,7 @@ fn metadata_stable(before: &fs::Metadata, after: &fs::Metadata) -> bool {
 }
 
 fn write_installation_metadata(
+    data_root: &Path,
     installation: &Path,
     plan: &CompiledExecutionPlan,
 ) -> Result<(), OciError> {
@@ -1845,10 +1863,11 @@ fn write_installation_metadata(
     let mut entries = Vec::with_capacity(unique_artifacts.len());
     for artifact in unique_artifacts {
         let path = models.join(&artifact.selection_id).join(&artifact.path);
-        let metadata = fs::symlink_metadata(&path)?;
-        if !trusted_model_metadata(&metadata, artifact.size_bytes) {
-            return Err(OciError::Artifact);
-        }
+        let (_, metadata) = open_trusted_model_file(
+            &path,
+            artifact.size_bytes,
+            shared_store_inode(data_root, &artifact.sha256),
+        )?;
         entries.push(installation_metadata_entry(artifact, &metadata));
     }
     entries.sort();
@@ -1948,23 +1967,52 @@ fn metadata_matches_receipt(metadata: &fs::Metadata, receipt: &InstallationMetad
         && metadata.ino() == receipt.ino
         && metadata.len() == receipt.size_bytes
         && timestamp_ns(metadata.mtime(), metadata.mtime_nsec()) == receipt.mtime_ns
-        && timestamp_ns(metadata.ctime(), metadata.ctime_nsec()) == receipt.ctime_ns
+        // Every link another installation adds or drops moves the change time
+        // of an inode they share, so it says nothing about a shared object. A
+        // private inode keeps the exact change-time binding.
+        && (metadata.nlink() > 1
+            || timestamp_ns(metadata.ctime(), metadata.ctime_nsec()) == receipt.ctime_ns)
 }
 
-fn trusted_model_metadata(metadata: &fs::Metadata, expected_bytes: u64) -> bool {
-    trusted_model_shape(metadata, expected_bytes) && metadata.mode() & 0o777 == 0o600
+/// `(device, inode)` of the shared store object an installation's model file
+/// may be a hard link of.
+type SharedInode = (u64, u64);
+
+fn store_object_path(data_root: &Path, sha256: &str) -> PathBuf {
+    data_root.join("distribution").join("models").join(sha256)
 }
 
-fn trusted_model_shape(metadata: &fs::Metadata, expected_bytes: u64) -> bool {
+/// The inode of the store object named `sha256`, when the agent owns a regular
+/// file there. An installation's model file with more than one link is trusted
+/// only when it is exactly this inode; a private copy keeps a single link.
+fn shared_store_inode(data_root: &Path, sha256: &str) -> Option<SharedInode> {
+    if !lower_hex(sha256, 64) {
+        return None;
+    }
+    let metadata = fs::symlink_metadata(store_object_path(data_root, sha256)).ok()?;
+    (metadata.file_type().is_file() && metadata.uid() == rustix::process::geteuid().as_raw())
+        .then(|| (metadata.dev(), metadata.ino()))
+}
+
+fn trusted_model_shape(
+    metadata: &fs::Metadata,
+    expected_bytes: u64,
+    shared: Option<SharedInode>,
+) -> bool {
     metadata.file_type().is_file()
         && !metadata.file_type().is_symlink()
-        && metadata.nlink() == 1
+        && (metadata.nlink() == 1 || shared == Some((metadata.dev(), metadata.ino())))
         && metadata.uid() == rustix::process::geteuid().as_raw()
         && metadata.len() == expected_bytes
 }
 
-fn trusted_model_file(file: &File, metadata: &fs::Metadata, expected_bytes: u64) -> bool {
-    if !trusted_model_shape(metadata, expected_bytes) {
+fn trusted_model_file(
+    file: &File,
+    metadata: &fs::Metadata,
+    expected_bytes: u64,
+    shared: Option<SharedInode>,
+) -> bool {
+    if !trusted_model_shape(metadata, expected_bytes, shared) {
         return false;
     }
     match metadata.mode() & 0o777 {
@@ -1974,7 +2022,7 @@ fn trusted_model_file(file: &File, metadata: &fs::Metadata, expected_bytes: u64)
     }
 }
 
-fn exact_runtime_file_acl(file: &File) -> bool {
+pub(crate) fn exact_runtime_file_acl(file: &impl std::os::fd::AsFd) -> bool {
     const ACL_VERSION: u32 = 0x0002;
     const USER_OBJ: u16 = 0x0001;
     const USER: u16 = 0x0002;
@@ -2015,9 +2063,10 @@ fn exact_runtime_file_acl(file: &File) -> bool {
 fn open_trusted_model_file(
     path: &Path,
     expected_bytes: u64,
+    shared: Option<SharedInode>,
 ) -> Result<(File, fs::Metadata), OciError> {
     let path_metadata = fs::symlink_metadata(path)?;
-    if !trusted_model_shape(&path_metadata, expected_bytes) {
+    if !trusted_model_shape(&path_metadata, expected_bytes, shared) {
         return Err(OciError::Artifact);
     }
     let file = OpenOptions::new()
@@ -2025,7 +2074,7 @@ fn open_trusted_model_file(
         .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
         .open(path)?;
     let opened_metadata = file.metadata()?;
-    if !trusted_model_file(&file, &opened_metadata, expected_bytes)
+    if !trusted_model_file(&file, &opened_metadata, expected_bytes, shared)
         || opened_metadata.dev() != path_metadata.dev()
         || opened_metadata.ino() != path_metadata.ino()
     {
@@ -2059,12 +2108,31 @@ fn materialize_compiled_models(
 /// Bytes between two progress reports while one model file is copied.
 const MATERIALIZE_PROGRESS_STEP: u64 = 64 * 1024 * 1024;
 
-/// Give the installation its own copy of every planned model file, reporting
-/// `(done, total)` bytes. Files already in place count as done at once.
+/// Put every planned model file in the installation, reporting `(done, total)`
+/// bytes. A file already in place counts as done at once.
+///
+/// The shared distribution object is the one trusted copy of a model file, so
+/// a new installation hard-links it: no bytes move and no extra disk is used,
+/// however large the model or however many installations already hold it. An
+/// installation that already holds a private copy, from before files were
+/// shared, keeps it until the installation goes. Where a link cannot be made
+/// (another filesystem, the link limit) the file is copied instead.
 fn materialize_compiled_models_observed(
     data_root: &Path,
     plan: &CompiledExecutionPlan,
     installation_id: &str,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<Vec<PathBuf>, OciError> {
+    materialize_compiled_models_with(data_root, plan, installation_id, true, progress)
+}
+
+/// `link` is false only where a test needs the copy fallback on a filesystem
+/// that would allow the link.
+fn materialize_compiled_models_with(
+    data_root: &Path,
+    plan: &CompiledExecutionPlan,
+    installation_id: &str,
+    link: bool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<Vec<PathBuf>, OciError> {
     if !data_root.is_absolute() {
@@ -2121,7 +2189,7 @@ fn materialize_compiled_models_observed(
             }
             // The workload validator proved this is the same receipt-bound
             // physical object. Its first projection performed the only source
-            // and destination hash verification; this projection only adds a
+            // and destination verification; this projection only adds a
             // second OCI mount intent.
             continue;
         }
@@ -2131,6 +2199,11 @@ fn materialize_compiled_models_observed(
         let parent = destination.parent().ok_or(OciError::Artifact)?;
         fs::create_dir_all(parent)?;
         fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        let source = model_root.join(&artifact.sha256);
+        if !source.starts_with(&model_root) {
+            return Err(OciError::Artifact);
+        }
+        let shared = shared_store_inode(data_root, &artifact.sha256);
         if let Ok(metadata) = fs::symlink_metadata(&destination) {
             if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
                 return Err(OciError::Artifact);
@@ -2140,10 +2213,16 @@ fn materialize_compiled_models_observed(
                     .get(&(artifact.selection_id.clone(), artifact.path.clone()))
                     .filter(|entry| metadata_matches_receipt(&metadata, entry))
             });
-            if let Some(entry) = reusable {
+            // A file that already is the shared object needs no receipt: it is
+            // the one trusted inode, and nothing is left to place.
+            let already_shared = shared == Some((metadata.dev(), metadata.ino()));
+            if reusable.is_some() || already_shared {
                 let (_, opened_metadata) =
-                    open_trusted_model_file(&destination, artifact.size_bytes)?;
-                if metadata_matches_receipt(&opened_metadata, entry) {
+                    open_trusted_model_file(&destination, artifact.size_bytes, shared)?;
+                if already_shared
+                    || reusable
+                        .is_some_and(|entry| metadata_matches_receipt(&opened_metadata, entry))
+                {
                     physical_by_path.insert(physical_key, (destination.clone(), physical));
                     materialized.push(destination);
                     done_bytes += artifact.size_bytes;
@@ -2152,18 +2231,31 @@ fn materialize_compiled_models_observed(
                 }
             }
         }
-        let source = model_root.join(&artifact.sha256);
-        if !source.starts_with(&model_root) {
-            return Err(OciError::Artifact);
-        }
         let (mut source_file, source_metadata) =
-            open_trusted_model_file(&source, artifact.size_bytes)?;
+            open_trusted_model_file(&source, artifact.size_bytes, shared)?;
         let temporary = destination.with_extension(format!(
             "{}.{}.{}.partial",
             std::process::id(),
             uuid::Uuid::new_v4(),
             artifact.file_id
         ));
+        if link && fs::hard_link(&source, &temporary).is_ok() {
+            let mut temporary_guard = TemporaryArtifact::new(temporary.clone());
+            // The name just linked must be the object opened above, still a
+            // trusted model file, before it replaces anything.
+            let (_, linked) = open_trusted_model_file(&temporary, artifact.size_bytes, shared)?;
+            if linked.dev() != source_metadata.dev() || linked.ino() != source_metadata.ino() {
+                return Err(OciError::Artifact);
+            }
+            fs::rename(&temporary, &destination)?;
+            temporary_guard.retain();
+            sync_parent(parent)?;
+            physical_by_path.insert(physical_key, (destination.clone(), physical));
+            materialized.push(destination);
+            done_bytes += artifact.size_bytes;
+            progress(done_bytes, total_bytes);
+            continue;
+        }
         let mut output = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -2199,9 +2291,9 @@ fn materialize_compiled_models_observed(
         let source_after = source_file.metadata()?;
         let output_metadata = output.metadata()?;
         if copied != artifact.size_bytes
-            || !trusted_model_file(&source_file, &source_after, artifact.size_bytes)
+            || !trusted_model_file(&source_file, &source_after, artifact.size_bytes, shared)
             || !metadata_stable(&source_metadata, &source_after)
-            || !trusted_model_metadata(&output_metadata, artifact.size_bytes)
+            || !trusted_model_file(&output, &output_metadata, artifact.size_bytes, None)
         {
             drop(output);
             let _ = fs::remove_file(&temporary);
@@ -2359,6 +2451,42 @@ fn materialized_model_bytes(
         })
 }
 
+/// Bytes of the plan's model files the shared store already holds in full, so
+/// an installation links them instead of writing them. An estimate for the
+/// capacity check only; the install itself verifies every object it uses.
+fn linkable_model_bytes(data_root: &Path, plan: &CompiledExecutionPlan) -> u64 {
+    unique_plan_artifacts(plan)
+        .into_iter()
+        .filter(|artifact| {
+            lower_hex(&artifact.sha256, 64)
+                && fs::symlink_metadata(store_object_path(data_root, &artifact.sha256)).is_ok_and(
+                    |metadata| {
+                        metadata.file_type().is_file() && metadata.len() == artifact.size_bytes
+                    },
+                )
+        })
+        .map(|artifact| artifact.size_bytes)
+        .fold(0_u64, u64::saturating_add)
+}
+
+/// Sum of the lengths of the regular files below `directory`.
+fn tree_bytes(directory: &Path) -> Result<u64, OciError> {
+    let mut total = 0_u64;
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let size = if file_type.is_dir() {
+            tree_bytes(&entry.path())?
+        } else if file_type.is_file() {
+            entry.metadata()?.len()
+        } else {
+            return Err(OciError::Artifact);
+        };
+        total = total.checked_add(size).ok_or(OciError::Artifact)?;
+    }
+    Ok(total)
+}
+
 fn visit_files(
     root: &Path,
     directory: &Path,
@@ -2473,9 +2601,10 @@ mod tests {
     use super::{
         InstallationReconciliationState, OciError, OciRuntime, ensure_runtime_tmp,
         materialize_compiled_models, materialize_compiled_models_observed,
-        read_installation_metadata, read_reconciliation_directory_identity,
-        reconciliation_checkpoint_path, reconciliation_quarantine_path, release_page_cache,
-        unique_plan_artifacts, write_installation_metadata, write_reconciliation_checkpoint,
+        materialize_compiled_models_with, read_installation_metadata,
+        read_reconciliation_directory_identity, reconciliation_checkpoint_path,
+        reconciliation_quarantine_path, release_page_cache, unique_plan_artifacts,
+        write_installation_metadata, write_reconciliation_checkpoint,
     };
     use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
     use serde_json::{Value, json};
@@ -2945,7 +3074,7 @@ mod tests {
             serde_json::to_vec(&plan).unwrap(),
         )
         .unwrap();
-        write_installation_metadata(&installation, &plan).unwrap();
+        write_installation_metadata(data, &installation, &plan).unwrap();
         (installation_id, installation, plan)
     }
 
@@ -3588,10 +3717,11 @@ mod tests {
         let total = LARGE + plan.artifacts[1].size_bytes;
 
         let mut reports = Vec::new();
-        materialize_compiled_models_observed(
+        materialize_compiled_models_with(
             data.path(),
             &plan,
             "cb555393-764b-4eb6-8f15-b416d289428f",
+            false,
             &mut |done, of| reports.push((done, of)),
         )
         .unwrap();
@@ -3672,11 +3802,268 @@ mod tests {
         let installation = data
             .path()
             .join("installations/cb555393-764b-4eb6-8f15-b416d289428f");
-        write_installation_metadata(&installation, &plan).unwrap();
+        write_installation_metadata(data.path(), &installation, &plan).unwrap();
         let repeated =
             materialize_compiled_models(data.path(), &plan, "cb555393-764b-4eb6-8f15-b416d289428f")
                 .unwrap();
         assert_eq!(repeated.len(), 1);
         assert_eq!(plan.artifacts.len(), 2);
+    }
+
+    /// Put the plan's two model files in the shared store, as distribution does.
+    fn stock_store(data: &Path, plan: &crate::workloads::CompiledExecutionPlan) -> Vec<PathBuf> {
+        let root = data.join("distribution/models");
+        fs::create_dir_all(&root).unwrap();
+        [
+            (b"primary".as_slice(), &plan.artifacts[0].sha256),
+            (b"secondary".as_slice(), &plan.artifacts[1].sha256),
+        ]
+        .into_iter()
+        .map(|(bytes, digest)| {
+            let path = root.join(digest);
+            fs::write(&path, bytes).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+            path
+        })
+        .collect()
+    }
+
+    const FIRST: &str = "cb555393-764b-4eb6-8f15-b416d289428f";
+    const SECOND: &str = "cb555393-764b-4eb6-8f15-b416d2894290";
+
+    fn linked_installation(
+        data: &Path,
+        plan: &crate::workloads::CompiledExecutionPlan,
+        installation_id: &str,
+    ) -> PathBuf {
+        let installation = data.join("installations").join(installation_id);
+        let mut reports = Vec::new();
+        materialize_compiled_models_observed(data, plan, installation_id, &mut |done, of| {
+            reports.push((done, of))
+        })
+        .unwrap();
+        // Linking moves no bytes, but the progress still ends complete.
+        assert_eq!(reports.last().map(|(done, of)| done == of), Some(true));
+        write_installation_metadata(data, &installation, plan).unwrap();
+        fs::write(
+            installation.join("spec.json"),
+            serde_json::to_vec(plan).unwrap(),
+        )
+        .unwrap();
+        installation
+    }
+
+    #[test]
+    fn a_new_installation_links_the_shared_model_files_instead_of_copying_them() {
+        let data = tempdir().unwrap();
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        let store = stock_store(data.path(), &plan);
+
+        let first = linked_installation(data.path(), &plan, FIRST);
+        let second = linked_installation(data.path(), &plan, SECOND);
+
+        for (artifact, object) in plan.artifacts.iter().zip(&store) {
+            let object = fs::metadata(object).unwrap();
+            for installation in [&first, &second] {
+                let file = fs::metadata(
+                    installation
+                        .join("models")
+                        .join(&artifact.selection_id)
+                        .join(&artifact.path),
+                )
+                .unwrap();
+                assert_eq!((file.dev(), file.ino()), (object.dev(), object.ino()));
+            }
+            // The store and both installations: one inode, three names, one
+            // set of bytes on disk.
+            assert_eq!(object.nlink(), 3);
+        }
+        assert_eq!(
+            fs::read(first.join("models/primary/config.json")).unwrap(),
+            b"primary"
+        );
+
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        runtime.verify_installation(FIRST).unwrap();
+        runtime.verify_installation(SECOND).unwrap();
+        // The tree still measures at its full logical size.
+        assert!(runtime.installed_bytes(FIRST).unwrap() > 16);
+    }
+
+    #[test]
+    fn a_sibling_installation_changing_the_link_count_does_not_stale_the_others_custody() {
+        let data = tempdir().unwrap();
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        stock_store(data.path(), &plan);
+        linked_installation(data.path(), &plan, FIRST);
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        runtime.verify_installation(FIRST).unwrap();
+
+        // Linking a second installation and removing it again both change the
+        // shared inode's change time.
+        std::thread::sleep(Duration::from_millis(2));
+        let second = linked_installation(data.path(), &plan, SECOND);
+        fs::remove_dir_all(second).unwrap();
+
+        let transition = runtime.begin_installation_acl_transition(FIRST).unwrap();
+        runtime
+            .finish_installation_acl_transition(FIRST, transition)
+            .unwrap();
+        runtime.verify_installation(FIRST).unwrap();
+    }
+
+    #[test]
+    fn a_model_file_linked_to_anything_but_the_store_object_is_refused() {
+        let data = tempdir().unwrap();
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        stock_store(data.path(), &plan);
+        let installation = linked_installation(data.path(), &plan, FIRST);
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        runtime.verify_installation(FIRST).unwrap();
+
+        // A second, foreign name for the same inode does not change that it is
+        // the store object, but a different inode with two names is not one.
+        let foreign = installation.join("models/primary/config.json");
+        fs::remove_file(&foreign).unwrap();
+        let other = data.path().join("other-secret");
+        fs::write(&other, b"primary").unwrap();
+        fs::set_permissions(&other, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::hard_link(&other, &foreign).unwrap();
+        assert!(matches!(
+            runtime.verify_installation(FIRST),
+            Err(OciError::Artifact)
+        ));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn an_object_a_workload_already_runs_from_still_links_into_a_new_installation() {
+        let data = tempdir().unwrap();
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        let store = stock_store(data.path(), &plan);
+        linked_installation(data.path(), &plan, FIRST);
+        // The helper grants the runtime user read access when the first
+        // installation starts; the shared inode carries it for every name.
+        apply_acl(
+            &store[0],
+            &[
+                (0x0001, 0o6, u32::MAX),
+                (0x0002, 0o4, 10_001),
+                (0x0004, 0, u32::MAX),
+                (0x0010, 0o4, u32::MAX),
+                (0x0020, 0, u32::MAX),
+            ],
+        );
+        assert_eq!(fs::metadata(&store[0]).unwrap().mode() & 0o777, 0o640);
+
+        linked_installation(data.path(), &plan, SECOND);
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        runtime.verify_installation(FIRST).unwrap();
+        runtime.verify_installation(SECOND).unwrap();
+    }
+
+    #[test]
+    fn an_installation_keeps_a_private_copy_it_already_holds() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, plan) = persisted_installation(data.path());
+        stock_store(data.path(), &plan);
+        let before = fs::metadata(installation.join("models/primary/config.json")).unwrap();
+
+        materialize_compiled_models(data.path(), &plan, &installation_id).unwrap();
+
+        let after = fs::metadata(installation.join("models/primary/config.json")).unwrap();
+        assert_eq!((after.dev(), after.ino()), (before.dev(), before.ino()));
+        assert_eq!(after.nlink(), 1);
+        let runner = NoProcess;
+        runtime(data.path(), &runner)
+            .verify_installation(&installation_id)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_store_object_that_is_not_private_owner_only_is_never_linked() {
+        let data = tempdir().unwrap();
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        let store = stock_store(data.path(), &plan);
+        fs::set_permissions(&store[0], fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert!(matches!(
+            materialize_compiled_models(data.path(), &plan, FIRST),
+            Err(OciError::Artifact)
+        ));
+        assert!(
+            !data
+                .path()
+                .join("installations")
+                .join(FIRST)
+                .join("models/primary/config.json")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn model_materialization_copies_when_a_link_cannot_be_made() {
+        let data = tempdir().unwrap();
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        let store = stock_store(data.path(), &plan);
+
+        materialize_compiled_models_with(data.path(), &plan, FIRST, false, &mut |_, _| {}).unwrap();
+
+        let copy = fs::metadata(
+            data.path()
+                .join("installations")
+                .join(FIRST)
+                .join("models/primary/config.json"),
+        )
+        .unwrap();
+        let object = fs::metadata(&store[0]).unwrap();
+        assert_ne!(copy.ino(), object.ino());
+        assert_eq!((copy.nlink(), object.nlink()), (1, 1));
+    }
+
+    #[test]
+    fn linkable_bytes_count_only_complete_store_objects() {
+        let data = tempdir().unwrap();
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        assert_eq!(super::linkable_model_bytes(data.path(), &plan), 0);
+        let store = stock_store(data.path(), &plan);
+        assert_eq!(super::linkable_model_bytes(data.path(), &plan), 7 + 9);
+        fs::write(&store[1], b"short").unwrap();
+        assert_eq!(super::linkable_model_bytes(data.path(), &plan), 7);
+    }
+
+    #[test]
+    fn installed_bytes_sum_file_lengths_and_refuse_anything_but_files_and_directories() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, _) = persisted_installation(data.path());
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let expected: u64 = [
+            "spec.json",
+            "models/primary/config.json",
+            "models/secondary/config.json",
+            "model-metadata.json",
+        ]
+        .iter()
+        .map(|name| fs::metadata(installation.join(name)).unwrap().len())
+        .sum();
+        assert_eq!(runtime.installed_bytes(&installation_id).unwrap(), expected);
+
+        symlink(installation.join("spec.json"), installation.join("link")).unwrap();
+        assert!(matches!(
+            runtime.installed_bytes(&installation_id),
+            Err(OciError::Artifact)
+        ));
     }
 }

@@ -137,6 +137,23 @@ checks. Future ownership changes must update all consumers and retire the old
 path together, while retaining control intent, exact selected identities,
 authorization, and reservations.
 
+### Spark model files
+
+A Spark keeps one content-addressed object per model file under
+`/var/lib/vonk-forge-agent/distribution/models/<sha256>`. An installation does
+not copy it: its `models/<selection>/<path>` is a hard link to that object, so a
+new installation of a model the Spark already holds, including every recipe
+revision and every other recipe that uses the model, takes seconds and no
+extra disk. The object stays the one trusted inode: the agent accepts an
+installation file with more than one link only when it is exactly the store
+object of that file's digest, and a copy that cannot be linked (another
+filesystem, the link limit) is written as a private file instead. Containers
+still mount each file read-only and run as a non-root user with read access
+granted by ACL, so a workload cannot change the shared bytes. An installation
+that already holds a private copy keeps it until it is uninstalled. Removing an
+installation removes only its links; the filesystem frees the bytes when the
+last name goes.
+
 ## Artifact recovery
 
 Models and container images follow one recovery policy, with format-specific
