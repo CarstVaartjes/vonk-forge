@@ -1,8 +1,10 @@
-"""Unused installations, image receipts and cached models are removed.
+"""Unused installations, image receipts and cached models are removed to make room.
 
-Each kind is removed after the grace period, and kept while a saved profile
-points to it, a workload runs, it was used in the last day, or a live
-operation names it. A load that starts after the sweep looked is never raced.
+They are removed only while disk is short (work was refused for lack of it, or
+free space is below the low line), least recently used first and no more than
+the shortfall needs, and are kept while a saved profile points to them, a
+workload runs, or a live operation names them. A load that starts after the
+pass looked is never raced.
 """
 
 from __future__ import annotations
@@ -33,21 +35,33 @@ from vonk_control.models import (
     Job,
     ModelCacheOperation,
     ModelCacheSet,
+    NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
 )
 from vonk_control.recipe_operations import RecipeOperationConflict
+from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.storage_demands import (
+    NAS_MODELS,
+    STORAGE_EVICTING,
+    STORAGE_INSUFFICIENT,
+    StorageDemands,
+    spark_scope,
+)
 from vonk_control.unused_storage_collection import (
     ACTOR,
     GRACE,
     UnusedStorageCollector,
 )
 
+from .runtime_image_fixtures import place_test_image
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
 from .test_model_cache import _artifact, _download
 
 A_MODEL = "a" * 64
 AN_IMAGE = "d" * 64
+GIB = 1024**3
+TOTAL = 1000 * GIB
 
 
 @pytest.fixture
@@ -72,10 +86,12 @@ class FakeLifecycle:
         *,
         between: Callable[[str], None] | None = None,
         refuse: frozenset[str] = frozenset(),
+        apply: bool = False,
     ) -> None:
         self._sessions = sessions
         self._between = between
         self._refuse = refuse
+        self._apply = apply
         self.removed: list[str] = []
 
     def preview_uninstall(self, installation_id: str):
@@ -99,7 +115,52 @@ class FakeLifecycle:
             raise RecipeOperationConflict("refused")
         with self._sessions.begin() as session:
             unattended_guard(session)
+            if self._apply:
+                installation = session.get(RecipeInstallation, installation_id)
+                assert installation is not None
+                installation.state = "uninstalled"
         self.removed.append(installation_id)
+
+
+def _report_disk(
+    sessions: sessionmaker[Session],
+    free: int,
+    *,
+    at: datetime,
+    node: str = NODE,
+    total: int = TOTAL,
+) -> None:
+    """What a Spark's inventory reports for its disk, as of ``at``."""
+
+    stamp = at
+    with sessions.begin() as session:
+        existing = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == node,
+                NodeInventorySnapshot.observed_at == stamp,
+            )
+        )
+        if existing is not None:
+            existing.disk_free_bytes = free
+            return
+        session.add(
+            NodeInventorySnapshot(
+                node_id=node,
+                observed_at=stamp,
+                received_at=stamp,
+                disk_total_bytes=total,
+                disk_free_bytes=free,
+                host_memory_total_bytes=1,
+                host_memory_free_bytes=1,
+                gpu_memory_total_bytes=1,
+                gpu_memory_free_bytes=1,
+                gpu_count=1,
+                memory_pool="separate",
+                artifact_store_read_only=False,
+                capabilities=[],
+                evidence_digest=uuid.uuid4().hex + uuid.uuid4().hex,
+            )
+        )
 
 
 def _collector(
@@ -107,9 +168,15 @@ def _collector(
     lifecycle: FakeLifecycle | None = None,
     *,
     now: datetime | None = None,
+    free: int = GIB,
     **options,
 ) -> UnusedStorageCollector:
+    """A collector for a Spark and a NAS that both report ``free`` bytes of a
+    1000 GiB disk: by default 1 GiB, far below the 10 % low line."""
+
     world.now = now or NOW
+    _report_disk(world.sessions, free, at=world.now)
+    options.setdefault("disk_usage", lambda _path: (TOTAL, free))
     return UnusedStorageCollector(
         world.sessions,
         clock=lambda: world.now,
@@ -167,13 +234,69 @@ def _kept(result, reason: str) -> int:
     return sum(count for key, count in result.kept.items() if reason in key)
 
 
+def _scope(result, scope: str) -> dict[str, object]:
+    return next(item for item in result.scopes if item["scope"] == scope)
+
+
+def _size(
+    world: Catalog, installation_id: str, size: int, *, model: str | None = None
+) -> None:
+    """What the installation holds on its Spark, and optionally its model."""
+
+    with world.sessions.begin() as session:
+        for node in session.scalars(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation_id
+            )
+        ):
+            node.installed_bytes = size
+        if model is not None:
+            row = session.get(RecipeInstallation, installation_id)
+            assert row is not None
+            row.model_content_sha256 = model
+
+
+def _unattended_uninstall(world: Catalog, *, state: str, updated: datetime) -> None:
+    """An uninstall this collector queued earlier, as the real lifecycle records it."""
+
+    with world.sessions.begin() as session:
+        session.add(
+            Job(
+                request_id=str(uuid.uuid4()),
+                kind="recipe.uninstall",
+                state=state,
+                actor=ACTOR,
+                authority_revision="r",
+                targets=[NODE],
+                payload_digest="0" * 64,
+                payload={},
+                current_attempt=0,
+                created_at=updated,
+                updated_at=updated,
+            )
+        )
+
+
+def _three_idle(world: Catalog, *, newest_age: timedelta) -> tuple[str, str, str]:
+    """Three unused 80 GiB installations, last used 9, 5 and ``newest_age`` ago."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    found = []
+    for age in (timedelta(days=9), timedelta(days=5), newest_age):
+        installation, _ = world.workload(old, run="stopped", touched=NOW - age)
+        _size(world, installation, 80 * GIB)
+        found.append(installation)
+    return found[0], found[1], found[2]
+
+
 # -- installations ----------------------------------------------------------------
 
 
 def test_installation_nothing_uses_is_uninstalled_and_a_superseded_one_goes_too(
     world: Catalog,
 ) -> None:
-    """Catches a sweep that never uninstalls, or only the newest revision's."""
+    """Catches a pass that never uninstalls, or only the newest revision's."""
 
     old = world.revision("glm", 1)
     head = world.revision("glm", 2, head="active")
@@ -185,6 +308,110 @@ def test_installation_nothing_uses_is_uninstalled_and_a_superseded_one_goes_too(
 
     assert sorted(lifecycle.removed) == sorted([stale, unpointed])
     assert result.installations == 2
+
+
+def test_nothing_is_removed_while_disk_is_not_short(
+    world: Catalog, tmp_path: Path
+) -> None:
+    """Catches time-based removal: an item idle for a month holds disk nobody is
+    waiting for, so it stays however much time passes."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    world.workload(old, run="stopped", touched=NOW - timedelta(days=30))
+    receipt = _receipt(tmp_path, AN_IMAGE)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    for now in (NOW, NOW + timedelta(days=90)):
+        result = _collector(
+            world, lifecycle, now=now, free=TOTAL // 2, image_cache_root=tmp_path
+        ).collect()
+        assert (result.installations, result.images, result.models) == (0, 0, 0)
+
+    assert lifecycle.removed == []
+    assert receipt.exists()
+
+
+def test_the_least_recently_used_go_first_and_only_as_many_as_the_shortfall_needs(
+    world: Catalog,
+) -> None:
+    """Catches evicting everything unused (or the newest first) for a small gap."""
+
+    oldest, middle, newest = _three_idle(world, newest_age=timedelta(days=2))
+    lifecycle = FakeLifecycle(world.sessions)
+
+    # 90 GiB free of 1000: 10 GiB under the 100 GiB low line, so 10 GiB plus the
+    # 20 GiB reserve is needed and the oldest 80 GiB covers it.
+    result = _collector(world, lifecycle, free=90 * GIB).collect()
+
+    assert lifecycle.removed == [oldest]
+    assert middle not in lifecycle.removed and newest not in lifecycle.removed
+    scope = result.scopes[0]
+    assert scope["scope"] == spark_scope(NODE)
+    assert scope["needed_bytes"] == 10 * GIB
+    assert scope["estimated_freed_bytes"] == 80 * GIB
+
+
+def test_items_used_in_the_last_day_go_only_after_everything_older(
+    world: Catalog,
+) -> None:
+    """Catches ordering that treats a just-used installation like an idle one."""
+
+    oldest, middle, recent = _three_idle(world, newest_age=timedelta(hours=2))
+    lifecycle = FakeLifecycle(world.sessions)
+
+    # Two of the three are needed: the recent one is the one left.
+    _collector(world, lifecycle, free=GIB).collect()
+
+    assert sorted(lifecycle.removed) == sorted([oldest, middle])
+    assert recent not in lifecycle.removed
+
+
+def test_an_item_used_in_the_last_day_goes_when_nothing_older_can_cover_it(
+    world: Catalog,
+) -> None:
+    """A recent installation is last, not protected: a refused load still fits."""
+
+    head = world.revision("glm", 1, head="active")
+    recent, _ = world.workload(head, run="stopped", touched=NOW - timedelta(hours=2))
+    _size(world, recent, 80 * GIB)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == [recent]
+
+
+def test_the_low_line_is_a_tenth_of_the_disk_or_the_largest_install_known(
+    world: Catalog,
+) -> None:
+    """Catches a fixed low line: a Spark that cannot take its largest known
+    install again is short even with plenty of percent free."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    idle, _ = world.workload(old, run="stopped")
+    _size(world, idle, 80 * GIB)
+    big, _ = world.workload(old, run="running")
+    with world.sessions.begin() as session:
+        for node in session.scalars(
+            select(InstallationNode).where(InstallationNode.installation_id == big)
+        ):
+            node.required_bytes = 50 * GIB
+    lifecycle = FakeLifecycle(world.sessions)
+
+    # 150 GiB free (15 %) with a largest install of 50 GiB: not short.
+    _collector(world, lifecycle, free=150 * GIB).collect()
+    assert lifecycle.removed == []
+
+    with world.sessions.begin() as session:
+        for node in session.scalars(
+            select(InstallationNode).where(InstallationNode.installation_id == big)
+        ):
+            node.required_bytes = 200 * GIB
+    # The same disk cannot take a 200 GiB install: short.
+    _collector(world, lifecycle, free=150 * GIB).collect()
+    assert lifecycle.removed == [idle]
 
 
 def test_installation_a_profile_points_to_is_kept_even_when_idle(
@@ -255,52 +482,82 @@ def test_installation_with_a_failed_run_waits_for_the_run_to_be_stopped(
     assert _kept(result, "run not stopped") == 1
 
 
-def test_installation_used_in_the_last_day_or_superseded_in_it_is_kept(
-    world: Catalog,
-) -> None:
-    """Catches removing before the 24 h grace, from use or from supersession."""
+def test_an_installation_of_a_model_a_profile_needs_is_kept(world: Catalog) -> None:
+    """Removing the last installation of a model deletes the Spark's shared copy,
+    so a superseded revision's installation stays while the profile's newest
+    revision of the same model would have to fetch the weights again (and its
+    admission counts them as already there)."""
 
     old = world.revision("glm", 1)
-    world.revision("glm", 2, head="active")
-    recent, _ = world.workload(old, run="stopped", touched=NOW - timedelta(hours=3))
-    slow = world.revision("qwen", 1)
-    world.revision("qwen", 2, created=NOW - timedelta(hours=2), head="active")
-    superseded_lately, _ = world.workload(slow, run="stopped")
+    world.revision(
+        "glm",
+        2,
+        head="active",
+        document={"models": [{"model": {"content_sha256": "c" * 64}}]},
+    )
+    superseded, _ = world.workload(old, run="stopped")
+    _size(world, superseded, 80 * GIB, model="c" * 64)
+    other, _ = world.workload(old, run="stopped")
+    _size(world, other, 80 * GIB, model="d" * 64)
+    _profile(world, "vonk-forge/glm")
     lifecycle = FakeLifecycle(world.sessions)
 
     result = _collector(world, lifecycle).collect()
 
-    assert lifecycle.removed == []
-    assert _kept(result, "recent use") == 2
-    assert recent and superseded_lately
-
-    # Once the grace period has passed with nothing touching them, both go.
-    _collector(world, lifecycle, now=NOW + GRACE).collect()
-    assert sorted(lifecycle.removed) == sorted([recent, superseded_lately])
+    assert lifecycle.removed == [other]
+    assert _kept(result, "model a profile needs") == 1
 
 
-def test_installation_a_recent_profile_edit_restarts_the_grace_period_of_a_current_one(
+def test_a_profile_edit_or_a_new_revision_alone_removes_nothing(
     world: Catalog,
 ) -> None:
-    """An edit may have just dropped the assignment that used a current
-    installation, but it says nothing about a superseded revision, which no
-    profile resolves to; profiles are edited often, so it must not keep those."""
+    """The owner's rule: only a lack of space removes anything, so an edit or a
+    superseding revision neither removes nor (when short) protects."""
 
     old = world.revision("glm", 1)
-    head = world.revision("glm", 2, head="active")
-    current, _ = world.workload(head, run="stopped")
+    world.revision("glm", 2, head="active")
     superseded, _ = world.workload(old, run="stopped")
     _profile(world, "vonk-forge/other")
     with world.sessions.begin() as session:
         for profile in session.scalars(select(FleetProfile)):
-            profile.updated_at = NOW - timedelta(hours=1)
+            profile.updated_at = NOW - timedelta(minutes=5)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle, free=TOTAL // 2).collect()
+    assert lifecycle.removed == []
+
+    _collector(world, lifecycle).collect()
+    assert lifecycle.removed == [superseded]
+
+
+def test_installations_of_one_model_go_together_or_not_at_all(world: Catalog) -> None:
+    """Their model files are shared, so removing one of two frees nothing."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    first, _ = world.workload(old, run="stopped")
+    second, _ = world.workload(old, run="stopped")
+    _size(world, first, 80 * GIB, model="c" * 64)
+    _size(world, second, 70 * GIB, model="c" * 64)
     lifecycle = FakeLifecycle(world.sessions)
 
     result = _collector(world, lifecycle).collect()
 
-    assert lifecycle.removed == [superseded]
-    assert current not in lifecycle.removed
-    assert _kept(result, "recent use") == 1
+    assert sorted(lifecycle.removed) == sorted([first, second])
+    # The shared bytes are counted once, not once per installation.
+    assert result.scopes[0]["estimated_freed_bytes"] == 80 * GIB
+
+    # One of them still in use keeps the model, so removing the other frees none.
+    other = FakeLifecycle(world.sessions)
+    with world.sessions.begin() as session:
+        run = session.scalar(
+            select(RecipeRun).where(RecipeRun.installation_id == second)
+        )
+        assert run is not None
+        run.state = "running"
+    result = _collector(world, other).collect()
+    assert other.removed == []
+    assert _kept(result, "model shared with one in use") == 1
 
 
 def test_installation_a_live_operation_names_is_kept(world: Catalog) -> None:
@@ -533,6 +790,21 @@ def _real_lifecycle(tmp_path: Path, *, nodes: int = 1, engine: Engine | None = N
     return sessions, service, installation.owner_id, node_ids
 
 
+_REAL_CLOCK = datetime(2026, 8, 7, 12, tzinfo=UTC) + timedelta(days=2)
+
+
+def _real_collector(
+    sessions: sessionmaker[Session], service, nodes: tuple[str, ...]
+) -> UnusedStorageCollector:
+    """A collector over a real lifecycle whose Sparks report little free disk."""
+
+    for node in nodes:
+        _report_disk(sessions, GIB, at=_REAL_CLOCK, node=node)
+    return UnusedStorageCollector(
+        sessions, clock=lambda: _REAL_CLOCK, lifecycle=service
+    )
+
+
 def _ordinals(sessions: sessionmaker[Session]) -> dict[str, int]:
     with sessions() as session:
         return {
@@ -549,11 +821,7 @@ def test_unused_installation_is_uninstalled_without_taking_a_new_intent(
 
     sessions, service, _installation_id, nodes = _real_lifecycle(tmp_path)
     before = _ordinals(sessions)
-    collector = UnusedStorageCollector(
-        sessions,
-        clock=lambda: datetime(2026, 8, 7, 12, tzinfo=UTC) + GRACE + timedelta(hours=1),
-        lifecycle=service,
-    )
+    collector = _real_collector(sessions, service, nodes)
 
     result = collector.collect()
 
@@ -577,11 +845,7 @@ def test_removal_is_refused_when_the_target_sparks_hold_different_intents(
         assert node is not None
         node.workload_intent_ordinal += 5
     before = _ordinals(sessions)
-    collector = UnusedStorageCollector(
-        sessions,
-        clock=lambda: datetime(2026, 8, 7, 12, tzinfo=UTC) + GRACE + timedelta(hours=1),
-        lifecycle=service,
-    )
+    collector = _real_collector(sessions, service, nodes)
 
     result = collector.collect()
 
@@ -718,6 +982,9 @@ def test_receipt_removal_runs_on_postgres(
 
 
 def _receipt(root: Path, archive: str, *, age: timedelta = timedelta(days=3)) -> Path:
+    """A published receipt over a stored image of 1 KiB, last written ``age`` ago."""
+
+    place_test_image(FilesystemRuntimeImageStorage(root), archive, 1024)
     path = root / "image-cache" / f"{archive}.receipt.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{}")
@@ -726,38 +993,64 @@ def _receipt(root: Path, archive: str, *, age: timedelta = timedelta(days=3)) ->
     return path
 
 
-def test_receipt_no_recipe_needs_is_removed_after_grace(
+def test_receipt_no_recipe_needs_is_removed_when_disk_is_short_and_recent_ones_last(
     world: Catalog, tmp_path: Path
 ) -> None:
-    """Catches receipts living forever once nothing names their image."""
+    """Catches receipts living forever once nothing names their image, and
+    removing a just-used one before an idle one."""
 
     path = _receipt(tmp_path, AN_IMAGE)
     recent = _receipt(tmp_path, "e" * 64, age=timedelta(hours=2))
+    blobs = SimpleNamespace(calls=0)
+    blobs.collect = lambda: setattr(blobs, "calls", blobs.calls + 1)  # type: ignore[attr-defined]
+    exact = {"reserve_floor_bytes": 0, "reserve_fraction": 0.0}
 
-    result = _collector(world, image_cache_root=tmp_path).collect()
+    # One byte short of the 100 GiB low line: the idle receipt covers it.
+    result = _collector(
+        world,
+        image_cache_root=tmp_path,
+        image_blobs=blobs,
+        free=100 * GIB - 1,
+        **exact,
+    ).collect()
 
     assert not path.exists()
     assert recent.exists()
     assert result.images == 1
-    assert _kept(result, "recent use") == 1
+    # The image's layers are reclaimed now, not at the next hourly pass.
+    assert blobs.calls == 1
     with world.sessions() as session:
         gate = session.scalar(select(ArtifactLifecycleGate))
         assert gate is None or gate.removal_owner_id is None
 
+    # Short by more than the idle one held: the recent one goes too.
+    result = _collector(world, image_cache_root=tmp_path, free=GIB, **exact).collect()
+    assert not recent.exists()
+    assert result.images == 1
 
-def test_receipt_the_current_recipe_authorizes_is_kept(
+
+def test_receipt_a_profile_points_to_is_kept_and_a_merely_offered_one_is_not(
     world: Catalog, tmp_path: Path
 ) -> None:
-    """Catches removing the image the newest revision would load."""
+    """Catches removing the image the newest revision of a profiled recipe would
+    load, and keeping every image the catalog offers (which would leave the NAS
+    nothing to free)."""
 
     head = world.revision("glm", 1, head="active")
     world.authorize(head, build_id=world.build(head), original_digest="0" * 64)
     path = _receipt(tmp_path, AN_IMAGE)
 
+    _profile(world, "vonk-forge/glm")
     result = _collector(world, image_cache_root=tmp_path).collect()
-
     assert path.exists()
-    assert _kept(result, "current recipe") == 1
+    assert _kept(result, "profile") == 1
+
+    with world.sessions.begin() as session:
+        for profile in session.scalars(select(FleetProfile)):
+            session.delete(profile)
+    result = _collector(world, image_cache_root=tmp_path).collect()
+    assert not path.exists()
+    assert result.images == 1
 
 
 def test_receipt_of_a_superseded_revision_goes_but_a_shared_one_stays(
@@ -770,19 +1063,22 @@ def test_receipt_of_a_superseded_revision_goes_but_a_shared_one_stays(
     world.authorize(old, build_id=world.build(old), original_digest="0" * 64)
     world.authorize(head, build_id=world.build(head), original_digest="1" * 64)
     shared = _receipt(tmp_path, AN_IMAGE)
+    _profile(world, "vonk-forge/glm")
 
     _collector(world, image_cache_root=tmp_path).collect()
 
     assert shared.exists()
 
 
-def test_receipt_a_live_operation_names_or_a_recent_transfer_used_is_kept(
+def test_receipt_a_live_operation_names_is_kept_and_a_recent_transfer_only_goes_last(
     world: Catalog, tmp_path: Path
 ) -> None:
-    """Catches removing an image a load or a Spark pull is using."""
+    """Catches removing an image a load is using, and treating a recent Spark
+    pull as a reason to keep it from a load that is waiting for room."""
 
     named = _receipt(tmp_path, "1" * 64)
     pulled = _receipt(tmp_path, "2" * 64)
+    idle = _receipt(tmp_path, "7" * 64)
     world.job({"plan": {"image": "1" * 64}}, state="waiting", updated=NOW - GRACE)
     with world.sessions.begin() as session:
         session.add(
@@ -802,11 +1098,21 @@ def test_receipt_a_live_operation_names_or_a_recent_transfer_used_is_kept(
             )
         )
 
-    result = _collector(world, image_cache_root=tmp_path).collect()
+    # Short by one byte: the idle image goes, the recently pulled one waits.
+    result = _collector(
+        world,
+        image_cache_root=tmp_path,
+        free=100 * GIB - 1,
+        reserve_floor_bytes=0,
+        reserve_fraction=0.0,
+    ).collect()
 
     assert named.exists() and pulled.exists()
+    assert not idle.exists()
     assert _kept(result, "live operation") == 1
-    assert _kept(result, "recent use") == 1
+
+    result = _collector(world, image_cache_root=tmp_path).collect()
+    assert named.exists() and not pulled.exists()
 
 
 def test_receipt_an_installation_still_uses_is_kept(
@@ -910,6 +1216,7 @@ def _models(world: Catalog, service: ModelCacheService, **kwargs):
     return _collector(
         world,
         model_cache=service,
+        model_cache_root=service._root,
         now=datetime.now(UTC) + GRACE + timedelta(hours=1),
         **kwargs,
     )
@@ -925,15 +1232,17 @@ def _set_exists(world: Catalog, set_digest: str) -> bool:
         return session.get(ModelCacheSet, set_digest) is not None
 
 
-def test_model_no_recipe_needs_is_removed_after_grace_through_the_fenced_removal(
+def test_model_no_recipe_needs_is_removed_when_disk_is_short_through_the_fenced_removal(
     world: Catalog, cached
 ) -> None:
-    """Catches cached weights outliving every recipe that named them."""
+    """Catches cached weights outliving every profile that named them, and a
+    second removal queued while the first is still freeing its files."""
 
     service, set_digest = cached
     _head_recipe_naming(world, "b" * 64)  # a current recipe, for another model
 
-    result = _models(world, service).collect()
+    collector = _models(world, service)
+    result = collector.collect()
 
     assert result.models == 1, result.kept
     with world.sessions() as session:
@@ -941,29 +1250,74 @@ def test_model_no_recipe_needs_is_removed_after_grace_through_the_fenced_removal
             select(ModelCacheOperation).where(ModelCacheOperation.kind == "remove")
         )
         assert removal is not None and removal.actor == ACTOR
+    # Until the cache has deleted the files, free space says nothing new.
+    waiting = collector.collect()
+    assert waiting.models == 0
+    assert _scope(waiting, "nas")["outcome"] == "waiting"
     _settle(service)
     assert not _set_exists(world, set_digest)
 
 
-def test_model_in_the_cache_period_is_kept_until_the_grace_has_passed(
-    world: Catalog, cached
-) -> None:
-    """Catches removing a freshly downloaded model: a load may be about to use it."""
+def test_model_is_kept_while_disk_is_not_short(world: Catalog, cached) -> None:
+    """Catches removing an idle model nobody is waiting for room for."""
 
     service, set_digest = cached
 
-    result = _collector(world, model_cache=service, now=datetime.now(UTC)).collect()
+    result = _models(world, service, free=TOTAL // 2).collect()
 
     assert result.models == 0
-    assert _kept(result, "recent use") == 1
     assert _set_exists(world, set_digest)
 
 
-def test_model_a_current_recipe_names_is_kept_and_so_is_one_a_profile_loads(
+def test_a_download_refused_for_lack_of_disk_frees_the_models_it_can(
     world: Catalog, cached
 ) -> None:
-    """Catches removing the weights of the newest revision of a recipe."""
+    """Catches a refused download that never makes room, and one that removes
+    models when even all of them could not make it fit."""
 
+    service, set_digest = cached
+    demands = StorageDemands(lambda: world.now)
+    # 200 GiB free is above the low line, so only the refusal asks for more.
+    collector = _models(world, service, free=200 * GIB, demands=demands)
+    demands.request(
+        NAS_MODELS,
+        200 * GIB + 1024**2,
+        source="model-download",
+        reason="insufficient-reserved-storage",
+    )
+
+    short = collector.collect()
+    assert short.models == 0
+    assert _scope(short, "nas")["outcome"] == "insufficient_after_eviction"
+    assert _set_exists(world, set_digest)
+
+    demands.request(
+        NAS_MODELS,
+        200 * GIB + 3,
+        source="model-download",
+        reason="insufficient-reserved-storage",
+    )
+    covered = collector.collect()
+    assert covered.models == 1
+    assert str(_scope(covered, "nas")["why"]).startswith("refused: model-download")
+
+
+def test_model_a_profile_loads_is_kept_and_a_merely_offered_one_is_not(
+    world: Catalog, cached
+) -> None:
+    """Catches removing the weights of a profile's recipe, and keeping every
+    model the catalog offers (the NAS would then never have room to free)."""
+
+    service, set_digest = cached
+    _head_recipe_naming(world, A_MODEL)
+
+    offered = _models(world, service).collect()
+    assert offered.models == 1, offered.kept
+    _settle(service)
+    assert not _set_exists(world, set_digest)
+
+
+def test_model_a_profile_points_to_is_kept(world: Catalog, cached) -> None:
     service, set_digest = cached
     _head_recipe_naming(world, A_MODEL)
     _profile(world, "vonk-forge/glm")
@@ -971,7 +1325,7 @@ def test_model_a_current_recipe_names_is_kept_and_so_is_one_a_profile_loads(
     result = _models(world, service).collect()
 
     assert result.models == 0
-    assert _kept(result, "current recipe") == 1
+    assert _kept(result, "profile") == 1
     assert _set_exists(world, set_digest)
 
 
@@ -996,9 +1350,12 @@ def test_model_an_installation_or_a_live_operation_uses_is_kept(
     assert _set_exists(world, set_digest)
 
 
-def test_model_a_recent_transfer_to_a_spark_counts_as_use(
+def test_model_a_recent_transfer_to_a_spark_only_makes_it_the_last_to_go(
     world: Catalog, cached
 ) -> None:
+    """A transfer in the last day is a reason to evict it last, not to keep it
+    from a download that is waiting for room."""
+
     service, set_digest = cached
     stamp = datetime.now(UTC) + timedelta(hours=2)
     with world.sessions.begin() as session:
@@ -1021,8 +1378,7 @@ def test_model_a_recent_transfer_to_a_spark_counts_as_use(
 
     result = _models(world, service).collect()
 
-    assert result.models == 0
-    assert _kept(result, "recent use") == 1
+    assert result.models == 1
 
 
 def test_model_a_load_reaches_after_the_sweep_looked_is_not_fenced(
@@ -1063,10 +1419,10 @@ def test_model_a_load_reaches_after_the_sweep_looked_is_not_fenced(
     assert _set_exists(world, set_digest)
 
 
-def test_one_sweep_logs_one_summary_with_the_reasons_kept(
+def test_one_pass_logs_one_line_with_what_was_freed_why_and_what_was_kept(
     world: Catalog, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Operators read removed and kept counts, and why, from one line."""
+    """Operators read the why, the bytes and the reasons kept from one line."""
 
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
@@ -1074,14 +1430,207 @@ def test_one_sweep_logs_one_summary_with_the_reasons_kept(
     _receipt(tmp_path, AN_IMAGE)
     caplog.set_level("INFO")
 
-    _collector(world, image_cache_root=tmp_path).collect()
+    collector = _collector(world, image_cache_root=tmp_path)
+    collector.collect()
+    collector.collect()
 
-    summaries = [
-        record
+    lines = [
+        record.getMessage()
         for record in caplog.records
-        if "unused_storage.swept" in record.getMessage()
+        if "unused_storage.eviction_pass" in record.getMessage()
     ]
-    assert len(summaries) == 1
-    line = summaries[0].getMessage()
-    assert "installation: running" in line
-    assert "image_receipts_removed" in line
+    # The second pass found nothing new to say, so it says nothing.
+    assert len(lines) == 1
+    assert "installation: running" in lines[0]
+    assert "image_receipts_removed" in lines[0]
+    assert "low-space line" in lines[0]
+    assert "estimated_freed_bytes" in lines[0]
+
+
+# -- work refused for lack of disk ------------------------------------------------
+
+
+def test_work_refused_for_lack_of_disk_frees_exactly_what_it_asked_for(
+    world: Catalog,
+) -> None:
+    """Catches a refused load that never makes room, and one that frees more
+    than its shortfall plus the reserve."""
+
+    oldest, middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
+    demands = StorageDemands(lambda: world.now)
+    lifecycle = FakeLifecycle(world.sessions)
+    # 400 GiB free is well above the low line: only the refused load asks.
+    collector = _collector(world, lifecycle, free=400 * GIB, demands=demands)
+    assert collector.collect().installations == 0
+
+    demands.request(
+        spark_scope(NODE),
+        450 * GIB,
+        source="profile-load",
+        subject="p",
+        reason="run-switch.insufficient-disk",
+    )
+    result = collector.collect()
+
+    # 50 GiB short plus the 20 GiB reserve: the oldest 80 GiB covers it.
+    assert lifecycle.removed == [oldest]
+    assert middle not in lifecycle.removed
+    scope = _scope(result, spark_scope(NODE))
+    assert scope["needed_bytes"] == 50 * GIB
+    assert scope["why"] == "refused: profile-load run-switch.insufficient-disk"
+
+
+def test_a_request_everything_removable_could_not_meet_removes_nothing_and_says_so(
+    world: Catalog,
+) -> None:
+    """Removing part of the cache for a load that still would not fit costs the
+    cache and helps nobody; the waiting load is told what would be enough."""
+
+    _three_idle(world, newest_age=timedelta(days=2))
+    demands = StorageDemands(lambda: world.now)
+    lifecycle = FakeLifecycle(world.sessions)
+    collector = _collector(world, lifecycle, free=400 * GIB, demands=demands)
+
+    relief = collector.relief_for_spark(
+        NODE, 800 * GIB, source="profile-load", subject="p", reason="x"
+    )
+    result = collector.collect()
+
+    assert relief is not None
+    assert relief.code == STORAGE_INSUFFICIENT
+    assert (relief.needed_bytes, relief.freeable_bytes) == (400 * GIB, 240 * GIB)
+    assert str(400 * GIB) in relief.detail and str(240 * GIB) in relief.detail
+    assert lifecycle.removed == []
+    assert _scope(result, spark_scope(NODE))["outcome"] == "insufficient_after_eviction"
+
+
+def test_a_request_that_removal_can_meet_is_reported_as_evicting(
+    world: Catalog,
+) -> None:
+    _three_idle(world, newest_age=timedelta(days=2))
+    collector = _collector(
+        world, free=400 * GIB, demands=StorageDemands(lambda: world.now)
+    )
+
+    relief = collector.relief_for_spark(
+        NODE, 450 * GIB, source="profile-load", subject="p", reason="x"
+    )
+
+    assert relief is not None and relief.code == STORAGE_EVICTING
+    assert (relief.needed_bytes, relief.freeable_bytes) == (50 * GIB, 240 * GIB)
+
+
+def test_no_relief_is_offered_when_the_free_space_is_unknown_or_enough(
+    world: Catalog,
+) -> None:
+    collector = _collector(world, free=400 * GIB)
+
+    assert (
+        collector.relief_for_spark(
+            NODE, 300 * GIB, source="profile-load", subject="p", reason="x"
+        )
+        is None
+    )
+    # A Spark that has reported nothing recently is not guessed at.
+    world.now = NOW + timedelta(hours=1)
+    assert (
+        collector.relief_for_spark(
+            NODE, 900 * GIB, source="profile-load", subject="p", reason="x"
+        )
+        is None
+    )
+
+
+def test_a_demand_lapses_unless_the_refused_work_asks_again() -> None:
+    """Catches evicting for a load that was cancelled or went away."""
+
+    now = [NOW]
+    demands = StorageDemands(lambda: now[0], ttl=timedelta(minutes=10))
+    demands.request(spark_scope(NODE), GIB, source="install", reason="x")
+    assert len(demands.active()) == 1
+
+    now[0] = NOW + timedelta(minutes=11)
+    assert demands.active() == []
+
+    demands.request(spark_scope(NODE), GIB, source="install", reason="x")
+    demands.settle(spark_scope(NODE), 2 * GIB)
+    assert demands.active() == []
+
+
+# -- one round at a time ------------------------------------------------------------
+
+
+def test_a_second_removal_waits_for_the_first_to_show_in_a_fresh_report(
+    world: Catalog,
+) -> None:
+    """Hard links make the bytes a removal frees uncertain, so the Spark's own
+    next report decides whether more must go (catches queueing more while the
+    first is still running, or acting on a report older than its landing)."""
+
+    _three_idle(world, newest_age=timedelta(days=2))
+    lifecycle = FakeLifecycle(world.sessions)
+    collector = _collector(world, lifecycle)
+    _unattended_uninstall(world, state="running", updated=NOW)
+
+    assert collector.collect().installations == 0
+
+    # Landed, but the Spark has not reported since.
+    with world.sessions.begin() as session:
+        job = session.scalar(select(Job).where(Job.kind == "recipe.uninstall"))
+        assert job is not None
+        job.state, job.updated_at = "succeeded", NOW + timedelta(seconds=10)
+    world.now = NOW + timedelta(seconds=20)
+    _report_disk(world.sessions, GIB, at=NOW + timedelta(seconds=5))
+    waiting = collector.collect()
+    assert waiting.installations == 0
+    assert _scope(waiting, spark_scope(NODE))["outcome"] == "waiting"
+
+    # A report after it landed: the Spark is still short, so more goes.
+    _report_disk(world.sessions, GIB, at=NOW + timedelta(seconds=15))
+    assert collector.collect().installations >= 1
+
+
+def test_removals_that_free_far_less_than_promised_pause_eviction(
+    world: Catalog, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Catches a cascade: removing installation after installation whose files
+    another installation keeps linked, none of which frees anything."""
+
+    oldest, middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
+    lifecycle = FakeLifecycle(world.sessions, apply=True)
+    caplog.set_level("INFO")
+    collector = _collector(world, lifecycle, free=90 * GIB)
+    collector.collect()
+    assert lifecycle.removed == [oldest]
+
+    # The Spark reports the same free space after the removal: it freed nothing.
+    world.now = NOW + timedelta(minutes=2)
+    _report_disk(world.sessions, 90 * GIB, at=world.now)
+    paused = collector.collect()
+
+    assert lifecycle.removed == [oldest]
+    assert _scope(paused, spark_scope(NODE))["outcome"] == "paused"
+    assert any(
+        "unused_storage.ineffective" in record.getMessage() for record in caplog.records
+    )
+
+    # After the pause it tries again.
+    world.now = NOW + timedelta(minutes=30)
+    _report_disk(world.sessions, 90 * GIB, at=world.now)
+    collector.collect()
+    assert lifecycle.removed == [oldest, middle]
+
+
+def test_removals_that_free_what_they_promised_do_not_pause_eviction(
+    world: Catalog,
+) -> None:
+    _oldest, _middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
+    lifecycle = FakeLifecycle(world.sessions, apply=True)
+    collector = _collector(world, lifecycle, free=1 * GIB)
+    first = collector.collect().installations
+    assert first == 2
+
+    world.now = NOW + timedelta(minutes=2)
+    _report_disk(world.sessions, 150 * GIB, at=world.now)
+    assert collector.collect().installations == 0
+    assert len(lifecycle.removed) == 2

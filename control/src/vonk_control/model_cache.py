@@ -126,6 +126,7 @@ from .operation_blockers import (
 )
 from .operation_contract import AvailabilityOperationFailure
 from .runtime_init import RuntimeSecretError, read_runtime_secret
+from .storage_demands import NAS_MODELS, StorageDemands
 from .strict_json import read_stored_model, serialize_json_value
 
 SCHEMA_VERSION = 2
@@ -1350,6 +1351,7 @@ class ModelCacheService:
         self._sessions = sessions
         self._root = root
         self._reserve_bytes = reserve_bytes
+        self._storage_demands: StorageDemands | None = None
         self._max_parallel_downloads = max_parallel_downloads
         self._clock = clock or (lambda: datetime.now(UTC))
         self._http = http_client
@@ -4163,6 +4165,7 @@ class ModelCacheService:
         blockers = []
         if new_bytes > storage.available_bytes:
             blockers.append("insufficient-reserved-storage")
+            self._request_storage(new_bytes, "insufficient-reserved-storage")
         plan = {
             "schema_version": SCHEMA_VERSION,
             "kind": "download",
@@ -6050,6 +6053,7 @@ class ModelCacheService:
             try:
                 measured_required = manifest.expected_bytes
                 measured_free = self.storage_summary().free_bytes
+                self._request_storage(measured_required, "model_cache.capacity")
                 required_bytes, free_bytes, shortfall_bytes = (
                     measured_required,
                     measured_free,
@@ -7724,10 +7728,9 @@ class ModelCacheService:
                 return self._operation_view(existing)
         manifest = self._manifest_for_set(digest)
         transfer = self._transfer_state_for_manifest(manifest, force=True)
-        if (
-            require_integer(transfer["total_bytes"], "transfer total bytes")
-            > self.storage_summary().available_bytes
-        ):
+        repair_bytes = require_integer(transfer["total_bytes"], "transfer total bytes")
+        if repair_bytes > self.storage_summary().available_bytes:
+            self._request_storage(repair_bytes, "insufficient-reserved-storage")
             raise ModelCacheConflict(
                 "model_cache.download_blocked", "insufficient-reserved-storage"
             )
@@ -8769,6 +8772,23 @@ class ModelCacheService:
             "total": total,
             "_next_boundary": next_boundary,
         }
+
+    def bind_storage_demands(self, demands: StorageDemands) -> None:
+        """Attach the register a download refused for lack of disk asks space in."""
+
+        self._storage_demands = demands
+
+    def _request_storage(self, new_bytes: int, reason: str) -> None:
+        """Ask for the free NAS disk a refused download needs, reserve included."""
+
+        if self._storage_demands is not None:
+            self._storage_demands.request(
+                NAS_MODELS,
+                new_bytes + self._reserve_bytes,
+                source="model-download",
+                subject="",
+                reason=reason,
+            )
 
     def storage_summary(self) -> StorageSummary:
         usage = shutil.disk_usage(self._root)

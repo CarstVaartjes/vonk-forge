@@ -167,6 +167,7 @@ from .run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationService,
 )
+from .storage_demands import STORAGE_INSUFFICIENT, StorageRelief
 from .strict_json import (
     read_stored_document,
     read_stored_model,
@@ -292,6 +293,24 @@ class PreparationStarter(Protocol):
     def __call__(
         self, recipe_revision_id: str, *, actor: str
     ) -> Sequence[OperationBlocker]: ...
+
+
+class StorageReliefProvider(Protocol):
+    """Ask for free disk on one Spark for a load that was refused for lack of it.
+
+    Returns the named reason to show on the waiting load, or ``None`` when the
+    Spark's free space cannot be read or already covers the request.
+    """
+
+    def __call__(
+        self,
+        node_id: str,
+        required_free_bytes: int,
+        *,
+        source: str,
+        subject: str,
+        reason: str,
+    ) -> StorageRelief | None: ...
 
 
 class PreparationCanceller(Protocol):
@@ -2822,6 +2841,7 @@ class FleetProfileService:
         self._cache_resolver = cache_resolver
         self._assessment_provider = assessment_provider
         self._preparation_starter: PreparationStarter | None = None
+        self._storage_relief: StorageReliefProvider | None = None
         self._preparation_canceller: PreparationCanceller | None = None
         # Round-robin position of the bounded automatic-recovery scan, so rows
         # that stay ineligible cannot starve later due rows.
@@ -5816,6 +5836,11 @@ class FleetProfileService:
 
         self._preparation_starter = starter
 
+    def bind_storage_relief(self, relief: StorageReliefProvider) -> None:
+        """Attach the authority that frees disk for a load waiting on it."""
+
+        self._storage_relief = relief
+
     def bind_preparation_canceller(self, canceller: PreparationCanceller) -> None:
         """Attach the authority that cancels a preparation a load asked for."""
 
@@ -5905,10 +5930,10 @@ class FleetProfileService:
         cannot resolve by itself starts a preparation.
         """
 
+        blockers = self._request_storage(preview)
         starter = self._preparation_starter
         if starter is None:
-            return []
-        blockers: list[OperationBlocker] = []
+            return blockers
         for assignment in _assignments_needing_preparation(
             preview.assignments,
             {item.assignment_id for item in preview.preparations},
@@ -5926,6 +5951,60 @@ class FleetProfileService:
                         severity="warning",
                     )
                 )
+        return blockers
+
+    def _request_storage(self, preview: FleetProfilePreview) -> list[OperationBlocker]:
+        """Ask for the disk a load was refused for, and say how that is going.
+
+        A load that does not fit a Spark's free disk waits (it is not refused for
+        good): the Controller removes the least recently used installations
+        nothing uses until it fits, and the load retries by itself. The reason
+        shown names the bytes needed and the bytes that can be freed.
+        """
+
+        relief = self._storage_relief
+        if relief is None:
+            return []
+        blockers: list[OperationBlocker] = []
+        for item in preview.assessments:
+            assessment = item.assessment
+            refused = {
+                node_id
+                for reason in assessment.blockers
+                if reason.code == "run-switch.insufficient-disk"
+                for node_id in reason.node_ids
+            }
+            fit = assessment.fit_after_stop or assessment.fit_current
+            for node in fit.nodes:
+                if (
+                    node.node_id not in refused
+                    or node.disk_free_bytes is None
+                    or node.disk_free_after_bytes is None
+                    or node.disk_free_after_bytes >= 0
+                ):
+                    continue
+                try:
+                    found = relief(
+                        node.node_id,
+                        node.disk_free_bytes - node.disk_free_after_bytes,
+                        source="profile-load",
+                        subject=preview.profile_id,
+                        reason="run-switch.insufficient-disk",
+                    )
+                except Exception:  # a load never fails on this
+                    _LOGGER.warning("storage relief failed", exc_info=True)
+                    continue
+                if found is not None:
+                    blockers.append(
+                        make_blocker(
+                            found.code,
+                            found.detail,
+                            severity="error"
+                            if found.code == STORAGE_INSUFFICIENT
+                            else "warning",
+                            node_ids=(node.node_id,),
+                        )
+                    )
         return blockers
 
     def _park_for_retry(

@@ -1,56 +1,69 @@
-"""Remove the three kinds of storage nothing uses any more.
+"""Free disk by removing what nothing uses, and only when disk is short.
 
-Storage that no profile points to, nothing runs, nothing used in the last day
-and no operation names is dead weight, and it can always be fetched again.
-Once an hour this collector finds it and removes it, in the order that lets the
-next kind clear in a later sweep:
+Installations, runtime image receipts and cached models are always refetchable,
+so they are removed only to make room: when work was refused for lack of disk
+(a profile load, an install, a build, a model download asked for free space on
+a Spark or the NAS, see :mod:`storage_demands`), or when a Spark or the NAS
+runs low on free space on its own (below a share of its capacity, or below the
+largest install or model set it has held). Time unused is never a reason, and a
+profile change alone removes nothing.
 
-1. **Spark installations** (state ``installed``). Removal is a real uninstall
-   on the Sparks, queued through the same lifecycle as ``vonkctl recipe
-   uninstall``. Its model files go with it unless another installation on that
-   Spark still needs them.
-2. **Runtime image receipts** in the NAS ``image-cache``. Removing a receipt
-   releases the image; the hourly image store collector then reclaims the
-   blobs nothing else names.
-3. **Model files** in the NAS model cache, removed through the model cache's
-   durable, fenced removal.
+A pass measures free space (a Spark's latest inventory, the NAS filesystem) and
+removes the least recently used unused items until the shortfall plus a small
+reserve is covered, then stops. Items used in the last 24 hours go only after
+everything older. Which items exist:
+
+1. **Spark installations** (state ``installed``). Removal is a real uninstall on
+   the Sparks, queued through the same lifecycle as ``vonkctl recipe
+   uninstall``; its model files go with it unless another installation on that
+   Spark still needs them. Installations that share one model are removed
+   together or not at all, since only the last one frees the shared bytes.
+2. **Runtime image receipts** in the NAS ``image-cache``; the image store then
+   reclaims the blobs nothing else names.
+3. **Model files** in the NAS model cache, through the model cache's durable,
+   fenced removal.
 
 Nothing is removed while it is
 
 * pointed to by a saved profile (loaded or not): an installation by the
   profile's recipe selector resolving to its revision on its Sparks, an image or
-  model by the newest revision of every recipe the catalog still offers;
+  model by the newest revision of every recipe a profile names;
 * running, or installed for a workload that has not stopped;
-* used in the last 24 hours, which includes a recipe superseded, a profile
-  edited, or a model, image or installation touched in that time;
 * named by a live or recently finished operation (searched in the stored JSON,
   as the catalog revision collector does).
 
-``installation_policy`` is not consulted. ``keep-cached`` only stops a profile
-*load* from removing installations out of its scope; it never promised to keep
-what nothing points to. This sweep removes that after the grace period.
+A removal queued on a Spark is given time to land and show in a fresh inventory
+before the next one, so the Spark's own free space (not a promise about how much
+a removal frees, which hard links make uncertain) decides whether more is
+needed. A round that frees far less than it promised pauses eviction there for
+a while. If everything that may go would still not cover a refused request,
+nothing is removed and the waiting load says so
+(``storage.insufficient_after_eviction``).
 
 Every removal is re-proven while the Sparks (or artifact gates) are locked, so
-a load that starts after the sweep looked is never raced: the uninstall takes
+a load that starts after the pass looked is never raced: the uninstall takes
 no new workload intent (it supersedes nothing and leaves recovery of a running
 workload alone) and is refused when an operation targets its Sparks. One item
-that cannot be removed is kept for the next sweep and never stops the rest.
+that cannot be removed is kept for the next pass and never stops the rest.
 """
 
 from __future__ import annotations
 
 import logging
+import math
+import os
+import shutil
 import time
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
 from pydantic import TypeAdapter
-from sqlalchemy import or_, select, union
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -67,14 +80,14 @@ from .artifact_reference_scan import (
 from .attempt_residues import _OWNER_JOB_KINDS
 from .catalog_revision_collection import (
     GRACE,
-    INTERVAL,
     live_tokens,
     operation_tokens,
-    pinned_by_heads,
+    tokens,
 )
 from .fleet_profile_contract import FleetProfileAssignmentInput
 from .logging import log_event
 from .models import (
+    AgentNode,
     ArtifactDistributionAssignment,
     CatalogDocumentHead,
     CatalogDocumentRevision,
@@ -83,8 +96,10 @@ from .models import (
     FleetProfileApplication,
     InstallationNode,
     Job,
+    ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
+    NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -96,19 +111,42 @@ from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
 )
+from .settings import (
+    STORAGE_EVICTION_RESERVE_FLOOR_BYTES,
+    STORAGE_EVICTION_RESERVE_FRACTION,
+    STORAGE_INEFFECTIVE_COOLDOWN_SECONDS,
+    STORAGE_LOW_FREE_CAP_FRACTION,
+    STORAGE_LOW_FREE_FRACTION,
+    STORAGE_SCAN_INTERVAL_SECONDS,
+)
+from .storage_demands import (
+    NAS_IMAGES,
+    NAS_MODELS,
+    STORAGE_EVICTING,
+    STORAGE_INSUFFICIENT,
+    StorageDemand,
+    StorageDemands,
+    StorageRelief,
+    spark_scope,
+)
 
 _LOGGER = logging.getLogger(__name__)
 ACTOR = "system:storage-sweep"
-# One sweep stops here and the rest continues on the next worker pass.
+# One pass stops here and the rest continues on the next worker pass.
 SWEEP_BUDGET_SECONDS = 30.0
+# A Spark's inventory older than this proves nothing about its free space.
+INVENTORY_MAX_AGE = timedelta(seconds=300)
 # A failed run holds nothing; any other state but stopped may still be on a Spark.
 _DEAD_RUNS = ("stopped", "failed")
+# Installations that may hold files on their Sparks (a plan holds none).
+_HOLDING_STATES = ("installed", "installing", "partial", "failed")
+_FINISHED_JOBS = ("succeeded", "failed", "cancelled", "expired")
 _RECEIPT_SUFFIX = ".receipt.json"
 _ASSIGNMENTS = TypeAdapter(list[FleetProfileAssignmentInput])
 
 
 class _Kept(Exception):
-    """Something still uses it (or proof is missing); try again next sweep."""
+    """Something still uses it (or proof is missing); try again next pass."""
 
 
 class UnusedModelRemoval(Protocol):
@@ -125,7 +163,7 @@ class UnusedModelRemoval(Protocol):
 
 
 class InstallationRemoval(Protocol):
-    """The recipe lifecycle's uninstall, as the sweep uses it."""
+    """The recipe lifecycle's uninstall, as the collector uses it."""
 
     def preview_uninstall(self, installation_id: str) -> UninstallPlan: ...
 
@@ -140,12 +178,20 @@ class InstallationRemoval(Protocol):
     ) -> object: ...
 
 
+class ImageBlobReclaimer(Protocol):
+    """The image store's reclaim of blobs no receipt names any more."""
+
+    def collect(self) -> object: ...
+
+
 @dataclass(frozen=True, slots=True)
 class Swept:
     installations: int
     images: int
     models: int
     kept: dict[str, int]
+    #: What the pass expected to free, per scope, with why it ran.
+    scopes: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,21 +202,20 @@ class _Evidence:
     cutoff: datetime
     live: frozenset[str]
     operations: frozenset[str]
+    #: Digests the newest revisions of the recipes a saved profile names mention.
     pinned: frozenset[str]
-    head_digests: frozenset[str]
-    head_revisions: frozenset[str]
-    bound_models: frozenset[str]
+    pointed_digests: frozenset[str]
+    pointed_models: frozenset[str]
+    pointed_archives: frozenset[str]
     # Newest active recipe revision of each document: id and creation time.
     newest: Mapping[str, tuple[str, datetime, int]]
     # (publisher, slug) -> Spark sets of the saved profile assignments naming it.
     # None when a profile cannot be read: nothing can then be proven unused.
     pointers: Mapping[tuple[str, str], tuple[frozenset[str], ...]] | None
-    profile_edited: datetime | None
     owned_nodes: frozenset[str]
     active_scopes: tuple[str, ...]
     recent_sets: frozenset[str]
     recent_archives: frozenset[str]
-    head_archives: frozenset[str]
 
     @classmethod
     def read(cls, session: Session, now: datetime) -> _Evidence:
@@ -191,38 +236,44 @@ class _Evidence:
             known = newest.get(document_id)
             if known is None or number > known[2]:
                 newest[document_id] = (revision_id, _utc(created), number)
-        head_ids = frozenset(
-            value
-            for value in session.scalars(
-                union(
-                    select(CatalogDocumentHead.active_revision_id).where(
-                        CatalogDocumentHead.kind == "recipe"
-                    ),
-                    select(CatalogDocumentHead.candidate_revision_id).where(
-                        CatalogDocumentHead.kind == "recipe"
-                    ),
+        pointers = _profile_pointers(session)
+        head_ids = {revision_id for revision_id, _created, _number in newest.values()}
+        for column in (
+            CatalogDocumentHead.active_revision_id,
+            CatalogDocumentHead.candidate_revision_id,
+        ):
+            head_ids.update(
+                value
+                for value in session.scalars(
+                    select(column).where(CatalogDocumentHead.kind == "recipe")
                 )
+                if value is not None
             )
-            if value is not None
-        ) | frozenset(revision_id for revision_id, _created, _number in newest.values())
-        head_digests = frozenset(
-            session.scalars(
-                select(CatalogDocumentRevision.content_digest).where(
-                    CatalogDocumentRevision.id.in_(head_ids)
-                )
+        # What a profile points to is the newest revision of the recipes it
+        # names. A recipe nobody named is offered by the catalog but is no
+        # more than a download away, so it can go when space is short.
+        pointed = [
+            row
+            for row in session.execute(
+                select(
+                    CatalogDocumentRevision.id,
+                    CatalogDocumentRevision.publisher,
+                    CatalogDocumentRevision.slug,
+                    CatalogDocumentRevision.content_digest,
+                    CatalogDocumentRevision.document,
+                ).where(CatalogDocumentRevision.id.in_(head_ids))
             )
-        )
+            if pointers is None
+            or (row.publisher.casefold(), row.slug.casefold()) in pointers
+        ]
+        pointed_ids = frozenset(row.id for row in pointed)
+        pinned = tokens(row.document for row in pointed)
         bound = frozenset(
             session.scalars(
                 select(CatalogRecipeModelReference.model_content_digest).where(
-                    CatalogRecipeModelReference.recipe_revision_id.in_(head_ids)
+                    CatalogRecipeModelReference.recipe_revision_id.in_(pointed_ids)
                 )
             )
-        )
-        edited = session.scalar(
-            select(FleetProfile.updated_at)
-            .order_by(FleetProfile.updated_at.desc())
-            .limit(1)
         )
         owned = frozenset(
             node_id
@@ -249,13 +300,28 @@ class _Evidence:
             cutoff=cutoff,
             live=live_tokens(session, now),
             operations=operation_tokens(session, now),
-            pinned=pinned_by_heads(session),
-            head_digests=head_digests,
-            head_revisions=head_ids,
-            bound_models=bound,
+            pinned=pinned,
+            pointed_digests=frozenset(row.content_digest for row in pointed),
+            pointed_models=bound | pinned,
+            pointed_archives=frozenset(
+                session.scalars(
+                    select(RuntimeImageAuthorization.oci_archive_sha256).where(
+                        RuntimeImageAuthorization.recipe_revision_id.in_(pointed_ids)
+                    )
+                )
+            )
+            | frozenset(
+                value
+                for value in session.scalars(
+                    select(RecipeBuild.oci_layout_sha256).where(
+                        RecipeBuild.recipe_revision_id.in_(pointed_ids)
+                    )
+                )
+                if value is not None
+            )
+            | pinned,
             newest=newest,
-            pointers=_profile_pointers(session),
-            profile_edited=_utc(edited) if edited is not None else None,
+            pointers=pointers,
             owned_nodes=owned,
             active_scopes=scopes,
             recent_sets=frozenset(
@@ -291,27 +357,79 @@ class _Evidence:
                 )
                 if value is not None
             ),
-            head_archives=frozenset(
-                session.scalars(
-                    select(RuntimeImageAuthorization.oci_archive_sha256).where(
-                        RuntimeImageAuthorization.recipe_revision_id.in_(head_ids)
-                    )
-                )
-            )
-            | frozenset(
-                value
-                for value in session.scalars(
-                    select(RecipeBuild.oci_layout_sha256).where(
-                        RecipeBuild.recipe_revision_id.in_(head_ids)
-                    )
-                )
-                if value is not None
-            ),
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _Pressure:
+    """One Spark or filesystem that is short of free space."""
+
+    scope: str
+    node_id: str | None
+    free: int
+    total: int
+    observed_at: datetime | None
+    #: Bytes missing for the refused work (or the low-space line) to be met.
+    shortfall: int
+    #: The shortfall plus a reserve, so the next request does not refuse again.
+    need: int
+    why: str
+    #: Work was refused for this space, so removing too little would not help it.
+    demanded: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _Item:
+    """Something unused that can be removed, and what that is expected to free."""
+
+    kind: str  # "installation", "model" or "image"
+    key: str
+    #: Installations sharing one model on a Spark are removed together.
+    members: tuple[str, ...]
+    last_used: datetime
+    recent: bool
+    freeable: int
+
+
+@dataclass(slots=True)
+class _Outcome:
+    scope: str
+    why: str
+    shortfall: int
+    outcome: str
+    estimated_freed: int = 0
+    removed: Counter[str] = field(default_factory=Counter)
+    freeable: int = 0
+
+    def line(self) -> dict[str, object]:
+        return {
+            "scope": self.scope,
+            "why": self.why,
+            "needed_bytes": self.shortfall,
+            "freeable_bytes": self.freeable,
+            "estimated_freed_bytes": self.estimated_freed,
+            "outcome": self.outcome,
+            "installations_removed": self.removed["installation"],
+            "image_receipts_removed": self.removed["image"],
+            "models_removed": self.removed["model"],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _Round:
+    """What a pass promised to free, to compare with what the next one measures."""
+
+    estimated: int
+    free_before: int
+
+
+def _disk_usage(path: Path) -> tuple[int, int]:
+    usage = shutil.disk_usage(path)
+    return usage.total, usage.free
+
+
 class UnusedStorageCollector:
-    """Hourly sweep of unused installations, image receipts and model files."""
+    """Frees disk on a Spark or the NAS, by removing unused items, when it is short."""
 
     def __init__(
         self,
@@ -320,8 +438,18 @@ class UnusedStorageCollector:
         clock: Callable[[], datetime],
         lifecycle: InstallationRemoval,
         image_cache_root: Path | None = None,
+        model_cache_root: Path | None = None,
         model_cache: UnusedModelRemoval | None = None,
+        image_blobs: ImageBlobReclaimer | None = None,
+        demands: StorageDemands | None = None,
         budget_seconds: float = SWEEP_BUDGET_SECONDS,
+        disk_usage: Callable[[Path], tuple[int, int]] = _disk_usage,
+        low_free_fraction: float = STORAGE_LOW_FREE_FRACTION,
+        low_free_cap_fraction: float = STORAGE_LOW_FREE_CAP_FRACTION,
+        reserve_fraction: float = STORAGE_EVICTION_RESERVE_FRACTION,
+        reserve_floor_bytes: int = STORAGE_EVICTION_RESERVE_FLOOR_BYTES,
+        scan_interval: timedelta = timedelta(seconds=STORAGE_SCAN_INTERVAL_SECONDS),
+        cooldown: timedelta = timedelta(seconds=STORAGE_INEFFECTIVE_COOLDOWN_SECONDS),
     ) -> None:
         self._sessions = sessions
         self._clock = clock
@@ -336,21 +464,34 @@ class UnusedStorageCollector:
             if image_cache_root is not None
             else None
         )
+        self._model_cache_root = model_cache_root
         self._model_cache = model_cache
+        self._image_blobs = image_blobs
+        self._demands = demands
         self._budget_seconds = budget_seconds
+        self._disk_usage = disk_usage
+        self._low_free_fraction = low_free_fraction
+        self._low_free_cap_fraction = low_free_cap_fraction
+        self._reserve_fraction = reserve_fraction
+        self._reserve_floor_bytes = reserve_floor_bytes
+        self._scan_interval = scan_interval
+        self._cooldown = cooldown
         self._due_at: datetime | None = None
+        self._rounds: dict[str, _Round] = {}
+        self._paused_until: dict[str, datetime] = {}
+        self._last_outcome: dict[str, str] = {}
 
     def tick(self) -> bool:
-        """Sweep at most once per interval; True when anything was removed."""
+        """Look at free space at most once per scan; True when anything was removed."""
 
         now = self._clock()
         if self._due_at is not None and now < self._due_at:
             return False
-        self._due_at = now + INTERVAL
+        self._due_at = now + self._scan_interval
         try:
             result = self.collect()
         except SQLAlchemyError as error:
-            # A database fault proves nothing unused; try again next interval.
+            # A database fault proves nothing unused; try again next scan.
             log_event(
                 _LOGGER,
                 "unused_storage.sweep_failed",
@@ -361,86 +502,455 @@ class UnusedStorageCollector:
         return bool(result.installations or result.images or result.models)
 
     def collect(self) -> Swept:
+        """One pass: free what the short Sparks and the NAS need, and no more."""
+
         now = self._clock()
         deadline = time.monotonic() + self._budget_seconds
+        pressures = self._pressures(now)
+        if not pressures:
+            self._last_outcome.clear()
+            return Swept(0, 0, 0, {})
         with self._sessions() as session:
             evidence = _Evidence.read(session, now)
         kept: Counter[str] = Counter()
-        installations = self._installations(evidence, deadline, kept)
-        images = self._image_receipts(evidence, deadline, kept)
-        models = self._models(evidence, deadline, kept)
+        # An installation on two Sparks is one removal for both of them.
+        attempted: dict[tuple[str, str], bool] = {}
+        outcomes = [
+            self._relieve(pressure, evidence, deadline, kept, attempted)
+            for pressure in pressures
+        ]
         if any("sweep budget" in reason for reason in kept):
             self._due_at = now  # continue on the next worker pass
-        if installations or images or models or kept:
+        removed: Counter[str] = Counter()
+        for outcome in outcomes:
+            removed.update(outcome.removed)
+        # One line per pass that did something or whose answer changed, so a
+        # Spark that stays short and waiting does not repeat itself every scan.
+        changed = [
+            outcome
+            for outcome in outcomes
+            if outcome.removed.total()
+            or self._last_outcome.get(outcome.scope) != outcome.outcome
+        ]
+        self._last_outcome = {outcome.scope: outcome.outcome for outcome in outcomes}
+        if changed:
             log_event(
                 _LOGGER,
-                "unused_storage.swept",
+                "unused_storage.eviction_pass",
                 service="control-worker",
-                installations_removed=installations,
-                image_receipts_removed=images,
-                models_removed=models,
+                scopes=[outcome.line() for outcome in changed],
                 kept=dict(kept),
             )
-        return Swept(installations, images, models, dict(kept))
+        return Swept(
+            removed["installation"],
+            removed["image"],
+            removed["model"],
+            dict(kept),
+            tuple(outcome.line() for outcome in outcomes),
+        )
 
-    # -- installations ------------------------------------------------------
+    def relief_for_spark(
+        self,
+        node_id: str,
+        required_free_bytes: int,
+        *,
+        source: str,
+        subject: str,
+        reason: str,
+    ) -> StorageRelief | None:
+        """Ask for free space on a Spark for work that was refused for lack of it.
 
-    def _installations(
-        self, evidence: _Evidence, deadline: float, kept: Counter[str]
-    ) -> int:
-        with self._sessions() as session:
-            candidates = list(
-                session.scalars(
-                    select(RecipeInstallation.id)
-                    .where(RecipeInstallation.state == "installed")
-                    .order_by(RecipeInstallation.updated_at, RecipeInstallation.id)
-                )
+        Returns what to tell the waiting work: that unused installations are
+        being removed (``storage.evicting``), or that all of them together would
+        not be enough (``storage.insufficient_after_eviction``). ``None`` when
+        the Spark's free space cannot be read or already covers the request.
+        """
+
+        scope = spark_scope(node_id)
+        if self._demands is not None:
+            self._demands.request(
+                scope,
+                required_free_bytes,
+                source=source,
+                subject=subject,
+                reason=reason,
             )
-            reasons = {
-                installation_id: _installation_kept(session, installation_id, evidence)
-                for installation_id in candidates
-            }
-        removed = 0
-        for installation_id in candidates:
-            reason = reasons[installation_id]
-            if reason is not None:
-                kept[f"installation: {reason}"] += 1
+        now = self._clock()
+        try:
+            with self._sessions() as session:
+                snapshot = _latest_snapshots(session, node_id).get(node_id)
+                if snapshot is None or now - snapshot[2] > INVENTORY_MAX_AGE:
+                    return None
+                shortfall = required_free_bytes - snapshot[0]
+                if shortfall <= 0:
+                    return None
+                evidence = _Evidence.read(session, now)
+                items = self._spark_items(session, node_id, evidence, Counter())
+                settling = _spark_settling(session, node_id, snapshot[2])
+        except SQLAlchemyError:
+            return None
+        freeable = sum(item.freeable for item in items)
+        paused = self._paused_until.get(scope)
+        paused = paused if paused is not None and now < paused else None
+        if freeable >= shortfall and paused is None:
+            code = STORAGE_EVICTING
+            detail = (
+                f"Needs {shortfall} more free bytes on this Spark; "
+                f"{freeable} bytes of unused installations can be removed, "
+                "least recently used first"
+                + (" (waiting for the last removal to finish)." if settling else ".")
+            )
+        else:
+            code = STORAGE_INSUFFICIENT
+            detail = (
+                f"Needs {shortfall} more free bytes on this Spark; only "
+                f"{freeable} bytes of unused installations can be removed"
+                + (
+                    "; the last removals freed far less than expected, so "
+                    "removal is paused"
+                    if paused is not None
+                    else ""
+                )
+                + ". Stop or remove something on this Spark to make room."
+            )
+        return StorageRelief(code, shortfall, freeable, detail)
+
+    # -- pressure ---------------------------------------------------------------
+
+    def _pressures(self, now: datetime) -> list[_Pressure]:
+        demands = self._demands.active() if self._demands is not None else []
+        pressures: list[_Pressure] = []
+        with self._sessions() as session:
+            largest_install = (
+                session.scalar(select(func.max(InstallationNode.required_bytes))) or 0
+            )
+            largest_set = (
+                session.scalar(select(func.max(ModelCacheSet.expected_bytes))) or 0
+            )
+            snapshots = _latest_snapshots(session)
+        for node_id, (free, total, observed) in sorted(snapshots.items()):
+            if now - observed > INVENTORY_MAX_AGE:
                 continue
-            if time.monotonic() > deadline:
-                kept["installation: sweep budget"] += 1
-                continue
+            scope = spark_scope(node_id)
+            pressure = self._pressure(
+                scope,
+                node_id,
+                free,
+                total,
+                observed,
+                largest_install,
+                [demand for demand in demands if demand.scope == scope],
+            )
+            if pressure is not None:
+                pressures.append(pressure)
+        for scope, path, kinds in self._nas_filesystems():
             try:
-                self._uninstall(installation_id)
-            except _Kept as why:
-                kept[f"installation: {why}"] += 1
+                total, free = self._disk_usage(path)
+            except OSError:
                 continue
+            wanted = {
+                *([NAS_MODELS] if "model" in kinds else []),
+                *([NAS_IMAGES] if "image" in kinds else []),
+            }
+            pressure = self._pressure(
+                scope,
+                None,
+                free,
+                total,
+                None,
+                largest_set,
+                [demand for demand in demands if demand.scope in wanted],
+            )
+            if pressure is not None:
+                pressures.append(pressure)
+        return pressures
+
+    def _pressure(
+        self,
+        scope: str,
+        node_id: str | None,
+        free: int,
+        total: int,
+        observed: datetime | None,
+        largest: int,
+        demands: list[StorageDemand],
+    ) -> _Pressure | None:
+        mark = min(
+            max(math.ceil(total * self._low_free_fraction), largest),
+            math.ceil(total * self._low_free_cap_fraction),
+        )
+        reserve = max(
+            self._reserve_floor_bytes, math.ceil(total * self._reserve_fraction)
+        )
+        if self._demands is not None:
+            self._demands.settle(scope, free)
+        wanted = max((demand.required_free_bytes for demand in demands), default=0)
+        if wanted > free:
+            required = max(wanted, mark if free < mark else 0)
+            why = "refused: " + "; ".join(
+                sorted({f"{demand.source} {demand.reason}" for demand in demands})
+            )
+            demanded = True
+        elif free < mark:
+            required = mark
+            why = f"free space {free} is below the {mark}-byte low-space line"
+            demanded = False
+        else:
+            return None
+        shortfall = required - free
+        return _Pressure(
+            scope,
+            node_id,
+            free,
+            total,
+            observed,
+            shortfall,
+            shortfall + reserve,
+            why,
+            demanded,
+        )
+
+    def _nas_filesystems(self) -> list[tuple[str, Path, frozenset[str]]]:
+        roots: list[tuple[Path, str]] = []
+        if self._model_cache is not None and self._model_cache_root is not None:
+            roots.append((self._model_cache_root, "model"))
+        if self._images is not None and self._image_cache is not None:
+            roots.append((self._image_cache, "image"))
+        by_device: dict[int, list[tuple[Path, str]]] = defaultdict(list)
+        for root, kind in roots:
+            try:
+                by_device[os.stat(root).st_dev].append((root, kind))
+            except OSError:
+                continue
+        result: list[tuple[str, Path, frozenset[str]]] = []
+        for members in by_device.values():
+            kinds = frozenset(kind for _root, kind in members)
+            scope = "nas" if len(by_device) == 1 else f"nas:{min(kinds)}"
+            result.append((scope, members[0][0], kinds))
+        return result
+
+    # -- one scope ----------------------------------------------------------------
+
+    def _relieve(
+        self,
+        pressure: _Pressure,
+        evidence: _Evidence,
+        deadline: float,
+        kept: Counter[str],
+        attempted: dict[tuple[str, str], bool],
+    ) -> _Outcome:
+        now = self._clock()
+        outcome = _Outcome(pressure.scope, pressure.why, pressure.shortfall, "evicting")
+        with self._sessions() as session:
+            if pressure.node_id is not None and pressure.observed_at is not None:
+                settling = _spark_settling(
+                    session, pressure.node_id, pressure.observed_at
+                )
+                items = self._spark_items(session, pressure.node_id, evidence, kept)
+            else:
+                settling = _model_removal_in_flight(session)
+                items = self._nas_items(session, evidence, kept)
+        outcome.freeable = sum(item.freeable for item in items)
+        if settling:
+            outcome.outcome = "waiting"
+            return outcome
+        self._check_round(pressure, now)
+        paused = self._paused_until.get(pressure.scope)
+        if paused is not None and now < paused:
+            outcome.outcome = "paused"
+            return outcome
+        if pressure.demanded and outcome.freeable < pressure.shortfall:
+            # Removing part of it would cost cached items and still not admit
+            # the work that asked.
+            outcome.outcome = "insufficient_after_eviction"
+            return outcome
+        ordered = sorted(
+            items, key=lambda item: (item.recent, item.last_used, item.kind, item.key)
+        )
+        queued = 0
+        for item in ordered:
+            if queued >= pressure.need:
+                break
+            done = attempted.get((item.kind, item.key))
+            if done is None:
+                if time.monotonic() > deadline:
+                    kept[f"{item.kind}: sweep budget"] += 1
+                    continue
+                done = attempted[(item.kind, item.key)] = self._remove(
+                    item, kept, outcome
+                )
+            if done:
+                queued += item.freeable
+        outcome.estimated_freed = queued
+        if outcome.removed["image"]:
+            self._reclaim_blobs()
+        if queued:
+            self._rounds[pressure.scope] = _Round(queued, pressure.free)
+        elif pressure.demanded:
+            outcome.outcome = "insufficient_after_eviction"
+        else:
+            outcome.outcome = "nothing_removable"
+        return outcome
+
+    def _check_round(self, pressure: _Pressure, now: datetime) -> None:
+        """Compare what the last round promised with the free space now measured."""
+
+        round_ = self._rounds.pop(pressure.scope, None)
+        if round_ is None or round_.estimated <= 0:
+            return
+        freed = pressure.free - round_.free_before
+        if freed * 2 >= round_.estimated:
+            return
+        self._paused_until[pressure.scope] = now + self._cooldown
+        log_event(
+            _LOGGER,
+            "unused_storage.ineffective",
+            service="control-worker",
+            scope=pressure.scope,
+            estimated_freed_bytes=round_.estimated,
+            freed_bytes=max(0, freed),
+            paused_until=self._paused_until[pressure.scope].isoformat(),
+        )
+
+    def _remove(self, item: _Item, kept: Counter[str], outcome: _Outcome) -> bool:
+        """Remove one item; False when anything still keeps it."""
+
+        label = "image receipt" if item.kind == "image" else item.kind
+        done = 0
+        for member in item.members:
+            try:
+                if item.kind == "installation":
+                    self._uninstall(member)
+                elif item.kind == "image":
+                    assert self._image_cache is not None
+                    self._remove_receipt(
+                        member, self._image_cache / f"{member}{_RECEIPT_SUFFIX}"
+                    )
+                else:
+                    self._remove_model(member)
+            except _Kept as why:
+                kept[f"{label}: {why}"] += 1
+                break
             except (
                 KeyError,
+                OSError,
                 RuntimeError,
                 TypeError,
                 ValueError,
                 SQLAlchemyError,
+                ArtifactLifecycleError,
+                RuntimeImagePreparationError,
             ) as error:
-                kept[f"installation: refused {_code(error)}"] += 1
+                kept[f"{label}: refused {_code(error)}"] += 1
                 log_event(
                     _LOGGER,
                     "unused_storage.refused",
                     service="control-worker",
-                    kind="installation",
-                    record_id=installation_id,
+                    kind=item.kind,
+                    record_id=member,
                     code=_code(error),
                     detail=str(error)[:256],
                 )
-                continue
-            removed += 1
+                break
+            done += 1
+            outcome.removed[item.kind] += 1
             log_event(
                 _LOGGER,
                 "unused_storage.removing",
                 service="control-worker",
-                kind="installation",
-                record_id=installation_id,
+                kind=item.kind,
+                record_id=member,
             )
-        return removed
+        return done == len(item.members)
+
+    def _reclaim_blobs(self) -> None:
+        if self._image_blobs is None:
+            return
+        try:
+            self._image_blobs.collect()
+        except (OSError, RuntimeError, SQLAlchemyError) as error:
+            log_event(
+                _LOGGER,
+                "unused_storage.refused",
+                service="control-worker",
+                kind="image-blobs",
+                code=_code(error),
+                detail=str(error)[:256],
+            )
+
+    # -- installations ------------------------------------------------------------
+
+    def _spark_items(
+        self,
+        session: Session,
+        node_id: str,
+        evidence: _Evidence,
+        kept: Counter[str],
+    ) -> list[_Item]:
+        rows = session.execute(
+            select(
+                RecipeInstallation.id,
+                RecipeInstallation.state,
+                RecipeInstallation.model_content_sha256,
+                InstallationNode.installed_bytes,
+            )
+            .join(
+                InstallationNode,
+                InstallationNode.installation_id == RecipeInstallation.id,
+            )
+            .where(
+                InstallationNode.node_id == node_id,
+                RecipeInstallation.state.in_(_HOLDING_STATES),
+            )
+        ).all()
+        groups: dict[str, list[tuple[str, str, int]]] = defaultdict(list)
+        for installation_id, state, model, installed in rows:
+            # One model's files are shared by every installation of it on a
+            # Spark, so only removing all of them frees them.
+            groups[model or f"installation:{installation_id}"].append(
+                (installation_id, state, installed)
+            )
+        items: list[_Item] = []
+        for key, members in sorted(groups.items()):
+            if key in evidence.pointed_models:
+                # Removing the last installation of a model deletes the Spark's
+                # shared copy, which the profile's own recipe would then fetch
+                # again (and admission counts it as already there).
+                kept["installation: model a profile needs"] += len(members)
+                continue
+            reasons = {
+                installation_id: (
+                    _installation_kept(session, installation_id, evidence)
+                    if state == "installed"
+                    else "not installed"
+                )
+                for installation_id, state, _installed in members
+            }
+            if any(reason is not None for reason in reasons.values()):
+                for reason in reasons.values():
+                    kept[
+                        f"installation: {reason or 'model shared with one in use'}"
+                    ] += 1
+                continue
+            freeable = max(installed for _id, _state, installed in members)
+            if freeable <= 0:
+                kept["installation: holds no bytes"] += len(members)
+                continue
+            last_used = max(
+                _installation_last_used(session, installation_id)
+                for installation_id, _state, _installed in members
+            )
+            items.append(
+                _Item(
+                    "installation",
+                    key,
+                    tuple(sorted(installation_id for installation_id, *_ in members)),
+                    last_used,
+                    last_used > evidence.cutoff,
+                    freeable,
+                )
+            )
+        return items
 
     def _uninstall(self, installation_id: str) -> None:
         plan = self._lifecycle.preview_uninstall(installation_id)
@@ -465,58 +975,48 @@ class UnusedStorageCollector:
             unattended_guard=still_unused,
         )
 
-    # -- runtime image receipts ---------------------------------------------
+    # -- NAS: runtime image receipts and model files ----------------------------
 
-    def _image_receipts(
-        self, evidence: _Evidence, deadline: float, kept: Counter[str]
-    ) -> int:
+    def _nas_items(
+        self, session: Session, evidence: _Evidence, kept: Counter[str]
+    ) -> list[_Item]:
+        return [
+            *self._image_items(evidence, kept),
+            *self._model_items(session, evidence, kept),
+        ]
+
+    def _image_items(self, evidence: _Evidence, kept: Counter[str]) -> list[_Item]:
         if self._images is None or self._image_cache is None:
-            return 0
-        removed = 0
+            return []
+        items: list[_Item] = []
         for path in sorted(self._image_cache.glob(f"*{_RECEIPT_SUFFIX}")):
             archive = path.name.removesuffix(_RECEIPT_SUFFIX)
             if len(archive) != 64 or any(c not in "0123456789abcdef" for c in archive):
                 continue
-            reason = _image_kept(archive, evidence, _mtime(path))
+            modified = _mtime(path)
+            reason = _image_kept(archive, evidence, modified)
             if reason is not None:
                 kept[f"image receipt: {reason}"] += 1
                 continue
-            if time.monotonic() > deadline:
-                kept["image receipt: sweep budget"] += 1
-                continue
+            assert modified is not None
             try:
-                self._remove_receipt(archive, path)
-            except _Kept as why:
-                kept[f"image receipt: {why}"] += 1
+                size = self._images.published_archive_bytes(archive)
+            except (OSError, RuntimeImagePreparationError, ValueError):
+                size = 0
+            if size <= 0:
+                kept["image receipt: holds no bytes"] += 1
                 continue
-            except (
-                OSError,
-                RuntimeError,
-                ValueError,
-                SQLAlchemyError,
-                ArtifactLifecycleError,
-                RuntimeImagePreparationError,
-            ) as error:
-                kept[f"image receipt: refused {_code(error)}"] += 1
-                log_event(
-                    _LOGGER,
-                    "unused_storage.refused",
-                    service="control-worker",
-                    kind="image-receipt",
-                    record_id=archive,
-                    code=_code(error),
-                    detail=str(error)[:256],
+            items.append(
+                _Item(
+                    "image",
+                    archive,
+                    (archive,),
+                    modified,
+                    modified > evidence.cutoff or archive in evidence.recent_archives,
+                    size,
                 )
-                continue
-            removed += 1
-            log_event(
-                _LOGGER,
-                "unused_storage.removed",
-                service="control-worker",
-                kind="image-receipt",
-                record_id=archive,
             )
-        return removed
+        return items
 
     def _remove_receipt(self, archive: str, path: Path) -> None:
         """Remove one receipt under its publication lock and reference gate.
@@ -549,74 +1049,60 @@ class UnusedStorageCollector:
                 raise _Kept(reason)
             self._images.remove_published(archive)
 
-    # -- model files --------------------------------------------------------
-
-    def _models(self, evidence: _Evidence, deadline: float, kept: Counter[str]) -> int:
+    def _model_items(
+        self, session: Session, evidence: _Evidence, kept: Counter[str]
+    ) -> list[_Item]:
         if self._model_cache is None:
-            return 0
-        with self._sessions() as session:
-            rows = session.execute(
-                select(
-                    ModelCacheSet.artifact_set_sha256,
-                    ModelCacheSet.model_content_sha256,
-                    ModelCacheSet.recipe_revision_sha256,
-                    ModelCacheSet.last_accessed_at,
-                    ModelCacheSet.updated_at,
+            return []
+        rows = session.execute(
+            select(
+                ModelCacheSet.artifact_set_sha256,
+                ModelCacheSet.model_content_sha256,
+                ModelCacheSet.verified_bytes,
+                ModelCacheSet.last_accessed_at,
+                ModelCacheSet.updated_at,
+            )
+        ).all()
+        by_model: dict[str, list[tuple[str, int, datetime, datetime]]] = defaultdict(
+            list
+        )
+        unidentified = 0
+        for set_digest, model_digest, verified, accessed, updated in rows:
+            if model_digest is None:
+                unidentified += 1
+            else:
+                by_model[model_digest].append(
+                    (set_digest, verified, _utc(accessed), _utc(updated))
                 )
-            ).all()
-            by_model: dict[str, list[str]] = {}
-            unidentified = 0
-            for set_digest, model_digest, *_rest in rows:
-                if model_digest is None:
-                    unidentified += 1
-                else:
-                    by_model.setdefault(model_digest, []).append(set_digest)
-            reasons = {
-                digest: _model_kept(session, digest, evidence)
-                for digest in sorted(by_model)
-            }
         if unidentified:
             kept["model: no model identity"] += unidentified
-        removed = 0
-        for digest in sorted(by_model):
-            reason = reasons[digest]
+        items: list[_Item] = []
+        for digest, sets in sorted(by_model.items()):
+            reason = _model_kept(session, digest, evidence)
             if reason is not None:
                 kept[f"model: {reason}"] += 1
                 continue
-            if time.monotonic() > deadline:
-                kept["model: sweep budget"] += 1
+            size = sum(verified for _set, verified, _a, _u in sets)
+            if size <= 0:
+                kept["model: holds no bytes"] += 1
                 continue
-            try:
-                self._remove_model(digest)
-            except _Kept as why:
-                kept[f"model: {why}"] += 1
-                continue
-            except (
-                RuntimeError,
-                ValueError,
-                SQLAlchemyError,
-                ArtifactLifecycleError,
-            ) as error:
-                kept[f"model: refused {_code(error)}"] += 1
-                log_event(
-                    _LOGGER,
-                    "unused_storage.refused",
-                    service="control-worker",
-                    kind="model",
-                    record_id=digest,
-                    code=_code(error),
-                    detail=str(error)[:256],
-                )
-                continue
-            removed += 1
-            log_event(
-                _LOGGER,
-                "unused_storage.removing",
-                service="control-worker",
-                kind="model",
-                record_id=digest,
+            last_used = max(
+                max(accessed, updated) for _set, _v, accessed, updated in sets
             )
-        return removed
+            items.append(
+                _Item(
+                    "model",
+                    digest,
+                    (digest,),
+                    last_used,
+                    last_used > evidence.cutoff
+                    or any(
+                        set_digest in evidence.recent_sets for set_digest, *_ in sets
+                    ),
+                    size,
+                )
+            )
+        return items
 
     def _remove_model(self, digest: str) -> None:
         assert self._model_cache is not None
@@ -643,7 +1129,7 @@ class UnusedStorageCollector:
 def _installation_kept(
     session: Session, installation_id: str, evidence: _Evidence
 ) -> str | None:
-    """Why an installation stays, or ``None`` when it is unused."""
+    """Why an installation stays, or ``None`` when nothing uses it."""
 
     installation = session.get(RecipeInstallation, installation_id)
     if installation is None or installation.state != "installed":
@@ -658,47 +1144,35 @@ def _installation_kept(
     newest = evidence.newest.get(revision.document_id) if revision else None
     if revision is None or newest is None:
         return "recipe unavailable"
-    nodes = {
-        node_id: _utc(updated)
-        for node_id, updated in session.execute(
-            select(InstallationNode.node_id, InstallationNode.updated_at).where(
+    nodes = set(
+        session.scalars(
+            select(InstallationNode.node_id).where(
                 InstallationNode.installation_id == installation_id
             )
         )
-    }
+    )
     if evidence.pointers is None:
         return "profiles unreadable"
     if newest[0] == installation.recipe_revision_id and any(
-        nodes.keys() & sparks
+        nodes & sparks
         for sparks in evidence.pointers.get(
             (revision.publisher.casefold(), revision.slug.casefold()), ()
         )
     ):
         return "profile"
     runs = session.execute(
-        select(RecipeRun.id, RecipeRun.state, RecipeRun.updated_at).where(
+        select(RecipeRun.id, RecipeRun.state).where(
             RecipeRun.installation_id == installation_id
         )
     ).all()
-    if any(state not in _DEAD_RUNS for _id, state, _at in runs):
+    if any(state not in _DEAD_RUNS for _id, state in runs):
         return "running"
-    if any(state == "failed" for _id, state, _at in runs):
+    if any(state == "failed" for _id, state in runs):
         # Uninstall refuses a run that was never stopped; nothing here stops one.
         return "run not stopped"
-    cutoff = evidence.cutoff
-    stamps = [_utc(installation.updated_at), *nodes.values()]
-    stamps.extend(_utc(updated) for _id, _state, updated in runs)
-    if newest[0] != installation.recipe_revision_id:
-        # Superseded: no profile resolves to it, and its grace starts there.
-        stamps.append(newest[1])
-    elif evidence.profile_edited is not None:
-        # An edit may have just dropped the assignment that used it.
-        stamps.append(evidence.profile_edited)
-    if any(stamp > cutoff for stamp in stamps):
-        return "recent use"
     if (
         installation_id in evidence.operations
-        or any(run_id in evidence.operations for run_id, _state, _at in runs)
+        or any(run_id in evidence.operations for run_id, _state in runs)
         or not evidence.owned_nodes.isdisjoint(nodes)
         or any(
             node_id in scope for scope in evidence.active_scopes for node_id in nodes
@@ -708,24 +1182,45 @@ def _installation_kept(
     return None
 
 
+def _installation_last_used(session: Session, installation_id: str) -> datetime:
+    """When the installation, one of its Sparks or one of its runs last changed."""
+
+    installation = session.get(RecipeInstallation, installation_id)
+    assert installation is not None
+    stamps = [_utc(installation.updated_at)]
+    stamps.extend(
+        _utc(updated)
+        for updated in session.scalars(
+            select(InstallationNode.updated_at).where(
+                InstallationNode.installation_id == installation_id
+            )
+        )
+    )
+    stamps.extend(
+        _utc(updated)
+        for updated in session.scalars(
+            select(RecipeRun.updated_at).where(
+                RecipeRun.installation_id == installation_id
+            )
+        )
+    )
+    return max(stamps)
+
+
 def _model_kept(session: Session, digest: str, evidence: _Evidence) -> str | None:
-    """Why a model's cached files stay, or ``None`` when no recipe needs them."""
+    """Why a model's cached files stay, or ``None`` when no profile needs them."""
 
     sets = session.execute(
         select(
             ModelCacheSet.artifact_set_sha256,
             ModelCacheSet.recipe_revision_sha256,
-            ModelCacheSet.last_accessed_at,
-            ModelCacheSet.updated_at,
         ).where(ModelCacheSet.model_content_sha256 == digest)
     ).all()
-    if (
-        digest in evidence.pinned
-        or digest in evidence.bound_models
-        or any(recipe in evidence.head_digests for _s, recipe, _a, _u in sets)
+    if digest in evidence.pointed_models or any(
+        recipe in evidence.pointed_digests for _s, recipe in sets
     ):
-        return "current recipe"
-    names = {digest} | {set_digest for set_digest, _r, _a, _u in sets}
+        return "profile"
+    names = {digest} | {set_digest for set_digest, _r in sets}
     names.update(
         session.scalars(
             select(ModelCacheSetArtifact.artifact_sha256).where(
@@ -733,11 +1228,6 @@ def _model_kept(session: Session, digest: str, evidence: _Evidence) -> str | Non
             )
         )
     )
-    if any(
-        _utc(accessed) > evidence.cutoff or _utc(updated) > evidence.cutoff
-        for _s, _r, accessed, updated in sets
-    ) or any(set_digest in evidence.recent_sets for set_digest, *_ in sets):
-        return "recent use"
     if not evidence.live.isdisjoint(names):
         return "live operation"
     return None
@@ -746,22 +1236,82 @@ def _model_kept(session: Session, digest: str, evidence: _Evidence) -> str | Non
 def _image_kept(
     archive: str, evidence: _Evidence, modified: datetime | None
 ) -> str | None:
-    """Why an image receipt stays, or ``None`` when no recipe needs the image."""
+    """Why an image receipt stays, or ``None`` when no profile needs the image."""
 
-    if archive in evidence.head_archives or archive in evidence.pinned:
-        return "current recipe"
-    if (
-        modified is None
-        or modified > evidence.cutoff
-        or archive in evidence.recent_archives
-    ):
-        return "recent use"
+    if archive in evidence.pointed_archives:
+        return "profile"
+    if modified is None:
+        return "receipt unreadable"
     if archive in evidence.live:
         return "live operation"
     return None
 
 
 # -- helpers --------------------------------------------------------------------
+
+
+def _latest_snapshots(
+    session: Session, node_id: str | None = None
+) -> dict[str, tuple[int, int, datetime]]:
+    """Each live Spark's latest reported (free, total, observed at) disk."""
+
+    latest = select(
+        NodeInventorySnapshot.node_id,
+        func.max(NodeInventorySnapshot.observed_at).label("observed_at"),
+    ).group_by(NodeInventorySnapshot.node_id)
+    if node_id is not None:
+        latest = latest.where(NodeInventorySnapshot.node_id == node_id)
+    newest = latest.subquery()
+    rows = session.execute(
+        select(
+            NodeInventorySnapshot.node_id,
+            NodeInventorySnapshot.disk_free_bytes,
+            NodeInventorySnapshot.disk_total_bytes,
+            NodeInventorySnapshot.observed_at,
+        )
+        .join(
+            newest,
+            and_(
+                NodeInventorySnapshot.node_id == newest.c.node_id,
+                NodeInventorySnapshot.observed_at == newest.c.observed_at,
+            ),
+        )
+        .join(AgentNode, AgentNode.node_id == NodeInventorySnapshot.node_id)
+        .where(AgentNode.revoked_at.is_(None))
+    )
+    return {
+        found: (free, total, _utc(observed)) for found, free, total, observed in rows
+    }
+
+
+def _spark_settling(session: Session, node_id: str, observed_at: datetime) -> bool:
+    """A removal this collector queued is still running, or finished after the
+    Spark last reported its free space, so that report does not show it yet."""
+
+    for targets in session.scalars(
+        select(Job.targets).where(
+            Job.kind == "recipe.uninstall",
+            Job.actor == ACTOR,
+            or_(Job.state.not_in(_FINISHED_JOBS), Job.updated_at >= observed_at),
+        )
+    ):
+        if isinstance(targets, list) and node_id in targets:
+            return True
+    return False
+
+
+def _model_removal_in_flight(session: Session) -> bool:
+    return (
+        session.scalar(
+            select(ModelCacheOperation.id)
+            .where(
+                ModelCacheOperation.kind == "remove",
+                ModelCacheOperation.state.in_(("queued", "running", "partial")),
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def _profile_pointers(
@@ -806,4 +1356,4 @@ def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
-__all__ = ["ACTOR", "GRACE", "INTERVAL", "Swept", "UnusedStorageCollector"]
+__all__ = ["ACTOR", "GRACE", "Swept", "UnusedStorageCollector"]

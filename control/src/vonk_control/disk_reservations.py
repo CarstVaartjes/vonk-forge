@@ -17,6 +17,33 @@ from .recipe_execution_contract import (
 )
 
 
+def models_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
+    """Models some installation on the Spark holds files of.
+
+    A Spark's shared store receives a model's files before any installation of it
+    is made, and only the agent's uninstall of the model's last installation
+    removes them, so while such an installation exists the store holds the model
+    and a new installation links its files instead of writing them.
+    """
+
+    return frozenset(
+        digest
+        for digest in session.scalars(
+            select(RecipeInstallation.model_content_sha256)
+            .join(
+                InstallationNode,
+                InstallationNode.installation_id == RecipeInstallation.id,
+            )
+            .where(
+                InstallationNode.node_id == node_id,
+                RecipeInstallation.state.in_(("installed", "installing", "partial")),
+                RecipeInstallation.model_content_sha256.is_not(None),
+            )
+        )
+        if digest is not None
+    )
+
+
 def outstanding_disk_reservation_bytes(
     session: Session,
     node_id: str,

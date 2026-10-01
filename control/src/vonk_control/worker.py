@@ -337,6 +337,7 @@ def assemble_production_worker(
     artifact_job_reconcile_batch_limit: int,
     distributed_start_timeout_seconds: int = 3600,
     model_cache=None,
+    model_cache_root: Path | None = None,
     background_services: Sequence[Callable[[], object]] = (),
     background_closers: Sequence[Callable[[], object]] = (),
     agent_artifact_root: Path | None = None,
@@ -371,6 +372,7 @@ def assemble_production_worker(
     from .run_switch_operations import RunSwitchOperationService
     from .runtime_image_preparation import FilesystemRuntimeImageStorage
     from .source_bundles import DatabaseSourceBundleStore
+    from .storage_demands import StorageDemands
     from .telemetry_maintenance import (
         TelemetryMaintenance,
         TelemetryMaintenanceCadence,
@@ -492,6 +494,7 @@ def assemble_production_worker(
     close_artifact_executor = getattr(artifact_phase_executor, "close", None)
     if callable(close_artifact_executor):
         worker_background_closers += (close_artifact_executor,)
+    image_store_collector = None
     if image_cache_root is not None:
         from .image_store_collection import ImageStoreCollector
         from .prebuilt_images import PrebuiltImageImporter
@@ -501,10 +504,13 @@ def assemble_production_worker(
         prebuilt_importer = PrebuiltImageImporter(
             sessions, image_cache_root, clock=clock
         )
+        image_store_collector = ImageStoreCollector(
+            sessions, image_cache_root, clock=clock
+        )
         worker_background_services += (
             prebuilt_importer.tick,
             # Reclaims image bytes nothing names any more, hourly.
-            ImageStoreCollector(sessions, image_cache_root, clock=clock).tick,
+            image_store_collector.tick,
         )
         worker_background_closers += (prebuilt_importer.close,)
     if recipe_image_artifact_root is not None:
@@ -530,17 +536,28 @@ def assemble_production_worker(
         )
         worker_background_services += (image_production.scheduler.tick,)
         worker_background_closers += (image_production.close,)
-    # Removes unused installations, image receipts and cached models, then
-    # superseded catalog revisions nothing uses any more, each hourly. Storage
-    # goes first: it is what lets the revision collector release a revision.
+    # Frees disk when it is short (a Spark or the NAS runs low, or work was
+    # refused for lack of it) by removing the least recently used installations,
+    # image receipts and cached models nothing uses. Superseded catalog
+    # revisions nothing uses any more are database rows, tidied hourly.
+    storage_demands = StorageDemands(clock)
+    lifecycle.bind_storage_demands(storage_demands)
+    recipe_builds.bind_storage_demands(storage_demands)
+    if model_cache is not None:
+        model_cache.bind_storage_demands(storage_demands)
+    storage_collector = UnusedStorageCollector(
+        sessions,
+        clock=clock,
+        lifecycle=lifecycle,
+        image_cache_root=image_cache_root,
+        model_cache_root=model_cache_root,
+        model_cache=model_cache,
+        image_blobs=image_store_collector,
+        demands=storage_demands,
+    )
+    fleet_profiles.bind_storage_relief(storage_collector.relief_for_spark)
     worker_background_services += (
-        UnusedStorageCollector(
-            sessions,
-            clock=clock,
-            lifecycle=lifecycle,
-            image_cache_root=image_cache_root,
-            model_cache=model_cache,
-        ).tick,
+        storage_collector.tick,
         CatalogRevisionCollector(sessions, clock=clock).tick,
     )
     telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)
@@ -738,6 +755,7 @@ if __name__ == "__main__":
         artifact_job_reconcile_interval_seconds=ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS,
         artifact_job_reconcile_batch_limit=ARTIFACT_JOB_RECONCILE_BATCH_LIMIT,
         model_cache=model_cache,
+        model_cache_root=settings.model_cache_root,
         agent_artifact_root=settings.agent_artifact_root,
         recipe_image_artifact_root=settings.agent_artifact_root,
         recipe_image_parallel_preparations=RECIPE_IMAGE_PARALLEL_PREPARATIONS,

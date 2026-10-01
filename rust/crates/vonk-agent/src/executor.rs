@@ -2348,12 +2348,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 }
-                let validated = match request.cleanup_model_content_sha256 {
+                let validated = match request.cleanup_model_content_sha256.as_deref() {
                     Some(model_content_sha256) => {
                         self.runtime.validate_uninstall_with_model_cleanup(
                             &installation_id,
                             &request.recipe_content_sha256,
-                            &model_content_sha256,
+                            model_content_sha256,
                         )
                     }
                     None => self
@@ -2398,6 +2398,22 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "controller cancellation observed after runtime cache cleanup",
                     );
                 }
+                // The Controller authorizes model cleanup only when no other
+                // installation of this model is left on the Spark. Name the
+                // store objects before the installation's own record is gone.
+                let store_objects = request
+                    .cleanup_model_content_sha256
+                    .as_deref()
+                    .and_then(|model_content_sha256| {
+                        self.runtime
+                            .model_store_objects(
+                                &installation_id,
+                                &request.recipe_content_sha256,
+                                model_content_sha256,
+                            )
+                            .ok()
+                    })
+                    .unwrap_or_default();
                 if let Err(error) = self
                     .runtime
                     .finalize_uninstall(&installation_id, &request.recipe_content_sha256)
@@ -2408,6 +2424,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         error.safe_category(),
                     );
                 }
+                // Freeing space is best effort and never fails the uninstall.
+                self.runtime.reclaim_unshared_model_objects(&store_objects);
                 if *cancellation.borrow() {
                     return cancelled(
                         "controller cancellation observed after uninstallation settled",
@@ -4456,6 +4474,22 @@ mod tests {
             recipe_content_sha256,
         )
         .unwrap();
+        // The Spark's shared store holds the model's files and another model's.
+        let store = data.path().join("distribution/models");
+        fs::create_dir_all(&store).unwrap();
+        let stored_model: Vec<_> = plan["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|artifact| artifact["model"]["content_sha256"] == model_content_sha256)
+            .map(|artifact| store.join(artifact["sha256"].as_str().unwrap()))
+            .collect();
+        assert!(!stored_model.is_empty());
+        for object in &stored_model {
+            fs::write(object, b"model bytes").unwrap();
+        }
+        let another_model = store.join("e".repeat(64));
+        fs::write(&another_model, b"another model").unwrap();
 
         let claim = AgentClaim {
             deadline: (Utc::now() + ChronoDuration::seconds(20))
@@ -4488,6 +4522,9 @@ mod tests {
         assert_eq!(result.state, "succeeded");
         assert_eq!(result.body, json!({}));
         assert!(!installation.exists());
+        // Model cleanup frees the store's copy once no installation links it.
+        assert!(stored_model.iter().all(|object| !object.exists()));
+        assert!(another_model.exists());
     }
 
     #[test]

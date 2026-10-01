@@ -1490,9 +1490,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(())
     }
 
-    /// Remove only this installation's materialized model files. Other
-    /// installations and the shared distribution cache retain their own files
-    /// (including hard links to the same content) for future use.
+    /// Remove this installation's materialized model files, then the shared
+    /// store's copy of each one that no installation links any more. Other
+    /// installations keep their own files, and a store object one of them still
+    /// links stays for them and for future installations.
     pub fn uninstall_with_model_cleanup(
         &self,
         installation_id: &str,
@@ -1504,8 +1505,61 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             expected_recipe_digest,
             model_content_sha256,
         )?;
+        let store_objects = self.model_store_objects(
+            installation_id,
+            expected_recipe_digest,
+            model_content_sha256,
+        )?;
         self.uninstall(installation_id, expected_recipe_digest)?;
+        self.reclaim_unshared_model_objects(&store_objects);
         Ok(removed_model_bytes)
+    }
+
+    /// The shared-store objects (by file digest) the installation's files of one
+    /// model were made from.
+    pub fn model_store_objects(
+        &self,
+        installation_id: &str,
+        expected_recipe_digest: &str,
+        model_content_sha256: &str,
+    ) -> Result<Vec<String>, OciError> {
+        let persisted = self.load_uninstall_spec(installation_id, expected_recipe_digest)?;
+        if !spec_references_model(&persisted, model_content_sha256) {
+            return Err(OciError::Artifact);
+        }
+        Ok(unique_plan_artifacts(&persisted)
+            .into_iter()
+            .filter(|artifact| artifact.model.content_sha256 == model_content_sha256)
+            .map(|artifact| artifact.sha256.clone())
+            .filter(|sha256| lower_hex(sha256, 64))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect())
+    }
+
+    /// Remove each named store object that nothing links any more (its only
+    /// link is the store's own name for it), and return the bytes that freed.
+    ///
+    /// Installations link store objects instead of copying them, so removing an
+    /// installation alone frees none of its model bytes. An object that still
+    /// has another link belongs to an installation that is still using it and
+    /// is left alone. Removal is best effort: an object that cannot be removed
+    /// stays for the next uninstall.
+    pub fn reclaim_unshared_model_objects(&self, digests: &[String]) -> u64 {
+        let owner = rustix::process::geteuid().as_raw();
+        digests
+            .iter()
+            .filter(|digest| lower_hex(digest, 64))
+            .filter_map(|digest| {
+                let path = store_object_path(self.data_root, digest);
+                let metadata = fs::symlink_metadata(&path).ok()?;
+                (metadata.file_type().is_file()
+                    && metadata.uid() == owner
+                    && metadata.nlink() == 1
+                    && fs::remove_file(&path).is_ok())
+                .then_some(metadata.len())
+            })
+            .fold(0_u64, u64::saturating_add)
     }
 
     pub fn validate_uninstall_with_model_cleanup(

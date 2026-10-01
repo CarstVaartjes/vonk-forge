@@ -168,6 +168,7 @@ from .run_admission import (
     require_admissible as require_run_admissible,
 )
 from .source_policy import SourcePolicyReport
+from .storage_demands import StorageDemands, spark_scope
 from .strict_json import read_stored_model
 
 # Longest rendered blocker reason kept in an install refusal.  Each reason names
@@ -632,6 +633,37 @@ class RecipeOperationService:
         self._build_cleanup_cursor: str | None = None
         self._run_health_maximum_age = timedelta(seconds=run_health_maximum_age_seconds)
 
+    # Bound by the worker; refused installs only ask for space where it is set.
+    _storage_demands: StorageDemands | None = None
+
+    def bind_storage_demands(self, demands: StorageDemands) -> None:
+        """Attach the register an install refused for lack of disk asks space in."""
+
+        self._storage_demands = demands
+
+    def _request_install_storage(self, plan: InstallPlan) -> None:
+        """Ask for the free disk each Spark that refused this install lacks."""
+
+        if self._storage_demands is None:
+            return
+        for node in plan.nodes:
+            if (
+                node.free_bytes is None
+                or node.free_after_bytes is None
+                or not any(
+                    reason.code == "install.insufficient_disk"
+                    for reason in node.blockers
+                )
+            ):
+                continue
+            self._storage_demands.request(
+                spark_scope(node.node_id),
+                node.free_bytes - node.free_after_bytes + node.disk_floor_bytes,
+                source="install",
+                subject=plan.recipe_revision_id,
+                reason="install.insufficient_disk",
+            )
+
     def preview_mapping(
         self,
         recipe_revision_id: str,
@@ -1087,6 +1119,7 @@ class RecipeOperationService:
             if adopted is not None:
                 return adopted
         if not plan.allowed:
+            self._request_install_storage(plan)
             try:
                 require_install_admissible(plan)
             except InstallAdmissionBusy:
@@ -1574,6 +1607,8 @@ class RecipeOperationService:
             now=now,
             compiled_execution_plans=plan.compiled_plan_by_node,
         )
+        if not plan.allowed:
+            self._request_install_storage(plan)
         require_install_admissible(plan)
         try:
             self._install_admission.refresh_install_receipts(plan, now=now)
