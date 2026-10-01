@@ -388,6 +388,19 @@ def _distributed_args(
         if role == "worker" and not has("headless"):
             command.append("--headless")
         return command
+    if recipe.runtime.engine == "tensorfold":
+        # One rank per node. The recipe wrapper resolves the two placeholders
+        # from the platform's placement environment, as the SGLang wrappers
+        # resolve --dist-init-addr.
+        if not has("tp"):
+            command.extend(("--tp", str(topology.node_count)))
+        if not has("rank"):
+            command.extend(("--rank", str(rank)))
+        if not has("master"):
+            command.extend(("--master", "VONK_MASTER_ADDR"))
+        if not has("master-port"):
+            command.extend(("--master-port", "VONK_MASTER_PORT"))
+        return command
     raise HarnessCompileError(
         f"distributed topology is not supported by the {recipe.runtime.engine} harness"
     )
