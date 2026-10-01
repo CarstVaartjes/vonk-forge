@@ -43,9 +43,13 @@ const PROBE_RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
 const PROBE_INSTALLATION_ID: &str = "40000000-0000-4000-8000-000000000001";
 
 fn main() {
-    let mode = env::args().nth(1).expect("mode setup|pull|start");
+    let mode = env::args().nth(1).expect("mode setup|pull|start|observe");
     if mode == "setup" {
         setup_files();
+        return;
+    }
+    if mode == "observe" {
+        observe();
         return;
     }
     let archive_sha = env_required("VONK_HELPER_ARCHIVE_SHA");
@@ -169,6 +173,50 @@ fn main() {
     if response_value.get("status").and_then(Value::as_str)
         != Some("container-runtime-request-executed")
     {
+        std::process::exit(2);
+    }
+}
+
+/// Observe the started run the way the agent's periodic report does: an
+/// ungranted inspection of the exact run request.
+fn observe() {
+    let platform_digest = env_required("VONK_HELPER_PLATFORM_DIGEST");
+    let (runtime_arguments, _) = production_start_arguments();
+    let request = HostRuntimeRequest {
+        action: HostRuntimeAction::RunInspect,
+        fence: Uuid::new_v4(),
+        arguments: start_request_arguments(
+            &env_required("VONK_HELPER_ARCHIVE_SHA"),
+            &platform_digest,
+            &platform_digest,
+            &env_required("VONK_HELPER_IMAGE_REF"),
+            runtime_arguments,
+        ),
+        job_plan: None,
+        installation_id: None,
+        reconciliation_identity: None,
+        run_generation: None,
+        start_plan: None,
+        stop_plan: None,
+    };
+    request.validate().unwrap();
+    let body = canonical_json(&request).unwrap();
+    let request_sha = hex_sha256(&body);
+    let request_path = Path::new(&request_root()).join(format!("{request_sha}.json"));
+    fs::write(&request_path, &body).unwrap();
+    fs::set_permissions(&request_path, fs::Permissions::from_mode(0o600)).unwrap();
+    let frame = canonical_json(&vonk_agent_protocol::RecipeRunInspectionRequest {
+        request_id: Uuid::new_v4(),
+        request_sha256: request_sha,
+    })
+    .unwrap();
+    let mut stream = UnixStream::connect(socket_path()).unwrap();
+    write_frame(&mut stream, &frame).unwrap();
+    let response = read_frame(&mut stream).unwrap();
+    let _ = fs::remove_file(&request_path);
+    println!("response={}", String::from_utf8_lossy(&response));
+    let value: Value = serde_json::from_slice(&response).unwrap();
+    if value.get("process_running").and_then(Value::as_bool) != Some(true) {
         std::process::exit(2);
     }
 }

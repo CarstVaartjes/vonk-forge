@@ -2529,15 +2529,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Err(OperationError::InvalidOperation);
         }
         self.bind_native_fabric(&mut validated, Path::new(NATIVE_FABRIC_ROOT))?;
-        let (inspected, _) =
-            self.inspect_runtime_image_for_reference(&validated.local_image_reference)?;
-        self.require_image_receipt(
-            archive_sha256,
-            registry_index_digest,
-            platform_manifest_digest,
-            &validated.local_image_reference,
-            &inspected.0,
-        )?;
+        // A running container is identified by its own labels, never by image
+        // bookkeeping: a run started by an earlier agent keeps being observed
+        // after receipts or image naming change. Start proved the image.
         let semantic_digest = hex_sha256(
             &canonical_json(&validated.arguments).map_err(|_| OperationError::InvalidOperation)?,
         );
@@ -2564,12 +2558,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let [container_id, running, digest, managed, run_id] = fields.as_slice() else {
             return Ok(false);
         };
-        if !lower_hex(container_id, 64)
-            || *digest != semantic_digest
-            || *managed != "true"
-            || *run_id != validated.run_id
-        {
+        if !lower_hex(container_id, 64) || *managed != "true" || *run_id != validated.run_id {
             return Ok(false);
+        }
+        if *digest != semantic_digest {
+            if capture_failure {
+                // A launch check is strict: this exact request started it.
+                return Ok(false);
+            }
+            // Observation: this run's own container under its own name, launched
+            // from a request an earlier agent rendered differently. It is still
+            // this run; report what it is doing and say why it differs.
+            eprintln!(
+                "vonk-agent-helper: run {} container was launched from another request rendering; observing it by its run identity",
+                validated.run_id
+            );
         }
         if *running == "true" {
             return Ok(true);
