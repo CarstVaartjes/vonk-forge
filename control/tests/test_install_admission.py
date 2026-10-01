@@ -29,6 +29,7 @@ from vonk_control.models import (
     CatalogRecipeModelReference,
     ClusterMapping,
     ClusterMappingNode,
+    InstallationNode,
     NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
@@ -603,6 +604,54 @@ def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
     assert plan.allowed is True
     assert plan.nodes[0].reused_bytes == 100
     assert plan.nodes[0].required_bytes == 20
+
+
+def test_a_model_the_spark_already_stores_through_an_installation_is_not_counted_again(
+    tmp_path,
+) -> None:
+    """With hard links an installation of a model the Spark holds writes none of
+    its files: counting them again refuses (and, with eviction, needlessly
+    removes things for) an install that fits."""
+
+    sessions, now, node, mapping, build = setup(tmp_path, free=40)
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
+    cold = service.plan_install(mapping, build, now=now)
+    assert cold.allowed is False
+
+    with sessions.begin() as session:
+        model = session.scalar(select(CatalogRecipeModelReference.model_content_digest))
+        installation = RecipeInstallation(
+            recipe_revision_id=RECIPE_REVISION_ID,
+            model_content_sha256=model,
+            mapping_id=mapping,
+            mapping_generation=1,
+            image_digest="sha256:" + "1" * 64,
+            plan_digest="d" * 64,
+            plan={},
+            state="installed",
+            actor="admin",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(installation)
+        session.flush()
+        session.add(
+            InstallationNode(
+                installation_id=installation.id,
+                node_id=node,
+                rank=0,
+                role="entrypoint",
+                state="installed",
+                required_bytes=100,
+                installed_bytes=100,
+                updated_at=now,
+            )
+        )
+    warm = service.plan_install(mapping, build, now=now)
+
+    assert warm.allowed is True
+    assert warm.nodes[0].reused_bytes == 100
+    assert warm.nodes[0].required_bytes == 20
 
 
 def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> None:

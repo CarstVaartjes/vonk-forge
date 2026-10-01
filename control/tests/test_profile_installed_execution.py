@@ -247,6 +247,27 @@ def test_installed_profile_still_refuses_insufficient_disk(tmp_path: Path) -> No
     }
 
 
+def test_a_model_the_spark_already_stores_is_not_reserved_again_by_a_load(
+    tmp_path: Path,
+) -> None:
+    """The review's disk claim leaves out the model files an installation of the
+    same model already put in the Spark's shared store (a new installation links
+    them): catches a load refused, or eviction triggered, for bytes never written."""
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    _service, planner = _profile_service(sessions, lifecycle)
+    request = _request(sessions, nodes[0])
+    cold = planner.preview(request, actor="admin").fit.nodes[0]
+    assert cold.disk_required_bytes is not None
+
+    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4()))
+    warm = planner.preview(request, actor="admin").fit.nodes[0]
+
+    assert warm.disk_required_bytes is not None
+    # The fixture's model files are 1 KiB, and nothing else changes.
+    assert cold.disk_required_bytes - warm.disk_required_bytes == 1024
+
+
 def test_a_load_waiting_for_disk_names_it_and_resumes_when_space_appears(
     tmp_path: Path,
 ) -> None:

@@ -54,7 +54,10 @@ from .cluster_mappings import (
     mapping_option_choices,
     validate_mapping_parameters,
 )
-from .disk_reservations import outstanding_disk_reservation_bytes
+from .disk_reservations import (
+    models_stored_on_node,
+    outstanding_disk_reservation_bytes,
+)
 from .distribution_assignment import NodeDistributionAssignment
 from .failure_classification import error_code, is_redownload, is_security_failure
 from .install_admission import (
@@ -913,6 +916,22 @@ class DatabaseRunSwitchArtifactInspector:
             artifact_set_bytes=artifact_bytes,
             dependency_model_content_sha256=dependencies,
         )
+
+
+def _recipe_model_digests(revision: CatalogDocumentRevision | None) -> frozenset[str]:
+    """The content digests of the models a recipe revision names."""
+
+    document = revision.document if revision is not None else None
+    models = document.get("models") if isinstance(document, Mapping) else None
+    if not isinstance(models, Sequence) or isinstance(models, (str, bytes)):
+        return frozenset()
+    found: set[str] = set()
+    for item in models:
+        model = item.get("model") if isinstance(item, Mapping) else None
+        digest = model.get("content_sha256") if isinstance(model, Mapping) else None
+        if isinstance(digest, str):
+            found.add(digest)
+    return frozenset(found)
 
 
 def _container_build_result(build: RecipeBuild) -> dict[str, object]:
@@ -5517,6 +5536,7 @@ class RunSwitchOperationService:
             if revision is not None
             else {}
         )
+        recipe_models = _recipe_model_digests(revision)
         excluded = set(excluded_run_ids)
         for item in group.nodes:
             snapshot, evidence = _latest_inventory(
@@ -5780,6 +5800,13 @@ class RunSwitchOperationService:
                     )
                     if image_size is None or artifact_size is None:
                         raise ValueError("payload size is unavailable")
+                    if recipe_models and recipe_models <= models_stored_on_node(
+                        session, item.node_id
+                    ):
+                        # The Spark's shared store already holds every model of
+                        # the recipe (an installation of it exists there), so
+                        # the install links those files and writes none.
+                        artifact_size = 0
                     disk_need = installation_disk_requirement(
                         disk,
                         required_download_bytes=image_size + artifact_size,
@@ -5799,7 +5826,8 @@ class RunSwitchOperationService:
                         )
                     )
                 else:
-                    # Review promises a full allocation, including headroom.
+                    # Review promises a full allocation, including headroom,
+                    # less the model files the Spark's store already holds.
                     # Installation may reduce it for exact target-local reuse;
                     # it must never grow a claim after operator acceptance.
                     required_disk = disk_need.required_bytes + disk_need.floor_bytes

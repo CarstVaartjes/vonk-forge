@@ -183,6 +183,12 @@ hard links free) decides whether more must go. A round that frees less than half
 of what it promised pauses eviction there for 15 minutes. If everything that may
 go would still not cover a refused request, nothing is removed.
 
+Disk admission counts what a Spark will actually write: while an installation of
+a model exists on a Spark, its shared store holds that model's files and a new
+installation links them, so a load's disk claim leaves them out. For the same
+reason an installation of a model a saved profile's recipe needs is never
+evicted (removing the last installation of a model deletes the store's copy).
+
 A load that waits for disk is not failed: it shows `storage.evicting` (bytes
 needed and bytes that can be freed) while the Controller frees room, or
 `storage.insufficient_after_eviction` when all unused installations together

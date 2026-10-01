@@ -912,6 +912,12 @@ class UnusedStorageCollector:
             )
         items: list[_Item] = []
         for key, members in sorted(groups.items()):
+            if key in evidence.pointed_models:
+                # Removing the last installation of a model deletes the Spark's
+                # shared copy, which the profile's own recipe would then fetch
+                # again (and admission counts it as already there).
+                kept["installation: model a profile needs"] += len(members)
+                continue
             reasons = {
                 installation_id: (
                     _installation_kept(session, installation_id, evidence)

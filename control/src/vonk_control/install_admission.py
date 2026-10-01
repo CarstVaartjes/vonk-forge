@@ -27,7 +27,10 @@ from .compiled_execution_plan import (
     CompiledRuntimeImage,
     validate_compiled_launch_payload,
 )
-from .disk_reservations import outstanding_disk_reservation_bytes
+from .disk_reservations import (
+    models_stored_on_node,
+    outstanding_disk_reservation_bytes,
+)
 from .inventory_repository import InventoryRepository, InventorySnapshotView
 from .legal_admission import territorial_admission
 from .models import (
@@ -467,12 +470,16 @@ class InstallAdmissionService:
                 )
                 compiled_artifacts = ()
             artifact_sizes: dict[str, int] = {}
+            models_by_artifact: dict[str, object] = {}
             for artifact in compiled_artifacts:
                 if not isinstance(artifact, Mapping):
                     continue
                 digest = artifact.get("sha256")
                 size = artifact.get("size_bytes")
                 if isinstance(digest, str) and type(size) is int and size >= 0:
+                    model = artifact.get("model")
+                    if isinstance(model, Mapping):
+                        models_by_artifact[digest] = model.get("content_sha256")
                     previous = artifact_sizes.setdefault(digest, size)
                     if previous != size:
                         blockers.append(
@@ -536,6 +543,7 @@ class InstallAdmissionService:
                         )
                     )
                 )
+                stored_models = models_stored_on_node(session, mapping_node.node_id)
                 reserved = outstanding_disk_reservation_bytes(
                     session,
                     mapping_node.node_id,
@@ -571,7 +579,10 @@ class InstallAdmissionService:
             reused_artifacts = sum(
                 size
                 for digest, size in artifact_sizes.items()
-                if any(
+                # The Spark's shared store already holds the model of an
+                # installation it has: a new installation links those files.
+                if models_by_artifact.get(digest) in stored_models
+                or any(
                     present_item.kind == "model"
                     and present_item.digest == digest
                     and present_item.size_bytes == size

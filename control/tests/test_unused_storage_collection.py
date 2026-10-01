@@ -482,6 +482,32 @@ def test_installation_with_a_failed_run_waits_for_the_run_to_be_stopped(
     assert _kept(result, "run not stopped") == 1
 
 
+def test_an_installation_of_a_model_a_profile_needs_is_kept(world: Catalog) -> None:
+    """Removing the last installation of a model deletes the Spark's shared copy,
+    so a superseded revision's installation stays while the profile's newest
+    revision of the same model would have to fetch the weights again (and its
+    admission counts them as already there)."""
+
+    old = world.revision("glm", 1)
+    world.revision(
+        "glm",
+        2,
+        head="active",
+        document={"models": [{"model": {"content_sha256": "c" * 64}}]},
+    )
+    superseded, _ = world.workload(old, run="stopped")
+    _size(world, superseded, 80 * GIB, model="c" * 64)
+    other, _ = world.workload(old, run="stopped")
+    _size(world, other, 80 * GIB, model="d" * 64)
+    _profile(world, "vonk-forge/glm")
+    lifecycle = FakeLifecycle(world.sessions)
+
+    result = _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == [other]
+    assert _kept(result, "model a profile needs") == 1
+
+
 def test_a_profile_edit_or_a_new_revision_alone_removes_nothing(
     world: Catalog,
 ) -> None:
