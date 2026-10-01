@@ -919,6 +919,10 @@ class SparkLifecycle:
         self.firewall_environment: dict[str, str] = {}
         self.agent_installed = False
         self.synthetic_fixture_sha256: str | None = None
+        # The release whose Controller this lane runs. The upgrade-carry lane
+        # starts on the previous release and moves to the candidate.
+        self.controller_generation: str = arguments.generation
+        self.controller_release: Path = arguments.candidate_release
         _require_loopback_controller_boundary()
         self.tailnet_services = {
             "control": LOCAL_CONTROL_SERVICE,
@@ -1272,20 +1276,17 @@ class SparkLifecycle:
         )
         release_url = (
             f"{self.origin}/artifacts/{self.arguments.channel}/releases/"
-            f"{self.arguments.generation}"
+            f"{getattr(self, 'controller_generation', self.arguments.generation)}"
         )
+        # Kept so an upgrade can rerun the installer with the same answers.
+        self._controller_inputs = (child_environment, responses)
         self.bundle = generate_bundle(
             self.temporary_root / "controller",
             candidate_url=f"{release_url}/bootstraps/nas",
             child_environment=child_environment,
             responses=responses,
         )
-        _set_bundle_environment(self.bundle, self._controller_site_values())
-        _configure_acceptance_renewal(
-            self.bundle,
-            lifetime_seconds=CERTIFICATE_LIFETIME_SECONDS,
-            agent_source_address=f"172.31.{self.synthetic_fabric_octet}.1",
-        )
+        self._reapply_controller_site()
         library_root = self._required_environment("VONK_RECIPE_LIBRARY_ROOT")
         self.synthetic_canary_fixture = _canonical_canary_fixture(Path(library_root))
         self._assert_project_is_empty()
@@ -1325,6 +1326,16 @@ class SparkLifecycle:
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)
         del password
+
+    def _reapply_controller_site(self) -> None:
+        """Set this lane's site values in the bundle the installer wrote."""
+        assert self.bundle is not None
+        _set_bundle_environment(self.bundle, self._controller_site_values())
+        _configure_acceptance_renewal(
+            self.bundle,
+            lifetime_seconds=CERTIFICATE_LIFETIME_SECONDS,
+            agent_source_address=f"172.31.{self.synthetic_fabric_octet}.1",
+        )
 
     def _local_controller_up_command(self) -> list[str]:
         return self._compose(
@@ -1380,10 +1391,13 @@ class SparkLifecycle:
     def _assert_compose_image_graph(self) -> None:
         assert self.bundle is not None
         candidate = _read_canonical_document(
-            self.arguments.candidate_release, "candidate release object"
+            getattr(self, "controller_release", self.arguments.candidate_release),
+            "candidate release object",
         )
         images = _object(candidate.get("images"), "candidate image graph")
-        if candidate.get("generation") != self.arguments.generation:
+        if candidate.get("generation") != getattr(
+            self, "controller_generation", self.arguments.generation
+        ):
             raise LifecycleError("candidate controller generation is invalid")
         configured = self._run_command(
             self._compose("--profile", "hermes", "config", "--format", "json"),
@@ -1468,7 +1482,8 @@ class SparkLifecycle:
         """A moving alias must still resolve to the candidate being qualified."""
         assert self.bundle is not None
         candidate = _read_canonical_document(
-            self.arguments.candidate_release, "candidate release object"
+            getattr(self, "controller_release", self.arguments.candidate_release),
+            "candidate release object",
         )
         images = _object(candidate.get("images"), "candidate image graph")
         for role, service in COMPOSE_IMAGE_ROLES.items():
@@ -2039,7 +2054,15 @@ class SparkLifecycle:
             ) from error
         return require_object(sync, "synthetic canary catalog sync")
 
-    def _run_synthetic_canary(self, node_id: str) -> dict[str, object]:
+    def _run_synthetic_canary(
+        self, node_id: str, *, carry: Callable[[], None] | None = None
+    ) -> dict[str, object]:
+        """Run the canary from catalog sync to uninstall.
+
+        ``carry`` runs while the canary serves, between its first inference
+        and its cleanup: the upgrade-carry lane upgrades the Controller and
+        the agent there and proves the workload kept serving.
+        """
         assert (
             self.control is not None
             and self.browser is not None
@@ -2331,6 +2354,8 @@ class SparkLifecycle:
                 inference, fixture.serving_check, fixture.slug
             )
             completed.append("inference-ok")
+            if carry is not None:
+                carry()
             cleanup_payload = {
                 "name": "Acceptance synthetic canary",
                 "description": "Disposable whole-fleet lifecycle canary cleanup",
@@ -2839,9 +2864,10 @@ class SparkLifecycle:
             time.sleep(1)
 
     @staticmethod
-    def _run_canonical_inference(
-        inference: Client, check: dict[str, object], alias: str
-    ) -> str:
+    def _serving_request(
+        check: dict[str, object], alias: str
+    ) -> tuple[str, dict[str, object]]:
+        """The canary's serving request, addressed to ``alias``."""
         request = require_object(check.get("request"), "synthetic serving request")
 
         def substitute(value: object) -> object:
@@ -2856,9 +2882,16 @@ class SparkLifecycle:
         body = substitute(request.get("body"))
         if not isinstance(body, dict):
             raise LifecycleError("synthetic serving request body is invalid")
+        return str(request["path"]), body
+
+    @staticmethod
+    def _run_canonical_inference(
+        inference: Client, check: dict[str, object], alias: str
+    ) -> str:
+        path, body = SparkLifecycle._serving_request(check, alias)
         responses: list[dict[str, object]] = []
         for _attempt in range(2):
-            status, payload = inference.request("POST", str(request["path"]), body)
+            status, payload = inference.request("POST", path, body)
             response = require_object(payload, "synthetic serving response")
             evaluate_http_response(
                 HttpObservation(status=status, headers={}, body=_canonical(response)),
@@ -3225,9 +3258,9 @@ class SparkLifecycle:
                     ),
                     "node_id": node_id,
                     "package_sha256": (
-                        self.graph["baseline_package_sha256"]
-                        if package_version == self.graph["baseline_version"]
-                        else self.graph["candidate_package_sha256"]
+                        self.graph.get("baseline_package_sha256")
+                        if package_version == self.graph.get("baseline_version")
+                        else self.graph.get("candidate_package_sha256")
                     ),
                     "serial": rows[0][4],
                     "version": package_version,

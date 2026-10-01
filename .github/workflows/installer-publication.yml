@@ -1131,15 +1131,34 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/spark-acceptance/report-linux-arm64.json
 
+  spark-upgrade-acceptance:
+    name: Carry a serving workload across the upgrade
+    # A workload serving on the promoted release must keep serving while the
+    # Controller is redeployed and the agent upgraded to this candidate.
+    needs: [authority, candidate]
+    if: >-
+      !cancelled() && needs.authority.result == 'success' &&
+      needs.candidate.result == 'success'
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/spark-upgrade-acceptance.yml
+    with:
+      channel: ${{ needs.authority.outputs.channel }}
+      candidate_generation: ${{ needs.candidate.outputs.generation }}
+      source_ref: ${{ needs.authority.outputs.source_sha }}
+    secrets: inherit
+
   acceptance:
     name: Sign complete candidate acceptance
-    needs: [authority, candidate, nas-acceptance, spark-acceptance]
+    needs: [authority, candidate, nas-acceptance, spark-acceptance, spark-upgrade-acceptance]
     if: >-
       always() &&
       needs.authority.result == 'success' &&
       needs.candidate.result == 'success' &&
       needs['nas-acceptance'].result == 'success' &&
-      needs['spark-acceptance'].result == 'success'
+      needs['spark-acceptance'].result == 'success' &&
+      needs['spark-upgrade-acceptance'].result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: installer-acceptance-${{ needs.authority.outputs.channel }}
