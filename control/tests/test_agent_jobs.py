@@ -2807,6 +2807,33 @@ def test_excluded_work_refusal_records_an_unready_retry_attempt(service) -> None
         assert "operator-retry-attempt-not-ready" in stored.status_reason
 
 
+def test_work_enqueued_after_the_claim_query_is_not_reported_as_refused(
+    service,
+) -> None:
+    """A node that polled a moment before an enqueue committed was not refused.
+
+    The claim query and the explanation of an empty claim are separate reads of
+    one transaction, so an operation committed in between is fully claimable
+    when the explanation looks. It was recorded as ``unclassified-unclaimable``
+    on a healthy install or start; it must record nothing and be claimed on
+    the next poll.
+    """
+
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        assert jobs._excluded_work_refusal(session, node, clock.now) is None
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and "refused" not in (stored.status_reason or "")
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+
+
 @pytest.mark.parametrize("malformed", (1, "true"))
 def test_claim_admits_and_names_a_malformed_cancel_flag(service, malformed) -> None:
     """A non-boolean cancel flag does not cancel, and is not silent either.
