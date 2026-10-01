@@ -1285,7 +1285,12 @@ def test_installer_acceptance_signer_requires_current_gate_report_set() -> None:
         "candidate",
         "nas-acceptance",
         "spark-acceptance",
+        "spark-upgrade-acceptance",
     ]
+    # The upgrade-carry lane gates signing: a candidate that drops a serving
+    # workload across the upgrade is never signed. It keeps its own report
+    # artifact; the signed gate set stays the NAS and Spark lane reports.
+    assert "needs['spark-upgrade-acceptance'].result == 'success'" in acceptance["if"]
     signing = next(
         step
         for step in acceptance["steps"]
