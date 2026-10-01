@@ -75,6 +75,17 @@ records the image as present on that Spark, so the next plan does not
 distribute it again. Distribution progress and per-Spark readiness are reported
 before workloads are stopped and replaced.
 
+The worker reclaims image bytes nothing names any more, once an hour. An
+image is kept while its receipt exists, while a live distribution assignment
+names it, or while a build that produced it is unfinished or finished less than
+24 hours ago (an image waiting for its first receipt). Every other blob that no
+kept image refers to is removed once it is older than 24 hours; a copy marks
+every blob of the image it stored as fresh, so a just-stored image always
+survives that long. Uploaded Spark archives that no build still waits on go the
+same way. Collection and copies share the store's single writer lock, so they
+never interleave, and a busy store is simply collected next time. An image
+needed again after collection is stored or built again, like any cache loss.
+
 Agents advertise this as `recipe.image.pull.v1`. A Spark whose agent does not
 is shown with an "upgrade the Spark agent" blocker
 (`run-switch.agent-upgrade-required`, `install.agent_upgrade_required`) instead

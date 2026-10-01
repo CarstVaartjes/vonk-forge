@@ -1,0 +1,78 @@
+#!/usr/bin/env -S uv run --project control --frozen python
+"""Measure what the layered image store moves for a series of images.
+
+    scripts/measure-image-store [--store DIR] REFERENCE...
+
+Copies each digest-pinned registry image, in order, into one OCI layout
+through the Controller's own store (the same `skopeo copy` it runs), and
+prints one JSON line per image: the bytes and blobs the copy added, how many
+of its layers were already stored, and how long it took. Pass consecutive
+releases of one recipe to see what an update costs. The store is a scratch
+directory, removed afterwards unless --store names one.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+from vonk_control.oci_image_store import OciImageStore
+
+
+def _stored(blobs: Path) -> dict[str, int]:
+    if not blobs.is_dir():
+        return {}
+    return {blob.name: blob.stat().st_size for blob in blobs.iterdir()}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("references", nargs="+", metavar="REFERENCE")
+    parser.add_argument("--store", type=Path, help="keep the layout here")
+    parser.add_argument("--skopeo", default=shutil.which("skopeo") or "skopeo")
+    args = parser.parse_args()
+    root = args.store or Path(tempfile.mkdtemp(prefix="image-store-"))
+    store = OciImageStore(root, skopeo=args.skopeo)
+    blobs = store.root / "blobs" / "sha256"
+    try:
+        for reference in args.references:
+            before = _stored(blobs)
+            started = time.monotonic()
+            image = store.import_reference(reference)
+            seconds = time.monotonic() - started
+            added = {
+                name: size
+                for name, size in _stored(blobs).items()
+                if name not in before
+            }
+            print(
+                json.dumps(
+                    {
+                        "reference": reference,
+                        "manifest": image.manifest_digest,
+                        "layers": len(image.layer_digests),
+                        "layers_already_stored": sum(
+                            digest.removeprefix("sha256:") in before
+                            for digest in image.layer_digests
+                        ),
+                        "stored_bytes": image.stored_bytes,
+                        "bytes_added": sum(added.values()),
+                        "blobs_added": len(added),
+                        "seconds": round(seconds, 1),
+                    }
+                ),
+                flush=True,
+            )
+    finally:
+        if args.store is None:
+            shutil.rmtree(root, ignore_errors=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -14,6 +14,12 @@ layout is read by name and size only; nothing is re-hashed.
 
 Only OCI image manifests are admitted, because the agent site serves every
 manifest with the OCI manifest media type.
+
+Collection removes what no image the Controller still names refers to. A copy
+marks every blob of the image it stored as fresh, so a just-stored image is
+kept for the grace period whatever the database says yet; after that, only
+the named images keep their blobs. Collection and copies share the store's
+one writer lock, so they never interleave.
 """
 
 from __future__ import annotations
@@ -23,7 +29,8 @@ import json
 import os
 import re
 import subprocess
-from collections.abc import Callable, Iterator, Mapping
+import time
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +71,14 @@ class StoredImage:
     @property
     def blob_digests(self) -> tuple[str, ...]:
         return (self.manifest_digest, self.config_digest, *self.layer_digests)
+
+
+@dataclass(frozen=True, slots=True)
+class Collection:
+    """What one collection removed from the layout."""
+
+    blobs_removed: int
+    bytes_reclaimed: int
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -188,12 +203,71 @@ class OciImageStore:
                 ) from error
             finally:
                 digest_file.unlink(missing_ok=True)
-        image = self.read(manifest_digest)
-        if image is None:
-            raise OciImageStoreError(
-                "image_store.import_incomplete", "copied image is incomplete"
-            )
+            image = self.read(manifest_digest)
+            if image is None:
+                raise OciImageStoreError(
+                    "image_store.import_incomplete", "copied image is incomplete"
+                )
+            # A copy that found every blob already present writes nothing;
+            # mark the image fresh so collection keeps it for the grace
+            # period, until the Controller has recorded it.
+            for digest in image.blob_digests:
+                os.utime(self.blob_path(digest))
         return image
+
+    def collect(
+        self, referenced: Callable[[], Iterable[str]], *, grace_seconds: float
+    ) -> Collection | None:
+        """Remove blobs no referenced image needs; ``None`` when busy.
+
+        ``referenced`` returns the manifests (hex addresses) the Controller
+        still needs; it is asked while the writer lock is held, so no copy
+        can land between the answer and the sweep. A blob is removed only
+        when none of them refers to it and it is older than the grace
+        period. A missing referenced manifest refers to nothing, which is
+        ordinary cache loss.
+        """
+
+        blobs = self.root / "blobs" / "sha256"
+        if not blobs.is_dir():
+            return Collection(0, 0)
+        try:
+            with self._lock():
+                return self._sweep(blobs, referenced, time.time() - grace_seconds)
+        except OciImageStoreError as error:
+            if error.code == STORE_BUSY:
+                return None
+            raise
+
+    def _sweep(
+        self, blobs: Path, referenced: Callable[[], Iterable[str]], cutoff: float
+    ) -> Collection:
+        keep: set[str] = set()
+        for address in referenced():
+            keep.update(self._referenced_blobs(address))
+        removed = reclaimed = 0
+        for blob in blobs.iterdir():
+            if blob.name in keep:
+                continue
+            try:
+                status = blob.stat()
+                if status.st_mtime > cutoff:
+                    continue
+                blob.unlink()
+            except FileNotFoundError:
+                continue
+            removed += 1
+            reclaimed += status.st_size
+        return Collection(removed, reclaimed)
+
+    def _referenced_blobs(self, address: str) -> set[str]:
+        digest = f"sha256:{address}"
+        try:
+            manifest = json.loads(self.blob_path(digest).read_bytes())
+            image = _stored_image(digest, manifest)
+        except (OSError, ValueError, OciImageStoreError):
+            return set()
+        return {item.removeprefix("sha256:") for item in image.blob_digests}
 
     @contextmanager
     def _lock(self) -> Iterator[None]:
@@ -263,6 +337,7 @@ __all__ = [
     "LAYOUT_DIRECTORY",
     "OCI_MANIFEST",
     "STORE_BUSY",
+    "Collection",
     "OciImageStore",
     "OciImageStoreError",
     "StoredImage",
