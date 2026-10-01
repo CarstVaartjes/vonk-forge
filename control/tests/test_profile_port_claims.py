@@ -1,6 +1,7 @@
 """Accepted serving ports survive preparation and transfer to the exact run."""
 
-from datetime import datetime, timedelta
+from dataclasses import fields
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -8,6 +9,11 @@ from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.fleet_projection import FleetProjection
+from vonk_control.inventory_repository import (
+    MAX_INVENTORY_FUTURE_SKEW,
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.models import (
     AgentNode,
     ClusterMapping,
@@ -182,9 +188,38 @@ def test_profile_port_promise_preserves_live_owner_and_survives_reviewed_stop(
             assert counts[node_id]["port"][1] == len(expected_ports)
         promised_ids = {claim.id for claim in promised}
         old_ids = {claim.id for claim in old_ports}
+    # The replacement's own Run/Switch stops the old workload right before it
+    # starts (the old one keeps serving until then).
     stop_id = _drive_to_job(profiles, planner, sessions, "recipe.stop")
     for node_id in nodes:
         lifecycle.record_node_result(stop_id, node_id, succeeded=True, evidence={})
+    # Start admission needs the Sparks' first inventory collected after that
+    # stop, which the agents send on their own a little later.
+    with sessions() as session:
+        stopped = session.get(RecipeRun, old.owner_id)
+        assert stopped is not None and stopped.stopped_at is not None
+        stopped_at = stopped.stopped_at
+        latest = {
+            snapshot.node_id: snapshot
+            for snapshot in session.scalars(
+                select(NodeInventorySnapshot).order_by(
+                    NodeInventorySnapshot.observed_at
+                )
+            )
+        }
+    if stopped_at.tzinfo is None:
+        stopped_at = stopped_at.replace(tzinfo=UTC)
+    later = stopped_at + MAX_INVENTORY_FUTURE_SKEW + timedelta(seconds=2)
+    for service in (profiles, planner, lifecycle):
+        service._clock = lambda: later
+    inventory = InventoryRepository(sessions, clock=lambda: later)
+    for node_id in nodes:
+        sample = {
+            field.name: getattr(latest[node_id], field.name)
+            for field in fields(InventorySnapshotInput)
+        }
+        sample["observed_at"] = later
+        inventory.record(InventorySnapshotInput(**sample))
     # Even after the old owner releases its active port, unrelated work cannot
     # take the promised port in the gap before the replacement worker starts.
     competing = lifecycle.preview_run(installation_id, "competing")
