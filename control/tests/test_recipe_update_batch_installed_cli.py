@@ -33,6 +33,7 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.strict_json import ControllerAPIRoute
 from vonk_forge_contracts import RecipeDefinition
 
+from .runtime_image_fixtures import place_test_image
 from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,
@@ -71,7 +72,7 @@ def _prepared_build(
     """The verified receipt of the revision's finished build archive."""
 
     digest = hashlib.sha256(archive).hexdigest()
-    (storage.root / digest).write_bytes(archive)
+    place_test_image(storage, digest, len(archive))
     return prepare_runtime_image(
         recipe.model_dump(mode="json"),
         runtime=_runtime(),

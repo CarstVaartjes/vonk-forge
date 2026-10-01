@@ -19,7 +19,7 @@ def _payload(clock):
         "gpu_count": 1,
         "memory_pool": "shared",
         "artifact_store_read_only": False,
-        "capabilities": ["runtime.vonk.v1"],
+        "capabilities": ["runtime.vonk.v1", "recipe.image.pull.v1"],
         "nvidia_driver_version": "580.65.06",
         "container_runtime_version": "28.3.3",
     }

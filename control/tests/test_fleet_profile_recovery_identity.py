@@ -30,6 +30,7 @@ from vonk_control.recipe_operations import record_build_evidence
 from vonk_control.run_switch_contract import RunSwitchPlan
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
+from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_fleet_profile_cache_recovery import _typed_cache_failure
 from .test_fleet_profile_recovery_current import _failed_profile
 from .test_fleet_profiles import (
@@ -42,11 +43,12 @@ from .test_fleet_profiles import (
 from .test_recipe_operations import installed_recipe, setup_services
 
 
-def _complete_rebuild(sessions, storage, *, archive: bytes, image_digest: str) -> None:
+def _complete_rebuild(
+    sessions, storage, *, archive_digest: str, image_bytes: int, image_digest: str
+) -> None:
     """Deliver a completed build through the persisted build-evidence consumer."""
 
-    archive_digest = hashlib.sha256(archive).hexdigest()
-    (storage.root / archive_digest).write_bytes(archive)
+    place_test_image(storage, archive_digest, image_bytes)
     with sessions.begin() as session:
         build = session.scalar(select(RecipeBuild))
         assert build is not None
@@ -62,7 +64,7 @@ def _complete_rebuild(sessions, storage, *, archive: bytes, image_digest: str) -
             session,
             build,
             {
-                "image_bytes": len(archive),
+                "image_bytes": image_bytes,
                 "image_digest": image_digest,
                 "oci_layout_sha256": archive_digest,
             },
@@ -97,11 +99,12 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
     adapter._run_switch._build_archive_available = storage.build_archive_available
     if after_retry_admission:
         assert service.tick()
-    (storage.root / original_image.oci_layout_sha256).unlink()
+    remove_test_image(storage, original_image.oci_layout_sha256)
     _complete_rebuild(
         sessions,
         storage,
-        archive=b"a different rebuilt OCI archive",
+        archive_digest=hashlib.sha256(b"a different rebuilt OCI archive").hexdigest(),
+        image_bytes=len(b"a different rebuilt OCI archive"),
         image_digest="sha256:" + "2" * 64,
     )
 
@@ -161,12 +164,19 @@ def test_restored_exact_bytes_recover_only_current_profile_intent(
         image_digest = build.image_digest
         assert image_digest is not None
         storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
-        path = storage.root / build.oci_layout_sha256
-        archive = path.read_bytes()
-        path.unlink()
+        archive_digest = build.oci_layout_sha256
+        image_bytes = build.image_bytes
+        assert image_bytes is not None
+        remove_test_image(storage, archive_digest)
     adapter = cast(RunSwitchFleetProfileAdapter, service._switch_adapter)
     adapter._run_switch._build_archive_available = storage.build_archive_available
-    _complete_rebuild(sessions, storage, archive=archive, image_digest=image_digest)
+    _complete_rebuild(
+        sessions,
+        storage,
+        archive_digest=archive_digest,
+        image_bytes=image_bytes,
+        image_digest=image_digest,
+    )
     if supersede:
         service.load(
             profile.number,

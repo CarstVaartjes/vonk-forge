@@ -7,7 +7,6 @@ are real. This is not native builder, model-quality or physical acceptance.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
@@ -55,6 +54,7 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_control.source_bundles import SourceBundleStore
 
+from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_lifecycle_preflight import _finish as complete_preflight
 from .test_profile_build_memory import _accepted_build_profile
 from .test_recipe_operations import (
@@ -127,10 +127,13 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
                 build = session.get(RecipeBuild, job.payload["owner_id"])
                 assert build is not None
             storage = FilesystemRuntimeImageStorage(root / "runtime-images")
-            staged = storage.root / "staged-build.part"
-            staged.write_bytes((root / "expected-build.archive").read_bytes())
             expected = RuntimeImageReceipt.model_validate_json(
                 (root / "expected-build.receipt.json").read_text()
+            )
+            # The Spark's upload lands in the layered store as this image.
+            place_test_image(storage, expected.oci_archive_sha256, expected.image_bytes)
+            staged = storage.existing_archive(
+                expected.oci_archive_sha256, expected.image_bytes
             )
             receipt = storage.commit(
                 staged,
@@ -399,31 +402,29 @@ def test_profile_recovers_after_worker_process_death(
     storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
     original_archive = next(storage.root.glob("*.receipt.json"))
     original = RuntimeImageReceipt.model_validate_json(original_archive.read_text())
-    # Lose the actual cache bytes after acceptance. The deterministic Spark
-    # result recreates the exact reviewed image; a different rebuilt image is
-    # the separate W09f consent boundary, not an acceptable test shortcut.
-    archive_path = Path(original.archive_path)
-    assert archive_path.parent == storage.root
-    (tmp_path / "expected-build.archive").write_bytes(archive_path.read_bytes())
+    # Lose the stored image after acceptance. The deterministic Spark result
+    # recreates the exact reviewed image; a different rebuilt image is the
+    # separate W09f consent boundary, not an acceptable test shortcut.
+    assert storage.existing_archive(original.oci_archive_sha256, original.image_bytes)
     (tmp_path / "expected-build.receipt.json").write_text(original.model_dump_json())
     if replacement == "image":
         changed = original.model_copy(
             update={
                 "image_digest": "sha256:" + "b" * 64,
+                "oci_archive_sha256": "b" * 64,
             }
         )
         (tmp_path / "expected-build.receipt.json").write_text(changed.model_dump_json())
     elif replacement == "archive":
-        changed_bytes = archive_path.read_bytes() + b"replacement"
-        (tmp_path / "expected-build.archive").write_bytes(changed_bytes)
         changed = original.model_copy(
             update={
-                "oci_archive_sha256": hashlib.sha256(changed_bytes).hexdigest(),
-                "image_bytes": len(changed_bytes),
+                "image_digest": "sha256:" + "c" * 64,
+                "oci_archive_sha256": "c" * 64,
+                "image_bytes": original.image_bytes + len(b"replacement"),
             }
         )
         (tmp_path / "expected-build.receipt.json").write_text(changed.model_dump_json())
-    archive_path.unlink()
+    remove_test_image(storage, original.oci_archive_sha256)
     original_archive.unlink()
     with sessions() as session:
         original_installations = {

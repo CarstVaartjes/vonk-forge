@@ -20,15 +20,9 @@ def _assignment() -> DistributionAssignment:
                     "bytes": 13,
                     "kind": "model",
                 },
-                {
-                    "name": "image.oci.tar",
-                    "sha256": "e" * 64,
-                    "bytes": 11,
-                    "kind": "oci-archive",
-                },
             ],
             "oci_image_digest": "sha256:" + "f" * 64,
-            "oci_archive_sha256": "e" * 64,
+            "oci_image_config_digest": "sha256:" + "e" * 64,
         }
     )
 
@@ -51,6 +45,19 @@ def test_distribution_assignment_rejects_unsafe_object_name() -> None:
         DistributionAssignment.parse(wire)
 
 
+def test_distribution_carries_only_model_objects() -> None:
+    # The runtime image is pulled by its digests, never sent as an object.
+    with pytest.raises(AgentProtocolError):
+        DistributionObject.parse(
+            {
+                "name": "image.oci.tar",
+                "sha256": "e" * 64,
+                "bytes": 11,
+                "kind": "oci-archive",
+            }
+        )
+
+
 def test_distribution_allows_only_the_canonical_empty_model_support_file() -> None:
     empty_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     accepted = DistributionObject.parse(
@@ -66,10 +73,10 @@ def test_distribution_allows_only_the_canonical_empty_model_support_file() -> No
     with pytest.raises(AgentProtocolError):
         DistributionObject.parse(
             {
-                "name": "empty.oci.tar",
-                "sha256": empty_sha256,
+                "name": "weights.bin",
+                "sha256": "d" * 64,
                 "bytes": 0,
-                "kind": "oci-archive",
+                "kind": "model",
             }
         )
 

@@ -8,9 +8,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.distribution_object_kind import check_distribution_object_kind
-from ..models.distribution_object_kind import DistributionObjectKind
-from typing import cast
+from typing import Literal, cast
 
 
 
@@ -23,17 +21,17 @@ T = TypeVar("T", bound="DistributionObject")
 
 @_attrs_define
 class DistributionObject:
-    """ One model file, OCI archive, or OCI layer referenced by an assignment.
+    """ One model file referenced by an assignment.
 
         Attributes:
             bytes_ (int):
-            kind (DistributionObjectKind):
+            kind (Literal['model']):
             name (str):
             sha256 (str):
      """
 
     bytes_: int
-    kind: DistributionObjectKind
+    kind: Literal['model']
     name: str
     sha256: str
 
@@ -44,7 +42,7 @@ class DistributionObject:
     def to_dict(self) -> dict[str, Any]:
         bytes_ = self.bytes_
 
-        kind: str = self.kind
+        kind = self.kind
 
         name = self.name
 
@@ -69,10 +67,9 @@ class DistributionObject:
         d = dict(src_dict)
         bytes_ = d.pop("bytes")
 
-        kind = check_distribution_object_kind(d.pop("kind"))
-
-
-
+        kind = cast(Literal['model'] , d.pop("kind"))
+        if kind != 'model':
+            raise ValueError(f"kind must match const 'model', got '{kind}'")
 
         name = d.pop("name")
 

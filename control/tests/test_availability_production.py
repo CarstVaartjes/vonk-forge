@@ -53,6 +53,7 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .runtime_image_fixtures import place_test_image
 from .test_recipe_builds import _write_controller_build_receipt
 from .test_recipe_builds import setup as _build_setup
 
@@ -189,16 +190,14 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
     resolved = builds.resolve(revision.id)
     assert resolved.cached
     assert resolved.oci_layout_sha256 == stored_receipt.oci_archive_sha256
-    assert (
-        storage.existing_archive(archive_digest, len(archive)).read_bytes() == archive
-    )
+    assert storage.existing_archive(archive_digest, len(archive)).is_file()
 
     class NoNetworkTransport:
         def inspect_archive(self, *_args, **_kwargs):
             pytest.fail("a complete verified build receipt must be reused")
 
     monkeypatch.setattr(
-        availability_production, "SkopeoOCIImageTransport", NoNetworkTransport
+        availability_production, "OciLayoutImageTransport", NoNetworkTransport
     )
 
     class Operations:
@@ -1402,7 +1401,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                     )
                 )
             production.storage.root.mkdir(parents=True, exist_ok=True)
-            (production.storage.root / archive_digest).write_bytes(archive)
+            place_test_image(production.storage, archive_digest, len(archive))
             return SimpleNamespace(
                 id=str(uuid.uuid4()),
                 state="succeeded",
@@ -1433,7 +1432,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                 archive_bytes=len(archive),
             )
 
-    monkeypatch.setattr(availability_production, "SkopeoOCIImageTransport", Transport)
+    monkeypatch.setattr(availability_production, "OciLayoutImageTransport", Transport)
 
     class Settings:
         agent_artifact_root = tmp_path / "artifacts"

@@ -63,6 +63,15 @@ _LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeImagePull:
+    """The runtime image a node pulls from the layered store."""
+
+    image_digest: str
+    config_digest: str
+    address: str
+
+
+@dataclass(frozen=True, slots=True)
 class _ChildView:
     """Small child projection consumed by RunSwitchOperationService."""
 
@@ -292,7 +301,7 @@ class DurableDistributionPhaseExecutor:
             plan, progress
         )
         effective_execution_key = self._runtime_execution_key(progress)
-        archive = self._archive(
+        image = self._archive(
             plan,
             build_id=build_id,
             image_digest=image_digest,
@@ -305,8 +314,7 @@ class DurableDistributionPhaseExecutor:
                 plan,
                 node_id,
                 model_objects,
-                archive,
-                image_digest=image_digest,
+                image,
                 model_set_digest=model_set_digest,
             )
             for node_id in missing
@@ -319,7 +327,9 @@ class DurableDistributionPhaseExecutor:
             cached=cached,
             assignments=assignments,
             target_order=targets,
-            target_bytes=model_set_bytes + image_bytes,
+            # The image is pulled, not downloaded as an object; Docker fetches
+            # only the layers the node lacks.
+            target_bytes=model_set_bytes,
             workload_intent_ordinal=intent_ordinal,
         )
         return PhaseExecution(
@@ -739,7 +749,7 @@ class DurableDistributionPhaseExecutor:
             child = Job(
                 # The request key provides replay identity. Job/operation IDs
                 # are persisted once and follow the shared helper UUIDv4
-                # contract when this transfer requests Docker image import.
+                # contract when this transfer requests a runtime image pull.
                 id=str(uuid.uuid4()),
                 request_id=child_request,
                 kind="artifact-distribution",
@@ -962,7 +972,7 @@ class DurableDistributionPhaseExecutor:
         layout_digest: str,
         image_bytes: int,
         effective_execution_key: str | None = None,
-    ) -> DistributionObject:
+    ) -> RuntimeImagePull:
         if not image_digest or not layout_digest or image_bytes < 1:
             raise RuntimeError("verified OCI runtime image identity is unavailable")
         if build_id is None:
@@ -1004,21 +1014,32 @@ class DurableDistributionPhaseExecutor:
                         "runtime_image.authorization_invalid: "
                         "OCI build receipt authority changed"
                     )
-        return DistributionObject(
-            name="image.oci.tar",
-            sha256=layout_digest,
-            bytes=image_bytes,
-            kind="oci-archive",
+            config_digest = (
+                authorization.local_image_config_id
+                if plan.recipe_revision_id is not None
+                else self._stored_config_digest(layout_digest)
+            )
+        return RuntimeImagePull(
+            image_digest=image_digest,
+            config_digest=config_digest,
+            address=layout_digest,
         )
+
+    def _stored_config_digest(self, address: str) -> str:
+        storage = self._source_runtime_storage(self._distribution.source)
+        layout = getattr(storage, "layout", None)
+        image = layout.read(f"sha256:{address}") if layout is not None else None
+        if image is None:
+            raise RuntimeError("verified OCI runtime image identity is unavailable")
+        return image.config_digest
 
     def _assignment(
         self,
         plan: RunSwitchPlan,
         node_id: str,
         model_objects: tuple[DistributionObject, ...],
-        archive: DistributionObject,
+        image: RuntimeImagePull,
         *,
-        image_digest: str,
         model_set_digest: str,
     ) -> NodeDistributionAssignment:
         generation = getattr(getattr(plan, "mapping", None), "mapping_generation", None)
@@ -1026,7 +1047,7 @@ class DurableDistributionPhaseExecutor:
             generation = 1
         # UUID v4 is part of the wire contract, while the digest-derived bytes
         # make replay after a Controller restart yield the same assignment.
-        seed = f"{plan.plan_digest}:{generation}:{node_id}:{model_set_digest}:{archive.sha256}"
+        seed = f"{plan.plan_digest}:{generation}:{node_id}:{model_set_digest}:{image.address}"
         assignment_bytes = bytearray(hashlib.sha256(seed.encode("utf-8")).digest()[:16])
         assignment_bytes[6] = (assignment_bytes[6] & 0x0F) | 0x40
         assignment_bytes[8] = (assignment_bytes[8] & 0x3F) | 0x80
@@ -1045,9 +1066,10 @@ class DurableDistributionPhaseExecutor:
                     self._clock().astimezone(UTC) + timedelta(hours=1)
                 ).isoformat(),
                 "model_artifact_set_sha256": model_set_digest,
-                "objects": [item.to_mapping() for item in (*model_objects, archive)],
-                "oci_image_digest": image_digest,
-                "oci_archive_sha256": archive.sha256,
+                "objects": [item.to_mapping() for item in model_objects],
+                "oci_image_digest": image.image_digest,
+                "oci_image_config_digest": image.config_digest,
+                "oci_archive_sha256": image.address,
             }
         )
 

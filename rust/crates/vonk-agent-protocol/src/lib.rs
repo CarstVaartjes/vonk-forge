@@ -15,7 +15,6 @@ pub use generated::{
     RecipeBuildAdapterDefinition, RecipeBuildAdditionalContext, RecipeBuildBaseImage,
     RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest, RecipeBuildEvidence, RecipeBuildLimits,
     RecipeBuildMetadata, RecipeBuildNetwork, RecipeBuildOptions, RecipeBuildRequest,
-    RecipeImageImportEvidence, RecipeImageImportRequest,
     RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence, RecipeJobFile,
     RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
     RecipeJobRunRequest, RecipeJobRunResult, RecipeReconcilePayload as RecipeReconcileRequest,
@@ -532,7 +531,6 @@ impl AgentClaim {
                 | "artifact.distribution.v1"
                 | "recipe.build.v1"
                 | "recipe.build.cleanup.v1"
-                | "recipe.image.import.v1"
                 | "recipe.job.run.v1"
                 | "recipe.install"
                 | "recipe.start"
@@ -711,7 +709,7 @@ impl DistributionObject {
                 && !(self.kind == "model"
                     && self.sha256
                         == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-            || !matches!(self.kind.as_str(), "model" | "oci-archive" | "oci-layer")
+            || self.kind != "model"
         {
             return Err(ProtocolError::Identity("distribution object"));
         }
@@ -719,33 +717,25 @@ impl DistributionObject {
     }
 }
 
-/// The complete model and executable image object set of one distribution
-/// plan. The plan digest scopes every object fetch, so an enrolled agent
-/// cannot turn a digest into a general object browser.
+/// The model object set of one distribution plan and the runtime image the
+/// node pulls by digest from the Controller's layered store. The plan digest
+/// scopes every object fetch, so an enrolled agent cannot turn a digest into a
+/// general object browser.
 impl DistributionAssignment {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if !valid_oci_digest(&self.oci_image_digest)
-            || !lower_hex(&self.oci_archive_sha256, 64)
+            || !valid_oci_digest(&self.oci_image_config_digest)
             || self.objects.is_empty()
             || self.objects.len() > 4096
         {
             return Err(ProtocolError::Identity("distribution assignment"));
         }
         let mut digests = BTreeSet::new();
-        let mut has_model = false;
-        let mut has_archive = false;
         for object in &self.objects {
             object.validate()?;
             if !digests.insert(object.sha256.as_str()) {
                 return Err(ProtocolError::Identity("distribution object duplicate"));
             }
-            has_model |= object.kind == "model";
-            has_archive |= object.kind == "oci-archive" && object.sha256 == self.oci_archive_sha256;
-        }
-        if !has_model || !has_archive {
-            return Err(ProtocolError::Identity(
-                "distribution assignment object coverage",
-            ));
         }
         Ok(())
     }
@@ -790,9 +780,7 @@ impl AgentResult {
                 ),
                 // An empty success deserializes into the first empty-capable
                 // variant, so it is recognized by content, not by variant.
-                AgentOperation::RecipeBuildCleanupV1 | AgentOperation::RecipeImageImportV1 => {
-                    empty_result(&self.result)
-                }
+                AgentOperation::RecipeBuildCleanupV1 => empty_result(&self.result),
                 AgentOperation::RecipeBuildV1 => {
                     matches!(&self.result, AgentResultResult::RecipeBuildEvidence(_))
                 }
@@ -965,7 +953,6 @@ pub enum RecipeOperationRequest {
     RuntimePreflight(runtime_preflight::RuntimePreflightRequest),
     Build(Box<RecipeBuildRequest>),
     BuildCleanup(RecipeBuildCleanupRequest),
-    ImageImport(RecipeImageImportRequest),
     JobRun(RecipeJobRunRequest),
     Install(RecipeInstallRequest),
     Start(RecipeStartRequest),
@@ -1052,10 +1039,6 @@ impl RecipeOperationRequest {
             ("recipe.build.v1", generated::AgentClaimPayload::RecipeBuildRequest(value)) => {
                 Self::Build(Box::new(value.clone()))
             }
-            (
-                "recipe.image.import.v1",
-                generated::AgentClaimPayload::RecipeImageImportRequest(value),
-            ) => Self::ImageImport(value.clone()),
             ("recipe.job.run.v1", generated::AgentClaimPayload::RecipeJobRunRequest(value)) => {
                 Self::JobRun(value.clone())
             }
@@ -1085,13 +1068,6 @@ impl RecipeOperationRequest {
             Self::RuntimePreflight(_) => true,
             Self::Build(value) => validate_build(value),
             Self::BuildCleanup(_) => true,
-            Self::ImageImport(value) => {
-                value.mapping_generation >= 1
-                    && valid_node_id(&value.source_node_id)
-                    && valid_oci_digest(&value.image_digest)
-                    && lower_hex(&value.oci_layout_sha256, 64)
-                    && (1..=16 * 1024_u64.pow(4)).contains(&value.image_bytes)
-            }
             Self::JobRun(value) => validate_recipe_job(value),
             Self::Install(value) => {
                 lower_hex(&value.plan_digest, 64)
@@ -2440,22 +2416,14 @@ mod distribution_tests {
 
     fn assignment() -> DistributionAssignment {
         DistributionAssignment {
-            objects: vec![
-                DistributionObject {
-                    name: "weights/model.bin".to_owned(),
-                    sha256: "d".repeat(64),
-                    bytes: 13,
-                    kind: "model".parse().unwrap(),
-                },
-                DistributionObject {
-                    name: "image.oci.tar".to_owned(),
-                    sha256: "e".repeat(64),
-                    bytes: 11,
-                    kind: "oci-archive".parse().unwrap(),
-                },
-            ],
+            objects: vec![DistributionObject {
+                name: "weights/model.bin".to_owned(),
+                sha256: "d".repeat(64),
+                bytes: 13,
+                kind: "model".parse().unwrap(),
+            }],
             oci_image_digest: "sha256:".to_owned() + &"f".repeat(64),
-            oci_archive_sha256: "e".repeat(64),
+            oci_image_config_digest: "sha256:".to_owned() + &"e".repeat(64),
         }
     }
 

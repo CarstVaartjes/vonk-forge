@@ -22,6 +22,8 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .runtime_image_fixtures import place_test_image
+
 
 def _drain(cache: ModelCacheService, operation_id: str) -> None:
     deadline = time.monotonic() + 10
@@ -139,10 +141,11 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     def builder(*_args: object, claim: Any, **_kwargs: object):
         # The production builder reuses a verified archive; only a missing
         # archive is built.
-        archive = storage.root / image_archive_sha256
-        if not archive.exists():
+        if not storage.build_archive_available(
+            image_archive_sha256, len(image_archive)
+        ):
             image_builds.append(str(claim.operation_id))
-            archive.write_bytes(image_archive)
+            place_test_image(storage, image_archive_sha256, len(image_archive))
         return {
             "state": "succeeded",
             "build_id": "00000000-0000-4000-8000-000000000900",
@@ -165,7 +168,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
             return PulledImageEvidence(
                 manifest_digest="sha256:" + "e" * 64,
                 config_id="sha256:" + "f" * 64,
-                local_reference="docker-archive:" + str(archive),
+                local_reference="oci-layout:" + archive.name,
                 architecture=expected_architecture,
                 runtime_interface=expected_runtime_interface,
                 archive_sha256=expected_archive_sha256,

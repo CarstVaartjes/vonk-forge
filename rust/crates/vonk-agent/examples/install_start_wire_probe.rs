@@ -38,9 +38,6 @@ fn runtime_plan(
     let main = start_arguments_for_paths(
         spec,
         &CompiledOciPaths {
-            image_archive: data_root
-                .join("oci-archives")
-                .join(&spec.runtime_image.oci_layout_sha256),
             model_root: data_root
                 .join("installations")
                 .join(&installation_id)

@@ -526,7 +526,6 @@ def test_operation_enum_contains_only_supported_operations() -> None:
         "artifact.distribution.v1",
         "recipe.build.v1",
         "recipe.build.cleanup.v1",
-        "recipe.image.import.v1",
         "recipe.install",
         "recipe.start",
         "recipe.job.run.v1",

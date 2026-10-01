@@ -62,6 +62,14 @@ from .runtime_preflight import (
 )
 from .topology import Placement, TopologyError, validate_topology
 
+# Sparks pull runtime images from the Controller's layered image store; an
+# agent without this capability cannot install or start any recipe.
+IMAGE_PULL_CAPABILITY = "recipe.image.pull.v1"
+AGENT_UPGRADE_REQUIRED_DETAIL = (
+    "Upgrade the Spark agent: this agent cannot pull runtime images from the "
+    "Controller's layered image store."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AdmissionReason:
@@ -416,6 +424,16 @@ class InstallAdmissionService:
             warnings: list[AdmissionReason] = []
             if topology_reason is not None:
                 blockers.append(topology_reason)
+            if (
+                mapping_node.node_id in known_inventory
+                and IMAGE_PULL_CAPABILITY
+                not in known_inventory[mapping_node.node_id].capabilities
+            ):
+                blockers.append(
+                    AdmissionReason(
+                        "install.agent_upgrade_required", AGENT_UPGRADE_REQUIRED_DETAIL
+                    )
+                )
             if legal_admission.warning is not None:
                 warnings.append(AdmissionReason(*legal_admission.warning))
             if (
@@ -561,6 +579,10 @@ class InstallAdmissionService:
                 )
             )
             reused = reused_image + reused_artifacts
+            # ``image_bytes`` is the stored image's layers, what a pull moves
+            # (less when the Spark already holds shared layers). Docker keeps
+            # them unpacked, a larger footprint the next inventory observes
+            # in the Spark's free disk.
             required_download = max(0, actual_artifact_bytes - reused_artifacts) + max(
                 0, (image_bytes or 0) - reused_image
             )

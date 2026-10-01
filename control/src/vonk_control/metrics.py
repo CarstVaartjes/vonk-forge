@@ -48,7 +48,6 @@ _AGENT_OPERATIONS = frozenset(
         "agent.upgrade.v1",
         "artifact.distribution.v1",
         "recipe.build.v1",
-        "recipe.image.import.v1",
         "recipe.install",
         "recipe.start",
         "recipe.job.run.v1",

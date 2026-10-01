@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 import sys
@@ -27,6 +26,7 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImageReceipt,
 )
 
+from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_profile_build_memory import _accepted_build_profile
 from .test_profile_build_process_recovery import _worker_process
 
@@ -45,11 +45,8 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
     storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
     receipt_path = next(storage.root.glob("*.receipt.json"))
     original = RuntimeImageReceipt.model_validate_json(receipt_path.read_text())
-    original_bytes = storage.read_receipt(original.oci_archive_sha256)
-    archive = Path(original_bytes.archive_path)
-    (tmp_path / "expected-build.archive").write_bytes(archive.read_bytes())
     (tmp_path / "expected-build.receipt.json").write_text(original.model_dump_json())
-    archive.unlink()
+    remove_test_image(storage, original.oci_archive_sha256)
     receipt_path.unlink()
     _worker_process(
         {
@@ -116,17 +113,17 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
                     updated_at=now,
                 )
             )
-    replacement_bytes = b"a distinct verified rebuilt image archive"
-    staged = storage.root / "replacement.part"
-    staged.write_bytes(replacement_bytes)
+    replacement_bytes = len(b"a distinct verified rebuilt image archive")
+    place_test_image(storage, "b" * 64, replacement_bytes)
+    staged = storage.existing_archive("b" * 64, replacement_bytes)
     changed = storage.commit(
         staged,
         receipt=original.model_copy(
             update={
                 "build_id": replacement_build_id,
                 "image_digest": "sha256:" + "b" * 64,
-                "oci_archive_sha256": hashlib.sha256(replacement_bytes).hexdigest(),
-                "image_bytes": len(replacement_bytes),
+                "oci_archive_sha256": "b" * 64,
+                "image_bytes": replacement_bytes,
                 "archive_path": str(staged),
                 "recorded_at": now.isoformat(),
             }

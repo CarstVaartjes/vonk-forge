@@ -269,7 +269,8 @@ def test_profile_disk_handoff_preserves_materialized_install_headroom(
     _complete_rebuild(
         sessions,
         storage,
-        archive=b"replacement OCI image with an exact new identity",
+        archive_digest="1" * 64,
+        image_bytes=len(b"replacement OCI image with an exact new identity"),
         image_digest="sha256:" + "1" * 64,
     )
     later = NOW + MAX_INVENTORY_FUTURE_SKEW + timedelta(seconds=1)

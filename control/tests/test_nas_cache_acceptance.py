@@ -205,7 +205,6 @@ def _prebuilt_oci_source(root: Path, payload: bytes):
     root.mkdir()
     archive_sha256 = hashlib.sha256(payload).hexdigest()
     image_digest = "sha256:" + hashlib.sha256(b"prebuilt-image").hexdigest()
-    (root / archive_sha256).write_bytes(payload)
     return (
         FilesystemObjectSource(
             root,
@@ -221,7 +220,6 @@ def _local_build_oci_source(sessions, root: Path, revision_id: str, payload: byt
     archive_root.mkdir(parents=True)
     archive_sha256 = hashlib.sha256(payload).hexdigest()
     image_digest = "sha256:" + hashlib.sha256(b"locally-built-image").hexdigest()
-    (archive_root / archive_sha256).write_bytes(payload)
     with sessions.begin() as session:
         session.add(
             RecipeBuild(
@@ -250,7 +248,6 @@ def _assignment(
     artifact_set_sha256: str,
     model_objects: tuple[DistributionObject, ...],
     archive_sha256: str,
-    archive_bytes: int,
     image_digest: str,
 ) -> NodeDistributionAssignment:
     return NodeDistributionAssignment.parse(
@@ -263,14 +260,9 @@ def _assignment(
             "model_artifact_set_sha256": artifact_set_sha256,
             "objects": [
                 *(item.to_mapping() for item in model_objects),
-                {
-                    "name": "runtime.oci.tar",
-                    "sha256": archive_sha256,
-                    "bytes": archive_bytes,
-                    "kind": "oci-archive",
-                },
             ],
             "oci_image_digest": image_digest,
+            "oci_image_config_digest": "sha256:" + "9" * 64,
             "oci_archive_sha256": archive_sha256,
         }
     )
@@ -370,7 +362,6 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
                 artifact_set_sha256=artifact_set_sha256,
                 model_objects=model_objects,
                 archive_sha256=archive_sha256,
-                archive_bytes=len(b"pulled prebuilt OCI archive"),
                 image_digest=image_digest,
             )
             for node_id in (NODE_A, NODE_B)
@@ -386,7 +377,6 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
         expected = {
             str(artifacts[0]["sha256"]): model_payload,
             str(artifacts[1]["sha256"]): auxiliary_payload,
-            archive_sha256: b"pulled prebuilt OCI archive",
         }
         for node_id in (NODE_A, NODE_B, NODE_A):
             for digest, payload in expected.items():
@@ -399,6 +389,15 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
                     )
                     == payload
                 )
+
+        # The image is pulled by digest; its address is never a served object.
+        with pytest.raises(DistributionError):
+            _read_object(
+                distribution,
+                node_id=NODE_A,
+                plan_digest=plan_digest,
+                digest=archive_sha256,
+            )
 
         wrong_set = NodeDistributionAssignment.parse(
             assignments[0].to_mapping() | {"model_artifact_set_sha256": "f" * 64}
@@ -477,13 +476,11 @@ def test_succeeded_local_recipe_build_archive_uses_the_same_verified_distributio
                     artifact_set_sha256=artifact_set_sha256,
                     model_objects=model_objects,
                     archive_sha256=archive_sha256,
-                    archive_bytes=len(local_oci_payload),
                     image_digest=image_digest,
                 )
             )
         expected = {
             str(artifact["sha256"]): model_payload,
-            archive_sha256: local_oci_payload,
         }
         for node_id in (NODE_A, NODE_B, NODE_A):
             for digest, payload in expected.items():
@@ -496,6 +493,13 @@ def test_succeeded_local_recipe_build_archive_uses_the_same_verified_distributio
                     )
                     == payload
                 )
+        with pytest.raises(DistributionError):
+            _read_object(
+                distribution,
+                node_id=NODE_A,
+                plan_digest=plan_digest,
+                digest=archive_sha256,
+            )
     finally:
         restarted_engine.dispose()
 

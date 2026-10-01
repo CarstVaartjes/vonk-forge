@@ -268,7 +268,6 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             "runtime.spark-docker-nvidia.v1".to_owned(),
             "recipe.build.v1".to_owned(),
             "recipe.build.cleanup.v1".to_owned(),
-            "recipe.image.import.v1".to_owned(),
             // Pulls pinned runtime images from the Controller's layered
             // image store through a loopback forwarder.
             "recipe.image.pull.v1".to_owned(),

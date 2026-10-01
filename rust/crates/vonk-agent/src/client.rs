@@ -419,10 +419,8 @@ pub const RECIPE_RUN_UNOWNED: &str = "unowned";
 pub struct DistributionDownloadEvidence {
     pub model_digests: Vec<String>,
     pub model_paths: Vec<std::path::PathBuf>,
-    pub oci_archive_path: std::path::PathBuf,
-    pub oci_archive_sha256: String,
-    pub oci_archive_bytes: u64,
     pub oci_image_digest: String,
+    pub oci_image_config_digest: String,
     pub downloaded_bytes: u64,
 }
 
@@ -1106,8 +1104,8 @@ impl AgentHttpClient {
         .await
     }
 
-    /// Fetch and validate the assignment manifest before selecting model files
-    /// or an OCI archive. The manifest is bounded and mTLS-authenticated.
+    /// Fetch and validate the assignment manifest before selecting model
+    /// files. The manifest is bounded and mTLS-authenticated.
     pub async fn distribution_manifest(
         &self,
         plan_digest: &str,
@@ -1129,9 +1127,9 @@ impl AgentHttpClient {
         Ok(assignment)
     }
 
-    /// Consume a complete assignment. Every model/configuration object and the
-    /// exact OCI archive is fetched through the assignment-bound endpoint;
-    /// complete files are reused by trusted metadata, while `.partial` files
+    /// Consume a complete assignment. Every model/configuration object is
+    /// fetched through the assignment-bound endpoint; the runtime image is
+    /// pulled separately by its digests. Complete files are reused by trusted metadata, while `.partial` files
     /// resume by identity and length after an agent process restart. Model
     /// objects are stored below one content-addressed root so assignments with
     /// different plan digests can reuse the same verified bytes.
@@ -1139,42 +1137,28 @@ impl AgentHttpClient {
         &self,
         plan_digest: &str,
         destination_root: &Path,
-        archive_root: &Path,
     ) -> Result<DistributionDownloadEvidence, ClientError> {
-        self.download_distribution_with_progress(
-            plan_digest,
-            destination_root,
-            archive_root,
-            |_| {},
-        )
-        .await
+        self.download_distribution_with_progress(plan_digest, destination_root, |_| {})
+            .await
     }
 
     pub async fn download_distribution_with_progress<F>(
         &self,
         plan_digest: &str,
         destination_root: &Path,
-        archive_root: &Path,
         progress: F,
     ) -> Result<DistributionDownloadEvidence, ClientError>
     where
         F: FnMut(DistributionProgress),
     {
-        if !valid_sha256(plan_digest)
-            || !destination_root.is_absolute()
-            || !archive_root.is_absolute()
-        {
+        if !valid_sha256(plan_digest) || !destination_root.is_absolute() {
             return Err(ClientError::Protocol);
         }
         let assignment = self.distribution_manifest(plan_digest).await?;
         let model_root = destination_root.join("models");
-        let oci_root = archive_root.to_path_buf();
         tokio::fs::create_dir_all(&model_root).await?;
-        tokio::fs::create_dir_all(&oci_root).await?;
         tokio::fs::set_permissions(&model_root, std::fs::Permissions::from_mode(0o700)).await?;
-        tokio::fs::set_permissions(&oci_root, std::fs::Permissions::from_mode(0o700)).await?;
         ensure_private_parent(&model_root, destination_root).await?;
-        ensure_private_parent(&oci_root, archive_root).await?;
         let tracker = Mutex::new(DistributionProgressTracker {
             object_bytes: vec![0; assignment.objects.len()],
             bytes: 0,
@@ -1184,21 +1168,11 @@ impl AgentHttpClient {
         });
         let mut pending = Vec::new();
         for (index, object) in assignment.objects.iter().enumerate() {
-            let path = if object.kind == "model" {
-                model_root.join(&object.sha256)
-            } else if object.sha256 == assignment.oci_archive_sha256 && object.kind == "oci-archive"
-            {
-                oci_root.join(&object.sha256)
-            } else if object.kind == "oci-layer" {
-                oci_root.join("layers").join(&object.sha256)
-            } else {
-                continue;
-            };
-            let managed_root = if object.kind == "model" {
-                destination_root
-            } else {
-                archive_root
-            };
+            if object.kind != "model" {
+                return Err(ClientError::Protocol);
+            }
+            let path = model_root.join(&object.sha256);
+            let managed_root = destination_root;
             if !path.starts_with(managed_root) {
                 return Err(ClientError::Protocol);
             }
@@ -1207,8 +1181,8 @@ impl AgentHttpClient {
             }
             pending.push((index, object, path, managed_root));
         }
-        // Start large objects first so a large image archive does not become
-        // a lone serial tail after all of the smaller model files finish.
+        // Start large objects first so a large model file does not become a
+        // lone serial tail after all of the smaller files finish.
         pending.sort_by_key(|(_, object, _, _)| std::cmp::Reverse(object.bytes));
         // Bound both network traffic and disk buffers. These futures stay
         // owned by this call: an error or cancellation drops the remaining
@@ -1248,34 +1222,18 @@ impl AgentHttpClient {
         let mut model_paths = Vec::new();
         let mut model_digests = Vec::new();
         for (index, path) in completed {
-            let object = &assignment.objects[index];
-            if object.kind == "model" {
-                model_paths.push(path);
-                model_digests.push(object.sha256.clone());
-            }
+            model_paths.push(path);
+            model_digests.push(assignment.objects[index].sha256.clone());
         }
         let downloaded_bytes = tracker
             .into_inner()
             .expect("distribution progress lock")
             .bytes;
-        let archive_path = oci_root.join(&assignment.oci_archive_sha256);
-        if !archive_path.exists() {
-            return Err(ClientError::Protocol);
-        }
-        let oci_archive_sha256 = assignment.oci_archive_sha256.clone();
-        let oci_archive_bytes = assignment
-            .objects
-            .iter()
-            .find(|object| object.sha256 == oci_archive_sha256)
-            .map(|object| object.bytes)
-            .ok_or(ClientError::Protocol)?;
         Ok(DistributionDownloadEvidence {
             model_digests,
             model_paths,
-            oci_archive_path: archive_path,
-            oci_archive_sha256,
-            oci_archive_bytes,
             oci_image_digest: assignment.oci_image_digest,
+            oci_image_config_digest: assignment.oci_image_config_digest,
             downloaded_bytes,
         })
     }
@@ -1883,7 +1841,6 @@ fn host_runtime_plan_binding(
 fn host_runtime_grant_action(action: HostRuntimeAction) -> HostRuntimeGrantRequestAction {
     match action {
         HostRuntimeAction::RuntimePreflight => HostRuntimeGrantRequestAction::RuntimePreflight,
-        HostRuntimeAction::ImageImport => HostRuntimeGrantRequestAction::ImageImport,
         HostRuntimeAction::ImagePull => HostRuntimeGrantRequestAction::ImagePull,
         HostRuntimeAction::ImageInspect => HostRuntimeGrantRequestAction::ImageInspect,
         HostRuntimeAction::RunInspect => HostRuntimeGrantRequestAction::RunInspect,
@@ -2412,8 +2369,7 @@ mod tests {
     use url::Url;
     use uuid::Uuid;
     use vonk_agent_protocol::generated::{
-        AgentClaimPayload, AgentOperation, DistributionObjectKind, OperationProgress,
-        RecipeImageImportRequest,
+        AgentClaimPayload, AgentOperation, ArtifactDistributionPayload, OperationProgress,
     };
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, HostRuntimeRequest,
@@ -2752,46 +2708,34 @@ mod tests {
     async fn distribution_consumer_fetches_manifest_and_all_objects_with_ranges() {
         let model = b"model payload".to_vec();
         let config = b"config!".to_vec();
-        let archive = b"oci archive".to_vec();
         let digest = |bytes: &[u8]| hex_sha256(bytes);
         let model_digest = digest(&model);
         let config_digest = digest(&config);
-        let archive_digest = digest(&archive);
         let assignment = vonk_agent_protocol::DistributionAssignment {
             objects: vec![
                 vonk_agent_protocol::DistributionObject {
                     name: "weights/model.bin".to_owned(),
                     sha256: model_digest.clone(),
                     bytes: model.len() as u64,
-                    kind: DistributionObjectKind::Model,
+                    kind: "model".to_owned(),
                 },
                 vonk_agent_protocol::DistributionObject {
                     name: "config/tokenizer.json".to_owned(),
                     sha256: config_digest.clone(),
                     bytes: config.len() as u64,
-                    kind: DistributionObjectKind::Model,
-                },
-                vonk_agent_protocol::DistributionObject {
-                    name: "image.oci.tar".to_owned(),
-                    sha256: archive_digest.clone(),
-                    bytes: archive.len() as u64,
-                    kind: DistributionObjectKind::OciArchive,
+                    kind: "model".to_owned(),
                 },
             ],
             oci_image_digest: format!("sha256:{}", "d".repeat(64)),
-            oci_archive_sha256: archive_digest.clone(),
+            oci_image_config_digest: format!("sha256:{}", "e".repeat(64)),
         };
         assignment.validate().unwrap();
         let manifest = canonical_json(&assignment).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
-            let objects = [
-                (model_digest, model),
-                (config_digest, config),
-                (archive_digest, archive),
-            ];
-            for _ in 0..4 {
+            let objects = [(model_digest, model), (config_digest, config)];
+            for _ in 0..3 {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut request = Vec::new();
                 let mut buffer = [0_u8; 4096];
@@ -2852,7 +2796,7 @@ mod tests {
         let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), TEST_NODE_ID);
         let root = tempfile::tempdir().unwrap();
         let evidence = client
-            .download_distribution(TEST_PLAN_DIGEST, root.path(), root.path())
+            .download_distribution(TEST_PLAN_DIGEST, root.path())
             .await
             .unwrap();
         assert_eq!(
@@ -2860,9 +2804,14 @@ mod tests {
             b"model payload"
         );
         assert_eq!(std::fs::read(&evidence.model_paths[1]).unwrap(), b"config!");
+        // The runtime image is pulled by these digests, never downloaded here.
         assert_eq!(
-            std::fs::read(&evidence.oci_archive_path).unwrap(),
-            b"oci archive"
+            evidence.oci_image_digest,
+            format!("sha256:{}", "d".repeat(64))
+        );
+        assert_eq!(
+            evidence.oci_image_config_digest,
+            format!("sha256:{}", "e".repeat(64))
         );
         server.join().unwrap();
     }
@@ -2882,15 +2831,14 @@ mod tests {
 
         let first = b"first model file";
         let second = b"second model file";
-        let (archive, image_digest) = oci_archive_fixture();
-        let mut assignment = distribution_assignment_fixture(first, &archive, &image_digest);
+        let mut assignment = distribution_assignment_fixture(first);
         assignment.objects.insert(
             1,
             vonk_agent_protocol::DistributionObject {
                 name: "weights/second.bin".to_owned(),
                 sha256: hex_sha256(second),
                 bytes: second.len() as u64,
-                kind: DistributionObjectKind::Model,
+                kind: "model".to_owned(),
             },
         );
         assignment.validate().unwrap();
@@ -2898,7 +2846,6 @@ mod tests {
         let objects = HashMap::from([
             (hex_sha256(first), first.to_vec()),
             (hex_sha256(second), second.to_vec()),
-            (hex_sha256(&archive), archive),
         ]);
         let completion_order = assignment
             .objects
@@ -2930,10 +2877,10 @@ mod tests {
             stream.write_all(&manifest).await.unwrap();
             drop(stream);
 
-            // Withhold bodies until all three requests are in flight. A serial
+            // Withhold bodies until both requests are in flight. A serial
             // downloader cannot pass this barrier; no throughput threshold is used.
             let mut pending = Vec::new();
-            for _ in 0..3 {
+            for _ in 0..2 {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let headers = request(&mut stream).await;
                 pending.push((stream, headers));
@@ -2969,19 +2916,14 @@ mod tests {
         let mut completed_items = 0;
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            client.download_distribution_with_progress(
-                TEST_PLAN_DIGEST,
-                root.path(),
-                root.path(),
-                |item| {
-                    if item.completed_items > completed_items {
-                        assert_eq!(item.completed_items, completed_items + 1);
-                        completed_items = item.completed_items;
-                        completed.add_permits(1);
-                    }
-                    snapshots.push(item);
-                },
-            ),
+            client.download_distribution_with_progress(TEST_PLAN_DIGEST, root.path(), |item| {
+                if item.completed_items > completed_items {
+                    assert_eq!(item.completed_items, completed_items + 1);
+                    completed_items = item.completed_items;
+                    completed.add_permits(1);
+                }
+                snapshots.push(item);
+            }),
         )
         .await;
         if result.is_err() {
@@ -3008,88 +2950,18 @@ mod tests {
         assert_eq!(last.bytes, evidence.downloaded_bytes);
     }
 
-    fn oci_archive_fixture() -> (Vec<u8>, String) {
-        fn descriptor(media_type: &str, bytes: &[u8]) -> Value {
-            json!({
-                "mediaType": media_type,
-                "digest": format!("sha256:{}", hex_sha256(bytes)),
-                "size": bytes.len(),
-            })
-        }
-
-        let config = br#"{"architecture":"arm64","os":"linux"}"#;
-        let layer = b"small arm64 layer";
-        let manifest = canonical_json(&json!({
-            "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.manifest.v1+json",
-            "config": descriptor("application/vnd.oci.image.config.v1+json", config),
-            "layers": [descriptor("application/vnd.oci.image.layer.v1.tar", layer)],
-        }))
-        .unwrap();
-        let manifest_digest = hex_sha256(&manifest);
-        let index = canonical_json(&json!({
-            "schemaVersion": 2,
-            "manifests": [{
-                "mediaType": "application/vnd.oci.image.manifest.v1+json",
-                "digest": format!("sha256:{manifest_digest}"),
-                "size": manifest.len(),
-                "platform": {"architecture": "arm64", "os": "linux"},
-            }],
-        }))
-        .unwrap();
-        let layout = br#"{"imageLayoutVersion":"1.0.0"}"#;
-        let mut builder = tar::Builder::new(Vec::new());
-        for (name, bytes) in [
-            ("oci-layout", layout.as_slice()),
-            ("index.json", index.as_slice()),
-            (
-                &format!("blobs/sha256/{}", hex_sha256(config)),
-                config.as_slice(),
-            ),
-            (
-                &format!("blobs/sha256/{}", hex_sha256(layer)),
-                layer.as_slice(),
-            ),
-            (
-                &format!("blobs/sha256/{manifest_digest}"),
-                manifest.as_slice(),
-            ),
-        ] {
-            let mut header = tar::Header::new_gnu();
-            header.set_size(bytes.len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            builder
-                .append_data(&mut header, name, bytes)
-                .expect("OCI fixture member");
-        }
-        (
-            builder.into_inner().expect("OCI fixture archive"),
-            manifest_digest,
-        )
-    }
-
     fn distribution_assignment_fixture(
         model: &[u8],
-        archive: &[u8],
-        image_digest: &str,
     ) -> vonk_agent_protocol::DistributionAssignment {
-        let model_object = vonk_agent_protocol::DistributionObject {
-            name: "weights/model.bin".to_owned(),
-            sha256: hex_sha256(model),
-            bytes: model.len() as u64,
-            kind: DistributionObjectKind::Model,
-        };
-        let archive_object = vonk_agent_protocol::DistributionObject {
-            name: "image.oci.tar".to_owned(),
-            sha256: hex_sha256(archive),
-            bytes: archive.len() as u64,
-            kind: DistributionObjectKind::OciArchive,
-        };
         vonk_agent_protocol::DistributionAssignment {
-            objects: vec![model_object, archive_object],
-            oci_image_digest: format!("sha256:{image_digest}"),
-            oci_archive_sha256: hex_sha256(archive),
+            objects: vec![vonk_agent_protocol::DistributionObject {
+                name: "weights/model.bin".to_owned(),
+                sha256: hex_sha256(model),
+                bytes: model.len() as u64,
+                kind: "model".to_owned(),
+            }],
+            oci_image_digest: format!("sha256:{}", "1".repeat(64)),
+            oci_image_config_digest: format!("sha256:{}", "2".repeat(64)),
         }
     }
 
@@ -3294,83 +3166,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn distribution_skips_an_archive_the_builder_adopted_after_upload() {
+    async fn distribution_acceptance_uses_authenticated_ranges_and_replays_without_refetching() {
         let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
-        let archive_sha = assignment.oci_archive_sha256.clone();
-        let mut objects = HashMap::new();
-        objects.insert(hex_sha256(model), model.to_vec());
-        objects.insert(hex_sha256(&archive), archive.clone());
-        // Manifest plus the model only: any archive request would hang the
-        // server join below, and the recorded targets are checked directly.
-        let (client, server) = distribution_fixture_server(
-            assignment.clone(),
-            objects,
-            2,
-            DistributionFixtureMode::Good,
-        );
-        let root = tempfile::tempdir().unwrap();
-        let built = root.path().join("builds").join("op");
-        std::fs::create_dir_all(&built).unwrap();
-        let built = built.join("image.docker.tar");
-        std::fs::write(&built, &archive).unwrap();
-        crate::image_importer::ImageImporter {
-            data_root: root.path(),
-        }
-        .retain_distribution_archive(
-            &archive_sha,
-            &format!("sha256:{image_digest}"),
-            archive.len() as u64,
-            &built,
-        )
-        .unwrap();
-        assert!(!built.exists(), "adoption moves the archive out of builds/");
-
-        let archive_root = root.path().join("oci-archives");
-        let assignment_root = root.path().join("distribution").join("plan");
-        std::fs::create_dir_all(&assignment_root).unwrap();
-        let evidence = client
-            .download_distribution(TEST_PLAN_DIGEST, &assignment_root, &archive_root)
-            .await
-            .unwrap();
-        let requests = server.join().unwrap();
-        assert!(
-            requests
-                .iter()
-                .all(|request| !String::from_utf8_lossy(request).contains(&archive_sha)),
-            "the builder downloaded the archive it just produced"
-        );
-        assert_eq!(std::fs::read(evidence.oci_archive_path).unwrap(), archive);
-    }
-
-    #[tokio::test]
-    async fn distribution_acceptance_uses_authenticated_ranges_and_reuses_import_cache() {
-        let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let assignment = distribution_assignment_fixture(model);
         assignment.validate().unwrap();
         let mut objects = HashMap::new();
         objects.insert(hex_sha256(model), model.to_vec());
-        objects.insert(hex_sha256(&archive), archive.clone());
+        // Manifest and model, then a replay that fetches only the manifest.
         let (client, server) = distribution_fixture_server(
             assignment.clone(),
             objects,
-            4,
+            3,
             DistributionFixtureMode::Good,
         );
         let root = tempfile::tempdir().unwrap();
         let assignment_root = root.path().join("distribution").join("plan");
-        let archive_root = root.path().join("oci-archives");
         std::fs::create_dir_all(&assignment_root).unwrap();
         let mut snapshots = Vec::new();
         let evidence = client
-            .download_distribution_with_progress(
-                TEST_PLAN_DIGEST,
-                &assignment_root,
-                &archive_root,
-                |item| snapshots.push(item),
-            )
+            .download_distribution_with_progress(TEST_PLAN_DIGEST, &assignment_root, |item| {
+                snapshots.push(item)
+            })
             .await
             .unwrap();
         assert!(snapshots.iter().any(|item| item.phase == "copying"));
@@ -3383,92 +3199,34 @@ mod tests {
         let final_progress = snapshots.last().unwrap();
         assert_eq!(final_progress.bytes, evidence.downloaded_bytes);
         assert_eq!(final_progress.completed_items, final_progress.total_items);
-        assert_eq!(evidence.oci_image_digest, format!("sha256:{image_digest}"));
+        assert_eq!(evidence.oci_image_digest, assignment.oci_image_digest);
         assert_eq!(
-            evidence.oci_archive_path,
-            archive_root.join(&assignment.oci_archive_sha256)
+            evidence.oci_image_config_digest,
+            assignment.oci_image_config_digest
         );
-        assert_eq!(std::fs::read(&evidence.oci_archive_path).unwrap(), archive);
         assert_eq!(std::fs::read(&evidence.model_paths[0]).unwrap(), model);
         assert_eq!(
-            std::fs::metadata(&evidence.oci_archive_path)
+            std::fs::metadata(&evidence.model_paths[0])
                 .unwrap()
                 .permissions()
                 .mode()
                 & 0o777,
             0o600
         );
-        assert!(
-            !PathBuf::from(format!("{}.partial", evidence.oci_archive_path.display())).exists()
-        );
-        let importer = crate::image_importer::ImageImporter {
-            data_root: root.path(),
-        };
-        let cached = importer
-            .retain_distribution_archive(
-                &evidence.oci_archive_sha256,
-                &evidence.oci_image_digest,
-                evidence.oci_archive_bytes,
-                &evidence.oci_archive_path,
-            )
-            .unwrap();
-        assert_eq!(cached, evidence.oci_archive_path);
-        // Replace the cached archive with same-size different bytes: a replay
-        // trusts name, size and custody, so it neither re-hashes nor re-fetches.
-        let cached_bytes = std::fs::read(&evidence.oci_archive_path).unwrap();
-        std::fs::write(&evidence.oci_archive_path, vec![0_u8; cached_bytes.len()]).unwrap();
-        let reused_evidence = client
-            .download_distribution(TEST_PLAN_DIGEST, &assignment_root, &archive_root)
+        // Replace the object with same-size different bytes: a replay trusts
+        // name, size and custody, so it neither re-hashes nor re-fetches.
+        std::fs::write(&evidence.model_paths[0], vec![0_u8; model.len()]).unwrap();
+        let replayed = client
+            .download_distribution(TEST_PLAN_DIGEST, &assignment_root)
             .await
             .unwrap();
         assert_eq!(
-            std::fs::read(&evidence.oci_archive_path).unwrap(),
-            vec![0_u8; cached_bytes.len()],
-            "an adopted or cached archive is not re-hashed on replay"
+            std::fs::read(&replayed.model_paths[0]).unwrap(),
+            vec![0_u8; model.len()]
         );
-        std::fs::write(&evidence.oci_archive_path, &cached_bytes).unwrap();
-        assert_eq!(reused_evidence.downloaded_bytes, evidence.downloaded_bytes);
-        let reused = importer
-            .retain_distribution_archive(
-                &evidence.oci_archive_sha256,
-                &evidence.oci_image_digest,
-                evidence.oci_archive_bytes,
-                &evidence.oci_archive_path,
-            )
-            .unwrap();
-        assert_eq!(cached, reused);
-        assert!(
-            !archive_root
-                .join(format!("{}.partial", assignment.oci_archive_sha256))
-                .exists()
-        );
-        assert!(
-            std::fs::read_dir(&archive_root)
-                .unwrap()
-                .flatten()
-                .all(|entry| !entry.file_name().to_string_lossy().contains("partial"))
-        );
-        assert_eq!(
-            importer.distribution_runtime_arguments(
-                &evidence.oci_archive_sha256,
-                &evidence.oci_image_digest,
-                evidence.oci_archive_bytes,
-                &cached,
-            )[1],
-            evidence.oci_archive_sha256
-        );
+        assert_eq!(replayed.downloaded_bytes, evidence.downloaded_bytes);
         let requests = server.join().unwrap();
-        assert_eq!(requests.len(), 4);
-        let archive_gets = requests
-            .iter()
-            .filter(|request| {
-                String::from_utf8_lossy(request).contains(&format!(
-                    "/agent/distribution/objects/{}",
-                    assignment.oci_archive_sha256
-                ))
-            })
-            .count();
-        assert_eq!(archive_gets, 1);
+        assert_eq!(requests.len(), 3);
         assert!(requests.iter().all(|request| {
             String::from_utf8_lossy(request)
                 .to_ascii_lowercase()
@@ -3479,38 +3237,29 @@ mod tests {
     #[tokio::test]
     async fn content_addressed_distribution_handoff_reuses_objects_across_plan_digests() {
         let model = b"model payload".to_vec();
-        let (archive, _) = oci_archive_fixture();
-        let image_digest = "1".repeat(64);
-        let assignment = distribution_assignment_fixture(&model, &archive, &image_digest);
+        let assignment = distribution_assignment_fixture(&model);
         let plan_digest = "a".repeat(64);
         let model_artifact_set_sha256 = "d".repeat(64);
         assignment.validate().unwrap();
         let mut objects = HashMap::new();
         objects.insert(hex_sha256(&model), model.clone());
-        objects.insert(hex_sha256(&archive), archive.clone());
         let (client, server) = distribution_fixture_server(
             assignment.clone(),
             objects.clone(),
-            3,
+            2,
             DistributionFixtureMode::Good,
         );
         let root = tempfile::tempdir().unwrap();
         let distribution_root = root.path().join("distribution");
-        let archive_root = root.path().join("oci-archives");
         std::fs::create_dir_all(&distribution_root).unwrap();
-        std::fs::create_dir_all(&archive_root).unwrap();
         let evidence = client
-            .download_distribution(&plan_digest, &distribution_root, &archive_root)
+            .download_distribution(&plan_digest, &distribution_root)
             .await
             .unwrap();
-        assert_eq!(server.join().unwrap().len(), 3);
+        assert_eq!(server.join().unwrap().len(), 2);
         assert_eq!(
             evidence.model_paths,
             vec![distribution_root.join("models").join(hex_sha256(&model))]
-        );
-        assert_eq!(
-            evidence.oci_archive_path,
-            archive_root.join(&assignment.oci_archive_sha256)
         );
 
         let mut plan_value: Value = serde_json::from_str(include_str!(
@@ -3518,14 +3267,10 @@ mod tests {
         ))
         .unwrap();
         let model_sha256 = hex_sha256(&model);
-        let archive_sha256 = hex_sha256(&archive);
         plan_value["identity"]["model_artifact_set_sha256"] =
             json!(model_artifact_set_sha256.clone());
         plan_value["artifacts"][0]["sha256"] = json!(model_sha256.clone());
         plan_value["artifacts"][0]["size_bytes"] = json!(model.len());
-        plan_value["runtime_image"]["image_digest"] = json!(format!("sha256:{image_digest}"));
-        plan_value["runtime_image"]["oci_layout_sha256"] = json!(archive_sha256.clone());
-        plan_value["runtime_image"]["image_bytes"] = json!(archive.len());
         let plan: CompiledExecutionPlan = serde_json::from_value(plan_value).unwrap();
         plan.validate().unwrap();
 
@@ -3549,7 +3294,6 @@ mod tests {
             .unwrap(),
             model
         );
-        assert!(archive_root.join(&archive_sha256).is_file());
 
         runtime
             .install(
@@ -3569,7 +3313,7 @@ mod tests {
             DistributionFixtureMode::Good,
         );
         let reused = second_client
-            .download_distribution(&second_plan_digest, &distribution_root, &archive_root)
+            .download_distribution(&second_plan_digest, &distribution_root)
             .await
             .unwrap();
         assert_eq!(reused.downloaded_bytes, evidence.downloaded_bytes);
@@ -3608,11 +3352,9 @@ mod tests {
     #[tokio::test]
     async fn distribution_acceptance_resumes_partial_object_and_rejects_corruption() {
         let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let assignment = distribution_assignment_fixture(model);
         let mut objects = HashMap::new();
         objects.insert(hex_sha256(model), model.to_vec());
-        objects.insert(hex_sha256(&archive), archive.clone());
         let root = tempfile::tempdir().unwrap();
         let model_path = root
             .path()
@@ -3625,11 +3367,11 @@ mod tests {
         let (client, server) = distribution_fixture_server(
             assignment.clone(),
             objects,
-            3,
+            2,
             DistributionFixtureMode::Good,
         );
         client
-            .download_distribution(TEST_PLAN_DIGEST, root.path(), root.path())
+            .download_distribution(TEST_PLAN_DIGEST, root.path())
             .await
             .unwrap();
         assert_eq!(std::fs::read(&model_path).unwrap(), model);
@@ -3647,17 +3389,11 @@ mod tests {
         assert!(model_request.contains("range: bytes=5-"));
 
         let corrupt_root = tempfile::tempdir().unwrap();
-        // Keep the unrelated archive cached so this fixture can serve just
-        // the manifest and bad model response, independent of request order.
-        let cached_archive = corrupt_root.path().join(&assignment.oci_archive_sha256);
-        std::fs::write(&cached_archive, &archive).unwrap();
-        std::fs::set_permissions(&cached_archive, std::fs::Permissions::from_mode(0o600)).unwrap();
         let (corrupt_client, corrupt_server) = distribution_fixture_server(
             assignment.clone(),
             {
                 let mut values = HashMap::new();
                 values.insert(hex_sha256(model), model.to_vec());
-                values.insert(hex_sha256(&archive), archive);
                 values
             },
             2,
@@ -3665,7 +3401,7 @@ mod tests {
         );
         assert!(matches!(
             corrupt_client
-                .download_distribution(TEST_PLAN_DIGEST, corrupt_root.path(), corrupt_root.path(),)
+                .download_distribution(TEST_PLAN_DIGEST, corrupt_root.path())
                 .await,
             Err(ClientError::Protocol)
         ));
@@ -3675,11 +3411,9 @@ mod tests {
     #[tokio::test]
     async fn direct_distribution_object_resumes_private_partial_atomically() {
         let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let assignment = distribution_assignment_fixture(model);
         let mut objects = HashMap::new();
         objects.insert(hex_sha256(model), model.to_vec());
-        objects.insert(hex_sha256(&archive), archive);
         let (client, server) = distribution_fixture_server(
             assignment.clone(),
             objects,
@@ -3708,11 +3442,9 @@ mod tests {
     #[tokio::test]
     async fn distribution_rejects_partial_replacement_after_stream_hash() {
         let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let assignment = distribution_assignment_fixture(model);
         let mut objects = HashMap::new();
         objects.insert(hex_sha256(model), model.to_vec());
-        objects.insert(hex_sha256(&archive), archive);
         let (client, server) = distribution_fixture_server(
             assignment.clone(),
             objects,
@@ -3789,11 +3521,9 @@ mod tests {
         // A symlink at the digest name is a failure to report, never a reason
         // to widen what this agent removes: the linked file must survive.
         let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let assignment = distribution_assignment_fixture(model);
         let mut objects = HashMap::new();
         objects.insert(hex_sha256(model), model.to_vec());
-        objects.insert(hex_sha256(&archive), archive);
         let (client, server) = distribution_fixture_server(
             assignment.clone(),
             objects,
@@ -3834,8 +3564,7 @@ mod tests {
     #[tokio::test]
     async fn direct_distribution_retries_interrupted_body_from_appended_offset() {
         let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let assignment = distribution_assignment_fixture(model);
         let mut objects = HashMap::new();
         objects.insert(hex_sha256(model), model.to_vec());
         let (client, server) = distribution_fixture_server(
@@ -3873,8 +3602,7 @@ mod tests {
     #[tokio::test]
     async fn direct_distribution_retries_service_unavailability_but_not_bad_identity() {
         let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let assignment = distribution_assignment_fixture(model);
         for (mode, request_count, succeeds) in [
             (DistributionFixtureMode::UnavailableFirstObject, 2, true),
             (DistributionFixtureMode::WrongEtagFirstObject, 1, false),
@@ -3915,11 +3643,9 @@ mod tests {
     #[tokio::test]
     async fn distribution_acceptance_rejects_an_unauthorized_destination() {
         let model = b"small model object";
-        let (archive, image_digest) = oci_archive_fixture();
-        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let assignment = distribution_assignment_fixture(model);
         let mut objects = HashMap::new();
         objects.insert(hex_sha256(model), model.to_vec());
-        objects.insert(hex_sha256(&archive), archive.clone());
         let (authorized_client, authorized_server) = distribution_fixture_server(
             assignment.clone(),
             objects.clone(),
@@ -4002,7 +3728,7 @@ mod tests {
         request_capture_client(
             200,
             vec!["Content-Type: application/json".to_owned()],
-            br#"{"grant":{"claims":{"authority":"vonk.host-maintenance-helper","expires_at":2100000010,"issued_at":2100000000,"node_id":"spk_0123456789abcdef0123456789abcdef","operation":{"action":"image-import","fence":"44d4e914-34df-4962-a802-d1f7dcd928aa","request_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","type":"execute-container-runtime-request"},"request_id":"84ddf214-f067-4bbf-917e-95df32a07fd8","schema_version":1},"schema_version":1,"signature":{"algorithm":"ed25519","key_id":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","value":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}}"#.to_vec(),
+            br#"{"grant":{"claims":{"authority":"vonk.host-maintenance-helper","expires_at":2100000010,"issued_at":2100000000,"node_id":"spk_0123456789abcdef0123456789abcdef","operation":{"action":"image-pull","fence":"44d4e914-34df-4962-a802-d1f7dcd928aa","request_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","type":"execute-container-runtime-request"},"request_id":"84ddf214-f067-4bbf-917e-95df32a07fd8","schema_version":1},"schema_version":1,"signature":{"algorithm":"ed25519","key_id":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","value":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}}"#.to_vec(),
             None,
         )
     }
@@ -4217,25 +3943,19 @@ mod tests {
 
     #[tokio::test]
     async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
-        let payload = RecipeImageImportRequest {
-            build_id: Uuid::new_v4(),
-            image_bytes: 1,
-            image_digest: format!("sha256:{}", "b".repeat(64)),
-            mapping_generation: 1,
-            mapping_id: Uuid::new_v4(),
-            oci_layout_sha256: "c".repeat(64),
-            source_node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+        let payload = ArtifactDistributionPayload {
+            plan_digest: "c".repeat(64),
         };
         let claim = AgentClaim {
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
-            operation: AgentOperation::RecipeImageImportV1,
-            payload: AgentClaimPayload::RecipeImageImportRequest(payload),
+            operation: AgentOperation::ArtifactDistributionV1,
+            payload: AgentClaimPayload::ArtifactDistributionPayload(payload),
             deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
         };
         let runtime_request = HostRuntimeRequest {
-            action: HostRuntimeAction::ImageImport,
+            action: HostRuntimeAction::ImagePull,
             fence: claim.fence,
-            arguments: vec!["image-import".to_owned()],
+            arguments: vec!["image-pull".to_owned()],
             job_plan: None,
             installation_id: None,
             reconciliation_identity: None,

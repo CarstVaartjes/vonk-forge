@@ -38,7 +38,7 @@ pytest_plugins = ("tests.test_profile_load_installed_cli",)
 def _add_disjoint_profile_node(
     sessions: sessionmaker[Session], source_node_id: str, node_id: str
 ) -> str:
-    capabilities = ["runtime.vonk.v1", "recipe.operations.v1"]
+    capabilities = ["runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"]
     with sessions.begin() as session:
         session.add(
             AgentNode(

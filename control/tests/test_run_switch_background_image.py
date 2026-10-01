@@ -53,6 +53,7 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
 )
 
+from .runtime_image_fixtures import place_test_image
 from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import NOW, _CanonicalModelCache, setup_services
 from .test_run_switch_operations import (
@@ -183,7 +184,7 @@ def _background_image_switch(
     storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
     archive = b"canonical-runtime-image-archive"[:image_bytes]
     assert hashlib.sha256(archive).hexdigest() == layout_digest
-    (storage.root / layout_digest).write_bytes(archive)
+    place_test_image(storage, layout_digest, len(archive))
     if old_receipt is not None:
         # A receipt an older Controller wrote; the current contract rejects it.
         document = _old_receipt(
@@ -311,7 +312,7 @@ def _background_image_switch(
                     8_000,
                     1,
                     False,
-                    ("runtime.vonk.v1", "recipe.operations.v1"),
+                    ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
                     memory_pool="shared",
                 )
             )

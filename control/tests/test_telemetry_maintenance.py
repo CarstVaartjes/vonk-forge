@@ -277,7 +277,10 @@ def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
                 8_000,
                 1,
                 False,
-                ("runtime.vonk.v1",),
+                (
+                    "runtime.vonk.v1",
+                    "recipe.image.pull.v1",
+                ),
                 memory_pool="shared",
             )
         )

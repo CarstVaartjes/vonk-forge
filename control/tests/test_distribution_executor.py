@@ -32,6 +32,7 @@ from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor import (
     CompositeDistributionPhaseExecutor,
     DurableDistributionPhaseExecutor,
+    RuntimeImagePull,
     _phase_receipt,
 )
 from vonk_control.model_cache import ModelCacheService
@@ -63,6 +64,7 @@ from vonk_control.run_switch_operations import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .runtime_image_fixtures import place_test_image
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 from .test_recipe_operations import NOW, setup_services
 
@@ -191,14 +193,14 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     config = DistributionObject(
         name="config/tokenizer.json", sha256="b" * 64, bytes=5, kind="model"
     )
-    archive = DistributionObject(
-        name="image.oci.tar", sha256="c" * 64, bytes=11, kind="oci-archive"
+    archive = RuntimeImagePull(
+        image_digest="sha256:" + "e" * 64,
+        config_digest="sha256:" + "9" * 64,
+        address="c" * 64,
     )
-    source = MemoryObjectSource(
-        {"a" * 64: b"x" * 10, "b" * 64: b"y" * 5, "c" * 64: b"z" * 11}
-    )
+    source = MemoryObjectSource({"a" * 64: b"x" * 10, "b" * 64: b"y" * 5})
     source.register_artifact_set("d" * 64, (model, config))
-    source.register_runtime_image("sha256:" + "e" * 64, archive.sha256)
+    source.register_runtime_image(archive.image_digest, archive.address)
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
 
     class StubExecutor(DurableDistributionPhaseExecutor):
@@ -306,7 +308,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         # emitted by the transfer producer, rather than hand-written UUIDs.
         ExecuteContainerRuntimeRequestOperation(
             type="execute-container-runtime-request",
-            action="image-import",
+            action="image-pull",
             fence=str(uuid4()),
             request_sha256="a" * 64,
         )
@@ -334,23 +336,23 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
                 progress={
                     "phase": "copying",
                     "completed_bytes": 3,
-                    "total_bytes": 26,
+                    "total_bytes": 15,
                     "total_bytes_known": True,
                 },
                 result={
-                    "downloaded_bytes": 26,
+                    "downloaded_bytes": 15,
                 },
             )
         )
     view = executor.get(first.operation_id)
     assert view.state == "succeeded"
     assert [member["node_id"] for member in view.result["members"]] == [NODE_A, NODE_B]
-    assert view.result["progress"]["completed_bytes"] == 52
-    assert view.result["progress"]["total_bytes"] == 52
+    assert view.result["progress"]["completed_bytes"] == 30
+    assert view.result["progress"]["total_bytes"] == 30
     with services.sessions() as session:
         persisted = session.get(Job, first.operation_id)
         assert persisted is not None and persisted.result is not None
-        assert persisted.result["progress"]["completed_bytes"] == 52
+        assert persisted.result["progress"]["completed_bytes"] == 30
         assert persisted.result["progress"]["members"][0]["state"] == "succeeded"
     executor.source_available = False
     replay = executor.execute(
@@ -390,7 +392,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             )
         )
         assert attempt is not None and attempt.result is not None
-        attempt.result = {**attempt.result, "downloaded_bytes": 25}
+        attempt.result = {**attempt.result, "downloaded_bytes": 14}
     mismatch = executor.get(first.operation_id)
     assert mismatch.state == "failed"
     assert mismatch.result["members"][0]["error"] == (
@@ -432,14 +434,9 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
                     "bytes": 7,
                     "kind": "model",
                 },
-                {
-                    "name": "image.oci.tar",
-                    "sha256": layout_digest,
-                    "bytes": 11,
-                    "kind": "oci-archive",
-                },
             ],
             "oci_image_digest": image_digest,
+            "oci_image_config_digest": "sha256:" + "9" * 64,
             "oci_archive_sha256": layout_digest,
         }
     )
@@ -500,7 +497,7 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
             {"assignments": {node_id: assignment.to_mapping()}},
             {
                 "node_id": node_id,
-                "downloaded_bytes": 18,
+                "downloaded_bytes": 7,
             },
         ]
     }
@@ -1115,7 +1112,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
     storage = FilesystemRuntimeImageStorage(services.artifact_root)
-    (storage.root / archive_digest).write_bytes(archive_payload)
+    place_test_image(storage, archive_digest, len(archive_payload))
     distribution = build_distribution_service_from_components(
         cache,
         services.sessions,
@@ -1230,10 +1227,10 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             assignment = assignments[node]
             assert assignment["model_artifact_set_sha256"] == artifact_set
             assert {item["sha256"] for item in assignment["objects"]} == {
-                *(item["sha256"] for item in artifacts),
-                archive_digest,
+                item["sha256"] for item in artifacts
             }
             assert assignment["oci_image_digest"] == image_digest
+            assert assignment["oci_image_config_digest"].startswith("sha256:")
             operation = session.scalar(
                 select(AgentOperation).where(
                     AgentOperation.parent_job_id == child.id,
@@ -1273,8 +1270,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     )
     assert manifest_response.status_code == 200
     assert {item["sha256"] for item in manifest_response.json()["objects"]} == {
-        *(item["sha256"] for item in artifacts),
-        archive_digest,
+        item["sha256"] for item in artifacts
     }
     for node, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
         response = client.get(

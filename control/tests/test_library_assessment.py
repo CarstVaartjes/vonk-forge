@@ -45,6 +45,7 @@ from cluster_profiles.cli import main
 from cluster_profiles.cli_render import render_payload
 from cluster_profiles.control_client import ControlClient
 
+from .runtime_image_fixtures import remove_test_image
 from .test_library_canonical_projection import _insert_canonical_rows
 from .test_model_cache import _write_object_receipt
 from .test_recipe_operations import NOW, setup_services
@@ -277,8 +278,8 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
         )
         identity = runtime["identity"]
         assert isinstance(identity, dict)
-        # Seed already-authorized image metadata over the real fixture archive.
-        # Authorization issuance and archive publication have their own tests.
+        # Seed already-authorized image metadata over the stored fixture image.
+        # Authorization issuance and image storage have their own tests.
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=recipe.identity.recipe_revision_id,
@@ -321,8 +322,7 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
     assert missing.readiness.state == "blocked"
     with paths[0].open("wb") as output:
         output.truncate(manifest.artifacts[0].expected_bytes)
-    archive = storage.root / build.oci_layout_sha256
-    archive.unlink()
+    remove_test_image(storage, build.oci_layout_sha256)
     missing = projection.recipe_library().recipes[0].assessment
     assert missing is not None
     assert missing.readiness.state == "blocked"
@@ -333,7 +333,11 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
     projection, sessions, *_ = assessed_library
     later = "spk_" + "f" * 32
     with sessions.begin() as session:
-        capabilities = ("runtime.vonk.v1", "recipe.operations.v1")
+        capabilities = (
+            "runtime.vonk.v1",
+            "recipe.image.pull.v1",
+            "recipe.operations.v1",
+        )
         session.add(
             AgentNode(
                 node_id=later,

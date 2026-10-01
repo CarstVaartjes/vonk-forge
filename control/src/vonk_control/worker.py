@@ -577,7 +577,7 @@ if __name__ == "__main__":
     )
     from .runtime_image_preparation import (
         FilesystemRuntimeImageStorage,
-        SkopeoOCIImageTransport,
+        OciLayoutImageTransport,
         make_runtime_image_receipt_preparer,
         resolve_persisted_runtime_image_receipt,
     )
@@ -630,7 +630,7 @@ if __name__ == "__main__":
         runtime_archive_available=runtime_image_storage.build_archive_available,
     )
     model_cache.resume_operations()
-    runtime_image_transport = SkopeoOCIImageTransport()
+    runtime_image_transport = OciLayoutImageTransport()
     prepare_runtime_image_receipt = make_runtime_image_receipt_preparer(
         sessions,
         runtime_image_storage,

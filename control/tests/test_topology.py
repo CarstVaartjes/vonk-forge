@@ -39,7 +39,11 @@ def placements():
 
 def capabilities(values):
     return {
-        item.node_id: ("runtime.vonk.v1", "fabric.full_mesh.mbps.200000")
+        item.node_id: (
+            "runtime.vonk.v1",
+            "recipe.image.pull.v1",
+            "fabric.full_mesh.mbps.200000",
+        )
         for item in values
     }
 
@@ -96,7 +100,11 @@ def test_missing_runtime_or_fabric_capability_is_blocking() -> None:
             multinode(),
             values,
             {
-                item.node_id: ("runtime.vonk.v1", "fabric.connected.mbps.100000")
+                item.node_id: (
+                    "runtime.vonk.v1",
+                    "recipe.image.pull.v1",
+                    "fabric.connected.mbps.100000",
+                )
                 for item in values
             },
         )

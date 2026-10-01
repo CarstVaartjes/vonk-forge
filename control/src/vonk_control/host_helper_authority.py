@@ -235,9 +235,6 @@ class HostRuntimeAuthorityService:
 
     _ACTION_KINDS: ClassVar[dict[ContainerRuntimeAction, frozenset[str]]] = {
         ContainerRuntimeAction.RUNTIME_PREFLIGHT: frozenset({"runtime.preflight.v1"}),
-        ContainerRuntimeAction.IMAGE_IMPORT: frozenset(
-            {"recipe.image.import.v1", "artifact.distribution.v1"}
-        ),
         # A registry pull of a pinned runtime image from the Controller's
         # layered image store, as part of distributing it to a Spark.
         ContainerRuntimeAction.IMAGE_PULL: frozenset({"artifact.distribution.v1"}),

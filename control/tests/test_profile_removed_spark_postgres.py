@@ -121,6 +121,7 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
             assert template is not None
             capabilities = (
                 "runtime.vonk.v1",
+                "recipe.image.pull.v1",
                 "recipe.operations.v1",
                 "fabric.connected.mbps.200000",
             )

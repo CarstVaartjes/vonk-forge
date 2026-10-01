@@ -22,17 +22,13 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import re
-import subprocess
 import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -50,7 +46,12 @@ from .catalog_revision_contract import (
     PrebuiltImage,
 )
 from .models import Job, RecipeBuild
-from .runtime_image_preparation import IMAGE_CACHE_DIRECTORY
+from .oci_image_store import (
+    IMAGE_CACHE_DIRECTORY,
+    STORE_BUSY,
+    OciImageStore,
+    OciImageStoreError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,8 +59,6 @@ PREBUILT_KEY_SCHEMA_VERSION = 1
 PREBUILT_BUILD_KIND = "recipe.build.v1"
 # A Controller pull of one image; renewed while the pull runs.
 _CLAIM_LEASE = timedelta(minutes=5)
-_PULL_TIMEOUT_SECONDS = 6 * 60 * 60
-_PULL_RETRIES = 3
 _REFERENCE = re.compile(PREBUILT_REFERENCE_PATTERN)
 
 
@@ -356,112 +355,6 @@ def _bundle_relative(dockerfile: str, context: str) -> str:
     return dockerfile.removeprefix(context.rstrip("/") + "/")
 
 
-@dataclass(frozen=True, slots=True)
-class PulledArchive:
-    path: Path
-    sha256: str
-    size: int
-
-
-class PrebuiltImagePuller(Protocol):
-    def __call__(self, reference: str, destination: Path, *, local_name: str) -> None:
-        """Write the pinned image as a Docker archive at ``destination``."""
-        ...
-
-
-class PrebuiltImagePullError(RuntimeError):
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail[:512]
-        super().__init__(self.detail)
-
-
-def skopeo_pull(
-    reference: str,
-    destination: Path,
-    *,
-    local_name: str,
-    executable: str = "/usr/bin/skopeo",
-) -> None:
-    """Pull one image by digest into a Docker archive.
-
-    skopeo resolves the reference by its digest and verifies the manifest and
-    every blob against it; a mismatch is an error, never a silent substitute.
-    """
-
-    command = [
-        executable,
-        "copy",
-        "--retry-times",
-        str(_PULL_RETRIES),
-        "--override-os",
-        "linux",
-        "--override-arch",
-        "arm64",
-        f"docker://{reference}",
-        f"docker-archive:{destination}:{local_name}",
-    ]
-    environment = os.environ | {"TMPDIR": str(destination.parent)}
-    try:
-        result = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=_PULL_TIMEOUT_SECONDS,
-            env=environment,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise PrebuiltImagePullError(
-            "prebuilt_image_pull_failed", f"skopeo copy did not finish: {error}"
-        ) from error
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "skopeo copy failed").strip()
-        raise PrebuiltImagePullError(
-            "prebuilt_image_pull_failed", detail.splitlines()[-1]
-        )
-
-
-def pull_into_image_cache(
-    reference: str,
-    image_cache: Path,
-    *,
-    local_name: str,
-    puller: PrebuiltImagePuller = skopeo_pull,
-) -> PulledArchive:
-    """Pull a prebuilt image into the Controller image cache.
-
-    This is the ingress point: the archive digest is computed once, here, and
-    names the stored file.  Readers later check name and size only.
-    """
-
-    image_cache.mkdir(mode=0o750, parents=True, exist_ok=True)
-    partial = image_cache / f".prebuilt-{reference.rsplit(':', 1)[1]}.part"
-    partial.unlink(missing_ok=True)
-    try:
-        puller(reference, partial, local_name=local_name)
-        digest = hashlib.sha256()
-        size = 0
-        with partial.open("rb") as stream:
-            while chunk := stream.read(8 * 1024 * 1024):
-                size += len(chunk)
-                digest.update(chunk)
-        if size < 1:
-            raise PrebuiltImagePullError(
-                "prebuilt_image_pull_failed", "pulled image archive is empty"
-            )
-        archive_sha256 = digest.hexdigest()
-        destination = image_cache / archive_sha256
-        if destination.exists() and destination.stat().st_size == size:
-            partial.unlink()
-        else:
-            os.chmod(partial, 0o640)
-            os.replace(partial, destination)
-        return PulledArchive(destination, archive_sha256, size)
-    finally:
-        partial.unlink(missing_ok=True)
-
-
 def prebuilt_reference(job: Job) -> str | None:
     """The pinned image a Controller-executed build job pulls, if any."""
 
@@ -497,13 +390,13 @@ class PrebuiltImageImporter:
         artifact_root: Path,
         *,
         clock: Callable[[], datetime],
-        puller: PrebuiltImagePuller = skopeo_pull,
+        store: OciImageStore | None = None,
         owner: str | None = None,
     ) -> None:
         self._sessions = sessions
         self._image_cache = artifact_root / IMAGE_CACHE_DIRECTORY
         self._clock = clock
-        self._puller = puller
+        self._store = store or OciImageStore(artifact_root)
         self._owner = owner or f"prebuilt-{uuid.uuid4()}"
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="prebuilt-image"
@@ -515,25 +408,87 @@ class PrebuiltImageImporter:
         self._executor.shutdown(wait=False, cancel_futures=True)
 
     def tick(self) -> int:
-        """Start at most one pull; never block the worker loop."""
+        """Start at most one import; never block the worker loop."""
 
         with self._lock:
             if self._active is not None and not self._active.done():
                 return 0
             job_id = self._claim()
-            if job_id is None:
+            if job_id is not None:
+                self._active = self._executor.submit(self.run, job_id)
+                return 1
+            build_id = self._uploaded_build()
+            if build_id is None:
                 return 0
-            self._active = self._executor.submit(self.run, job_id)
+            self._active = self._executor.submit(self.convert_upload, build_id)
             return 1
 
     def run_pending(self) -> int:
-        """Claim and run one pull in the calling thread (tests, tools)."""
+        """Run one import in the calling thread (tests, tools)."""
 
         job_id = self._claim()
-        if job_id is None:
+        if job_id is not None:
+            self.run(job_id)
+            return 1
+        build_id = self._uploaded_build()
+        if build_id is None:
             return 0
-        self.run(job_id)
+        self.convert_upload(build_id)
         return 1
+
+    def _uploaded_build(self) -> str | None:
+        """A succeeded Spark build whose upload is not in the layout yet.
+
+        A Spark build uploads one Docker archive, named by its sha256, beside
+        the layout. Conversion runs only after the build succeeded: the
+        agent's terminal evidence is compared against the uploaded identity
+        first, and only then is the row rewritten to the stored image.
+        """
+        with self._sessions() as session:
+            for build_id, layout in session.execute(
+                select(RecipeBuild.id, RecipeBuild.oci_layout_sha256)
+                .where(
+                    RecipeBuild.state == "succeeded",
+                    RecipeBuild.oci_layout_sha256.is_not(None),
+                )
+                .order_by(RecipeBuild.updated_at, RecipeBuild.id)
+            ):
+                if isinstance(layout, str) and (self._image_cache / layout).is_file():
+                    return str(build_id)
+        return None
+
+    def convert_upload(self, build_id: str) -> None:
+        """Move a Spark build's uploaded archive into the layered store."""
+
+        with self._sessions() as session:
+            build = session.get(RecipeBuild, build_id)
+            archive_sha256 = None if build is None else build.oci_layout_sha256
+        if archive_sha256 is None:
+            return
+        archive = self._image_cache / archive_sha256
+        try:
+            image = self._store.import_archive(archive)
+        except OciImageStoreError as error:
+            _LOGGER.warning(
+                "uploaded build %s could not be stored (%s); retrying",
+                build_id,
+                error.detail,
+            )
+            return
+        with self._sessions.begin() as session:
+            build = session.get(RecipeBuild, build_id, with_for_update=True)
+            if build is None or build.oci_layout_sha256 != archive_sha256:
+                return
+            build.image_digest = image.manifest_digest
+            build.oci_layout_sha256 = image.manifest_digest.removeprefix("sha256:")
+            build.image_bytes = image.stored_bytes
+            build.updated_at = self._clock()
+        archive.unlink(missing_ok=True)
+        _LOGGER.info(
+            "stored Spark build %s as runtime image %s",
+            build_id,
+            image.manifest_digest,
+        )
 
     def _claim(self) -> str | None:
         now = self._clock()
@@ -599,35 +554,59 @@ class PrebuiltImageImporter:
         renewer.start()
         try:
             _LOGGER.info("pulling prebuilt runtime image %s", reference)
-            archive = pull_into_image_cache(
-                reference,
-                self._image_cache,
-                local_name=f"localhost/vonk/recipe-build-{build_id}:latest",
-                puller=self._puller,
-            )
-        except (PrebuiltImagePullError, OSError) as error:
-            code = getattr(error, "code", "prebuilt_image_pull_failed")
-            detail = str(getattr(error, "detail", error)) or type(error).__name__
-            _LOGGER.warning(
-                "prebuilt runtime image %s is unavailable (%s); the next plan "
-                "builds on a Spark instead",
-                reference,
-                detail,
-            )
-            self._finish(job_id, build_id, node_id, failure=(code, detail))
+            image = self._store.import_reference(reference)
+        except OciImageStoreError as error:
+            if error.code != STORE_BUSY:
+                self._fail(job_id, build_id, node_id, reference, error)
+            else:
+                self._release(job_id)
+        except OSError as error:
+            self._fail(job_id, build_id, node_id, reference, error)
         else:
             self._finish(
                 job_id,
                 build_id,
                 node_id,
                 evidence=RecipeBuildEvidence(
-                    image_bytes=archive.size,
-                    image_digest=reference.rsplit("@", 1)[1],
-                    oci_layout_sha256=archive.sha256,
+                    image_bytes=image.stored_bytes,
+                    image_digest=image.manifest_digest,
+                    oci_layout_sha256=image.manifest_digest.removeprefix("sha256:"),
                 ),
             )
         finally:
             stop.set()
+
+    def _fail(
+        self,
+        job_id: str,
+        build_id: str,
+        node_id: str,
+        reference: str,
+        error: OciImageStoreError | OSError,
+    ) -> None:
+        code = "prebuilt_image_pull_failed"
+        detail = str(getattr(error, "detail", error)) or type(error).__name__
+        _LOGGER.warning(
+            "prebuilt runtime image %s is unavailable (%s); the next plan "
+            "builds on a Spark instead",
+            reference,
+            detail,
+        )
+        self._finish(job_id, build_id, node_id, failure=(code, detail))
+
+    def _release(self, job_id: str) -> None:
+        """Give a claimed import back so the next tick retries it."""
+
+        with self._sessions.begin() as session:
+            job = session.get(Job, job_id, with_for_update=True)
+            if job is None or job.payload.get("prebuilt_claim_owner") != self._owner:
+                return
+            job.payload = {
+                key: value
+                for key, value in job.payload.items()
+                if key not in {"prebuilt_claim_owner", "prebuilt_claim_until"}
+            }
+            job.updated_at = self._clock()
 
     def _finish(
         self,
@@ -714,15 +693,11 @@ __all__ = [
     "PREBUILT_KEY_SCHEMA_VERSION",
     "PrebuiltImage",
     "PrebuiltImageImporter",
-    "PrebuiltImagePullError",
-    "PulledArchive",
     "executable_build_key",
     "package_build_intent",
     "podman_build_arguments",
     "policy_prebuilt_reference",
     "prebuilt_failed",
     "prebuilt_reference",
-    "pull_into_image_cache",
-    "skopeo_pull",
     "write_library_image_plan",
 ]

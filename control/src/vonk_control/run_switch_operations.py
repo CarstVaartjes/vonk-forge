@@ -57,7 +57,12 @@ from .cluster_mappings import (
 from .disk_reservations import outstanding_disk_reservation_bytes
 from .distribution_assignment import NodeDistributionAssignment
 from .failure_classification import error_code, is_redownload, is_security_failure
-from .install_admission import InstallAdmissionBusy, InstallPreflightExpired
+from .install_admission import (
+    AGENT_UPGRADE_REQUIRED_DETAIL,
+    IMAGE_PULL_CAPABILITY,
+    InstallAdmissionBusy,
+    InstallPreflightExpired,
+)
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .logging import log_event, redact_text
@@ -5575,6 +5580,19 @@ class RunSwitchOperationService:
                     _as_reason(
                         "run-switch.spark-unavailable",
                         "Selected Spark is not active in Controller authority.",
+                        scope="node",
+                        node_ids=(item.node_id,),
+                    )
+                )
+            if (
+                serving
+                and snapshot is not None
+                and IMAGE_PULL_CAPABILITY not in snapshot.capabilities
+            ):
+                node_blockers.append(
+                    _as_reason(
+                        "run-switch.agent-upgrade-required",
+                        AGENT_UPGRADE_REQUIRED_DETAIL,
                         scope="node",
                         node_ids=(item.node_id,),
                     )

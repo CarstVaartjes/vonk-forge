@@ -17,9 +17,6 @@ import logging
 import os
 import re
 import stat
-import subprocess
-import time
-import traceback
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -46,8 +43,13 @@ from .catalog_revision_contract import (
     read_catalog_projection,
 )
 from .compiled_execution_plan import CompiledRuntimeImage
-from .logging import log_event, redact_text
 from .models import CatalogDocumentRevision, RecipeBuild, RuntimeImageAuthorization
+from .oci_image_store import (
+    IMAGE_CACHE_DIRECTORY,
+    OciImageStore,
+    OciImageStoreError,
+    StoredImage,
+)
 from .runtime_adapters import (
     RuntimeAdapter,
     RuntimeAdapterError,
@@ -57,10 +59,7 @@ from .validation_detail import validation_error_detail
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-IMAGE_CACHE_DIRECTORY = "image-cache"
 _LOGGER = logging.getLogger(__name__)
-_SUBPROCESS_TIMEOUT_SECONDS = 60 * 60
-_SUBPROCESS_ATTEMPTS = 3
 # One rejection detail is enough to name the rule; the document itself is
 # never recorded and the rendered detail is already bounded per issue.
 _MAX_RECEIPT_REJECTION_DETAIL = 512
@@ -116,11 +115,13 @@ class OCIImageTransport(Protocol):
         ...
 
 
-class SkopeoOCIImageTransport:
-    """Concrete unprivileged OCI transport backed by packaged ``skopeo``."""
+class OciLayoutImageTransport:
+    """Read a stored image's identity from the layered store, no subprocess.
 
-    def __init__(self, *, executable: str = "/usr/bin/skopeo") -> None:
-        self.executable = executable
+    ``archive`` is the image's manifest blob in the Controller's OCI layout;
+    its config blob sits beside it. The bytes were verified when they entered
+    the layout, so this only reads the platform and the interface label.
+    """
 
     def inspect_archive(
         self,
@@ -134,40 +135,20 @@ class SkopeoOCIImageTransport:
         expected_runtime_interface = _runtime_interface_label(
             expected_runtime_interface
         )
-        source = f"docker-archive:{archive}"
-        observed_digest = _run_text(
-            [
-                self.executable,
-                "inspect",
-                *_platform_args(expected_architecture),
-                "--format",
-                "{{.Digest}}",
-                source,
-            ]
-        ).strip()
-        raw_manifest = _run_text(
-            [
-                self.executable,
-                "inspect",
-                *_platform_args(expected_architecture),
-                "--raw",
-                source,
-            ]
-        )
-        config = _run_json_text(
-            _run_text(
-                [
-                    self.executable,
-                    "inspect",
-                    *_platform_args(expected_architecture),
-                    "--config",
-                    source,
-                ]
+        try:
+            config_digest = _config_digest(archive.read_text(encoding="utf-8"))
+            config = json.loads(
+                (archive.parent / config_digest.removeprefix("sha256:")).read_bytes()
             )
-        )
+        except (OSError, ValueError) as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.inspect_invalid",
+                "stored OCI image manifest or config is unreadable",
+                retryable=True,
+            ) from error
         if not isinstance(config, Mapping):
             raise RuntimeImagePreparationError(
-                "runtime_image.inspect_invalid", "skopeo config output is invalid"
+                "runtime_image.inspect_invalid", "stored OCI image config is invalid"
             )
         architecture = _observed_architecture(config)
         if architecture != expected_architecture:
@@ -181,15 +162,10 @@ class SkopeoOCIImageTransport:
                 "runtime_image.interface_mismatch",
                 "OCI image runtime interface label does not match the recipe",
             )
-        if _IMAGE_DIGEST.fullmatch(observed_digest) is None:
-            raise RuntimeImagePreparationError(
-                "runtime_image.digest_mismatch",
-                "skopeo archive inspection returned an invalid image digest",
-            )
         return PulledImageEvidence(
-            manifest_digest=observed_digest,
-            config_id=_config_digest(raw_manifest),
-            local_reference=source,
+            manifest_digest=f"sha256:{archive.name}",
+            config_id=config_digest,
+            local_reference=f"oci-layout:{archive.name}",
             architecture=architecture,
             runtime_interface=interface,
             archive_sha256=expected_archive_sha256,
@@ -420,23 +396,6 @@ def _log_rejected_receipt(path: Path, rejection: _ReceiptDocumentRejected) -> No
         rejection.code,
         rejection.detail[:_MAX_RECEIPT_REJECTION_DETAIL],
     )
-
-
-def _stored_archive_is_bad(
-    final: Path,
-    final_stat: os.stat_result,
-    receipt: RuntimeImageReceipt,
-) -> bool:
-    """Whether stored bytes at a content address disagree with that address."""
-
-    if stat.S_ISDIR(final_stat.st_mode):
-        raise RuntimeImagePreparationError(
-            "runtime_image.archive_conflict",
-            "content-addressed OCI archive path is a directory",
-        )
-    if not stat.S_ISREG(final_stat.st_mode):
-        return True
-    return final_stat.st_size != receipt.image_bytes
 
 
 def prefixed_image_digest(value: str | None) -> str | None:
@@ -786,7 +745,7 @@ class RuntimeImageStorage(Protocol):
         *,
         receipt: RuntimeImageReceipt,
     ) -> RuntimeImageReceipt:
-        """Verify and atomically publish an archive and its receipt."""
+        """Publish the receipt of an image already in the layered store."""
         ...
 
     def existing_archive(self, archive_sha256: str, expected_bytes: int) -> Path:
@@ -833,6 +792,7 @@ class FilesystemRuntimeImageStorage:
 
     def __init__(self, root: Path, *, maximum_bytes: int = 16 * 1024**4) -> None:
         self.root = root / IMAGE_CACHE_DIRECTORY
+        self.layout = OciImageStore(root)
         self.maximum_bytes = maximum_bytes
         self.root.mkdir(parents=True, exist_ok=True)
         # Receipts this process already reported, so a scan does not repeat
@@ -903,287 +863,159 @@ class FilesystemRuntimeImageStorage:
     def commit(
         self, staged: Path, *, receipt: RuntimeImageReceipt
     ) -> RuntimeImageReceipt:
-        if not staged.is_file() or staged.is_symlink():
-            raise RuntimeImagePreparationError(
-                "runtime_image.archive_unavailable",
-                "OCI export did not produce a regular archive",
-            )
-        size = staged.stat().st_size
-        if (
-            size < 1
-            or size > self.maximum_bytes
-            or size != receipt.image_bytes
-            or not _SHA256.fullmatch(receipt.oci_archive_sha256)
-        ):
+        """Publish the receipt of an image already in the layered store.
+
+        ``staged`` is the image's manifest blob in the layout; nothing is
+        moved. An existing receipt for the same image is kept, completed, or
+        refused when it binds the image to another identity.
+        """
+        final = self.existing_archive(receipt.oci_archive_sha256, receipt.image_bytes)
+        if staged != final:
             raise RuntimeImagePreparationError(
                 "runtime_image.archive_mismatch",
-                "OCI archive bytes or digest do not match the image receipt",
+                "runtime image receipt names another stored image",
             )
-        final = self.root / receipt.oci_archive_sha256
-        existing_receipt: RuntimeImageReceipt | None = None
-        try:
-            final_stat = final.lstat()
-        except FileNotFoundError:
-            final_stat = None
-        except OSError as error:
-            raise RuntimeImagePreparationError(
-                "runtime_image.archive_unavailable",
-                "content-addressed OCI archive could not be inspected",
-            ) from error
         receipt_path = self.root / f"{receipt.oci_archive_sha256}.receipt.json"
-        if final_stat is not None and _stored_archive_is_bad(
-            final, final_stat, receipt
-        ):
-            # Never keep bytes that disagree with their content address: the
-            # verified staged bytes replace them, with a freshly derived receipt.
-            _LOGGER.warning(
-                "replacing corrupt runtime image archive %s",
-                receipt.oci_archive_sha256,
-            )
+        existing_receipt: RuntimeImageReceipt | None = None
+        if receipt_path.exists():
             try:
-                final.unlink()
-                receipt_path.unlink(missing_ok=True)
-            except OSError as error:
-                raise RuntimeImagePreparationError(
-                    "runtime_image.archive_conflict",
-                    "corrupt content-addressed OCI archive could not be discarded",
-                    retryable=True,
-                    recovery_actions=("retry",),
-                ) from error
-            final_stat = None
-        if final_stat is not None:
-            if receipt_path.exists():
-                try:
-                    existing_receipt = _load_receipt_document(receipt_path)
-                except _ReceiptDocumentRejected as rejection:
-                    # The archive is content-addressed and its bytes were
-                    # verified before this receipt was derived, so a document
-                    # the current contract cannot parse is stale metadata about
-                    # those exact bytes -- not a conflicting identity.  Replace
-                    # it below from the freshly validated receipt and record
-                    # the rule that rejected the old file.  A receipt that may
-                    # belong to a newer contract is left in place: this
-                    # preparation retries until the deploy has converged.
-                    _log_rejected_receipt(receipt_path, rejection)
-                    if not rejection.own_stale:
-                        raise RuntimeImagePreparationError(
-                            "runtime_image.receipt_contract_newer",
-                            "runtime image receipt was written by a newer Controller contract",
-                            retryable=True,
-                            recovery_actions=("retry",),
-                        ) from rejection
-                    existing_receipt = None
-            if existing_receipt is not None and (
-                any(
-                    getattr(existing_receipt, field) != getattr(receipt, field)
-                    for field in (
-                        "image_digest",
-                        "oci_archive_sha256",
-                        "image_bytes",
-                        "local_image_config_id",
-                        "architecture",
-                        "runtime_interface",
-                        "runtime_interface_label",
-                        "build_id",
-                        "runtime_adapter",
-                        "runtime_adapter_sha256",
-                    )
+                existing_receipt = _load_receipt_document(receipt_path)
+            except _ReceiptDocumentRejected as rejection:
+                # Stale metadata about these exact verified blobs is replaced
+                # below. A receipt that may belong to a newer contract is left
+                # in place: this preparation retries until the deploy converges.
+                _log_rejected_receipt(receipt_path, rejection)
+                if not rejection.own_stale:
+                    raise RuntimeImagePreparationError(
+                        "runtime_image.receipt_contract_newer",
+                        "runtime image receipt was written by a newer Controller contract",
+                        retryable=True,
+                        recovery_actions=("retry",),
+                    ) from rejection
+                existing_receipt = None
+        if existing_receipt is not None and (
+            any(
+                getattr(existing_receipt, field) != getattr(receipt, field)
+                for field in (
+                    "image_digest",
+                    "oci_archive_sha256",
+                    "image_bytes",
+                    "local_image_config_id",
+                    "architecture",
+                    "runtime_interface",
+                    "runtime_interface_label",
+                    "build_id",
+                    "runtime_adapter",
+                    "runtime_adapter_sha256",
                 )
-                or (
-                    receipt.build_input_sha256 is not None
-                    and existing_receipt.build_input_sha256
-                    not in {None, receipt.build_input_sha256}
-                )
-            ):
-                # A valid receipt binds these bytes to another build. Workloads
-                # and authorizations may already be bound to that identity, so
-                # it is never swapped underneath them: the conflict is refused.
-                raise RuntimeImagePreparationError(
-                    "runtime_image.receipt_identity_conflict",
-                    "content-addressed OCI archive already has a different immutable identity",
-                    retryable=False,
-                    recovery_actions=("inspect",),
-                )
+            )
+            or (
+                receipt.build_input_sha256 is not None
+                and existing_receipt.build_input_sha256
+                not in {None, receipt.build_input_sha256}
+            )
+        ):
+            # A valid receipt binds this image to another build. Workloads and
+            # authorizations may already be bound to that identity, so it is
+            # never swapped underneath them: the conflict is refused.
+            raise RuntimeImagePreparationError(
+                "runtime_image.receipt_identity_conflict",
+                "stored runtime image already has a different immutable identity",
+                retryable=False,
+                recovery_actions=("inspect",),
+            )
+        if existing_receipt is not None:
             if (
-                existing_receipt is not None
-                and existing_receipt.build_input_sha256 is None
+                existing_receipt.build_input_sha256 is None
                 and receipt.build_input_sha256 is not None
             ):
-                # Repair an incomplete receipt from the exact build evidence
-                # that produced these verified bytes. The archive does not
-                # change, so this only completes its metadata.
-                backfilled = RuntimeImageReceipt(
+                # Complete the receipt from the exact build evidence.
+                existing_receipt = RuntimeImageReceipt(
                     **{
                         **existing_receipt.to_mapping(),
                         "build_input_sha256": receipt.build_input_sha256,
                     }
                 )
-                _atomic_json_replace(receipt_path, backfilled.to_mapping())
-                existing_receipt = backfilled
-            if staged != final:
-                staged.unlink()
-        else:
-            os.replace(staged, final)
-        if existing_receipt is not None:
+                _atomic_json_replace(receipt_path, existing_receipt.to_mapping())
             return existing_receipt
         published = RuntimeImageReceipt(
-            **{
-                **receipt.to_mapping(),
-                "archive_path": str(final),
-            }
+            **{**receipt.to_mapping(), "archive_path": str(final)}
         )
-        receipt_path = self.root / f"{receipt.oci_archive_sha256}.receipt.json"
         _atomic_json_replace(receipt_path, published.to_mapping())
         return published
 
     def existing_archive(self, archive_sha256: str, expected_bytes: int) -> Path:
-        if _SHA256.fullmatch(archive_sha256) is None:
-            raise RuntimeImagePreparationError(
-                "runtime_image.archive_invalid", "OCI archive digest is invalid"
-            )
-        path = self.root / archive_sha256
-        try:
-            observed = path.lstat()
-        except FileNotFoundError as error:
+        """The stored image's manifest blob, when the whole image is present.
+
+        ``archive_sha256`` is the image's address in the layered store (its
+        manifest digest hex) and ``expected_bytes`` its stored size. The
+        blobs were verified when they entered the layout; reuse checks names
+        and sizes only.
+        """
+        image = self._stored_image(archive_sha256)
+        if image is None:
             raise RuntimeImagePreparationError(
                 "runtime_image.cache_missing",
-                "OCI archive is not present in Controller storage",
+                "runtime image is not present in Controller storage",
                 retryable=True,
-            ) from error
-        except OSError as error:
-            raise RuntimeImagePreparationError(
-                "runtime_image.archive_unavailable",
-                "Controller runtime image storage could not be inspected",
-            ) from error
-        if not stat.S_ISREG(observed.st_mode) or stat.S_ISLNK(observed.st_mode):
+            )
+        if image.stored_bytes != expected_bytes:
             raise RuntimeImagePreparationError(
                 "runtime_image.archive_mismatch",
-                "stored OCI archive is not a regular file",
+                "stored runtime image does not match its recorded size",
             )
-        # The archive was verified when it was published under this digest;
-        # reuse checks identity (the name) and size, and does not re-hash.
-        if (
-            not 1 <= expected_bytes <= self.maximum_bytes
-            or observed.st_size != expected_bytes
-        ):
+        return self.layout.blob_path(image.manifest_digest)
+
+    def _stored_image(self, archive_sha256: str) -> StoredImage | None:
+        if _SHA256.fullmatch(archive_sha256) is None:
             raise RuntimeImagePreparationError(
-                "runtime_image.archive_mismatch",
-                "stored OCI archive does not match its recorded size",
+                "runtime_image.archive_invalid", "runtime image address is invalid"
             )
-        return path
+        try:
+            return self.layout.read(f"sha256:{archive_sha256}")
+        except OciImageStoreError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_unavailable", error.detail, retryable=True
+            ) from error
 
     def published_archive_bytes(self, archive_sha256: str) -> int:
-        """Return one exact regular archive size under the managed image root."""
+        """The stored size of one image (shared layers included), or 0."""
 
         if _SHA256.fullmatch(archive_sha256) is None:
             raise RuntimeImagePreparationError(
                 "runtime_image.identity_invalid",
-                "archive size lookup requires an exact SHA-256",
+                "image size lookup requires an exact SHA-256",
             )
-        root_fd = self._open_managed_root()
-        try:
-            try:
-                metadata = os.stat(
-                    archive_sha256, dir_fd=root_fd, follow_symlinks=False
-                )
-            except FileNotFoundError:
-                return 0
-            if not stat.S_ISREG(metadata.st_mode):
-                raise RuntimeImagePreparationError(
-                    "runtime_image.removal_path_unsafe",
-                    "published image archive is not a regular file",
-                )
-            return metadata.st_size
-        except OSError as error:
-            raise RuntimeImagePreparationError(
-                "runtime_image.removal_storage_failed",
-                "published image archive could not be inspected safely",
-                retryable=True,
-                recovery_actions=("retry",),
-            ) from error
-        finally:
-            os.close(root_fd)
+        image = self._stored_image(archive_sha256)
+        return 0 if image is None else image.stored_bytes
 
     def remove_published(self, archive_sha256: str) -> int:
-        """Unlink one archive and receipt by exact digest under the held lock.
+        """Retire one image's receipt by exact digest under the held lock.
 
         The caller owns the matching nonblocking ``publication_lock`` and its
-        committed SQL deletion fence. Repeating this operation after process
-        death is safe: either pathname may already be absent.
+        committed SQL deletion fence. The image's blobs may be shared with
+        other images; garbage collection reclaims the ones no image
+        references, so this reclaims no bytes itself. Repeating it is safe.
         """
 
         if _SHA256.fullmatch(archive_sha256) is None:
             raise RuntimeImagePreparationError(
                 "runtime_image.identity_invalid",
-                "archive removal requires an exact SHA-256",
+                "image removal requires an exact SHA-256",
             )
-        root_fd = self._open_managed_root()
         try:
-            reclaimed = 0
-            filenames = (archive_sha256, f"{archive_sha256}.receipt.json")
-            present: dict[str, os.stat_result] = {}
-            for filename in filenames:
-                try:
-                    metadata = os.stat(filename, dir_fd=root_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    continue
-                if not stat.S_ISREG(metadata.st_mode):
-                    raise RuntimeImagePreparationError(
-                        "runtime_image.removal_path_unsafe",
-                        "published image archive or receipt is not a regular file",
-                    )
-                present[filename] = metadata
-            for filename in filenames:
-                metadata = present.get(filename)
-                if metadata is None:
-                    continue
-                if filename == archive_sha256:
-                    reclaimed = metadata.st_size
-                os.unlink(filename, dir_fd=root_fd)
-            os.fsync(root_fd)
-            return reclaimed
+            (self.root / f"{archive_sha256}.receipt.json").unlink(missing_ok=True)
         except OSError as error:
             raise RuntimeImagePreparationError(
                 "runtime_image.removal_storage_failed",
-                "published image archive or receipt could not be removed safely",
+                "runtime image receipt could not be removed safely",
                 retryable=True,
                 recovery_actions=("retry",),
             ) from error
-        finally:
-            os.close(root_fd)
-
-    def _open_managed_root(self) -> int:
-        try:
-            descriptor = os.open(
-                self.root,
-                os.O_RDONLY
-                | getattr(os, "O_DIRECTORY", 0)
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_CLOEXEC", 0),
-            )
-        except OSError as error:
-            raise RuntimeImagePreparationError(
-                "runtime_image.storage_unavailable",
-                "managed image cache root is unavailable",
-                retryable=True,
-                recovery_actions=("retry",),
-            ) from error
-        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
-            os.close(descriptor)
-            raise RuntimeImagePreparationError(
-                "runtime_image.storage_unavailable",
-                "managed image cache root is not a directory",
-            )
-        return descriptor
+        return 0
 
     def build_archive_available(self, archive_sha256: str, expected_bytes: int) -> bool:
-        """Report whether exact build bytes are present without scanning the archive.
-
-        This is the planning/projection check.  The preparation and distribution
-        paths still hash the archive before using it.  A missing file is normal
-        cache loss; unsafe types, changed sizes, and inaccessible storage remain
-        explicit failures rather than being projected as an ordinary cache miss.
-        """
+        """Whether the whole image is in the layered store, by name and size."""
 
         if (
             _SHA256.fullmatch(archive_sha256) is None
@@ -1194,25 +1026,13 @@ class FilesystemRuntimeImageStorage:
                 "runtime_image.receipt_invalid",
                 "source-build image evidence is invalid",
             )
-        path = self.root / archive_sha256
-        try:
-            observed = path.lstat()
-        except FileNotFoundError:
+        image = self._stored_image(archive_sha256)
+        if image is None:
             return False
-        except OSError as error:
-            raise RuntimeImagePreparationError(
-                "runtime_image.archive_unavailable",
-                "Controller runtime image storage could not be inspected",
-            ) from error
-        if not stat.S_ISREG(observed.st_mode) or stat.S_ISLNK(observed.st_mode):
+        if image.stored_bytes != expected_bytes:
             raise RuntimeImagePreparationError(
                 "runtime_image.archive_mismatch",
-                "stored OCI build object is not a regular archive",
-            )
-        if observed.st_size != expected_bytes:
-            raise RuntimeImagePreparationError(
-                "runtime_image.archive_mismatch",
-                "stored OCI build archive length changed",
+                "stored runtime image size changed",
             )
         return True
 
@@ -1428,7 +1248,7 @@ def prepare_runtime_image(
     receipt = _prepare_from_build(
         build_receipt,
         storage=storage,
-        transport=transport or SkopeoOCIImageTransport(),
+        transport=transport or OciLayoutImageTransport(),
         publisher=parsed.identity.publisher,
         slug=parsed.identity.slug,
         content_sha256=_recipe_digest(recipe),
@@ -1812,82 +1632,13 @@ def _validate_evidence(
         )
 
 
-def _run_text(command: list[str]) -> str:
-    last_error: BaseException | None = None
-    for attempt in range(1, _SUBPROCESS_ATTEMPTS + 1):
-        try:
-            result = subprocess.run(
-                command,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-            )
-            return result.stdout
-        except (
-            OSError,
-            subprocess.CalledProcessError,
-            subprocess.TimeoutExpired,
-        ) as error:
-            last_error = error
-            if attempt < _SUBPROCESS_ATTEMPTS:
-                time.sleep(2 ** (attempt - 1))
-    assert last_error is not None
-    stderr = getattr(last_error, "stderr", None)
-    stderr_text = (
-        stderr.decode("utf-8", errors="replace")
-        if isinstance(stderr, bytes)
-        else str(stderr or "")
-    )
-    safe_stderr_tail = redact_text(stderr_text[-4096:])[-2048:]
-    safe_reason_stderr_tail = redact_text(stderr_text[-1024:])[-320:]
-    detail = "packaged OCI helper command failed"
-    if isinstance(last_error, subprocess.TimeoutExpired):
-        detail += f" after {_SUBPROCESS_TIMEOUT_SECONDS}s timeout"
-    if safe_reason_stderr_tail:
-        detail += f"; stderr tail: {safe_reason_stderr_tail}"
-    log_event(
-        _LOGGER,
-        "runtime_image.subprocess_failed",
-        service="controller",
-        error=type(last_error).__name__,
-        message=redact_text(last_error),
-        stderr_tail=safe_stderr_tail,
-        traceback=redact_text("".join(traceback.format_exception(last_error))),
-        attempts=_SUBPROCESS_ATTEMPTS,
-        timeout_seconds=_SUBPROCESS_TIMEOUT_SECONDS,
-    )
-    raise RuntimeImagePreparationError(
-        "runtime_image.transport_failed",
-        detail,
-        retryable=True,
-        recovery_actions=("retry",),
-    ) from last_error
-
-
 def _run_json_text(value: str) -> object:
     try:
         return json.loads(value)
     except json.JSONDecodeError as error:
         raise RuntimeImagePreparationError(
-            "runtime_image.inspect_invalid", "packaged OCI helper returned invalid JSON"
+            "runtime_image.inspect_invalid", "stored OCI manifest is invalid JSON"
         ) from error
-
-
-def _platform_args(architecture: str) -> list[str]:
-    try:
-        os_name, cpu = architecture.split("/", 1)
-    except ValueError as error:
-        raise RuntimeImagePreparationError(
-            "runtime_image.runtime_invalid",
-            "runtime architecture must be os/architecture",
-        ) from error
-    if not os_name or not cpu or "/" in cpu:
-        raise RuntimeImagePreparationError(
-            "runtime_image.runtime_invalid",
-            "runtime architecture must be os/architecture",
-        )
-    return ["--override-os", os_name, "--override-arch", cpu]
 
 
 def _observed_architecture(image: Mapping[str, object]) -> str:
@@ -2028,6 +1779,7 @@ def _unlink_quietly(path: Path) -> None:
 __all__ = [
     "FilesystemRuntimeImageStorage",
     "OCIImageTransport",
+    "OciLayoutImageTransport",
     "PulledImageEvidence",
     "RuntimeArchitecture",
     "RuntimeImagePreparationError",
@@ -2037,7 +1789,6 @@ __all__ = [
     "RuntimeImageStorage",
     "RuntimeInterface",
     "RuntimeInterfaceLabel",
-    "SkopeoOCIImageTransport",
     "persist_runtime_image_receipt",
     "prepare_runtime_image",
     "read_runtime_image_reference_intent",

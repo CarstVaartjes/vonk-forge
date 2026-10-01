@@ -106,41 +106,10 @@ fn grant_verifier(signer: &Ed25519KeyPair) -> GrantVerifier {
     GrantVerifier::new(signer.public_key().as_ref(), 971).unwrap()
 }
 
-fn runtime_archive_config_id() -> String {
+fn runtime_config_id() -> String {
     format!(
         "sha256:{}",
         hex_sha256(br#"{"config":{"User":"10001:10001"}}"#)
-    )
-}
-
-fn runtime_image_archive() -> (Vec<u8>, String) {
-    let config = br#"{"config":{"User":"10001:10001"}}"#;
-    let config_digest = hex_sha256(config);
-    let config_member = format!("{config_digest}.json");
-    let manifest = serde_json::to_vec(&serde_json::json!([{
-        "Config": config_member,
-        "RepoTags": ["localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest"],
-        "Layers": [],
-    }]))
-    .unwrap();
-    let mut builder = tar::Builder::new(Vec::new());
-    let mut header = tar::Header::new_gnu();
-    header.set_size(manifest.len() as u64);
-    header.set_mode(0o600);
-    header.set_cksum();
-    builder
-        .append_data(&mut header, "manifest.json", manifest.as_slice())
-        .unwrap();
-    let mut header = tar::Header::new_gnu();
-    header.set_size(config.len() as u64);
-    header.set_mode(0o600);
-    header.set_cksum();
-    builder
-        .append_data(&mut header, config_member, &config[..])
-        .unwrap();
-    (
-        builder.into_inner().unwrap(),
-        format!("sha256:{config_digest}"),
     )
 }
 
@@ -306,7 +275,6 @@ struct RecordingRunner {
     calls: SharedCalls,
     runtime_container: Arc<Mutex<Option<(String, String)>>>,
     runtime_running: Arc<Mutex<bool>>,
-    docker_load_stdout: Arc<Mutex<Option<Vec<u8>>>>,
 }
 
 #[derive(Debug)]
@@ -433,27 +401,9 @@ impl CommandRunner for RecordingRunner {
             success = false;
             Vec::new()
         } else if executable == std::path::Path::new("/usr/bin/docker")
-            && arguments.first().is_some_and(|value| value == "load")
-        {
-            self.docker_load_stdout
-                .lock()
-                .unwrap()
-                .clone()
-                .unwrap_or_else(|| {
-                    format!(
-                        "Loaded image: localhost/vonk/recipe-build-{}:latest\n",
-                        "20000000-0000-4000-8000-000000000002"
-                    )
-                    .into_bytes()
-                })
-        } else if executable == std::path::Path::new("/usr/bin/docker")
             && arguments.get(..2) == Some(&["image".to_owned(), "inspect".to_owned()])
         {
-            format!(
-                "{}\tlinux\tarm64\tv1\t10001:10001\n",
-                runtime_archive_config_id()
-            )
-            .into_bytes()
+            format!("{}\tlinux\tarm64\tv1\t10001:10001\n", runtime_config_id()).into_bytes()
         } else if executable == std::path::Path::new("/usr/bin/docker")
             && arguments.get(..2) == Some(&["container".to_owned(), "inspect".to_owned()])
         {
@@ -533,12 +483,6 @@ impl CommandRunner for RecordingRunner {
             exit_code: Some(if success { 0 } else { 1 }),
             stderr: Vec::new(),
         })
-    }
-}
-
-impl RecordingRunner {
-    fn set_docker_load_stdout(&self, output: impl Into<Vec<u8>>) {
-        *self.docker_load_stdout.lock().unwrap() = Some(output.into());
     }
 }
 
@@ -630,7 +574,6 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
             type_: "execute-container-runtime-request".into(),
             action: match request.action {
                 HostRuntimeAction::RuntimePreflight => ContainerRuntimeAction::RuntimePreflight,
-                HostRuntimeAction::ImageImport => ContainerRuntimeAction::ImageImport,
                 HostRuntimeAction::ImagePull => ContainerRuntimeAction::ImagePull,
                 HostRuntimeAction::ImageInspect => ContainerRuntimeAction::ImageInspect,
                 HostRuntimeAction::RunInspect => ContainerRuntimeAction::RunInspect,
@@ -669,84 +612,41 @@ fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRun
 }
 
 #[test]
-fn accepted_docker_archive_is_loaded_and_receipted_by_exact_digest() {
+fn granted_image_pull_receipts_the_pinned_manifest() {
     let (_temp, roots, runner, release) = fixture();
-    let image = "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002";
-    let (body, config_id) = runtime_image_archive();
-    let archive_sha256 = hex_sha256(&body);
-    let archive_root = roots.agent_data.join("oci-archives");
-    fs::create_dir_all(&archive_root).unwrap();
-    let archive = archive_root.join(&archive_sha256);
-    fs::write(&archive, &body).unwrap();
-    fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
-    let registry_index_digest = format!("sha256:{}", "a".repeat(64));
-    let platform_manifest_digest = format!("sha256:{}", "c".repeat(64));
-    let image_reference = format!("{image}@{platform_manifest_digest}");
+    let address = "c".repeat(64);
+    let manifest = format!("sha256:{address}");
+    let config = runtime_config_id();
+    let image_reference = format!("localhost/vonk/compiled-runtime-{address}@{manifest}");
     let request = runtime_request(
-        HostRuntimeAction::ImageImport,
+        HostRuntimeAction::ImagePull,
         vec![
-            archive.display().to_string(),
-            archive_sha256.clone(),
-            body.len().to_string(),
-            registry_index_digest.clone(),
-            platform_manifest_digest.clone(),
+            "127.0.0.1:41000".to_owned(),
+            manifest.clone(),
+            config.clone(),
             image_reference.clone(),
         ],
     );
     let request_digest = write_runtime_request(&roots, &request);
-    let executor = OperationExecutor::new(
-        roots.clone(),
-        release.public_key().as_ref(),
-        runner.clone(),
-        None,
-    )
-    .unwrap();
+    let executor =
+        OperationExecutor::new(roots.clone(), release.public_key().as_ref(), runner, None).unwrap();
 
     executor
         .execute(&runtime_operation(&request, request_digest))
         .unwrap();
 
-    let receipt: serde_json::Value = serde_json::from_slice(
-        &fs::read(roots.runtime_image_receipts.join(&archive_sha256)).unwrap(),
-    )
-    .unwrap();
-    let archive_metadata = fs::metadata(&archive).unwrap();
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&fs::read(roots.runtime_image_receipts.join(&address)).unwrap())
+            .unwrap();
     assert_eq!(
         receipt,
         serde_json::json!({
-            "archive_identity": {
-                "bytes": body.len(),
-                "changed_nanoseconds": archive_metadata.ctime_nsec(),
-                "changed_seconds": archive_metadata.ctime(),
-                "device": archive_metadata.dev(),
-                "inode": archive_metadata.ino(),
-                "modified_nanoseconds": archive_metadata.mtime_nsec(),
-                "modified_seconds": archive_metadata.mtime(),
-            },
-            "archive_bytes": body.len(),
-            "archive_config_id": config_id,
-            "archive_sha256": archive_sha256,
-            "image_config_id": config_id,
+            "image_config_id": config,
             "local_image_reference": image_reference,
-            "platform_manifest_digest": platform_manifest_digest,
-            "registry_index_digest": registry_index_digest,
-            "schema_version": 2,
+            "platform_manifest_digest": manifest,
+            "schema_version": 3,
         })
     );
-    let calls = runner.calls.lock().unwrap();
-    assert!(calls.iter().any(|(program, arguments)| {
-        program == std::path::Path::new("/usr/bin/docker")
-            && arguments == &["load", "--input", archive.to_str().unwrap()]
-    }));
-    assert!(calls.iter().any(|(program, arguments)| {
-        program == std::path::Path::new("/usr/bin/docker")
-            && arguments
-                == &[
-                    "tag",
-                    "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest",
-                    "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002",
-                ]
-    }));
 }
 
 #[test]
@@ -773,79 +673,6 @@ fn installation_cleanup_is_bound_to_the_signed_request_identity() {
         executor.execute(&mismatched),
         Err(OperationError::InvalidOperation)
     ));
-}
-
-fn assert_archive_import_accepts_load_output(load_output: Vec<u8>, expected_source: Option<&str>) {
-    let (_temp, roots, runner, release) = fixture();
-    runner.set_docker_load_stdout(load_output);
-    let image = "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002";
-    let (body, config_id) = runtime_image_archive();
-    let archive_sha256 = hex_sha256(&body);
-    let archive_root = roots.agent_data.join("oci-archives");
-    fs::create_dir_all(&archive_root).unwrap();
-    let archive = archive_root.join(&archive_sha256);
-    fs::write(&archive, &body).unwrap();
-    fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
-    let registry_index_digest = format!("sha256:{}", "a".repeat(64));
-    let platform_manifest_digest = format!("sha256:{}", "c".repeat(64));
-    let image_reference = format!("{image}@{platform_manifest_digest}");
-    let request = runtime_request(
-        HostRuntimeAction::ImageImport,
-        vec![
-            archive.display().to_string(),
-            archive_sha256.clone(),
-            body.len().to_string(),
-            registry_index_digest.clone(),
-            platform_manifest_digest.clone(),
-            image_reference,
-        ],
-    );
-    let request_digest = write_runtime_request(&roots, &request);
-    let calls = runner.calls.clone();
-    let executor =
-        OperationExecutor::new(roots.clone(), release.public_key().as_ref(), runner, None).unwrap();
-
-    executor
-        .execute(&runtime_operation(&request, request_digest))
-        .unwrap();
-
-    let receipt: serde_json::Value = serde_json::from_slice(
-        &fs::read(roots.runtime_image_receipts.join(&archive_sha256)).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(receipt["schema_version"], 2);
-    assert_eq!(receipt["archive_sha256"], archive_sha256);
-    assert_eq!(receipt["archive_bytes"], body.len());
-    assert_eq!(receipt["archive_config_id"], config_id);
-    assert_eq!(
-        receipt["platform_manifest_digest"],
-        platform_manifest_digest
-    );
-    assert_eq!(receipt["image_config_id"], config_id);
-    assert_eq!(
-        receipt["local_image_reference"],
-        format!("{image}@sha256:{}", "c".repeat(64))
-    );
-    if let Some(source) = expected_source {
-        assert!(calls.lock().unwrap().iter().any(|(program, arguments)| {
-            program == std::path::Path::new("/usr/bin/docker")
-                && arguments == &["tag", source, image].map(str::to_owned)
-        }));
-    }
-}
-
-#[test]
-fn accepted_docker_archive_does_not_depend_on_load_output_format() {
-    assert_archive_import_accepts_load_output(
-        b"Loaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002\n"
-            .to_vec(),
-        Some("localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002"),
-    );
-    assert_archive_import_accepts_load_output(
-        b"Loaded image ID: sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662\n"
-            .to_vec(),
-        Some("sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"),
-    );
 }
 
 #[test]
@@ -900,7 +727,7 @@ fn ungranted_inspection_frame_can_only_inspect() {
     for request in [
         runtime_request(HostRuntimeAction::Start, vec!["run".to_owned()]),
         runtime_request(HostRuntimeAction::Stop, Vec::new()),
-        runtime_request(HostRuntimeAction::ImageImport, vec!["archive".to_owned()]),
+        runtime_request(HostRuntimeAction::ImagePull, vec!["registry".to_owned()]),
         cleanup,
     ] {
         let digest = write_runtime_request(&roots, &request);

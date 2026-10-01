@@ -36,6 +36,8 @@ helper_pid=''
 fixture_dir=$(mktemp -d)
 archive_sha=''
 archive_bytes=''
+loopback_registry=127.0.0.1:5001
+store_image="$loopback_registry/vonk/runtime"
 
 cleanup() {
   if [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null; then
@@ -55,7 +57,7 @@ agent_gid=$(id -g vonk-agent)
 install -d -o root -g root -m 0755 /var/lib/vonk-forge
 install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper /var/lib/vonk-forge/helper/requests
 install -d -o root -g root -m 0755 /run/vonk-forge-agent /run/vonk-forge-package-helper
-install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent /var/lib/vonk-forge-agent/oci-archives /run/vonk-forge-agent/runtime-requests
+install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent /run/vonk-forge-agent/runtime-requests
 rm -rf \
   "$installation_root" \
   /var/lib/vonk-forge-agent/runs/$run_id \
@@ -130,46 +132,27 @@ test -n "$registry_digest"
 test "$registry_digest" != "$platform_digest"
 docker_local_image_id=$(docker image inspect "$image_platform" --format '{{.Id}}')
 docker image inspect "$platform_ref" >"$report_root/source-image-ref-inspect.json"
-docker save --output "$fixture_dir/image.oci.tar" "$platform_ref"
-archive_sha=$(sha256sum "$fixture_dir/image.oci.tar" | awk '{print $1}')
-archive_bytes=$(stat -c '%s' "$fixture_dir/image.oci.tar")
-archive_config_digest=$(python3 - "$fixture_dir/image.oci.tar" <<'PY'
-import hashlib
+# The Controller's layered store serves images as vonk/runtime on a loopback
+# port; the proof registry stands in for it.
+docker tag "$image_platform" "$store_image:proof"
+docker push "$store_image:proof" >"$report_root/store-push.log" 2>&1
+docker manifest inspect --insecure "$store_image@$platform_digest" >"$report_root/store-manifest.json"
+archive_sha=${platform_digest#sha256:}
+archive_bytes=$(python3 - "$report_root/store-manifest.json" <<'PY'
 import json
-import re
 import sys
-import tarfile
 
-with tarfile.open(sys.argv[1], "r") as archive:
-    manifest_entries = json.load(archive.extractfile("manifest.json"))
-    if len(manifest_entries) != 1:
-        raise SystemExit("archive must contain exactly one image")
-    config_path = manifest_entries[0].get("Config")
-    if not isinstance(config_path, str) or re.fullmatch(
-        r"(?:blobs/sha256/[0-9a-f]{64}(?:\.json)?|[0-9a-f]{64}\.json)",
-        config_path,
-    ) is None:
-        raise SystemExit("archive config path is invalid")
-    config = archive.extractfile(config_path).read()
-    config_digest = "sha256:" + hashlib.sha256(config).hexdigest()
-    config_name = config_path.rsplit("/", 1)[1]
-    config_name = config_name.removesuffix(".json")
-    if config_digest != "sha256:" + config_name:
-        raise SystemExit("archive config digest does not match its blob name")
-print(config_digest)
+with open(sys.argv[1], encoding="utf-8") as handle:
+    manifest = json.load(handle)
+print(sum(layer["size"] for layer in manifest["layers"]))
 PY
 )
-test "$platform_config_digest" = "$archive_config_digest"
-test "$platform_config_digest" != "$platform_digest"
-config_id=$archive_config_digest
-printf 'registry_index_digest=%s\nplatform_manifest_digest=%s\nplatform_config_digest=%s\narchive_config_digest=%s\ndocker_local_image_id=%s\n' \
-  "$registry_digest" "$platform_digest" "$platform_config_digest" "$archive_config_digest" "$docker_local_image_id" \
+config_id=$platform_config_digest
+printf 'registry_index_digest=%s\nplatform_manifest_digest=%s\nplatform_config_digest=%s\ndocker_local_image_id=%s\n' \
+  "$registry_digest" "$platform_digest" "$platform_config_digest" "$docker_local_image_id" \
   >"$report_root/image-identities.txt"
 local_image="localhost/vonk/compiled-runtime-$archive_sha"
 image_ref="$local_image@$platform_digest"
-cp "$fixture_dir/image.oci.tar" "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
-chown vonk-agent:vonk-agent "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
-chmod 0600 "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
 
 install -d -o vonk-agent -g vonk-agent -m 0700 \
   /var/lib/vonk-forge-agent/installations \
@@ -188,7 +171,6 @@ install -d -o vonk-agent -g vonk-agent -m 0700 \
   "$installation_root/runtime-cache"
 for path in \
   /var/lib/vonk-forge-agent \
-  /var/lib/vonk-forge-agent/oci-archives \
   /var/lib/vonk-forge-agent/installations \
   "$installation_root" \
   "$installation_root/models" \
@@ -233,11 +215,11 @@ export VONK_HELPER_SOCKET=/run/vonk-forge-package-helper/package-helper.sock
 export VONK_HELPER_REQUEST_ROOT=/run/vonk-forge-agent/runtime-requests
 
 "$probe_binary" setup >"$report_root/setup.log"
-for ref in "$image_ref" "$local_image" "$image_platform" "$image_name"; do
+for ref in "$image_ref" "$local_image" "$image_platform" "$image_name" "$store_image:proof"; do
   docker image rm "$ref" >>"$report_root/source-image-removal.log" 2>&1 || true
 done
 if docker image inspect "$image_ref" >/dev/null 2>&1; then
-  echo 'source image remained installed before helper import' >&2
+  echo 'source image remained installed before helper pull' >&2
   exit 1
 fi
 rm -f /run/vonk-forge-package-helper/package-helper.sock
@@ -264,7 +246,8 @@ sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_FIXTURE="$fixture" \
   VONK_HELPER_SOCKET="$VONK_HELPER_SOCKET" \
   VONK_HELPER_REQUEST_ROOT="$VONK_HELPER_REQUEST_ROOT" \
-  "$probe_binary" import | tee "$report_root/import.log"
+  VONK_HELPER_LOOPBACK_REGISTRY="$loopback_registry" \
+  "$probe_binary" pull | tee "$report_root/pull.log"
 
 sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_ARCHIVE_SHA="$archive_sha" \

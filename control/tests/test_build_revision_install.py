@@ -29,7 +29,6 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_builds import RecipeBuildResolution, RecipeBuildService
 from vonk_control.recipe_operations import (
-    RecipeOperationConflict,
     RecipeOperationService,
 )
 from vonk_control.run_admission import RunAdmissionService
@@ -39,10 +38,10 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
     resolve_persisted_runtime_image_receipt,
 )
-from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import document_sha256, read_model
 
 from .preflight_fixtures import record_passing_preflight
+from .runtime_image_fixtures import remove_test_image
 from .test_recipe_builds import (
     RecordingQueue,
     _json_array,
@@ -354,7 +353,7 @@ def test_install_rechecks_reused_receipt_after_preview(tmp_path, lost_authority)
     plan = admission.plan_install(mapping, build_id, now=now)
     assert plan.allowed
     if lost_authority == "missing":
-        (storage.root / receipt.oci_archive_sha256).unlink()
+        remove_test_image(storage, receipt.oci_archive_sha256)
     else:
         with sessions.begin() as session:
             for authorization in session.scalars(
@@ -402,59 +401,5 @@ def test_installation_replay_adopts_accepted_effect_before_cache_refresh(tmp_pat
     )
     plan = admission.plan_install(mapping, build_id, now=now)
     installation_id = operations.prepare_installation(plan, actor="admin")
-    (storage.root / receipt.oci_archive_sha256).unlink()
+    remove_test_image(storage, receipt.oci_archive_sha256)
     assert operations.prepare_installation(plan, actor="admin") == installation_id
-
-
-@pytest.mark.parametrize("receipt_state", ["ready", "revoked", "missing"])
-def test_explicit_distribution_consumes_current_revisions_exact_receipt(
-    tmp_path, receipt_state
-):
-    fixture = _prepared_successor(tmp_path)
-    assert isinstance(fixture, tuple)
-    sessions, now, successor, receipt, storage, admission, mapping, build_id = fixture
-    operations = RecipeOperationService(
-        sessions,
-        install_admission=admission,
-        run_admission=RunAdmissionService(sessions),
-        agent_jobs=RecordingQueue(),
-        clock=lambda: now,
-        builds=RecipeBuildService(
-            sessions,
-            bundles=SourceBundleStore(tmp_path / "bundles"),
-            prepared_builds=storage.find_build,
-            build_archive_available=storage.build_archive_available,
-        ),
-    )
-    preview = operations.preview_image_distribution(
-        build_id, mapping, mapping_generation=1
-    )
-    assert preview.image_digest == receipt.image_digest
-    if receipt_state == "missing":
-        (storage.root / receipt.oci_archive_sha256).unlink()
-    elif receipt_state == "revoked":
-        with sessions.begin() as session:
-            for authorization in session.scalars(
-                select(RuntimeImageAuthorization).where(
-                    RuntimeImageAuthorization.recipe_revision_id == successor.id
-                )
-            ):
-                authorization.state = "revoked"
-
-    def distribute():
-        return operations.distribute_image(
-            build_id,
-            mapping,
-            mapping_generation=1,
-            plan_digest=preview.plan_digest,
-            actor="admin",
-            request_id="successor-distribution",
-        )
-
-    if receipt_state == "ready":
-        queued = distribute()
-        assert queued.kind == "recipe.image.import.v1"
-        assert queued.plan_digest == preview.plan_digest
-    else:
-        with pytest.raises(RecipeOperationConflict):
-            distribute()

@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   native-arm64-helper-process:
-    name: Exercise signed helper import and start on ARM64
+    name: Exercise signed helper pull and start on ARM64
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
@@ -66,7 +66,7 @@ jobs:
           cargo build --locked --release --package vonk-agent-helper --bin vonk-agent-helper
           cargo build --locked --release --package vonk-agent \
             --example privileged_oci_process_probe
-      - name: Run signed import and start through the real helper process
+      - name: Run signed pull and start through the real helper process
         shell: bash
         env:
           VONK_HELPER_BINARY: ${{ github.workspace }}/target/release/vonk-agent-helper

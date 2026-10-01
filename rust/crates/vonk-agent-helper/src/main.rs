@@ -823,7 +823,7 @@ mod tests {
         let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
-                action: ContainerRuntimeAction::ImageImport,
+                action: ContainerRuntimeAction::ImagePull,
                 fence: uuid::Uuid::nil(),
                 request_sha256: "a".repeat(64),
                 installation_id: None,

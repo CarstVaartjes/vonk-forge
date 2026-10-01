@@ -222,7 +222,6 @@
           "artifact.distribution.v1",
           "recipe.build.v1",
           "recipe.build.cleanup.v1",
-          "recipe.image.import.v1",
           "recipe.install",
           "recipe.start",
           "recipe.job.run.v1",
@@ -2465,7 +2464,7 @@
       },
       "DistributionObject": {
         "additionalProperties": false,
-        "description": "One model file, OCI archive, or OCI layer referenced by an assignment.",
+        "description": "One model file referenced by an assignment.",
         "properties": {
           "bytes": {
             "maximum": 17592186044416.0,
@@ -2474,11 +2473,7 @@
             "type": "integer"
           },
           "kind": {
-            "enum": [
-              "model",
-              "oci-archive",
-              "oci-layer"
-            ],
+            "const": "model",
             "title": "Kind",
             "type": "string"
           },
@@ -10880,6 +10875,11 @@
             "title": "Oci Archive Sha256",
             "type": "string"
           },
+          "oci_image_config_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Oci Image Config Digest",
+            "type": "string"
+          },
           "oci_image_digest": {
             "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Oci Image Digest",
@@ -10894,13 +10894,14 @@
         "required": [
           "objects",
           "oci_image_digest",
-          "oci_archive_sha256",
+          "oci_image_config_digest",
           "assignment_id",
           "plan_digest",
           "generation",
           "node_id",
           "expires_at",
-          "model_artifact_set_sha256"
+          "model_artifact_set_sha256",
+          "oci_archive_sha256"
         ],
         "title": "NodeDistributionAssignment",
         "type": "object"
@@ -13241,13 +13242,6 @@
         "title": "RecipeImageAvailabilityResult",
         "type": "object"
       },
-      "RecipeImageImportEvidence": {
-        "additionalProperties": false,
-        "description": "The image is imported; the Controller already holds its identity.",
-        "properties": {},
-        "title": "RecipeImageImportEvidence",
-        "type": "object"
-      },
       "RecipeInputSlot": {
         "additionalProperties": false,
         "properties": {
@@ -13959,9 +13953,6 @@
                         "$ref": "#/components/schemas/RecipeBuildCleanupEvidence"
                       },
                       {
-                        "$ref": "#/components/schemas/RecipeImageImportEvidence"
-                      },
-                      {
                         "$ref": "#/components/schemas/RecipeStartResult"
                       },
                       {
@@ -14007,9 +13998,6 @@
                       },
                       {
                         "$ref": "#/components/schemas/RecipeBuildCleanupEvidence"
-                      },
-                      {
-                        "$ref": "#/components/schemas/RecipeImageImportEvidence"
                       },
                       {
                         "$ref": "#/components/schemas/RecipeStartResult"

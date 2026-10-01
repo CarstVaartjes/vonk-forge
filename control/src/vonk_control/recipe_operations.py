@@ -89,7 +89,6 @@ from .models import (
     FleetProfileApplication,
     InstallationNode,
     Job,
-    NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -380,16 +379,6 @@ class IssuedWorkloadReconciliation:
 
 
 @dataclass(frozen=True, slots=True)
-class ImageDistributionPreview:
-    recipe_build_id: str
-    mapping_id: str
-    mapping_generation: int
-    image_digest: str
-    node_ids: tuple[str, ...]
-    plan_digest: str
-
-
-@dataclass(frozen=True, slots=True)
 class RecipeRunRankStatus:
     node_id: str
     rank: int
@@ -425,10 +414,6 @@ class RecipeRunStatus:
 
 _TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _INITIAL_OBSERVATION_GRACE_SECONDS = 120
-_RETRYABLE_IMAGE_DISTRIBUTION_STATES = frozenset({"failed", "waiting-for-operator"})
-_RETRYABLE_IMAGE_OPERATION_STATES = _TERMINAL_JOB_STATES | frozenset(
-    {"waiting-for-operator"}
-)
 _MEMORY_RESERVATION_KINDS = frozenset({"unified-memory", "host-memory", "gpu-memory"})
 _MAX_ACTION_NODES = 1024
 _MAX_ACTIVE_RUNS = 128
@@ -439,7 +424,6 @@ _WORKLOAD_INTENT_KINDS = frozenset(
         "recipe.stop",
         "recipe.uninstall",
         "recipe.reconcile",
-        "recipe.image.import.v1",
         "recipe.job.run.v1",
     }
 )
@@ -1332,86 +1316,6 @@ class RecipeOperationService:
             )
         self._agent_jobs.notify_available()
         return self.get(job.id)
-
-    def preview_image_distribution(
-        self,
-        recipe_build_id: str,
-        mapping_id: str,
-        *,
-        mapping_generation: int,
-    ) -> ImageDistributionPreview:
-        if self._builds is None:
-            raise RecipeOperationConflict("recipe build service is unavailable")
-        try:
-            plan = self._builds.plan_distribution(
-                recipe_build_id, mapping_id, generation=mapping_generation
-            )
-        except (KeyError, RuntimeError, ValueError) as error:
-            raise RecipeOperationConflict(str(error)) from error
-        identity = {
-            "schema_version": 1,
-            "build_id": plan.build_id,
-            "mapping_id": plan.mapping_id,
-            "mapping_generation": plan.mapping_generation,
-            "image_digest": plan.image_digest,
-            "targets": [node_id for node_id, _payload in plan.targets],
-        }
-        return ImageDistributionPreview(
-            recipe_build_id=plan.build_id,
-            mapping_id=plan.mapping_id,
-            mapping_generation=plan.mapping_generation,
-            image_digest=plan.image_digest,
-            node_ids=tuple(node_id for node_id, _payload in plan.targets),
-            plan_digest=hashlib.sha256(canonical_message(identity)).hexdigest(),
-        )
-
-    def distribute_image(
-        self,
-        recipe_build_id: str,
-        mapping_id: str,
-        *,
-        mapping_generation: int,
-        plan_digest: str,
-        actor: str,
-        request_id: str,
-        workload_intent_ordinal: int | None = None,
-    ) -> RecipeOperationView:
-        if self._builds is None:
-            raise RecipeOperationConflict("recipe build service is unavailable")
-        try:
-            plan = self._builds.plan_distribution(
-                recipe_build_id, mapping_id, generation=mapping_generation
-            )
-        except (KeyError, RuntimeError, ValueError) as error:
-            raise RecipeOperationConflict(str(error)) from error
-        identity = {
-            "schema_version": 1,
-            "build_id": plan.build_id,
-            "mapping_id": plan.mapping_id,
-            "mapping_generation": plan.mapping_generation,
-            "image_digest": plan.image_digest,
-            "targets": [node_id for node_id, _payload in plan.targets],
-        }
-        actual_plan_digest = hashlib.sha256(canonical_message(identity)).hexdigest()
-        plan_digest = actual_plan_digest
-        existing = self._idempotent(request_id, "recipe.image.import.v1", None)
-        if existing is not None:
-            return existing
-        if not plan.targets:
-            raise RecipeOperationConflict(
-                "exact built image is already present on every mapped GPU node"
-            )
-        return self._queue(
-            kind="recipe.image.import.v1",
-            owner_kind="image-distribution",
-            owner_id=plan.build_id,
-            plan_digest=plan_digest,
-            actor=actor,
-            request_id=request_id,
-            node_payloads=plan.targets,
-            authority_digest=plan_digest,
-            workload_intent_ordinal=workload_intent_ordinal,
-        )
 
     def preview_run(
         self,
@@ -3671,10 +3575,6 @@ class RecipeOperationService:
                     now=now,
                     intent=RecipeBuildIntent(kind="independent"),
                 )
-            elif previous.kind == "recipe.image.import.v1":
-                job = self._retry_image_distribution_in_session(
-                    session, previous, actor=actor, request_id=request_id, now=now
-                )
             elif previous.kind == "recipe.install" and previous.state == "failed":
                 job = self._retry_install_in_session(
                     session, previous, actor=actor, request_id=request_id, now=now
@@ -3683,86 +3583,6 @@ class RecipeOperationService:
                 raise RecipeOperationConflict("recipe operation is not retryable")
         self._agent_jobs.notify_available()
         return self.get(job.id)
-
-    def _retry_image_distribution_in_session(
-        self,
-        session: Session,
-        previous: Job,
-        *,
-        actor: str,
-        request_id: str,
-        now: datetime,
-    ) -> Job:
-        if previous.state not in _RETRYABLE_IMAGE_DISTRIBUTION_STATES:
-            raise RecipeOperationConflict("recipe image distribution is not retryable")
-        plan_digest = _required_string(previous.payload, "plan_digest")
-        owner_id = _required_string(previous.payload, "owner_id")
-        active = any(
-            job.id != previous.id
-            and job.state in {"queued", "running"}
-            and isinstance(job.payload, Mapping)
-            and job.payload.get("owner_id") == owner_id
-            and job.payload.get("plan_digest") == plan_digest
-            for job in session.scalars(
-                select(Job).where(Job.kind == "recipe.image.import.v1")
-            )
-        )
-        if active:
-            raise RecipeOperationConflict(
-                "recipe image distribution already has an active retry"
-            )
-        children = tuple(
-            session.scalars(
-                select(AgentOperation)
-                .where(AgentOperation.parent_job_id == previous.id)
-                .order_by(AgentOperation.node_id)
-            )
-        )
-        payload_identities = {
-            (
-                child.payload.get("mapping_id"),
-                child.payload.get("mapping_generation"),
-                child.payload.get("source_node_id"),
-                child.payload.get("image_digest"),
-                child.payload.get("oci_layout_sha256"),
-                child.payload.get("image_bytes"),
-            )
-            for child in children
-            if isinstance(child.payload, Mapping)
-        }
-        if (
-            previous.payload.get("owner_kind") != "image-distribution"
-            or not children
-            or tuple(child.node_id for child in children)
-            != tuple(sorted(previous.targets))
-            or previous.authority_revision != plan_digest.removeprefix("sha256:")
-            or len(payload_identities) != 1
-            or any(
-                child.kind != "recipe.image.import.v1"
-                or child.state not in _RETRYABLE_IMAGE_OPERATION_STATES
-                or child.authority_revision != plan_digest.removeprefix("sha256:")
-                or child.payload_digest
-                != hashlib.sha256(canonical_message(child.payload)).hexdigest()
-                or not _valid_image_import_payload(child.payload, owner_id)
-                for child in children
-            )
-        ):
-            raise RecipeOperationConflict("stored recipe image distribution is invalid")
-        return self._queue_in_session(
-            session,
-            kind="recipe.image.import.v1",
-            owner_kind="image-distribution",
-            owner_id=owner_id,
-            plan_digest=plan_digest,
-            actor=actor,
-            request_id=request_id,
-            node_payloads=tuple(
-                (child.node_id, dict(child.payload)) for child in children
-            ),
-            authority_digest=plan_digest,
-            now=now,
-            workload_intent_ordinal=_bound_workload_intent(previous),
-        )
 
     def _retry_install_in_session(
         self,
@@ -4221,8 +4041,6 @@ class RecipeOperationService:
                 build.state = "succeeded" if force_rebuild else "failed"
                 build.error = str(evidence.get("reason", "agent build failed"))[:512]
                 build.updated_at = now
-        elif job.kind == "recipe.image.import.v1":
-            _record_image_import_evidence(session, operation, evidence, succeeded, now)
         elif job.kind == "recipe.install":
             node = session.scalar(
                 select(InstallationNode).where(
@@ -7428,38 +7246,6 @@ def _current_phase_index(
     return None
 
 
-def _valid_image_import_payload(value: object, expected_build_id: str) -> bool:
-    expected_fields = {
-        "build_id",
-        "mapping_id",
-        "mapping_generation",
-        "source_node_id",
-        "image_digest",
-        "oci_layout_sha256",
-        "image_bytes",
-    }
-    if not isinstance(value, Mapping) or set(value) != expected_fields:
-        return False
-    image_digest = value.get("image_digest")
-    layout_digest = value.get("oci_layout_sha256")
-    return (
-        value.get("build_id") == expected_build_id
-        and isinstance(value.get("mapping_id"), str)
-        and isinstance(value.get("mapping_generation"), int)
-        and value["mapping_generation"] >= 1
-        and isinstance(value.get("source_node_id"), str)
-        and isinstance(image_digest, str)
-        and len(image_digest) == 71
-        and image_digest.startswith("sha256:")
-        and all(character in "0123456789abcdef" for character in image_digest[7:])
-        and isinstance(layout_digest, str)
-        and len(layout_digest) == 64
-        and all(character in "0123456789abcdef" for character in layout_digest)
-        and isinstance(value.get("image_bytes"), int)
-        and value["image_bytes"] > 0
-    )
-
-
 def record_build_evidence(
     session: Session,
     build: RecipeBuild,
@@ -7510,58 +7296,6 @@ def record_build_evidence(
     build.image_bytes = image_bytes
     build.error = None
     build.updated_at = now
-
-
-def _record_image_import_evidence(
-    session: Session,
-    operation: AgentOperation,
-    evidence: Mapping[str, object],
-    succeeded: bool,
-    now: datetime,
-) -> None:
-    if not succeeded:
-        return
-    build_id = operation.payload.get("build_id")
-    build = session.get(RecipeBuild, build_id) if isinstance(build_id, str) else None
-    if (
-        evidence
-        or build is None
-        or build.state != "succeeded"
-        or operation.payload.get("image_digest") != build.image_digest
-        or operation.payload.get("oci_layout_sha256") != build.oci_layout_sha256
-        or operation.payload.get("image_bytes") != build.image_bytes
-    ):
-        raise RecipeOperationConflict("recipe image import evidence is invalid")
-    assert build.image_digest is not None and build.image_bytes is not None
-    raw_digest = build.image_digest[7:]
-    artifact = session.scalar(
-        select(NodeArtifact).where(
-            NodeArtifact.node_id == operation.node_id,
-            NodeArtifact.digest == raw_digest,
-        )
-    )
-    if artifact is None:
-        session.add(
-            NodeArtifact(
-                node_id=operation.node_id,
-                kind="image",
-                digest=raw_digest,
-                source=f"docker-archive:{build.oci_layout_sha256}",
-                size_bytes=build.image_bytes,
-                state="verified",
-                ref_count=0,
-                verified_at=now,
-                updated_at=now,
-            )
-        )
-    elif (
-        artifact.kind != "image"
-        or artifact.size_bytes != build.image_bytes
-        or artifact.state != "verified"
-    ):
-        raise RecipeOperationConflict(
-            "recipe image import conflicts with local artifact state"
-        )
 
 
 def _start_endpoint(

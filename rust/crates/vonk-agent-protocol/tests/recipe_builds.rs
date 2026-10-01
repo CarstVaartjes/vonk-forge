@@ -212,20 +212,3 @@ fn build_network_rejects_private_and_metadata_destinations() {
         );
     }
 }
-
-#[test]
-fn image_import_binds_one_exact_build_and_layout() {
-    let payload = json!({
-        "build_id": "00000000-0000-4000-8000-000000000001",
-        "mapping_id": "00000000-0000-4000-8000-000000000002",
-        "mapping_generation": 1,
-        "source_node_id": format!("spk_{}", "1".repeat(32)),
-        "image_digest": format!("sha256:{}", "d".repeat(64)),
-        "oci_layout_sha256": "e".repeat(64),
-        "image_bytes": 1024
-    });
-    assert!(matches!(
-        parse_operation("recipe.image.import.v1", payload).unwrap(),
-        RecipeOperationRequest::ImageImport(_)
-    ));
-}

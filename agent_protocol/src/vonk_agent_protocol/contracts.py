@@ -113,7 +113,6 @@ class AgentOperation(StrEnum):
     ARTIFACT_DISTRIBUTION = "artifact.distribution.v1"
     RECIPE_BUILD = "recipe.build.v1"
     RECIPE_BUILD_CLEANUP = "recipe.build.cleanup.v1"
-    RECIPE_IMAGE_IMPORT = "recipe.image.import.v1"
     RECIPE_INSTALL = "recipe.install"
     RECIPE_START = "recipe.start"
     RECIPE_JOB_RUN = "recipe.job.run.v1"
@@ -744,8 +743,6 @@ from .build_import import (
     RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
     RecipeBuildRequest,
-    RecipeImageImportEvidence,
-    RecipeImageImportRequest,
 )
 from .recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from .recipe_operations import (
@@ -766,7 +763,6 @@ AgentPayload = (
     | ArtifactDistributionPayload
     | RecipeBuildRequest
     | RecipeBuildCleanupRequest
-    | RecipeImageImportRequest
     | RecipeJobRunRequest
     | RecipeInstallPayload
     | RecipeStartPayload
@@ -783,7 +779,6 @@ AgentResultPayload = (
     | RecipeUninstallResult
     | RecipeBuildEvidence
     | RecipeBuildCleanupEvidence
-    | RecipeImageImportEvidence
     | RecipeJobRunResult
     | ArtifactDistributionResult
     | AgentFailureResult
@@ -795,7 +790,6 @@ PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionPayload,
     AgentOperation.RECIPE_BUILD: RecipeBuildRequest,
     AgentOperation.RECIPE_BUILD_CLEANUP: RecipeBuildCleanupRequest,
-    AgentOperation.RECIPE_IMAGE_IMPORT: RecipeImageImportRequest,
     AgentOperation.RECIPE_JOB_RUN: RecipeJobRunRequest,
     AgentOperation.RECIPE_INSTALL: RecipeInstallPayload,
     AgentOperation.RECIPE_START: RecipeStartPayload,
@@ -836,7 +830,6 @@ RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.RECIPE_RECONCILE: RecipeReconcileResult,
     AgentOperation.RECIPE_BUILD: RecipeBuildEvidence,
     AgentOperation.RECIPE_BUILD_CLEANUP: RecipeBuildCleanupEvidence,
-    AgentOperation.RECIPE_IMAGE_IMPORT: RecipeImageImportEvidence,
     AgentOperation.RECIPE_JOB_RUN: RecipeJobRunResult,
 }
 

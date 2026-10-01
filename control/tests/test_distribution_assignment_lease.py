@@ -21,7 +21,10 @@ from vonk_control.distribution import (
     DistributionService,
     MemoryObjectSource,
 )
-from vonk_control.distribution_executor import DurableDistributionPhaseExecutor
+from vonk_control.distribution_executor import (
+    DurableDistributionPhaseExecutor,
+    RuntimeImagePull,
+)
 from vonk_control.models import AgentNode, ArtifactDistributionAssignment, Job
 
 from .test_agent_api import NODE_A, NODE_B, agent_system  # noqa: F401
@@ -112,8 +115,10 @@ def test_concurrent_processes_reclaim_a_grant_without_mutating_its_identity(
 MODEL = DistributionObject(
     name="weights/model.bin", sha256="a" * 64, bytes=10, kind="model"
 )
-ARCHIVE = DistributionObject(
-    name="image.oci.tar", sha256="c" * 64, bytes=11, kind="oci-archive"
+IMAGE = RuntimeImagePull(
+    image_digest="sha256:" + "e" * 64,
+    config_digest="sha256:" + "9" * 64,
+    address="c" * 64,
 )
 
 
@@ -124,9 +129,9 @@ def _transfer(agent_system):  # noqa: F811
             node = session.get(AgentNode, node_id)
             assert node is not None
             node.workload_intent_ordinal = 7
-    source = MemoryObjectSource({"a" * 64: b"x" * 10, "c" * 64: b"z" * 11})
+    source = MemoryObjectSource({"a" * 64: b"x" * 10})
     source.register_artifact_set("d" * 64, (MODEL,))
-    source.register_runtime_image("sha256:" + "e" * 64, ARCHIVE.sha256)
+    source.register_runtime_image(IMAGE.image_digest, IMAGE.address)
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
 
     class Executor(DurableDistributionPhaseExecutor):
@@ -134,7 +139,7 @@ def _transfer(agent_system):  # noqa: F811
             return (MODEL,), "d" * 64, 10
 
         def _archive(self, _plan, **_kwargs):
-            return ARCHIVE
+            return IMAGE
 
     executor = Executor(
         services.sessions, services.operations, distribution, clock=clock
@@ -256,7 +261,7 @@ def test_a_live_grant_for_different_bytes_is_still_refused(
         {
             **grant.to_mapping(),
             "model_artifact_set_sha256": "9" * 64,
-            "objects": [other.to_mapping(), ARCHIVE.to_mapping()],
+            "objects": [other.to_mapping()],
         }
     )
     with pytest.raises(DistributionError, match="already bound"):

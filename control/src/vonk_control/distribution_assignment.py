@@ -27,6 +27,10 @@ class NodeDistributionAssignment(DistributionAssignment):
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     expires_at: datetime
     model_artifact_set_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # The runtime image's address in the Controller's layered store (its
+    # manifest digest hex); the reference lifecycle protects it while the
+    # grant is open. The node pulls the image by ``oci_image_digest``.
+    oci_archive_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @field_validator("assignment_id")
     @classmethod
@@ -54,7 +58,7 @@ class NodeDistributionAssignment(DistributionAssignment):
         return DistributionAssignment(
             objects=self.objects,
             oci_image_digest=self.oci_image_digest,
-            oci_archive_sha256=self.oci_archive_sha256,
+            oci_image_config_digest=self.oci_image_config_digest,
         )
 
 

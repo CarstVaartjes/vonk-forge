@@ -18,7 +18,6 @@ from vonk_agent_protocol import (
     AgentInstallResult,
     RecipeBuildCleanupEvidence,
     RecipeBuildEvidence,
-    RecipeImageImportEvidence,
     RecipeJobRunResult,
     RecipeReconcileResult,
     RecipeStartResult,
@@ -54,7 +53,6 @@ LifecycleNodeResult = Annotated[
     AgentInstallResult
     | RecipeBuildEvidence
     | RecipeBuildCleanupEvidence
-    | RecipeImageImportEvidence
     | RecipeStartResult
     | RecipeStopResult
     | RecipeUninstallResult
@@ -205,8 +203,6 @@ def _validate_evidence_for_kind(kind: str, value: object) -> None:
         evidence_models = (RecipeBuildEvidence,)
     elif kind == "recipe.build.cleanup.v1":
         evidence_models = (RecipeBuildCleanupEvidence,)
-    elif kind in {"recipe.image.import.v1", "recipe.image.distribute"}:
-        evidence_models = (RecipeImageImportEvidence,)
     elif kind == "recipe.install":
         evidence_models = (AgentInstallResult,)
     elif kind == "recipe.start":

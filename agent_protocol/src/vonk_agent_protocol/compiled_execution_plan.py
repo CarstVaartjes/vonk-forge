@@ -26,7 +26,6 @@ from pydantic import (
 )
 
 from .contracts import AgentProtocolError
-from .distribution import DistributionObject
 from .host_helper import MAX_ARGV_BYTES
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -257,8 +256,13 @@ class CompiledArtifact(_Strict):
 
 
 class CompiledRuntimeImage(_Strict):
-    """The Controller-built OCI archive; imported locally as
-    ``localhost/vonk/compiled-runtime-<oci_layout_sha256>@<image_digest>``."""
+    """A runtime image in the Controller's layered store.
+
+    ``image_digest`` is its manifest digest and ``oci_layout_sha256`` the same
+    digest's hex, its address in the store; ``image_bytes`` is the size of its
+    layers. Sparks pull it into Docker as
+    ``localhost/vonk/compiled-runtime-<oci_layout_sha256>@<image_digest>``.
+    """
 
     image_digest: ImageDigest
     oci_layout_sha256: Digest
@@ -266,15 +270,6 @@ class CompiledRuntimeImage(_Strict):
     build_id: str = Field(min_length=1, max_length=128)
     local_image_config_id: ImageDigest
     runtime_interface_label: str = Field(min_length=1, max_length=128)
-
-    @property
-    def distribution_object(self) -> DistributionObject:
-        return DistributionObject(
-            name="image.oci.tar",
-            sha256=self.oci_layout_sha256,
-            bytes=self.image_bytes,
-            kind="oci-archive",
-        )
 
     @property
     def local_image_reference(self) -> str:
