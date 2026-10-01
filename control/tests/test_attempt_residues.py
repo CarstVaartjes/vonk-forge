@@ -9,6 +9,8 @@ reconciler, and effects it did leave are reconciled by the automatic cleanup.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -334,6 +336,125 @@ def test_a_plan_nobody_adopts_is_released_after_the_adoption_window(
         load,
         lambda: load.profiles.application(retried.id).state == "succeeded",
     ), load.profiles.application(retried.id).status_reason
+
+
+def test_a_plan_the_next_attempt_replaced_is_released_without_the_wait(
+    tmp_path: Path,
+) -> None:
+    """The next attempt plans differently (another image or choice).
+
+    Its plan digest differs from the cancelled attempt's, so nothing can adopt
+    the older plan. It must not outlive the attempts that follow it and show
+    as a second installation of the same recipe on the same Sparks.
+    """
+
+    load = _load(tmp_path)
+    old_id = _planned_left_by_failed_copy(load)
+    with load.sessions.begin() as session:
+        old = session.get(RecipeInstallation, old_id)
+        assert old is not None
+        # The next attempt no longer plans what this one did.
+        old.plan_digest = "f" * 64
+        old.plan = {**old.plan, "plan_digest": old.plan_digest}
+        old.created_at -= timedelta(minutes=1)  # the cancelled attempt came first
+        # Room for both: this case is about the record, not about capacity.
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            snapshot.disk_free_bytes = snapshot.disk_total_bytes
+    retried = load.profiles.retry(
+        load.application.id, request_key=str(uuid.uuid4()), actor="admin"
+    )
+    assert _loop(
+        load,
+        lambda: load.profiles.application(retried.id).state == "succeeded",
+    ), load.profiles.application(retried.id).status_reason
+    assert _loop(load, lambda: not load.residues.tick(), complete=False, rounds=3)
+    with load.sessions() as session:
+        live = [
+            (row.id, row.state)
+            for row in session.scalars(select(RecipeInstallation))
+            if row.state != "uninstalled"
+        ]
+        assert len(live) == 1 and live[0][0] != old_id and live[0][1] == "installed"
+        assert session.get(RecipeInstallation, old_id).state == "uninstalled"
+
+
+def test_a_plan_a_newer_revision_of_the_recipe_replaced_is_released(
+    tmp_path: Path,
+) -> None:
+    """The reload follows the recipe's newest revision, not the cancelled one.
+
+    A new revision's plan can never match the old plan's digest. The cancelled
+    attempt's plan is released once a later installation of the same recipe
+    exists on the same Sparks, and the newer installation is left alone.
+    """
+
+    load = _load(tmp_path)
+    old_id = _planned_left_by_failed_copy(load)
+    with load.sessions.begin() as session:
+        old = session.get(RecipeInstallation, old_id)
+        assert old is not None
+        current = session.get(CatalogDocumentRevision, old.recipe_revision_id)
+        assert current is not None
+        document = {**current.document, "newer": True}
+        digest = hashlib.sha256(
+            json.dumps(
+                document,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        newer = CatalogDocumentRevision(
+            id=str(uuid.uuid4()),
+            document_id=current.document_id,
+            kind="recipe",
+            publisher=current.publisher,
+            slug=current.slug,
+            revision_number=current.revision_number + 1,
+            schema_version=2,
+            state="active",
+            document=document,
+            content_digest=digest,
+            execution_key=current.execution_key,
+            created_by="test",
+            created_at=current.created_at,
+        )
+        session.add(newer)
+        session.flush()
+        later = RecipeInstallation(
+            **{
+                column.key: getattr(old, column.key)
+                for column in RecipeInstallation.__table__.columns
+            }
+        )
+        later.id = str(uuid.uuid4())
+        later.recipe_revision_id = newer.id
+        later.plan_digest = "e" * 64
+        later.state = "installed"
+        later.created_at = old.created_at + timedelta(minutes=1)
+        session.add(later)
+        session.flush()
+        for member in session.scalars(
+            select(InstallationNode).where(InstallationNode.installation_id == old_id)
+        ).all():
+            session.add(
+                InstallationNode(
+                    **{
+                        column.key: getattr(member, column.key)
+                        for column in InstallationNode.__table__.columns
+                    }
+                    | {"id": str(uuid.uuid4()), "installation_id": later.id}
+                )
+            )
+        later_id = later.id
+
+    assert load.residues.tick()
+    with load.sessions() as session:
+        released = session.get(RecipeInstallation, old_id)
+        kept = session.get(RecipeInstallation, later_id)
+        assert released is not None and released.state == "uninstalled"
+        assert kept is not None and kept.state == "installed"
 
 
 def test_a_record_an_active_attempt_owns_is_left_alone(tmp_path: Path) -> None:
