@@ -2632,7 +2632,9 @@ class SparkLifecycle:
                 _canonical(operation)
             )
         except (TypeError, ValueError) as error:
-            raise LifecycleError(f"{label} response is invalid") from error
+            raise LifecycleError(
+                f"{label} response is invalid: {str(error)[:400]}"
+            ) from error
         application_id = typed.id
         deadline = time.monotonic() + _CANARY_CONVERGENCE_SECONDS
         # Admission may be durably parked while an active workload owner

@@ -203,6 +203,39 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         _, payload = self.control.request("GET", "/api/fleet")
         return require_object(payload, "Fleet snapshot")
 
+    def _await_profile_application(
+        self, operation: dict[str, object], *, label: str, node_id: str
+    ) -> dict[str, object]:
+        """Follow a profile application by its stable fields only.
+
+        The previous release answers in its own schema; the lane needs the
+        identity, the state and the receipts it reads afterwards.
+        """
+        del node_id
+        assert self.control is not None
+        application = require_object(operation, label)
+        application_id = application.get("id")
+        deadline = time.monotonic() + 1800
+        while application.get("state") in {"queued", "running", "waiting-for-operator"}:
+            if time.monotonic() >= deadline:
+                raise LifecycleError(
+                    f"{label} did not converge: state={application.get('state')} "
+                    f"reason={application.get('status_reason')}"
+                )
+            time.sleep(1)
+            _, payload = self.control.request(
+                "GET", f"/api/profile/applications/{application_id}"
+            )
+            application = require_object(payload, label)
+            if application.get("id") != application_id:
+                raise LifecycleError(f"{label} identifies a different application")
+        if application.get("state") != "succeeded":
+            raise LifecycleError(
+                f"{label} failed: state={application.get('state')} "
+                f"reason={application.get('status_reason')}"
+            )
+        return application
+
     def _release_environment(self, release: ReleaseInput) -> dict[str, str]:
         assert self.temporary_root is not None
         base = (
