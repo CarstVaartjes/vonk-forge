@@ -2104,6 +2104,37 @@ class ModelCacheService:
             self.signal_cancelled_operation(superseded_id)
         return self.get_operation(operation_id)
 
+    def accept_unused_removal(
+        self,
+        model_content_sha256: str,
+        *,
+        actor: str,
+        request_key: str,
+        verify: Callable[[Session, tuple[str, ...]], None],
+    ) -> CacheOperationView:
+        """Accept the removal of a model nobody asked to remove.
+
+        The same durable, fenced removal as a request-led one, with one
+        difference: ``verify`` is called with every set and object gate held,
+        before the removal is accepted, and refuses it by raising. A sweep
+        therefore never fences a model that a load reached after it looked, and
+        never leaves a fence behind that waits for a current owner.
+        """
+
+        request_key = _request_key(request_key)
+        with self._lock, self._session(write=True) as session:
+            operation = self._accept_model_removal(
+                session,
+                actor=actor,
+                request_key=request_key,
+                selector=model_content_sha256,
+                model_content_sha256=model_content_sha256,
+                selected_sets=None,
+                verify=verify,
+            )
+            operation_id = operation.id
+        return self.get_operation(operation_id)
+
     def _cancel_superseded_downloads(
         self,
         session: Session,
@@ -2740,6 +2771,7 @@ class ModelCacheService:
         removal_fence: str | None = None,
         gates_reserved: bool = False,
         expected_scope: ModelCacheRemovalScope | None = None,
+        verify: Callable[[Session, tuple[str, ...]], None] | None = None,
     ) -> ModelCacheOperation:
         existing = session.scalar(
             select(ModelCacheOperation).where(
@@ -2823,6 +2855,10 @@ class ModelCacheService:
                 error.detail,
                 recovery="retry" if error.retryable else None,
             ) from error
+        if verify is not None:
+            # An unattended removal re-proves the sets unused with every gate
+            # held; raising rolls the reservation back with this transaction.
+            verify(session, scope.selected_sets)
 
         external_memberships = set(
             session.scalars(

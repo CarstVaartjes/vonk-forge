@@ -375,6 +375,7 @@ def assemble_production_worker(
         TelemetryMaintenance,
         TelemetryMaintenanceCadence,
     )
+    from .unused_storage_collection import UnusedStorageCollector
 
     if model_cache is not None:
         if agent_artifact_root is None:
@@ -529,8 +530,17 @@ def assemble_production_worker(
         )
         worker_background_services += (image_production.scheduler.tick,)
         worker_background_closers += (image_production.close,)
-    # Removes superseded catalog revisions nothing uses any more, hourly.
+    # Removes unused installations, image receipts and cached models, then
+    # superseded catalog revisions nothing uses any more, each hourly. Storage
+    # goes first: it is what lets the revision collector release a revision.
     worker_background_services += (
+        UnusedStorageCollector(
+            sessions,
+            clock=clock,
+            lifecycle=lifecycle,
+            image_cache_root=image_cache_root,
+            model_cache=model_cache,
+        ).tick,
         CatalogRevisionCollector(sessions, clock=clock).tick,
     )
     telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)

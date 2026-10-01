@@ -139,6 +139,36 @@ complete only after verification; receipt ordering follows the manifest even
 when transfers finish out of order. A failed or cancelled download stops the
 remaining transfers and retains their on-disk checkpoints.
 
+## Unused storage is removed automatically
+
+Once an hour the worker removes three kinds of storage that nothing uses, each
+of which can be fetched again on the next load:
+
+- **Spark installations** (state `installed`) that no saved profile points to
+  and nothing runs. This is a real uninstall on the Sparks, queued like
+  `vonkctl recipe uninstall`; its model files go with it unless another
+  installation on that Spark needs them. It takes no new workload intent, so it
+  cancels no other order and never disturbs recovery of a running workload.
+- **Runtime image receipts** in the NAS `image-cache` that no current recipe
+  revision authorizes. The hourly image store collector then reclaims the blobs
+  nothing else names.
+- **Cached model files** that no current recipe revision needs, through the
+  same durable, fenced removal as `vonkctl model remove`.
+
+Nothing is removed while a saved profile (loaded or not) points to it, a
+workload runs from it, it was used in the last 24 hours (including a recipe
+superseded, a profile edited, or a model or image fetched in that time), or a
+live or recent operation names it. Every removal is proven unused again while
+the Sparks or artifact gates are locked, so a load that starts meanwhile is
+never raced. One item that cannot be removed is kept for the next hour and does
+not stop the others. Each sweep logs one `unused_storage.swept` line with the
+removed counts and why the rest was kept.
+
+A profile's retention (`keep-cached` or `exact`) only decides whether *loading*
+that profile removes installations outside its scope; it never promised to keep
+what no profile points to. A `keep-cached` profile therefore keeps everything
+it points to, and unused leftovers go after the grace period.
+
 ## Credentials and evidence
 
 See [Hugging Face authentication](../model-cache-huggingface-auth.md) for gated
