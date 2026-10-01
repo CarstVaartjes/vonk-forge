@@ -2220,6 +2220,18 @@ fn validate_trusted_metadata(metadata: &fs::Metadata, expected_bytes: u64) -> bo
         && metadata.len() == expected_bytes
 }
 
+/// A completed distribution object is the one trusted copy of a model file
+/// that installations link, so it may carry more than one link and, once a
+/// workload has started from one of those links, the exact read access the
+/// runtime user was granted. Anything else about it is as strict as a partial.
+fn validate_trusted_final_metadata(metadata: &fs::Metadata, expected_bytes: u64) -> bool {
+    metadata.file_type().is_file()
+        && !metadata.file_type().is_symlink()
+        && metadata.uid() == rustix::process::geteuid().as_raw()
+        && matches!(metadata.mode() & 0o777, 0o600 | 0o640)
+        && metadata.len() == expected_bytes
+}
+
 async fn inspect_trusted_final(
     path: &Path,
     expected_bytes: u64,
@@ -2229,7 +2241,7 @@ async fn inspect_trusted_final(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    if !validate_trusted_metadata(&path_metadata, expected_bytes) {
+    if !validate_trusted_final_metadata(&path_metadata, expected_bytes) {
         return Err(ClientError::Protocol);
     }
     let file = tokio::fs::OpenOptions::new()
@@ -2239,7 +2251,8 @@ async fn inspect_trusted_final(
         .await
         .map_err(|_| ClientError::Protocol)?;
     let opened_metadata = file.metadata().await?;
-    if !validate_trusted_metadata(&opened_metadata, expected_bytes)
+    if !validate_trusted_final_metadata(&opened_metadata, expected_bytes)
+        || (opened_metadata.mode() & 0o777 == 0o640 && !crate::oci::exact_runtime_file_acl(&file))
         || opened_metadata.dev() != path_metadata.dev()
         || opened_metadata.ino() != path_metadata.ino()
     {
@@ -3410,6 +3423,72 @@ mod tests {
             Err(ClientError::Protocol)
         ));
         assert_eq!(corrupt_server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_finished_object_installations_link_to_is_still_a_trusted_final_object() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let object = dir.path().join("object");
+        std::fs::write(&object, b"model").unwrap();
+        let set_mode = |mode| {
+            std::fs::set_permissions(&object, std::fs::Permissions::from_mode(mode)).unwrap()
+        };
+        set_mode(0o600);
+
+        // Installations hold hard links to it; that does not make it untrusted.
+        std::fs::hard_link(&object, dir.path().join("installation-link")).unwrap();
+        assert!(
+            super::inspect_trusted_final(&object, 5)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        // Its size is still the identity.
+        assert!(super::inspect_trusted_final(&object, 6).await.is_err());
+        // Group or world access without the runtime user's exact grant is not.
+        for mode in [0o640, 0o644, 0o660, 0o400] {
+            set_mode(mode);
+            assert!(
+                super::inspect_trusted_final(&object, 5).await.is_err(),
+                "mode {mode:o}"
+            );
+        }
+        // The exact runtime read grant an installation's start leaves behind is.
+        let mut acl = 0x0002_u32.to_le_bytes().to_vec();
+        for (tag, permissions, identifier) in [
+            (0x0001_u16, 0o6_u16, u32::MAX),
+            (0x0002, 0o4, 10_001),
+            (0x0004, 0, u32::MAX),
+            (0x0010, 0o4, u32::MAX),
+            (0x0020, 0, u32::MAX),
+        ] {
+            acl.extend_from_slice(&tag.to_le_bytes());
+            acl.extend_from_slice(&permissions.to_le_bytes());
+            acl.extend_from_slice(&identifier.to_le_bytes());
+        }
+        set_mode(0o600);
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&object)
+            .unwrap();
+        rustix::fs::fsetxattr(
+            &file,
+            "system.posix_acl_access",
+            &acl,
+            rustix::fs::XattrFlags::empty(),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::metadata(&object).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        assert!(
+            super::inspect_trusted_final(&object, 5)
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[tokio::test]
