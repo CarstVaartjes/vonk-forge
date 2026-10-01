@@ -369,6 +369,8 @@ class UnusedStorageCollector:
         installations = self._installations(evidence, deadline, kept)
         images = self._image_receipts(evidence, deadline, kept)
         models = self._models(evidence, deadline, kept)
+        if any("sweep budget" in reason for reason in kept):
+            self._due_at = now  # continue on the next worker pass
         if installations or images or models or kept:
             log_event(
                 _LOGGER,
@@ -687,8 +689,10 @@ def _installation_kept(
     stamps = [_utc(installation.updated_at), *nodes.values()]
     stamps.extend(_utc(updated) for _id, _state, updated in runs)
     if newest[0] != installation.recipe_revision_id:
-        stamps.append(newest[1])  # superseded; its grace starts there
-    if evidence.profile_edited is not None:
+        # Superseded: no profile resolves to it, and its grace starts there.
+        stamps.append(newest[1])
+    elif evidence.profile_edited is not None:
+        # An edit may have just dropped the assignment that used it.
         stamps.append(evidence.profile_edited)
     if any(stamp > cutoff for stamp in stamps):
         return "recent use"

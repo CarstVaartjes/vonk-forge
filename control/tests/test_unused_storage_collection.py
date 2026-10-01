@@ -8,6 +8,7 @@ operation names it. A load that starts after the sweep looked is never raced.
 from __future__ import annotations
 
 import os
+import threading
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -16,7 +17,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import Engine, create_engine, event, func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.model_cache import ModelCacheService
@@ -277,22 +279,28 @@ def test_installation_used_in_the_last_day_or_superseded_in_it_is_kept(
     assert sorted(lifecycle.removed) == sorted([recent, superseded_lately])
 
 
-def test_installation_a_recent_profile_edit_restarts_the_grace_period(
+def test_installation_a_recent_profile_edit_restarts_the_grace_period_of_a_current_one(
     world: Catalog,
 ) -> None:
-    """A profile edit may have just dropped the assignment that used it."""
+    """An edit may have just dropped the assignment that used a current
+    installation, but it says nothing about a superseded revision, which no
+    profile resolves to; profiles are edited often, so it must not keep those."""
 
-    head = world.revision("glm", 1, head="active")
-    world.workload(head, run="stopped")
+    old = world.revision("glm", 1)
+    head = world.revision("glm", 2, head="active")
+    current, _ = world.workload(head, run="stopped")
+    superseded, _ = world.workload(old, run="stopped")
     _profile(world, "vonk-forge/other")
     with world.sessions.begin() as session:
         for profile in session.scalars(select(FleetProfile)):
             profile.updated_at = NOW - timedelta(hours=1)
     lifecycle = FakeLifecycle(world.sessions)
 
-    _collector(world, lifecycle).collect()
+    result = _collector(world, lifecycle).collect()
 
-    assert lifecycle.removed == []
+    assert lifecycle.removed == [superseded]
+    assert current not in lifecycle.removed
+    assert _kept(result, "recent use") == 1
 
 
 def test_installation_a_live_operation_names_is_kept(world: Catalog) -> None:
@@ -477,6 +485,25 @@ def test_one_refused_installation_does_not_stop_the_others(world: Catalog) -> No
     assert _kept(result, "refused") == 1
 
 
+def test_a_sweep_that_runs_out_of_budget_continues_on_the_next_pass(
+    world: Catalog,
+) -> None:
+    """Catches waiting a whole interval to finish a sweep the budget cut short."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    world.workload(old, run="stopped")
+    lifecycle = FakeLifecycle(world.sessions)
+    collector = _collector(world, lifecycle, budget_seconds=-1.0)
+
+    assert collector.tick() is False
+    assert lifecycle.removed == []
+
+    collector._budget_seconds = 30.0
+    assert collector.tick() is True
+    assert len(lifecycle.removed) == 1
+
+
 def test_one_sweep_per_interval(world: Catalog) -> None:
     """Catches a sweep on every worker pass."""
 
@@ -494,11 +521,11 @@ def test_one_sweep_per_interval(world: Catalog) -> None:
 # -- the real lifecycle: no new workload intent --------------------------------------
 
 
-def _real_lifecycle(tmp_path: Path, *, nodes: int = 1):
+def _real_lifecycle(tmp_path: Path, *, nodes: int = 1, engine: Engine | None = None):
     from .test_recipe_operations import installed_recipe, setup_services
 
     sessions, service, _queue, mapping_id, build_id, node_ids = setup_services(
-        tmp_path, nodes=nodes
+        tmp_path, nodes=nodes, engine=engine
     )
     installation = installed_recipe(
         service, mapping_id, build_id, node_ids, request_id=str(uuid.uuid4())
@@ -593,6 +620,98 @@ def test_removal_a_guard_refuses_queues_nothing(tmp_path: Path) -> None:
             select(func.count()).select_from(InstallationNode)
         ) == len(nodes)
     assert _ordinals(sessions) == before
+
+
+def test_the_guard_runs_while_the_target_spark_rows_are_locked(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    """Catches a re-check that runs before the Sparks are locked.
+
+    A load accepts its job with the target Spark rows locked ``FOR UPDATE``.
+    While the removal's guard decides, a load must therefore not be able to take
+    them: it is either already visible to the guard or waits for the removal.
+    """
+
+    sessions, service, installation_id, nodes = _real_lifecycle(
+        tmp_path, engine=postgres_engine
+    )
+    before = _ordinals(sessions)
+    deciding, released = threading.Event(), threading.Event()
+    outcome: dict[str, object] = {}
+
+    def guard(_session: Session) -> None:
+        deciding.set()
+        assert released.wait(30)
+
+    def remove() -> None:
+        try:
+            plan = service.preview_uninstall(installation_id)
+            outcome["view"] = service.uninstall(
+                installation_id,
+                plan_digest=plan.plan_digest,
+                actor=ACTOR,
+                request_id=str(uuid.uuid4()),
+                unattended_guard=guard,
+            )
+        except BaseException as error:  # noqa: BLE001 - reported by the test
+            outcome["error"] = error
+
+    worker = threading.Thread(target=remove)
+    worker.start()
+    try:
+        assert deciding.wait(30), outcome
+        with sessions() as load, pytest.raises(OperationalError):
+            load.execute(
+                select(AgentNode.node_id)
+                .where(AgentNode.node_id.in_(nodes))
+                .with_for_update(nowait=True)
+            ).all()
+    finally:
+        released.set()
+        worker.join(30)
+
+    assert "error" not in outcome, outcome
+    with sessions() as session:
+        job = session.scalar(select(Job).where(Job.kind == "recipe.uninstall"))
+        assert job is not None
+        assert job.payload["workload_intent_ordinal"] == before[nodes[0]]
+    assert _ordinals(sessions) == before
+
+
+def test_the_sweep_reads_its_evidence_on_postgres(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    """The sweep's own queries (unions, JSON text search, ordering) run on the
+    production database, not only on SQLite."""
+
+    Base.metadata.create_all(postgres_engine)
+    world = Catalog(postgres_engine)
+    old = world.revision("glm", 1)
+    head = world.revision("glm", 2, head="active")
+    stale, _ = world.workload(old, run="stopped")
+    pointed, _ = world.workload(head, run="stopped")
+    _profile(world, "vonk-forge/glm")
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == [stale]
+    assert pointed not in lifecycle.removed
+
+
+def test_receipt_removal_runs_on_postgres(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    """The gate lock, publication lock and reference scan on the real database."""
+
+    Base.metadata.create_all(postgres_engine)
+    world = Catalog(postgres_engine)
+    path = _receipt(tmp_path, AN_IMAGE)
+
+    result = _collector(world, image_cache_root=tmp_path).collect()
+
+    assert not path.exists()
+    assert result.images == 1
 
 
 # -- image receipts -----------------------------------------------------------------
