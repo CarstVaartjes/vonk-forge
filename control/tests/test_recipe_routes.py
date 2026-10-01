@@ -20,7 +20,9 @@ from vonk_control.fleet_profile_contract import (
 )
 from vonk_control.litellm import LiteLlmGeneration, LiteLlmPolicyError
 from vonk_control.models import (
+    AgentCertificate,
     AgentNode,
+    AgentPresence,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -40,6 +42,7 @@ from vonk_control.operation_api import durable_operation_services
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import (
+    SPARK_SILENT_WITHDRAWAL_SECONDS,
     AtomicRecipeRoutePublisher,
     RecipeRouteError,
     RecipeRouteNotReady,
@@ -1449,6 +1452,7 @@ def test_a_serving_route_outlives_missing_rank_reports(
     service.publish_run(run_id)
 
     clock.now = NOW + timedelta(seconds=301)
+    _agents_reached_the_controller(service, clock.now)
     worker = RecipeOperationWorker(service.sessions, service, clock=clock)
     with caplog.at_level("INFO"):
         worker.tick()
@@ -1541,6 +1545,52 @@ def test_recovered_run_rejoins_candidate_while_another_run_remains_published(
         assert _recipe_run(session, recovered_run).route_state == "published"
 
 
+def _agents_reached_the_controller(service, at: datetime) -> None:
+    with service.sessions.begin() as session:
+        for node in session.query(RunNode):
+            presence = session.get(AgentPresence, node.node_id)
+            if presence is None:
+                serial = f"serial-{node.node_id[-4:]}"
+                if session.get(AgentCertificate, serial) is None:
+                    session.add(
+                        AgentCertificate(
+                            serial=serial,
+                            node_id=node.node_id,
+                            not_before=at - timedelta(days=1),
+                            not_after=at + timedelta(days=1),
+                            fingerprint=f"fingerprint-{serial}",
+                        )
+                    )
+                    session.flush()
+                presence = AgentPresence(
+                    node_id=node.node_id,
+                    certificate_serial=serial,
+                    certificate_fingerprint=f"fingerprint-{serial}",
+                    management_address="192.168.1.10",
+                )
+                session.add(presence)
+            presence.observed_at = at
+
+
+def test_a_route_is_withdrawn_when_its_spark_goes_silent(tmp_path: Path) -> None:
+    """A Spark that stopped reaching the Controller is gone, not late."""
+
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    service.publish_run(run_id)
+    _agents_reached_the_controller(service, NOW)
+
+    clock.now = NOW + timedelta(seconds=SPARK_SILENT_WITHDRAWAL_SECONDS + 1)
+    RecipeOperationWorker(service.sessions, service, clock=clock).tick()
+
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.route_state == "withdrawn"
+        assert run.route_error is not None
+        assert "has not reached the Controller for" in run.route_error
+
+
 def test_worker_keeps_every_serving_route_while_reports_are_missing(
     tmp_path: Path,
 ) -> None:
@@ -1558,6 +1608,7 @@ def test_worker_keeps_every_serving_route_while_reports_are_missing(
     service.publish_run(second_run)
 
     clock.now = NOW + timedelta(seconds=301)
+    _agents_reached_the_controller(service, clock.now)
     RecipeOperationWorker(service.sessions, service, clock=clock).tick()
 
     with service.sessions() as session:

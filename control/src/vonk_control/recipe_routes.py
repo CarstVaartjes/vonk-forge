@@ -32,6 +32,7 @@ from .litellm import (
 )
 from .logging import log_event
 from .models import (
+    AgentPresence,
     CatalogDocumentRevision,
     ClusterMapping,
     Job,
@@ -59,6 +60,9 @@ _ALIAS = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}\Z")
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
+# A serving route is kept while its Sparks keep talking to the Controller,
+# even when their rank reports are missing; a Spark silent this long is gone.
+SPARK_SILENT_WITHDRAWAL_SECONDS = 300
 _LOGGER = logging.getLogger(__name__)
 _SQLITE_ROUTE_PUBLICATION_LOCK = threading.RLock()
 
@@ -1035,6 +1039,24 @@ class RecipeRouteService:
                             "recipe rank readiness evidence is stale", run_id=run.id
                         )
                     age = int((now.astimezone(UTC) - observed).total_seconds())
+                    # A Spark that stopped talking to the Controller at all is
+                    # evidence, not bookkeeping: its endpoint is gone too.
+                    presence = session.get(AgentPresence, node.node_id)
+                    silent = (
+                        None
+                        if presence is None
+                        else int(
+                            (
+                                now.astimezone(UTC) - _aware(presence.observed_at)
+                            ).total_seconds()
+                        )
+                    )
+                    if silent is not None and silent >= SPARK_SILENT_WITHDRAWAL_SECONDS:
+                        raise RecipeRouteError(
+                            f"Spark {node.node_id} has not reached the Controller "
+                            f"for {silent}s",
+                            run_id=run.id,
+                        )
                     retained.append(f"rank {node.rank} evidence is {age}s old")
             self._note_retained(run.id, retained)
             try:
