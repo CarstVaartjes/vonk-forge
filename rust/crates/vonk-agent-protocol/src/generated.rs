@@ -1272,6 +1272,8 @@ pub enum ExecuteContainerRuntimeRequestOperationAction {
     RuntimePreflight,
     #[serde(rename = "image-import")]
     ImageImport,
+    #[serde(rename = "image-pull")]
+    ImagePull,
     #[serde(rename = "image-inspect")]
     ImageInspect,
     #[serde(rename = "run-inspect")]
@@ -1288,6 +1290,7 @@ impl ::std::fmt::Display for ExecuteContainerRuntimeRequestOperationAction {
         match *self {
             Self::RuntimePreflight => f.write_str("runtime-preflight"),
             Self::ImageImport => f.write_str("image-import"),
+            Self::ImagePull => f.write_str("image-pull"),
             Self::ImageInspect => f.write_str("image-inspect"),
             Self::RunInspect => f.write_str("run-inspect"),
             Self::Start => f.write_str("start"),
@@ -1302,6 +1305,7 @@ impl ::std::str::FromStr for ExecuteContainerRuntimeRequestOperationAction {
         match value {
             "runtime-preflight" => Ok(Self::RuntimePreflight),
             "image-import" => Ok(Self::ImageImport),
+            "image-pull" => Ok(Self::ImagePull),
             "image-inspect" => Ok(Self::ImageInspect),
             "run-inspect" => Ok(Self::RunInspect),
             "start" => Ok(Self::Start),
@@ -1613,6 +1617,8 @@ pub enum HostRuntimeGrantRequestAction {
     RuntimePreflight,
     #[serde(rename = "image-import")]
     ImageImport,
+    #[serde(rename = "image-pull")]
+    ImagePull,
     #[serde(rename = "image-inspect")]
     ImageInspect,
     #[serde(rename = "run-inspect")]
@@ -1629,6 +1635,7 @@ impl ::std::fmt::Display for HostRuntimeGrantRequestAction {
         match *self {
             Self::RuntimePreflight => f.write_str("runtime-preflight"),
             Self::ImageImport => f.write_str("image-import"),
+            Self::ImagePull => f.write_str("image-pull"),
             Self::ImageInspect => f.write_str("image-inspect"),
             Self::RunInspect => f.write_str("run-inspect"),
             Self::Start => f.write_str("start"),
@@ -1643,6 +1650,7 @@ impl ::std::str::FromStr for HostRuntimeGrantRequestAction {
         match value {
             "runtime-preflight" => Ok(Self::RuntimePreflight),
             "image-import" => Ok(Self::ImageImport),
+            "image-pull" => Ok(Self::ImagePull),
             "image-inspect" => Ok(Self::ImageInspect),
             "run-inspect" => Ok(Self::RunInspect),
             "start" => Ok(Self::Start),
@@ -1703,6 +1711,8 @@ pub enum HostRuntimeRequestAction {
     RuntimePreflight,
     #[serde(rename = "image-import")]
     ImageImport,
+    #[serde(rename = "image-pull")]
+    ImagePull,
     #[serde(rename = "image-inspect")]
     ImageInspect,
     #[serde(rename = "run-inspect")]
@@ -1719,6 +1729,7 @@ impl ::std::fmt::Display for HostRuntimeRequestAction {
         match *self {
             Self::RuntimePreflight => f.write_str("runtime-preflight"),
             Self::ImageImport => f.write_str("image-import"),
+            Self::ImagePull => f.write_str("image-pull"),
             Self::ImageInspect => f.write_str("image-inspect"),
             Self::RunInspect => f.write_str("run-inspect"),
             Self::Start => f.write_str("start"),
@@ -1733,6 +1744,7 @@ impl ::std::str::FromStr for HostRuntimeRequestAction {
         match value {
             "runtime-preflight" => Ok(Self::RuntimePreflight),
             "image-import" => Ok(Self::ImageImport),
+            "image-pull" => Ok(Self::ImagePull),
             "image-inspect" => Ok(Self::ImageInspect),
             "run-inspect" => Ok(Self::RunInspect),
             "start" => Ok(Self::Start),
@@ -4914,6 +4926,7 @@ impl ExecuteContainerRuntimeRequestOperationAction {
         match self {
             Self::RuntimePreflight => "runtime-preflight",
             Self::ImageImport => "image-import",
+            Self::ImagePull => "image-pull",
             Self::ImageInspect => "image-inspect",
             Self::RunInspect => "run-inspect",
             Self::Start => "start",
@@ -5284,6 +5297,7 @@ impl HostRuntimeGrantRequestAction {
         match self {
             Self::RuntimePreflight => "runtime-preflight",
             Self::ImageImport => "image-import",
+            Self::ImagePull => "image-pull",
             Self::ImageInspect => "image-inspect",
             Self::RunInspect => "run-inspect",
             Self::Start => "start",
@@ -5353,6 +5367,7 @@ impl HostRuntimeRequestAction {
         match self {
             Self::RuntimePreflight => "runtime-preflight",
             Self::ImageImport => "image-import",
+            Self::ImagePull => "image-pull",
             Self::ImageInspect => "image-inspect",
             Self::RunInspect => "run-inspect",
             Self::Start => "start",

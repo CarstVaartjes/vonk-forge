@@ -1303,3 +1303,201 @@ def test_caddy_serves_the_file_the_controller_names_and_nothing_else(
         subprocess.run(
             ["docker", "rm", "-f", container], capture_output=True, check=False
         )
+
+
+def _runtime_image_store_snippet() -> str:
+    text = (ROOT / "deploy/compose/Caddyfile").read_text()
+    match = re.search(
+        r"^\(runtime_image_store\) \{\n.*?^\}\n", text, re.DOTALL | re.MULTILINE
+    )
+    assert match is not None
+    return match.group(0)
+
+
+def _oci_layout(store: Path) -> tuple[str, str]:
+    """A one-layer arm64 runtime image, written as the Controller stores it."""
+    import gzip
+    import hashlib
+    import io
+    import tarfile
+
+    def blob(payload: bytes) -> str:
+        digest = hashlib.sha256(payload).hexdigest()
+        (store / "blobs/sha256").mkdir(parents=True, exist_ok=True)
+        (store / "blobs/sha256" / digest).write_bytes(payload)
+        return digest
+
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as layer:
+        content = b"vonk runtime layer\n"
+        member = tarfile.TarInfo("vonk.txt")
+        member.size = len(content)
+        layer.addfile(member, io.BytesIO(content))
+    diff_id = hashlib.sha256(raw.getvalue()).hexdigest()
+    compressed = gzip.compress(raw.getvalue(), mtime=0)
+    layer_digest = blob(compressed)
+    config = json.dumps(
+        {
+            "architecture": "arm64",
+            "os": "linux",
+            "config": {
+                "User": "10001:10001",
+                "Labels": {"ai.vonkforge.runtime-interface": "v1"},
+            },
+            "rootfs": {"type": "layers", "diff_ids": [f"sha256:{diff_id}"]},
+        },
+        sort_keys=True,
+    ).encode()
+    config_digest = blob(config)
+    manifest = json.dumps(
+        {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "digest": f"sha256:{config_digest}",
+                "size": len(config),
+            },
+            "layers": [
+                {
+                    "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                    "digest": f"sha256:{layer_digest}",
+                    "size": len(compressed),
+                }
+            ],
+        },
+        sort_keys=True,
+    ).encode()
+    return blob(manifest), config_digest
+
+
+@pytest.mark.slow(60)
+def test_docker_pulls_a_pinned_runtime_image_from_the_digest_only_store(
+    tmp_path: Path,
+) -> None:
+    """The real store routes in front of an OCI layout, pulled by Docker.
+
+    Catches: a manifest served with a type Docker rejects, a missing
+    Docker-Content-Digest, a route that exposes anything but digest reads,
+    and a request without an agent identity reaching the store.
+    """
+    import http.client
+    import time
+
+    _require_docker_runtime()
+    state = tmp_path / "state"
+    store = state / "agent-artifacts/image-cache/oci"
+    manifest, config = _oci_layout(store)
+    (state / "agent-artifacts/image-cache/secret").write_bytes(b"controller state")
+    caddyfile = tmp_path / "Caddyfile"
+    caddyfile.write_text(
+        "{\n\tadmin off\n\tauto_https off\n}\n"
+        + _runtime_image_store_snippet()
+        # The agent site maps the verified mTLS subject; here the listener on
+        # 8080 is an identified agent and 8081 is not.
+        + ':8080 {\n\tmap {host} {vonk_agent_node} {\n\t\tdefault "spk_'
+        + "0" * 32
+        + '"\n\t}\n\timport runtime_image_store\n\trespond 404\n}\n'
+        + ':8081 {\n\tmap {host} {vonk_agent_node} {\n\t\tdefault ""\n\t}\n'
+        + "\timport runtime_image_store\n\trespond 404\n}\n"
+    )
+    container = f"vonk-image-store-{os.getpid()}"
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            container,
+            "-p",
+            "127.0.0.1::8080",
+            "-p",
+            "127.0.0.1::8081",
+            "-v",
+            f"{caddyfile}:/etc/caddy/Caddyfile:ro",
+            "-v",
+            f"{state}:/srv/state:ro",
+            DEV_CADDY_IMAGE,
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    def port(inner: int) -> int:
+        return int(
+            subprocess.run(
+                ["docker", "port", container, f"{inner}/tcp"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            .stdout.splitlines()[0]
+            .rsplit(":", 1)[1]
+        )
+
+    def request(listener: int, method: str, path: str) -> http.client.HTTPResponse:
+        for _ in range(50):
+            try:
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1", listener, timeout=5
+                )
+                connection.request(method, path)
+                response = connection.getresponse()
+                response.body = response.read()  # type: ignore[attr-defined]
+                return response
+            except (ConnectionError, http.client.RemoteDisconnected):
+                time.sleep(0.1)
+        raise AssertionError("caddy did not start")
+
+    reference = f"127.0.0.1:{port(8080)}/vonk/runtime@sha256:{manifest}"
+    try:
+        identified, anonymous = port(8080), port(8081)
+        head = request(
+            identified, "HEAD", f"/v2/vonk/runtime/manifests/sha256:{manifest}"
+        )
+        assert head.status == 200
+        assert head.getheader("Docker-Content-Digest") == f"sha256:{manifest}"
+        assert head.getheader("Content-Type") == (
+            "application/vnd.oci.image.manifest.v1+json"
+        )
+        for refused in (
+            "/v2/_catalog",
+            "/v2/vonk/runtime/manifests/latest",
+            "/v2/vonk/runtime/tags/list",
+            f"/v2/vonk/runtime/blobs/sha256:{'f' * 64}",
+            "/v2/vonk/runtime/blobs/sha256:../secret",
+        ):
+            assert request(identified, "GET", refused).status == 404, refused
+        assert request(identified, "PUT", "/v2/").status == 404
+        for path in (
+            "/v2/",
+            f"/v2/vonk/runtime/manifests/sha256:{manifest}",
+            f"/v2/vonk/runtime/blobs/sha256:{config}",
+        ):
+            assert request(anonymous, "GET", path).status == 404, path
+
+        subprocess.run(
+            ["docker", "pull", "--quiet", "--platform", "linux/arm64", reference],
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
+        inspected = subprocess.run(
+            ["docker", "image", "inspect", "--format", "{{.Id}}", reference],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert inspected in {f"sha256:{config}", f"sha256:{manifest}"}, (
+            inspected,
+            config,
+            manifest,
+        )
+    finally:
+        subprocess.run(
+            ["docker", "image", "rm", reference], capture_output=True, check=False
+        )
+        subprocess.run(
+            ["docker", "rm", "-f", container], capture_output=True, check=False
+        )

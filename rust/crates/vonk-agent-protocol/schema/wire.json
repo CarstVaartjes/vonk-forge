@@ -1950,6 +1950,7 @@
           "enum": [
             "runtime-preflight",
             "image-import",
+            "image-pull",
             "image-inspect",
             "run-inspect",
             "start",
@@ -2494,6 +2495,7 @@
           "enum": [
             "runtime-preflight",
             "image-import",
+            "image-pull",
             "image-inspect",
             "run-inspect",
             "start",
@@ -2640,6 +2642,7 @@
           "enum": [
             "runtime-preflight",
             "image-import",
+            "image-pull",
             "image-inspect",
             "run-inspect",
             "start",

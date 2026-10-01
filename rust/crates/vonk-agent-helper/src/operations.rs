@@ -35,6 +35,8 @@ use crate::protocol::{ContainerRuntimeAction, HostOperation, artifact_signing_by
 
 const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
+/// A first pull of a large runtime image over the Spark's link.
+const RUNTIME_IMAGE_PULL_TIMEOUT: Duration = Duration::from_secs(3 * 60 * 60);
 const MAX_COMMAND_OUTPUT_BYTES: u64 = 4096;
 // Matches the canonical CompiledEnvironmentEntry UTF-8 byte bound.
 const MAX_ENVIRONMENT_VALUE_BYTES: usize = 65536;
@@ -1146,6 +1148,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let expected_action = match action {
             ContainerRuntimeAction::RuntimePreflight => HostRuntimeAction::RuntimePreflight,
             ContainerRuntimeAction::ImageImport => HostRuntimeAction::ImageImport,
+            ContainerRuntimeAction::ImagePull => HostRuntimeAction::ImagePull,
             ContainerRuntimeAction::ImageInspect => HostRuntimeAction::ImageInspect,
             ContainerRuntimeAction::RunInspect => HostRuntimeAction::RunInspect,
             ContainerRuntimeAction::Start => HostRuntimeAction::Start,
@@ -1178,6 +1181,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
             }
             HostRuntimeAction::ImageImport => self
                 .runtime_image_import(&request.arguments)
+                .map(|()| RuntimeRequestOutcome { exit_code: None }),
+            HostRuntimeAction::ImagePull => self
+                .runtime_image_pull(&request.arguments)
                 .map(|()| RuntimeRequestOutcome { exit_code: None }),
             HostRuntimeAction::ImageInspect => self
                 .runtime_image_inspect(&request.arguments)
@@ -2159,6 +2165,91 @@ impl<R: CommandRunner> OperationExecutor<R> {
             }
             other => other,
         })
+    }
+
+    /// Pull a pinned runtime image from the Controller's layered image store.
+    ///
+    /// The agent serves the store on a loopback port for the duration of the
+    /// pull (Docker treats loopback registries as plain HTTP), so Docker skips
+    /// every layer it already holds and fetches only the new ones. The
+    /// Controller binds the manifest digest and its config digest in the
+    /// signed request; Docker verifies each blob against the manifest while
+    /// pulling, and the helper requires the pulled image to be exactly that
+    /// config with the platform runtime identity before tagging it locally.
+    fn runtime_image_pull(&self, arguments: &[String]) -> Result<(), OperationError> {
+        let [registry, manifest_digest, config_digest, image_reference] = arguments else {
+            return Err(OperationError::InvalidOperation);
+        };
+        let (local_image, embedded_digest) = parse_local_image_reference(image_reference)?;
+        if !valid_loopback_registry(registry)
+            || !valid_oci_digest(manifest_digest)
+            || !valid_oci_digest(config_digest)
+            || embedded_digest != *manifest_digest
+            || local_image
+                != format!(
+                    "localhost/vonk/compiled-runtime-{}",
+                    &manifest_digest["sha256:".len()..]
+                )
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        // Docker's classic image store names an image by its config digest;
+        // the containerd image store names it by its manifest digest.
+        let runtime_identity_valid = |inspected: &RuntimeImageInspection| {
+            (inspected.0 == *config_digest || inspected.0 == *manifest_digest)
+                && inspected.1 == "linux"
+                && inspected.2 == "arm64"
+                && inspected.3 == "v1"
+                && numeric_non_root_user(&inspected.4)
+        };
+        // An earlier pull of the same pinned image is reused as is.
+        if let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)?
+            && runtime_identity_valid(&inspected)
+        {
+            return Ok(());
+        }
+        let remote = format!("{registry}/vonk/runtime@{manifest_digest}");
+        let pulled = self
+            .run_docker_with_timeout(
+                &[
+                    "pull".to_owned(),
+                    "--quiet".to_owned(),
+                    "--platform".to_owned(),
+                    "linux/arm64".to_owned(),
+                    remote.clone(),
+                ],
+                RUNTIME_IMAGE_PULL_TIMEOUT,
+            )
+            .map_err(|error| match error {
+                OperationError::CommandFailed => OperationError::RuntimeImageLoadFailed,
+                other => other,
+            })?;
+        if !pulled.success {
+            return Err(OperationError::RuntimeImageLoadFailed);
+        }
+        let inspected = self
+            .inspect_runtime_image(&remote)
+            .map_err(|error| match error {
+                OperationError::CommandFailed | OperationError::InvalidArtifact => {
+                    OperationError::RuntimeImageInspectFailed
+                }
+                other => other,
+            })?;
+        if !runtime_identity_valid(&inspected) {
+            return Err(OperationError::RuntimeImageIdentityInvalid);
+        }
+        let tagged = self.run_docker(&["tag".to_owned(), remote.clone(), local_image.clone()])?;
+        if !tagged.success {
+            return Err(OperationError::RuntimeImageInspectFailed);
+        }
+        // The loopback reference names an ephemeral port; drop it. The image
+        // stays under its local tag, and Docker's layer metadata keeps later
+        // pulls incremental.
+        let _ = self.run_docker(&["image".to_owned(), "rm".to_owned(), remote]);
+        match self.inspect_runtime_image_if_present(&local_image)? {
+            Some(inspected) if runtime_identity_valid(&inspected) => Ok(()),
+            _ => Err(OperationError::RuntimeImageIdentityInvalid),
+        }
     }
 
     fn runtime_image_inspect(&self, arguments: &[String]) -> Result<(), OperationError> {
@@ -4722,6 +4813,18 @@ fn parse_local_image_reference(value: &str) -> Result<(String, String), Operatio
     Ok((image.to_owned(), digest.to_owned()))
 }
 
+/// Only the agent's loopback forwarder may serve an image pull.
+fn valid_loopback_registry(value: &str) -> bool {
+    value
+        .strip_prefix("127.0.0.1:")
+        .and_then(|port| {
+            (!port.starts_with('0') && port.bytes().all(|byte| byte.is_ascii_digit()))
+                .then(|| port.parse::<u16>().ok())
+                .flatten()
+        })
+        .is_some_and(|port| port >= 1024)
+}
+
 fn valid_oci_digest(value: &str) -> bool {
     value
         .strip_prefix("sha256:")
@@ -5122,6 +5225,211 @@ mod tests {
                 exit_code: Some(if digest_lookup { 1 } else { 0 }),
             })
         }
+    }
+
+    /// Docker as seen by an image pull: `image` holds what the daemon has
+    /// under each reference, and every call is recorded.
+    #[derive(Clone, Default)]
+    struct PullRunner {
+        images: Arc<Mutex<std::collections::BTreeMap<String, String>>>,
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+        pulled_config: String,
+        pull_fails: bool,
+    }
+
+    impl CommandRunner for PullRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            assert_eq!(executable, Path::new("/usr/bin/docker"));
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            let mut images = self.images.lock().unwrap();
+            let ok = |stdout: Vec<u8>| CommandOutput {
+                success: true,
+                stdout,
+                stderr: Vec::new(),
+                exit_code: Some(0),
+            };
+            let missing = CommandOutput {
+                success: false,
+                stdout: b"\n".to_vec(),
+                stderr: Vec::new(),
+                exit_code: Some(1),
+            };
+            let words = arguments.iter().map(String::as_str).collect::<Vec<_>>();
+            Ok(match words.as_slice() {
+                ["pull", .., reference] if self.pull_fails => {
+                    let _ = reference;
+                    missing
+                }
+                ["pull", .., reference] => {
+                    images.insert((*reference).to_owned(), self.pulled_config.clone());
+                    ok(Vec::new())
+                }
+                ["image", "inspect", _, _, reference] => match images.get(*reference) {
+                    Some(config) => {
+                        ok(format!("{config}\tlinux\tarm64\tv1\t10001:10001\n").into_bytes())
+                    }
+                    None => missing,
+                },
+                ["tag", source, target] => {
+                    let config = images.get(*source).cloned().expect("tag source exists");
+                    images.insert((*target).to_owned(), config);
+                    ok(Vec::new())
+                }
+                ["image", "rm", reference] => {
+                    images.remove(*reference);
+                    ok(Vec::new())
+                }
+                other => panic!("unexpected docker call {other:?}"),
+            })
+        }
+    }
+
+    fn pull_arguments(manifest: &str, config: &str) -> Vec<String> {
+        vec![
+            "127.0.0.1:41000".to_owned(),
+            format!("sha256:{manifest}"),
+            format!("sha256:{config}"),
+            format!("localhost/vonk/compiled-runtime-{manifest}@sha256:{manifest}"),
+        ]
+    }
+
+    #[test]
+    fn image_pull_tags_the_pinned_image_and_reuses_it_later() {
+        let temp = tempfile::tempdir().unwrap();
+        let (manifest, config) = ("a".repeat(64), "c".repeat(64));
+        let runner = PullRunner {
+            pulled_config: format!("sha256:{config}"),
+            ..PullRunner::default()
+        };
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            runner.clone(),
+            None,
+        )
+        .unwrap();
+
+        executor
+            .runtime_image_pull(&pull_arguments(&manifest, &config))
+            .unwrap();
+        let local = format!("localhost/vonk/compiled-runtime-{manifest}");
+        let remote = format!("127.0.0.1:41000/vonk/runtime@sha256:{manifest}");
+        {
+            let images = runner.images.lock().unwrap();
+            assert_eq!(images.get(&local), Some(&format!("sha256:{config}")));
+            assert!(
+                !images.contains_key(&remote),
+                "the loopback reference is dropped"
+            );
+        }
+        let pulls = |runner: &PullRunner| {
+            runner
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|call| call.first().map(String::as_str) == Some("pull"))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            pulls(&runner),
+            vec![vec![
+                "pull".to_owned(),
+                "--quiet".to_owned(),
+                "--platform".to_owned(),
+                "linux/arm64".to_owned(),
+                remote,
+            ]]
+        );
+
+        executor
+            .runtime_image_pull(&pull_arguments(&manifest, &config))
+            .unwrap();
+        assert_eq!(
+            pulls(&runner).len(),
+            1,
+            "a pulled image is not pulled again"
+        );
+    }
+
+    #[test]
+    fn image_pull_accepts_the_containerd_store_naming_the_image_by_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let (manifest, config) = ("a".repeat(64), "c".repeat(64));
+        let runner = PullRunner {
+            pulled_config: format!("sha256:{manifest}"),
+            ..PullRunner::default()
+        };
+        let executor =
+            OperationExecutor::new(ManagedRoots::under(temp.path()), &[0; 32], runner, None)
+                .unwrap();
+        executor
+            .runtime_image_pull(&pull_arguments(&manifest, &config))
+            .unwrap();
+    }
+
+    #[test]
+    fn image_pull_refuses_another_image_a_failed_pull_and_foreign_registries() {
+        let temp = tempfile::tempdir().unwrap();
+        let (manifest, config) = ("a".repeat(64), "c".repeat(64));
+        let wrong = PullRunner {
+            pulled_config: format!("sha256:{}", "d".repeat(64)),
+            ..PullRunner::default()
+        };
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            wrong.clone(),
+            None,
+        )
+        .unwrap();
+        assert!(matches!(
+            executor.runtime_image_pull(&pull_arguments(&manifest, &config)),
+            Err(OperationError::RuntimeImageIdentityInvalid)
+        ));
+        assert!(
+            !wrong
+                .images
+                .lock()
+                .unwrap()
+                .contains_key(&format!("localhost/vonk/compiled-runtime-{manifest}"))
+        );
+
+        let failing = PullRunner {
+            pull_fails: true,
+            ..PullRunner::default()
+        };
+        let executor =
+            OperationExecutor::new(ManagedRoots::under(temp.path()), &[0; 32], failing, None)
+                .unwrap();
+        assert!(matches!(
+            executor.runtime_image_pull(&pull_arguments(&manifest, &config)),
+            Err(OperationError::RuntimeImageLoadFailed)
+        ));
+
+        for registry in [
+            "ghcr.io",
+            "10.0.0.2:5000",
+            "127.0.0.1:80",
+            "127.0.0.1:041000",
+        ] {
+            let mut arguments = pull_arguments(&manifest, &config);
+            arguments[0] = registry.to_owned();
+            assert!(matches!(
+                executor.runtime_image_pull(&arguments),
+                Err(OperationError::InvalidOperation)
+            ));
+        }
+        let mut other_tag = pull_arguments(&manifest, &config);
+        other_tag[3] = format!(
+            "localhost/vonk/compiled-runtime-{}@sha256:{manifest}",
+            "b".repeat(64)
+        );
+        assert!(matches!(
+            executor.runtime_image_pull(&other_tag),
+            Err(OperationError::InvalidOperation)
+        ));
     }
 
     #[derive(Clone, Default)]
