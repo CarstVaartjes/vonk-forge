@@ -444,12 +444,15 @@ struct DistributionProgressTracker<F> {
 }
 
 impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
+    /// Report one object's byte count. The operation-wide phase is always
+    /// "copying": objects finish in any order while others are still moving,
+    /// so a per-object step must not become the phase the Controller shows for
+    /// the whole transfer. Nothing here re-reads or re-hashes content.
     fn report(
         &mut self,
         index: usize,
         object: &vonk_agent_protocol::DistributionObject,
         bytes: u64,
-        phase: &'static str,
         completed: bool,
     ) {
         // Retried ranges and verification can report the same offset again.
@@ -458,7 +461,7 @@ impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
         self.object_bytes[index] = self.object_bytes[index].max(bytes);
         self.completed_items += u64::from(completed);
         (self.callback)(DistributionProgress {
-            phase,
+            phase: "copying",
             completed_items: self.completed_items,
             total_items: self.object_bytes.len() as u64,
             object_sha256: object.sha256.clone(),
@@ -1197,11 +1200,11 @@ impl AgentHttpClient {
                         object.bytes,
                         &path,
                         managed_root,
-                        |bytes, phase| {
+                        |bytes, _step| {
                             tracker
                                 .lock()
                                 .expect("distribution progress lock")
-                                .report(index, object, bytes, phase, false);
+                                .report(index, object, bytes, false);
                         },
                     )
                     .await?;
@@ -1209,7 +1212,6 @@ impl AgentHttpClient {
                         index,
                         object,
                         object.bytes,
-                        "verifying",
                         true,
                     );
                     Ok::<_, ClientError>((index, path))
@@ -1370,8 +1372,9 @@ impl AgentHttpClient {
         // Bytes came over the assignment-bound mTLS channel from our own
         // Controller, so size and custody are checked here and the content is
         // not re-hashed. The digest names the object; ingress hashing happens
-        // once, where the Controller's cache first receives the bytes.
-        progress(expected_bytes, "verifying");
+        // once, where the Controller's cache first receives the bytes. The
+        // object is flushed and about to be renamed into place.
+        progress(expected_bytes, "finalizing");
         let before_rename = tokio::fs::symlink_metadata(&partial).await?;
         if !same_file_metadata(&synced_metadata, &before_rename) {
             return Err(ClientError::Protocol);
@@ -3189,8 +3192,9 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(snapshots.iter().any(|item| item.phase == "copying"));
-        assert!(snapshots.iter().any(|item| item.phase == "verifying"));
+        // One operation-wide phase for the whole transfer: a per-object step
+        // must not make it flip while other objects are still moving.
+        assert!(snapshots.iter().all(|item| item.phase == "copying"));
         assert!(
             snapshots
                 .windows(2)
@@ -3466,7 +3470,7 @@ mod tests {
                 &destination,
                 root.path(),
                 |_, phase| {
-                    if phase == "verifying" && !swapped {
+                    if phase == "finalizing" && !swapped {
                         std::fs::write(&replacement, &corrupt).unwrap();
                         std::fs::set_permissions(
                             &replacement,
@@ -3596,7 +3600,7 @@ mod tests {
                 .contains("range: bytes=5-")
         );
         assert!(updates.windows(2).all(|pair| pair[0].0 <= pair[1].0));
-        assert_eq!(updates.last(), Some(&(model.len() as u64, "verifying")));
+        assert_eq!(updates.last(), Some(&(model.len() as u64, "finalizing")));
     }
 
     #[tokio::test]
