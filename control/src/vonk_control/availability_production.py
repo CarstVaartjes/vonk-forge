@@ -540,6 +540,7 @@ def build_recipe_image_availability(
         attempted_candidates: set[str] = set()
         # Why each Spark was passed over, so a wait names its causes.
         skipped: dict[str, tuple[str, str]] = {}
+        prebuilt_unused: str | None = None
         if not isinstance(builder_node_id, str):
             # Read the parent and choose a candidate in a short transaction.
             # The candidate is locked again only for final persistence, after
@@ -644,6 +645,9 @@ def build_recipe_image_availability(
                 code = str(getattr(error, "code", ""))
                 if code in _BUILDER_ADMISSION_CODES:
                     skipped[candidate_id] = (code, str(error)[:200])
+                    prebuilt_unused = (
+                        getattr(error, "prebuilt_unused", None) or prebuilt_unused
+                    )
                     attempted_candidates.add(candidate_id)
                     selected_candidate = next(
                         (
@@ -795,7 +799,7 @@ def build_recipe_image_availability(
         if builder_node_id is None:
             # A resolved plan always carries the builder that produced it, so
             # without one the operation can only wait for capacity.
-            raise _capacity_wait(skipped, candidate_ids)
+            raise _capacity_wait(skipped, candidate_ids, prebuilt_unused)
         if selected_plan is None:
             try:
                 prepared = recipe_builds.prepare_plan(
@@ -1025,9 +1029,15 @@ def _build_dependency_error(error: BuildConsumerError) -> RecipeImageAvailabilit
 
 
 def _capacity_wait(
-    skipped: Mapping[str, tuple[str, str]], candidate_ids: tuple[str, ...]
+    skipped: Mapping[str, tuple[str, str]],
+    candidate_ids: tuple[str, ...],
+    prebuilt_unused: str | None = None,
 ) -> RecipeImageAvailabilityError:
-    """A wait for a builder that names every Spark passed over and why."""
+    """A wait for a builder that names every Spark passed over and why.
+
+    When the catalog's prebuilt image could not be used, that comes first:
+    it is why a Spark build was needed at all.
+    """
 
     if not candidate_ids:
         blockers: list[OperationBlocker] = [
@@ -1051,6 +1061,15 @@ def _capacity_wait(
         f"{item.node_ids[0][:12] if item.node_ids else 'fleet'}: {item.code}"
         for item in blockers[:6]
     )
+    if prebuilt_unused is not None:
+        blockers.insert(
+            0,
+            make_blocker(
+                "recipe_image.prebuilt_unused",
+                f"Prebuilt image not used: {prebuilt_unused}"[:512],
+            ),
+        )
+        detail = f"prebuilt image not used ({prebuilt_unused}); {detail}"
     return RecipeImageAvailabilityError(
         "recipe_image.build_capacity_wait",
         detail[:512],
@@ -1065,13 +1084,27 @@ def _build_planning_error(error: Exception) -> RecipeImageAvailabilityError:
     if code in _BUILDER_ADMISSION_CODES:
         # Keep the builder's own reason visible: "full" and "no fresh
         # inventory" need different operator attention.
+        blockers = [make_blocker(code, str(error)[:200])]
+        detail = (
+            f"selected Recipe builder is currently unavailable or full ({code}: "
+            f"{str(error)[:200]})"
+        )
+        prebuilt_unused = getattr(error, "prebuilt_unused", None)
+        if isinstance(prebuilt_unused, str):
+            blockers.insert(
+                0,
+                make_blocker(
+                    "recipe_image.prebuilt_unused",
+                    f"Prebuilt image not used: {prebuilt_unused}"[:512],
+                ),
+            )
+            detail = f"prebuilt image not used ({prebuilt_unused}); {detail}"
         return RecipeImageAvailabilityError(
             "recipe_image.build_capacity_wait",
-            f"selected Recipe builder is currently unavailable or full ({code}: "
-            f"{str(error)[:200]})",
+            detail[:512],
             retryable=True,
             recovery_actions=("resume", "retry"),
-            blockers=[make_blocker(code, str(error)[:200])],
+            blockers=blockers,
         )
     return RecipeImageAvailabilityError(
         code or "recipe_image.build_unavailable", str(error)[:512]
