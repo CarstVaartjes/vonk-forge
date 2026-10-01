@@ -38,7 +38,14 @@ copy that finds the store busy hands its job back and the next tick retries it.
 
 A Spark build remains the fallback: when the catalog pins no image, when the
 image was built from other inputs (for example under a different platform
-adapter), or when this Controller already failed to copy that digest. A failed
+adapter), or when this Controller already failed to copy that digest. The
+fallback is never silent. Every plan records a named decision in the build's
+policy report (`prebuilt_decision`) and logs it: `prebuilt.used`,
+`prebuilt.not_pinned`, `prebuilt.build_key_mismatch` (with the catalog key and
+the Controller key) or `prebuilt.pull_failed_recently`. The image preparation
+operation shows the same code as a blocker beside its build wait, and a wait on
+a prebuilt pull reads "waiting for the Controller to pull prebuilt image ..."
+instead of naming the Spark, which is only the nominal builder of that job. A failed
 copy is visible on the build (`prebuilt_image_pull_failed`) and in the worker
 log, and the next plan builds on a Spark. A newly published digest is tried
 again. A Spark build uploads its Docker archive beside the layout; once the

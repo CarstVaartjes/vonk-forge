@@ -22,6 +22,10 @@ from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
 from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -294,9 +298,11 @@ def test_prebuilt_image_from_other_inputs_falls_back_to_a_spark_build(
     # A Spark build was planned, and it needs Spark inventory.
     assert refused.value.code == "build.inventory_missing"
     # The refusal says why the prebuilt image was passed over, with both keys.
-    reason = refused.value.prebuilt_unused
-    assert reason is not None
-    assert "catalog key " + "0" * 64 in reason and "Controller key " in reason
+    decision = refused.value.prebuilt_unused
+    assert decision is not None
+    assert decision.code == "prebuilt.build_key_mismatch"
+    assert "catalog key " + "0" * 64 in decision.detail
+    assert "Controller key " in decision.detail
 
 
 def test_failed_pull_is_visible_and_the_next_plan_builds_on_a_spark(
@@ -332,7 +338,8 @@ def test_failed_pull_is_visible_and_the_next_plan_builds_on_a_spark(
         builds.prepare_plan(revision_id, NODE, now=NOW)
     assert refused.value.code == "build.inventory_missing"
     assert refused.value.prebuilt_unused is not None
-    assert "manifest unknown" in refused.value.prebuilt_unused
+    assert refused.value.prebuilt_unused.code == "prebuilt.pull_failed_recently"
+    assert "manifest unknown" in refused.value.prebuilt_unused.detail
 
     # A failed pull is not final: after the retry interval the same digest is
     # tried again, so a registry outage heals on its own.
@@ -452,6 +459,10 @@ def test_image_preparation_pulls_the_prebuilt_image_without_a_spark_build(
     assert production.service.run_pending() == 1
     waiting = production.service.get(operation.id)
     assert waiting.state != "succeeded"
+    # The wait says the Controller pulls the image, not that a Spark builds it.
+    blockers = {blocker.code: blocker.detail for blocker in waiting.blockers}
+    assert REFERENCE in blockers["prebuilt.used"]
+    assert "Controller to pull prebuilt image" in blockers["recipe_image.build_wait"]
 
     importer = PrebuiltImageImporter(
         sessions, tmp_path, clock=lambda: now[0], store=_Registry(tmp_path)
@@ -466,6 +477,62 @@ def test_image_preparation_pulls_the_prebuilt_image_without_a_spark_build(
     assert completed.result["image_digest"] == REFERENCE.rsplit("@", 1)[1]
     with sessions() as session:
         assert session.scalars(select(AgentOperation)).all() == []
+    production.close()
+
+
+def test_spark_build_with_capacity_says_why_the_prebuilt_image_was_not_used(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Spark that can build still reports the fallback; it is never silent."""
+
+    sessions, revision_id = _published_library(tmp_path, build_key="0" * 64)
+    now = [NOW]
+    production, _builds = _availability(sessions, tmp_path, monkeypatch, lambda: now[0])
+    # This Spark has room to build, so the fallback plan is admitted and runs.
+    InventoryRepository(sessions, clock=lambda: now[0]).record(
+        InventorySnapshotInput(
+            NODE,
+            NOW,
+            2 * 1024**4,
+            1 * 1024**4,
+            512 * 1024**3,
+            480 * 1024**3,
+            512 * 1024**3,
+            480 * 1024**3,
+            1,
+            False,
+            (
+                "recipe.build.v1",
+                "recipe.build.egress-proxy.v1",
+                "recipe.image.import.v1",
+                "runtime.vonk.v1",
+                "recipe.image.pull.v1",
+            ),
+            memory_pool="separate",
+        )
+    )
+
+    operation = production.service.start(
+        revision_id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-00000000a003",
+    )
+    assert production.service.run_pending() == 1
+
+    with sessions() as session:
+        (build,) = session.scalars(select(RecipeBuild)).all()
+        recorded = require_mapping(build.policy_report["prebuilt_decision"], "decision")
+        assert recorded["code"] == "prebuilt.build_key_mismatch"
+        assert "catalog key " + "0" * 64 in str(recorded["detail"])
+        assert "Controller key " in str(recorded["detail"])
+        assert "prebuilt_image" not in build.policy_report
+        assert len(session.scalars(select(AgentOperation)).all()) == 1
+
+    view = production.service.get(operation.id)
+    blockers = {blocker.code: blocker.detail for blocker in view.blockers}
+    assert "prebuilt.build_key_mismatch" in blockers
+    assert "Controller key " in blockers["prebuilt.build_key_mismatch"]
+    assert "recipe_image.build_wait" in blockers
     production.close()
 
 
@@ -513,7 +580,7 @@ def test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry(
     blockers = {blocker.code: blocker.detail for blocker in view.blockers}
     assert "build.inventory_missing" in blockers
     # The wait names why the prebuilt image was not used.
-    assert "denied" in blockers["recipe_image.prebuilt_unused"]
+    assert "denied" in blockers["prebuilt.pull_failed_recently"]
     production.close()
 
 

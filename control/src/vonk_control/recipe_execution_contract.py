@@ -176,6 +176,13 @@ class StoredPolicyFinding(_PersistedModel):
     detail: str
 
 
+class StoredPrebuiltDecision(_PersistedModel):
+    """Why the plan did or did not use the catalog's prebuilt image."""
+
+    code: str = Field(min_length=1, max_length=64)
+    detail: str = Field(min_length=1, max_length=512)
+
+
 class StoredBuildPolicyReport(_PersistedModel):
     passed: bool
     source_bundle_sha256: Digest
@@ -186,6 +193,9 @@ class StoredBuildPolicyReport(_PersistedModel):
     # Set when the Controller pulls the catalog's prebuilt image instead of
     # the builder building it; the digest above is then that image's digest.
     prebuilt_image: str | None = Field(default=None, min_length=1, max_length=512)
+    # The named reason for that choice, recorded for every plan so a Spark
+    # build is never planned without saying why the prebuilt image was not used.
+    prebuilt_decision: StoredPrebuiltDecision | None = None
 
 
 def _validate_json[ModelT: _PersistedModel](

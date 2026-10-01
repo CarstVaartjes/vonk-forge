@@ -14,7 +14,9 @@ bytes enter: skopeo pulls by digest and checks the manifest and every blob
 against it.  The resulting archive then takes exactly the path a Spark-built
 archive takes (receipt, authorization, distribution), so a prebuilt image and
 a Spark-built image for the same inputs are interchangeable.  A missing,
-mismatched or failed prebuilt image falls back to the Spark build.
+mismatched or failed prebuilt image falls back to the Spark build, and the
+fallback is never silent: every plan carries a :class:`PrebuiltDecision` that
+names why the image was or was not used.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -60,6 +63,29 @@ PREBUILT_BUILD_KIND = "recipe.build.v1"
 # A Controller pull of one image; renewed while the pull runs.
 _CLAIM_LEASE = timedelta(minutes=5)
 _REFERENCE = re.compile(PREBUILT_REFERENCE_PATTERN)
+
+# Why a plan did or did not use the catalog's prebuilt image.  The codes are
+# stable: they are stored with the build, logged, and shown as operation
+# blockers, so an operator can tell a Spark build from an image pull.
+PREBUILT_USED = "prebuilt.used"
+PREBUILT_NOT_PINNED = "prebuilt.not_pinned"
+PREBUILT_KEY_MISMATCH = "prebuilt.build_key_mismatch"
+PREBUILT_RECENT_PULL_FAILURE = "prebuilt.pull_failed_recently"
+
+
+@dataclass(frozen=True, slots=True)
+class PrebuiltDecision:
+    """The named outcome of choosing between a prebuilt image and a Spark build."""
+
+    code: str
+    detail: str
+
+    @property
+    def used(self) -> bool:
+        return self.code == PREBUILT_USED
+
+    def __str__(self) -> str:
+        return f"{self.code}: {self.detail}"
 
 
 def executable_build_key(identity: Mapping[str, object]) -> str:
@@ -722,9 +748,14 @@ def _aware(value: datetime, reference: datetime) -> datetime:
 
 
 __all__ = [
+    "PREBUILT_KEY_MISMATCH",
     "PREBUILT_KEY_SCHEMA_VERSION",
+    "PREBUILT_NOT_PINNED",
     "PREBUILT_PULL_FAILED",
+    "PREBUILT_RECENT_PULL_FAILURE",
     "PREBUILT_RETRY_AFTER",
+    "PREBUILT_USED",
+    "PrebuiltDecision",
     "PrebuiltImage",
     "PrebuiltImageImporter",
     "executable_build_key",

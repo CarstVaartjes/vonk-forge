@@ -44,6 +44,7 @@ from .models import (
     RecipeBuild,
 )
 from .operation_blockers import OperationBlocker, make_blocker
+from .prebuilt_images import PrebuiltDecision
 from .recipe_availability_intent import RecipeBuildDependency
 from .recipe_build_cancellation import BuildConsumerError, lock_build_dependency
 from .recipe_builds import (
@@ -540,7 +541,7 @@ def build_recipe_image_availability(
         attempted_candidates: set[str] = set()
         # Why each Spark was passed over, so a wait names its causes.
         skipped: dict[str, tuple[str, str]] = {}
-        prebuilt_unused: str | None = None
+        prebuilt_unused: PrebuiltDecision | None = None
         if not isinstance(builder_node_id, str):
             # Read the parent and choose a candidate in a short transaction.
             # The candidate is locked again only for final persistence, after
@@ -663,6 +664,11 @@ def build_recipe_image_availability(
                     code or "recipe_image.build_unavailable",
                     str(error)[:512],
                 ) from error
+            # Admission can still refuse the plan when it is persisted; the
+            # wait then names why this was a Spark build at all.
+            planned_decision = _recorded_decision(prepared.policy_report)
+            if planned_decision is not None and not planned_decision.used:
+                prebuilt_unused = planned_decision
             with sessions.begin() as session:
                 try:
                     acquire_admission_keys(session, (node_admission_key(candidate_id),))
@@ -1028,10 +1034,20 @@ def _build_dependency_error(error: BuildConsumerError) -> RecipeImageAvailabilit
     )
 
 
+def _prebuilt_blocker(decision: PrebuiltDecision) -> OperationBlocker:
+    """The named reason a plan did or did not use the catalog's prebuilt image."""
+
+    return make_blocker(
+        decision.code,
+        decision.detail,
+        severity="info" if decision.used else "warning",
+    )
+
+
 def _capacity_wait(
     skipped: Mapping[str, tuple[str, str]],
     candidate_ids: tuple[str, ...],
-    prebuilt_unused: str | None = None,
+    prebuilt_unused: PrebuiltDecision | None = None,
 ) -> RecipeImageAvailabilityError:
     """A wait for a builder that names every Spark passed over and why.
 
@@ -1062,13 +1078,7 @@ def _capacity_wait(
         for item in blockers[:6]
     )
     if prebuilt_unused is not None:
-        blockers.insert(
-            0,
-            make_blocker(
-                "recipe_image.prebuilt_unused",
-                f"Prebuilt image not used: {prebuilt_unused}"[:512],
-            ),
-        )
+        blockers.insert(0, _prebuilt_blocker(prebuilt_unused))
         detail = f"prebuilt image not used ({prebuilt_unused}); {detail}"
     return RecipeImageAvailabilityError(
         "recipe_image.build_capacity_wait",
@@ -1090,14 +1100,8 @@ def _build_planning_error(error: Exception) -> RecipeImageAvailabilityError:
             f"{str(error)[:200]})"
         )
         prebuilt_unused = getattr(error, "prebuilt_unused", None)
-        if isinstance(prebuilt_unused, str):
-            blockers.insert(
-                0,
-                make_blocker(
-                    "recipe_image.prebuilt_unused",
-                    f"Prebuilt image not used: {prebuilt_unused}"[:512],
-                ),
-            )
+        if isinstance(prebuilt_unused, PrebuiltDecision):
+            blockers.insert(0, _prebuilt_blocker(prebuilt_unused))
             detail = f"prebuilt image not used ({prebuilt_unused}); {detail}"
         return RecipeImageAvailabilityError(
             "recipe_image.build_capacity_wait",
@@ -1109,6 +1113,33 @@ def _build_planning_error(error: Exception) -> RecipeImageAvailabilityError:
     return RecipeImageAvailabilityError(
         code or "recipe_image.build_unavailable", str(error)[:512]
     )
+
+
+def _recorded_decision(policy: object) -> PrebuiltDecision | None:
+    try:
+        stored = parse_stored_build_policy(policy).prebuilt_decision
+    except RecipeExecutionContractError:
+        return None
+    return None if stored is None else PrebuiltDecision(stored.code, stored.detail)
+
+
+def _prebuilt_choice(
+    session: Session, build_id: str
+) -> tuple[PrebuiltDecision | None, str | None]:
+    """The prebuilt decision a build was planned with, and its image if used.
+
+    Builds planned before decisions were recorded have none: they show the
+    wait without one rather than a guess.
+    """
+
+    build = session.get(RecipeBuild, build_id)
+    if build is None:
+        return None, None
+    try:
+        policy = parse_stored_build_policy(build.policy_report)
+    except RecipeExecutionContractError:
+        return None, None
+    return _recorded_decision(build.policy_report), policy.prebuilt_image
 
 
 def _observe_build(
@@ -1128,13 +1159,30 @@ def _observe_build(
     if operation.state in {"queued", "running", "waiting-for-operator"}:
         with sessions() as session:
             current_progress = _build_progress(session, operation.id, builder_node_id)
+            decision, prebuilt_image = _prebuilt_choice(session, operation.owner_id)
         if current_progress is not None:
             progress(current_progress.model_dump(mode="json", exclude_none=True))
+        if prebuilt_image is not None:
+            # The Controller pulls the image; no Spark builds anything, even
+            # though the build job names a Spark as its nominal builder.
+            wait = (
+                f"waiting for the Controller to pull prebuilt image {prebuilt_image} "
+                f"(build {operation.id}): {operation.state}"
+            )
+        else:
+            wait = (
+                f"waiting for build {operation.id} on {builder_node_id}: "
+                f"{operation.state}"
+            )
+        blockers = [make_blocker("recipe_image.build_wait", wait)]
+        if decision is not None:
+            blockers.insert(0, _prebuilt_blocker(decision))
         raise RecipeImageAvailabilityError(
             "recipe_image.build_wait",
-            f"waiting for build {operation.id} on {builder_node_id}: {operation.state}",
+            wait,
             retryable=True,
             retry_after_seconds=5,
+            blockers=blockers,
         )
     if operation.state in {"failed", "expired"}:
         aggregate = operation.result
