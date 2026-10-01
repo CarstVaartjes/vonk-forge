@@ -392,7 +392,6 @@ def test_revision_of_an_installed_workload_is_kept_until_the_workload_moves(
         ("failed", "stopped"),
         ("uninstalled", "stopping"),
         ("uninstalled", "lost"),
-        ("uninstalled", "failed"),
     ],
 )
 def test_a_workload_that_may_still_have_effects_keeps_its_revision(
@@ -406,6 +405,38 @@ def test_a_workload_that_may_still_have_effects_keeps_its_revision(
     catalog.collector().collect()
 
     assert catalog.exists(old)
+
+
+def test_a_failed_run_does_not_pin_its_revision_forever(catalog: Catalog) -> None:
+    """Catches treating a failed run as live: nothing ever moves it to stopped."""
+
+    old, _head = _refresh(catalog, "glm")
+    catalog.workload(old, installation="uninstalled", run="failed")
+
+    catalog.collector().collect()
+
+    assert not catalog.exists(old)
+    assert catalog.count(RecipeRun) == 0
+
+
+def test_a_model_digest_named_by_a_head_recipe_document_is_kept_unbound(
+    catalog: Catalog,
+) -> None:
+    """Catches removing a model a pending candidate recipe is about to bind."""
+
+    pinned = catalog.revision("weights", 1, kind="model")
+    catalog.revision("weights", 2, kind="model", head="active")
+    catalog.revision(
+        "glm",
+        1,
+        state="candidate",
+        head="candidate",
+        document={"models": [{"model": {"content_sha256": _digest("weights/1")}}]},
+    )
+
+    catalog.collector().collect()
+
+    assert catalog.exists(pinned)
 
 
 def test_a_head_is_never_removed(catalog: Catalog) -> None:

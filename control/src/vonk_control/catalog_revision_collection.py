@@ -10,19 +10,21 @@ A revision is **kept** while anything still points at it:
 
 * it is the head's active or candidate revision, or the newest revision number
   of its document (so revision numbers never repeat);
-* an installation of it is anything but ``uninstalled``, one of its runs is
-  anything but ``stopped`` (``failed`` and ``lost`` may still have effects on a
-  Spark), a build of it is in flight, or a recipe job still names one of its
+* an installation of it is anything but ``uninstalled`` (``failed`` and
+  ``partial`` may have left files), one of its runs is still ``stopping`` or
+  ``lost`` or otherwise active (a ``failed`` run holds nothing and counts as
+  stopped), a build of it is in flight, or a recipe job still names one of its
   runs;
-* its installation, run, build, mapping or image authorization was touched
-  within the grace period, and it was superseded less than a grace period ago;
+* it was superseded, or an installation, run, build, mapping or image
+  authorization of it was last touched, less than a grace period ago;
 * a live or recently finished operation names it: a Job, agent operation,
   profile application (and the selected one always), model-cache operation or
   recipe job payload is searched for its id, so a reference kept in JSON is
   found without knowing which contract wrote it;
 * an image authorization of another revision was built from it or names its
   content (an editorial successor reusing the image receipt);
-* a kept recipe revision still pins it as its model.
+* a kept recipe revision still pins it as its model, by binding or because a
+  head or candidate recipe document names its digest.
 
 Everything else is removed together with the dead rows only it owned: its
 uninstalled installations, stopped runs, mappings, finished builds, image
@@ -92,6 +94,9 @@ INTERVAL = timedelta(hours=1)
 SWEEP_BUDGET_SECONDS = 20.0
 _FINISHED = ("succeeded", "failed", "cancelled")
 _FINISHED_BUILDS = ("succeeded", "failed")
+# Neither holds ports, memory or a place on a Spark (see STOPPABLE_RUN_STATES),
+# and nothing ever moves a failed run on to stopped.
+_DEAD_RUNS = ("stopped", "failed")
 _IN_FLIGHT_BUILDS = ("planned", "building")
 # A uuid (a revision, installation or run id) or a sha256 (a source bundle).
 _TOKEN = re.compile(
@@ -160,7 +165,7 @@ class CatalogRevisionCollector:
         deadline = time.monotonic() + self._budget_seconds
         with self._sessions() as session:
             candidates = self._candidates(session, cutoff)
-            live = _live_tokens(session, now)
+            live = _live_tokens(session, now) | _pinned_by_heads(session)
         removed = 0
         kept: Counter[str] = Counter()
         for candidate in candidates:
@@ -324,6 +329,7 @@ class CatalogRevisionCollector:
 
         if (
             revision.id in live
+            or revision.content_digest in live
             or not live.isdisjoint(installations)
             or not live.isdisjoint(runs)
         ):
@@ -338,7 +344,11 @@ class CatalogRevisionCollector:
         ):
             raise _Kept("installation")
         if runs and session.scalar(
-            select(exists().where(RecipeRun.id.in_(runs), RecipeRun.state != "stopped"))
+            select(
+                exists().where(
+                    RecipeRun.id.in_(runs), RecipeRun.state.not_in(_DEAD_RUNS)
+                )
+            )
         ):
             raise _Kept("run")
         if runs and session.scalar(
@@ -575,13 +585,34 @@ def _live_tokens(session: Session, now: datetime) -> frozenset[str]:
         select(RecipeInstallation.plan).where(
             RecipeInstallation.state != "uninstalled"
         ),
-        select(RecipeRun.plan).where(RecipeRun.state != "stopped"),
+        select(RecipeRun.plan).where(RecipeRun.state.not_in(_DEAD_RUNS)),
         select(RecipeBuild.plan).where(RecipeBuild.state.in_(_IN_FLIGHT_BUILDS)),
     )
     found: set[str] = set()
     for statement in sources:
         found |= _tokens(session.scalars(statement))
     return frozenset(found)
+
+
+def _pinned_by_heads(session: Session) -> frozenset[str]:
+    """Digests the head and candidate recipe documents name (their models).
+
+    A recipe binds its model revision when it is activated, so a pending
+    candidate has no binding yet; the digest in its own document is what it
+    will bind to.
+    """
+
+    heads = select(CatalogDocumentHead.active_revision_id).union(
+        select(CatalogDocumentHead.candidate_revision_id)
+    )
+    return _tokens(
+        session.scalars(
+            select(CatalogDocumentRevision.document).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.id.in_(heads),
+            )
+        )
+    )
 
 
 def _tokens(values: Iterable[object]) -> frozenset[str]:
