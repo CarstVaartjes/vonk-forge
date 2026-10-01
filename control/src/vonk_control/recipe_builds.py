@@ -366,6 +366,9 @@ def _build_disk_reserve(disk_total_bytes: int) -> int:
 class RecipeBuildError(ValueError):
     def __init__(self, code: str, detail: str) -> None:
         self.code = code
+        # Why the catalog's prebuilt image was not used, when a Spark build
+        # was planned instead and could not be admitted.
+        self.prebuilt_unused: str | None = None
         super().__init__(detail)
 
 
@@ -819,16 +822,19 @@ class RecipeBuildService:
         source_sha256: str,
         base_images: Sequence[Mapping[str, object]],
         adapter: RuntimeAdapter,
-    ) -> PrebuiltImage | None:
+        now: datetime,
+    ) -> tuple[PrebuiltImage | None, str | None]:
         """The catalog's prebuilt image when it was built from these exact inputs.
 
-        A missing image, an image built from other inputs (for example under
-        a different platform adapter) and an image this Controller already
-        failed to pull all fall back to a Spark build.
+        Otherwise ``None`` and the reason a Spark build is planned instead: no
+        image in the catalog, an image built from other inputs (for example
+        under a different platform adapter), or a pull that failed recently.
         """
         image = projected.prebuilt_image
         if image is None:
-            return None
+            reason = "the signed catalog pins no prebuilt image for this revision"
+            _LOGGER.info("recipe revision %s: %s", recipe_revision_id, reason)
+            return None, reason
         key = executable_build_key(
             derive_build_input_identity(
                 build,
@@ -839,18 +845,18 @@ class RecipeBuildService:
             )
         )
         if key != image.build_key:
-            _LOGGER.info(
-                "prebuilt image %s was built from other inputs (catalog key %s, "
-                "Controller key %s); building on a Spark instead",
-                image.reference,
-                image.build_key,
-                key,
+            reason = (
+                f"prebuilt image {image.reference} was built from other inputs "
+                f"(catalog key {image.build_key}, Controller key {key})"
             )
-            return None
+            _LOGGER.warning("%s; building on a Spark instead", reason)
+            return None, reason
         with self._sessions() as session:
-            if prebuilt_failed(session, recipe_revision_id, image):
-                return None
-        return image
+            failed = prebuilt_failed(session, recipe_revision_id, image, now=now)
+        if failed is not None:
+            _LOGGER.warning("%s; building on a Spark instead", failed)
+            return None, failed
+        return image, None
 
     def prepare_plan(
         self,
@@ -910,13 +916,14 @@ class RecipeBuildService:
                 "build.source_invalid", "recipe Dockerfile authority is unavailable"
             )
         base_images = list(dockerfile_base_images(dockerfile_payload))
-        prebuilt = self._usable_prebuilt(
+        prebuilt, prebuilt_unused = self._usable_prebuilt(
             revision.id,
             projected,
             build=build,
             source_sha256=source_sha256,
             base_images=base_images,
             adapter=adapter,
+            now=now,
         )
         if prebuilt is not None:
             # The Controller pulls this image; the Spark builds nothing, so
@@ -933,21 +940,26 @@ class RecipeBuildService:
         output_bytes = _declared_image_bytes(document)
         base_image_storage_bytes = resources.download_bytes if base_images else 0
         if prebuilt is None:
-            self._admit_spark_build(
-                builder_node_id,
-                now=now,
-                public_network=public_network,
-                memory_bytes=memory_bytes,
-                # The rootless builder retains inputs while exporting the
-                # image. Treat recipe storage as a generous peak envelope, not
-                # an exact quota over Podman's implementation-specific graph.
-                disk_envelope=_build_disk_envelope(
-                    base_image_bytes=base_image_storage_bytes,
-                    temporary_bytes=temporary_bytes,
-                    source_bytes=len(bundle.archive),
-                    output_bytes=output_bytes,
-                ),
-            )
+            try:
+                self._admit_spark_build(
+                    builder_node_id,
+                    now=now,
+                    public_network=public_network,
+                    memory_bytes=memory_bytes,
+                    # The rootless builder retains inputs while exporting the
+                    # image. Treat recipe storage as a generous peak envelope,
+                    # not an exact quota over Podman's implementation-specific
+                    # graph.
+                    disk_envelope=_build_disk_envelope(
+                        base_image_bytes=base_image_storage_bytes,
+                        temporary_bytes=temporary_bytes,
+                        source_bytes=len(bundle.archive),
+                        output_bytes=output_bytes,
+                    ),
+                )
+            except RecipeBuildError as error:
+                error.prebuilt_unused = prebuilt_unused
+                raise
         model_inputs = projected.build_model_artifacts
         topology_inputs = projected.build_topology_inputs
         build_identity = derive_build_input_identity(

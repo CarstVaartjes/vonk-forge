@@ -584,7 +584,7 @@ class PrebuiltImageImporter:
         reference: str,
         error: OciImageStoreError | OSError,
     ) -> None:
-        code = "prebuilt_image_pull_failed"
+        code = PREBUILT_PULL_FAILED
         detail = str(getattr(error, "detail", error)) or type(error).__name__
         _LOGGER.warning(
             "prebuilt runtime image %s is unavailable (%s); the next plan "
@@ -669,28 +669,62 @@ class PrebuiltImageImporter:
             job.updated_at = now
 
 
-def prebuilt_failed(
-    session: Session, recipe_revision_id: str, image: PrebuiltImage
-) -> bool:
-    """Whether this Controller already failed to pull ``image`` for the revision.
+# A failed pull blocks the same digest for this long; the next plan after it
+# tries the pull again, so a registry outage heals without anyone acting.
+PREBUILT_RETRY_AFTER = timedelta(hours=1)
+PREBUILT_PULL_FAILED = "prebuilt_image_pull_failed"
 
-    A failed pull falls back to a Spark build for that exact digest; a newly
-    published digest is tried again.
+
+def prebuilt_failed(
+    session: Session,
+    recipe_revision_id: str,
+    image: PrebuiltImage,
+    *,
+    now: datetime,
+) -> str | None:
+    """Why ``image`` is not tried for the revision right now, or ``None``.
+
+    Only a recent failed pull counts. A cancelled build never does: the
+    operator stopped it, the image did not fail.
     """
 
-    for report in session.scalars(
-        select(RecipeBuild.policy_report).where(
+    recent = now - PREBUILT_RETRY_AFTER
+    for report, error, updated_at in session.execute(
+        select(
+            RecipeBuild.policy_report, RecipeBuild.error, RecipeBuild.updated_at
+        ).where(
             RecipeBuild.recipe_revision_id == recipe_revision_id,
             RecipeBuild.state == "failed",
         )
     ):
-        if policy_prebuilt_reference(report) == image.reference:
-            return True
-    return False
+        if (
+            policy_prebuilt_reference(report) != image.reference
+            or not isinstance(error, str)
+            or not error.startswith(PREBUILT_PULL_FAILED)
+        ):
+            continue
+        failed_at = _aware(updated_at, now)
+        if failed_at < recent:
+            continue
+        retry_in = int((failed_at - recent).total_seconds() // 60) + 1
+        return (
+            f"pulling {image.reference} failed ({error[:200]}); "
+            f"it is tried again in {retry_in} min"
+        )
+    return None
+
+
+def _aware(value: datetime, reference: datetime) -> datetime:
+    # SQLite returns naive timestamps for timezone-aware columns.
+    if value.tzinfo is None and reference.tzinfo is not None:
+        return value.replace(tzinfo=reference.tzinfo)
+    return value
 
 
 __all__ = [
     "PREBUILT_KEY_SCHEMA_VERSION",
+    "PREBUILT_PULL_FAILED",
+    "PREBUILT_RETRY_AFTER",
     "PrebuiltImage",
     "PrebuiltImageImporter",
     "executable_build_key",

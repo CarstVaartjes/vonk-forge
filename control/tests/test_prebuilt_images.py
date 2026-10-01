@@ -38,6 +38,7 @@ from vonk_control.oci_image_store import (
     StoredImage,
 )
 from vonk_control.prebuilt_images import (
+    PREBUILT_RETRY_AFTER,
     PrebuiltImageImporter,
     write_library_image_plan,
 )
@@ -292,6 +293,10 @@ def test_prebuilt_image_from_other_inputs_falls_back_to_a_spark_build(
         builds.prepare_plan(revision_id, NODE, now=NOW)
     # A Spark build was planned, and it needs Spark inventory.
     assert refused.value.code == "build.inventory_missing"
+    # The refusal says why the prebuilt image was passed over, with both keys.
+    reason = refused.value.prebuilt_unused
+    assert reason is not None
+    assert "catalog key " + "0" * 64 in reason and "Controller key " in reason
 
 
 def test_failed_pull_is_visible_and_the_next_plan_builds_on_a_spark(
@@ -326,6 +331,15 @@ def test_failed_pull_is_visible_and_the_next_plan_builds_on_a_spark(
     with pytest.raises(RecipeBuildError) as refused:
         builds.prepare_plan(revision_id, NODE, now=NOW)
     assert refused.value.code == "build.inventory_missing"
+    assert refused.value.prebuilt_unused is not None
+    assert "manifest unknown" in refused.value.prebuilt_unused
+
+    # A failed pull is not final: after the retry interval the same digest is
+    # tried again, so a registry outage heals on its own.
+    later = NOW + PREBUILT_RETRY_AFTER + timedelta(seconds=1)
+    retried = builds.prepare_plan(revision_id, NODE, now=later)
+    assert retried.policy_report is not None
+    assert retried.policy_report["prebuilt_image"] == REFERENCE
 
 
 def test_cancelled_prebuilt_build_discards_a_late_pull(tmp_path: Path) -> None:
@@ -354,6 +368,11 @@ def test_cancelled_prebuilt_build_discards_a_late_pull(tmp_path: Path) -> None:
         assert build is not None and stored is not None
         assert stored.state == "cancelled"
         assert build.state == "failed" and build.image_digest is None
+
+    # Cancelling is not a failed pull: the next plan uses the image again.
+    again = builds.prepare_plan(revision_id, NODE, now=NOW)
+    assert again.policy_report is not None
+    assert again.policy_report["prebuilt_image"] == REFERENCE
 
 
 def test_off_target_build_runs_once_before_an_early_memory_stop() -> None:
@@ -491,7 +510,10 @@ def test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry(
     assert [build.state for build in builds] == ["failed"]
     assert view.failure is not None
     assert view.failure["code"] == "recipe_image.build_capacity_wait"
-    assert "build.inventory_missing" in {blocker.code for blocker in view.blockers}
+    blockers = {blocker.code: blocker.detail for blocker in view.blockers}
+    assert "build.inventory_missing" in blockers
+    # The wait names why the prebuilt image was not used.
+    assert "denied" in blockers["recipe_image.prebuilt_unused"]
     production.close()
 
 
