@@ -164,7 +164,7 @@ def _inspect_dockerfile(
     saw_from = False
     for line_number, instruction, argument in _dockerfile_instructions(text):
         upper = instruction.upper()
-        if "<<" in argument:
+        if upper in {"RUN", "COPY", "ADD"} and _has_heredoc(argument):
             findings.append(
                 _finding(
                     "dockerfile.heredoc_forbidden",
@@ -272,6 +272,57 @@ def _inspect_dockerfile(
             )
         )
     return findings
+
+
+def _has_heredoc(argument: str) -> bool:
+    """Return True when a RUN/COPY/ADD argument starts a BuildKit heredoc.
+
+    BuildKit lexes the line into words and treats a word matching
+    ``^\\d*<<-?[^<]*$`` as a heredoc start, so ``<<<`` here-strings are not
+    heredocs and ``RUN cat <<<"x"`` is accepted.  We scan with quote awareness
+    instead: ``<<`` inside single or double quotes (awk, sed or grep patterns,
+    exec-form JSON strings) is data, and so is ``<<`` inside ``((...))``
+    arithmetic.  Outside quotes, ``<<`` followed by an optional ``-``,
+    optional blanks, an optional quote and a word character is a heredoc,
+    including the no-space form ``cat<<EOF`` that the shell itself would honour.
+    """
+    quote = ""
+    arith = 0
+    i, n = 0, len(argument)
+    while i < n:
+        char = argument[i]
+        if quote:
+            if char == "\\" and quote == '"':
+                i += 2
+                continue
+            if char == quote:
+                quote = ""
+        elif char == "\\":
+            i += 2
+            continue
+        elif char in "'\"":
+            quote = char
+        elif argument.startswith("((", i):
+            arith += 1
+            i += 2
+            continue
+        elif argument.startswith("))", i) and arith:
+            arith -= 1
+            i += 2
+            continue
+        elif char == "<" and not arith and argument.startswith("<<", i):
+            if argument.startswith("<<<", i):
+                i += 3
+                continue
+            rest = argument[i + 2 :].removeprefix("-").lstrip()
+            if rest[:1] in {"'", '"'}:
+                rest = rest[1:]
+            if rest[:1].isalnum() or rest[:1] in {"_", "\\", "-", "."}:
+                return True
+            i += 2
+            continue
+        i += 1
+    return False
 
 
 def _dockerfile_instructions(text: str):

@@ -220,3 +220,57 @@ def test_package_policy_refuses_a_bundle_the_catalog_does_not_name() -> None:
     report = inspect_package_source_policy(document, bundle, source_sha256="f" * 64)
 
     assert [finding.code for finding in report.findings] == ["source.digest_mismatch"]
+
+
+_HEREDOC_BASE = "FROM ghcr.io/example/vllm@sha256:" + "a" * 64 + "\n"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "RUN <<EOF\nx\nEOF",
+        "RUN <<-EOF\nx\nEOF",
+        "RUN <<'EOF'\nx\nEOF",
+        'RUN <<"EOF"\nx\nEOF',
+        "RUN python3 <<PY\nx\nPY",
+        "RUN cat <<EOF > /x\nx\nEOF",
+        "RUN cat<<EOF\nx\nEOF",
+        "COPY <<EOF /x\nx\nEOF",
+        "ADD <<EOF /x\nx\nEOF",
+    ],
+)
+def test_real_heredocs_are_refused(recipe: dict[str, object], line: str) -> None:
+    bundle = bundle_for(recipe, _HEREDOC_BASE + line + "\nUSER 10001:10001\n")
+
+    with pytest.raises(SourcePolicyError) as caught:
+        enforce_build_source_policy(recipe, bundle)
+
+    assert "dockerfile.heredoc_forbidden" in {
+        finding.code for finding in caught.value.report.findings
+    }
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "RUN awk '/<<.PY.$/' /x",
+        'RUN awk "/<<EOF/" /x',
+        "RUN sed -n '/<<-EOF/p' /x",
+        "RUN grep -q '<<EOF' /x",
+        'RUN ["sh", "-c", "grep <<EOF /x"]',
+        # Here-strings: BuildKit's heredoc word regex excludes "<", so these are
+        # plain shell redirections, not Dockerfile heredocs.
+        'RUN cat <<<"x"',
+        "RUN bash -c 'cat <<<x'",
+        "RUN echo $((1<<2))",
+        "RUN echo a << ",
+    ],
+)
+def test_non_heredoc_double_angle_is_accepted(
+    recipe: dict[str, object], line: str
+) -> None:
+    bundle = bundle_for(recipe, _HEREDOC_BASE + line + "\nUSER 10001:10001\n")
+
+    report = enforce_build_source_policy(recipe, bundle)
+
+    assert report.passed is True
