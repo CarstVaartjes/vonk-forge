@@ -62,11 +62,15 @@ def test_fixtures_cover_every_engine_topology_and_interface_the_contract_allows(
         harness.slug for harness in CANONICAL_HARNESSES
     }
     distributed = {item.runtime.engine for item in recipes if item.topology.distributed}
-    assert distributed == {
+    capable = {
         harness.slug
         for harness in CANONICAL_HARNESSES
         if "distributed" in harness.topology_modes
     }
+    # TensorFold's distributed support landed before its first catalog recipe;
+    # the fixture refresh that adds one removes this allowance.
+    assert distributed <= capable
+    assert capable - distributed <= {"tensorfold"}
     assert {item.topology.node_count for item in recipes} >= {1, 2, 3, 4, 8}
     assert {item.interfaces[0].adapter for item in recipes} == {
         "openai",

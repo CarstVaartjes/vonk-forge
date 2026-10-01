@@ -140,6 +140,8 @@ def test_platform_metadata_is_strict_and_has_current_capabilities() -> None:
     sglang = next(item for item in CANONICAL_HARNESSES if item.slug == "sglang")
     assert vllm.topology_modes == ("single", "distributed")
     assert sglang.topology_modes == ("single", "distributed")
+    tensorfold = next(item for item in CANONICAL_HARNESSES if item.slug == "tensorfold")
+    assert tensorfold.topology_modes == ("single", "distributed")
     assert vllm.security_exceptions == ("model.trust-remote-code",)
     assert sglang.security_exceptions == ("model.trust-remote-code",)
     with pytest.raises(ValidationError):

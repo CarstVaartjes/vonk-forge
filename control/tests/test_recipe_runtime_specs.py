@@ -121,6 +121,60 @@ def _distributed_sglang_recipe() -> dict[str, object]:
     return raw
 
 
+def _distributed_tensorfold_recipe() -> dict[str, object]:
+    raw = _distributed_sglang_recipe()
+    runtime = _json_object(raw["runtime"])
+    runtime["engine"] = "tensorfold"
+    runtime["entrypoint"] = ["/opt/vonk/bin/tensorfold-serve"]
+    runtime["arguments"] = [{"name": "name", "value": "synthetic-tiny"}]
+    topology = _json_object(raw["topology"])
+    topology.update(
+        {"name": "dual-tensorfold", "start_order": ["worker", "entrypoint"]}
+    )
+    return raw
+
+
+def _option_value(command: list[object], name: str) -> object:
+    return command[command.index(name) + 1]
+
+
+def test_runtime_spec_gives_each_distributed_tensorfold_rank_its_rendezvous() -> None:
+    recipe = _distributed_tensorfold_recipe()
+    entrypoint = _compile(recipe)
+    worker = _compile(recipe, role="worker", rank=1)
+
+    entry_command = _json_array(_json_object(entrypoint["runtime"])["entrypoint"])
+    worker_command = _json_array(_json_object(worker["runtime"])["entrypoint"])
+    for rank, command in ((0, entry_command), (1, worker_command)):
+        assert _option_value(command, "--tp") == "2"
+        assert _option_value(command, "--rank") == str(rank)
+        assert _option_value(command, "--master") == "VONK_MASTER_ADDR"
+        assert _option_value(command, "--master-port") == "VONK_MASTER_PORT"
+    assert _json_object(entrypoint["runtime"])["placement_environment"] == {
+        "local_address": "VONK_LOCAL_ADDR",
+        "master_address": "VONK_MASTER_ADDR",
+        "master_port": "VONK_MASTER_PORT",
+    }
+    assert _json_object(entrypoint["topology"])["node_count"] == 2
+
+
+def test_distributed_tensorfold_keeps_an_option_the_recipe_already_sets() -> None:
+    recipe = _distributed_tensorfold_recipe()
+    _json_array(_json_object(recipe["runtime"])["arguments"]).append(
+        {"name": "tp", "value": 2}
+    )
+    command = _json_array(_json_object(_compile(recipe)["runtime"])["entrypoint"])
+
+    assert command.count("--tp") == 1
+
+
+def test_single_node_tensorfold_gets_no_rendezvous_options() -> None:
+    recipe = _recipe(engine="tensorfold", entrypoint=["/opt/vonk/bin/tensorfold-serve"])
+    command = _json_array(_json_object(_compile(recipe)["runtime"])["entrypoint"])
+
+    assert not {"--tp", "--rank", "--master", "--master-port"} & set(command)
+
+
 def _multi_artifact_inputs() -> tuple[dict[str, object], dict[str, object]]:
     raw = _example("recipe-source-build.json")
     model_raw = _example("model-definition.json")
