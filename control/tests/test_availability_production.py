@@ -501,6 +501,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
                 build_input_sha256="b" * 64,
                 builder_node_id="builder-node-000000000000000000000000000000",
                 build_id="00000000-0000-4000-8000-000000000703",
+                policy_report=None,
             )
 
         def persist_plan_in_session(self, _session, plan, **_kwargs):
@@ -652,6 +653,7 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
                 build_input_sha256="b" * 64,
                 builder_node_id=candidate,
                 build_id="00000000-0000-4000-8000-000000000805",
+                policy_report=None,
             )
 
         def persist_plan_in_session(self, _session, plan, **_kwargs):
@@ -1197,6 +1199,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                 build_input_sha256=(suffix * 64),
                 builder_node_id=node_id,
                 build_id=str(uuid.uuid4()),
+                policy_report=None,
             )
 
         def persist_plan_in_session(self, _session, plan, **_kwargs):
@@ -1373,6 +1376,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                 build_input_sha256=final_input,
                 builder_node_id=node_id,
                 build_id="00000000-0000-4000-8000-000000000721",
+                policy_report=None,
             )
 
         def persist_plan_in_session(self, _session, plan, **_kwargs):

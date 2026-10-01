@@ -48,7 +48,15 @@ from .models import (
     RecipeSourceBundle,
     ResourceReservation,
 )
-from .prebuilt_images import executable_build_key, prebuilt_failed
+from .prebuilt_images import (
+    PREBUILT_KEY_MISMATCH,
+    PREBUILT_NOT_PINNED,
+    PREBUILT_RECENT_PULL_FAILURE,
+    PREBUILT_USED,
+    PrebuiltDecision,
+    executable_build_key,
+    prebuilt_failed,
+)
 from .profile_capacity import profile_build_memory_claims
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -368,7 +376,7 @@ class RecipeBuildError(ValueError):
         self.code = code
         # Why the catalog's prebuilt image was not used, when a Spark build
         # was planned instead and could not be admitted.
-        self.prebuilt_unused: str | None = None
+        self.prebuilt_unused: PrebuiltDecision | None = None
         super().__init__(detail)
 
 
@@ -823,18 +831,23 @@ class RecipeBuildService:
         base_images: Sequence[Mapping[str, object]],
         adapter: RuntimeAdapter,
         now: datetime,
-    ) -> tuple[PrebuiltImage | None, str | None]:
+    ) -> tuple[PrebuiltImage | None, PrebuiltDecision]:
         """The catalog's prebuilt image when it was built from these exact inputs.
 
-        Otherwise ``None`` and the reason a Spark build is planned instead: no
-        image in the catalog, an image built from other inputs (for example
-        under a different platform adapter), or a pull that failed recently.
+        Otherwise ``None``. Either way the decision names why: the image is
+        used, the catalog pins none, it was built from other inputs (for
+        example under a different platform adapter), or a pull failed
+        recently. The decision is stored with the build and logged, so a
+        Spark build is never planned without saying why.
         """
         image = projected.prebuilt_image
         if image is None:
-            reason = "the signed catalog pins no prebuilt image for this revision"
-            _LOGGER.info("recipe revision %s: %s", recipe_revision_id, reason)
-            return None, reason
+            decision = PrebuiltDecision(
+                PREBUILT_NOT_PINNED,
+                "the signed catalog pins no prebuilt image for this revision",
+            )
+            _LOGGER.info("recipe revision %s: %s", recipe_revision_id, decision)
+            return None, decision
         key = executable_build_key(
             derive_build_input_identity(
                 build,
@@ -845,18 +858,32 @@ class RecipeBuildService:
             )
         )
         if key != image.build_key:
-            reason = (
+            decision = PrebuiltDecision(
+                PREBUILT_KEY_MISMATCH,
                 f"prebuilt image {image.reference} was built from other inputs "
-                f"(catalog key {image.build_key}, Controller key {key})"
+                f"(catalog key {image.build_key}, Controller key {key})",
             )
-            _LOGGER.warning("%s; building on a Spark instead", reason)
-            return None, reason
+            _LOGGER.warning(
+                "recipe revision %s: %s; building on a Spark instead",
+                recipe_revision_id,
+                decision,
+            )
+            return None, decision
         with self._sessions() as session:
             failed = prebuilt_failed(session, recipe_revision_id, image, now=now)
         if failed is not None:
-            _LOGGER.warning("%s; building on a Spark instead", failed)
-            return None, failed
-        return image, None
+            decision = PrebuiltDecision(PREBUILT_RECENT_PULL_FAILURE, failed)
+            _LOGGER.warning(
+                "recipe revision %s: %s; building on a Spark instead",
+                recipe_revision_id,
+                decision,
+            )
+            return None, decision
+        decision = PrebuiltDecision(
+            PREBUILT_USED, f"pulling the catalog's prebuilt image {image.reference}"
+        )
+        _LOGGER.info("recipe revision %s: %s", recipe_revision_id, decision)
+        return image, decision
 
     def prepare_plan(
         self,
@@ -916,7 +943,7 @@ class RecipeBuildService:
                 "build.source_invalid", "recipe Dockerfile authority is unavailable"
             )
         base_images = list(dockerfile_base_images(dockerfile_payload))
-        prebuilt, prebuilt_unused = self._usable_prebuilt(
+        prebuilt, prebuilt_decision = self._usable_prebuilt(
             revision.id,
             projected,
             build=build,
@@ -958,7 +985,9 @@ class RecipeBuildService:
                     ),
                 )
             except RecipeBuildError as error:
-                error.prebuilt_unused = prebuilt_unused
+                error.prebuilt_unused = (
+                    None if prebuilt_decision.used else prebuilt_decision
+                )
                 raise
         model_inputs = projected.build_model_artifacts
         topology_inputs = projected.build_topology_inputs
@@ -1030,6 +1059,10 @@ class RecipeBuildService:
             "findings": [asdict(item) for item in policy.findings],
             "builder_binary_digest": builder_binary_digest,
             "artifact_format": BUILD_ARTIFACT_FORMAT,
+        }
+        policy_document["prebuilt_decision"] = {
+            "code": prebuilt_decision.code,
+            "detail": prebuilt_decision.detail,
         }
         if prebuilt is not None:
             policy_document["prebuilt_image"] = prebuilt.reference
