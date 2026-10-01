@@ -102,8 +102,12 @@ class CarryEvidence:
 
 
 def _fetch(url: str, destination: Path) -> None:
+    # The public origin refuses anonymous library user agents.
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "vonk-forge-acceptance/1"}
+    )
     try:
-        with urllib.request.urlopen(url, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=60) as response:
             destination.write_bytes(response.read(16 * 1024 * 1024))
     except urllib.error.URLError as error:
         raise LifecycleError(f"release input {url} is unavailable: {error}") from error
