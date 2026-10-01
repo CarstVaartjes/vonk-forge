@@ -1,0 +1,182 @@
+name: Spark upgrade-carry acceptance
+
+# A workload that serves on the previous promoted release must keep serving
+# while the Controller is redeployed and the Spark agent is upgraded to the
+# candidate. The release calls this for every candidate; it also runs on pull
+# requests that change the lane (candidate = current promoted release,
+# baseline = the release promoted before it) and by hand for any two
+# published generations. Without a previous promoted release it is skipped
+# with a visible notice.
+on:
+  workflow_call:
+    inputs:
+      channel:
+        type: string
+        required: true
+      candidate_generation:
+        type: string
+        required: true
+      source_ref:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel"
+        type: choice
+        options: [dev, stable]
+        default: dev
+      candidate_generation:
+        description: "Candidate generation (default: the current promoted release)"
+        type: string
+        default: ""
+      baseline_generation:
+        description: "Baseline generation (default: the release promoted before the candidate)"
+        type: string
+        default: ""
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/spark-upgrade-acceptance.yml
+      - tests/acceptance/spark_upgrade_carry.py
+      - tests/acceptance/test_spark_lifecycle.py
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: vonk-forge-spark-upgrade-carry-${{ github.event.pull_request.number || github.ref }}-${{ inputs.candidate_generation || 'current' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  carry:
+    name: Carry a serving workload across the upgrade (linux-arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 75
+    environment: installer-canary-${{ inputs.channel || 'dev' }}
+    env:
+      CHANNEL: ${{ inputs.channel || 'dev' }}
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+      VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
+    steps:
+      - name: Check out exact acceptance suite
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
+
+      - name: Resolve the candidate and the previously promoted baseline
+        id: releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
+          CANDIDATE_INPUT: ${{ inputs.candidate_generation }}
+          BASELINE_INPUT: ${{ inputs.baseline_generation }}
+        run: |
+          set -euo pipefail
+          [[ "$CHANNEL" =~ ^(dev|stable)$ ]]
+          # The channel pointer names the promoted release; a release run's
+          # candidate is not promoted yet, so the pointer is its baseline.
+          pointer=$(curl -fsS "$INSTALLER_PUBLIC_ORIGIN/artifacts/$CHANNEL/current.manifest" \
+            | sed -n 's/^generation=\([0-9a-f]\{64\}\)$/\1/p' || true)
+          candidate=${CANDIDATE_INPUT:-$pointer}
+          [[ "$candidate" =~ ^[0-9a-f]{64}$ ]] || { echo "candidate generation is unknown" >&2; exit 1; }
+          baseline=$BASELINE_INPUT
+          if [[ -z "$baseline" && -n "$pointer" && "$pointer" != "$candidate" ]]; then
+            baseline=$pointer
+          fi
+          if [[ -z "$baseline" ]]; then
+            # Promotion receipts name every promoted generation, newest first.
+            baseline=$(gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+              --jq ".artifacts[] | select(.name | startswith(\"installer-promotion-$CHANNEL-\")) | .name" \
+              | sed "s/^installer-promotion-$CHANNEL-//" \
+              | grep -v -x "$candidate" | head -n 1 || true)
+          fi
+          [[ -z "$baseline" || "$baseline" =~ ^[0-9a-f]{64}$ ]]
+          printf 'candidate=%s\nbaseline=%s\n' "$candidate" "$baseline" >> "$GITHUB_OUTPUT"
+          printf 'Candidate %s; baseline %s\n' "$candidate" "${baseline:-none}"
+
+      - name: Resolve exact canonical recipe library source
+        id: recipe-library-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision=$(cat tests/acceptance/recipe-library-revision.txt)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact canonical recipe library
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CarstVaartjes/vonk-forge-recipes
+          ref: ${{ steps.recipe-library-source.outputs.revision }}
+          path: .recipe-library
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Build recipe library index and packages
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+
+      - name: Build and verify the Controller protocol wheel
+        uses: ./.github/actions/prepare-control-wheel
+
+      - name: Enable Docker CDI for synthetic Spark device discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          daemon_config=/etc/docker/daemon.json
+          updated_config=$(mktemp)
+          trap 'rm -f -- "$updated_config"' EXIT
+          if sudo test -e "$daemon_config"; then
+            sudo jq \
+              'if (.features // {}) | type != "object" then error("invalid Docker features") else .features = ((.features // {}) + {"cdi": true}) end' \
+              "$daemon_config" > "$updated_config"
+          else
+            jq -n '{"features":{"cdi":true}}' > "$updated_config"
+          fi
+          sudo dockerd --validate --config-file "$updated_config"
+          sudo install -D -o root -g root -m 0644 \
+            "$updated_config" "$daemon_config"
+          sudo systemctl restart docker.service
+          docker info --format '{{json .CDISpecDirs}}' | \
+            jq -e 'index("/etc/cdi") != null and index("/var/run/cdi") != null' \
+              >/dev/null
+
+      - name: Carry the canary from the baseline to the candidate
+        shell: bash
+        env:
+          INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
+          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
+          VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY: loopback
+          VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
+          CANDIDATE: ${{ steps.releases.outputs.candidate }}
+          BASELINE: ${{ steps.releases.outputs.baseline }}
+        run: |
+          set -euo pipefail
+          test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
+          mkdir -p "$RUNNER_TEMP/upgrade-carry"
+          uv run --project control --frozen \
+            python tests/acceptance/spark_upgrade_carry.py \
+            --channel "$CHANNEL" \
+            --candidate-generation "$CANDIDATE" \
+            --baseline-generation "$BASELINE" \
+            --run-id "$GITHUB_RUN_ID" \
+            --output "$RUNNER_TEMP/upgrade-carry/report.json"
+
+      - name: Upload upgrade-carry report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spark-upgrade-carry-${{ steps.releases.outputs.candidate || 'unresolved' }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/upgrade-carry/report.json
