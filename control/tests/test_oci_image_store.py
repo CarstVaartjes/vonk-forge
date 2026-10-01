@@ -9,12 +9,14 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import shutil
 import tarfile
+import time
 from pathlib import Path
 
 import pytest
-from vonk_control.oci_image_store import OciImageStore
+from vonk_control.oci_image_store import Collection, OciImageStore
 
 pytestmark = pytest.mark.skipif(
     shutil.which("skopeo") is None, reason="needs skopeo, as in the Controller image"
@@ -88,3 +90,27 @@ def test_archives_share_their_base_layer_and_read_back_complete(tmp_path: Path) 
     store.blob_path(second.layer_digests[1]).unlink()
     assert store.read(second.manifest_digest) is None
     assert store.read(first.manifest_digest) == first
+
+
+def test_a_repeated_copy_marks_its_image_fresh_for_collection(tmp_path: Path) -> None:
+    store = OciImageStore(tmp_path / "artifacts", skopeo=shutil.which("skopeo") or "")
+    archive = _docker_archive(tmp_path / "image.tar", [_layer("base.bin", b"b" * 64)])
+    image = store.import_archive(archive)
+    blobs = store.root / "blobs/sha256"
+    old = time.time() - 3600
+    for blob in blobs.iterdir():
+        os.utime(blob, (old, old))
+
+    # Copying the same image again writes no blob, but must not leave it
+    # looking abandoned to a collection that has not seen its record yet.
+    store.import_archive(archive)
+    assert store.collect(lambda: (), grace_seconds=60) == Collection(0, 0)
+
+    for blob in blobs.iterdir():
+        os.utime(blob, (old, old))
+    removed = store.collect(lambda: (), grace_seconds=60)
+    assert removed is not None and removed.blobs_removed == len(image.blob_digests)
+    assert store.read(image.manifest_digest) is None
+    # The layout's index still names the collected image; storing it again
+    # works all the same.
+    assert store.import_archive(archive) == image

@@ -491,6 +491,7 @@ def assemble_production_worker(
     if callable(close_artifact_executor):
         worker_background_closers += (close_artifact_executor,)
     if image_cache_root is not None:
+        from .image_store_collection import ImageStoreCollector
         from .prebuilt_images import PrebuiltImageImporter
 
         # Builds planned from a catalog prebuilt image are executed here, by
@@ -498,7 +499,11 @@ def assemble_production_worker(
         prebuilt_importer = PrebuiltImageImporter(
             sessions, image_cache_root, clock=clock
         )
-        worker_background_services += (prebuilt_importer.tick,)
+        worker_background_services += (
+            prebuilt_importer.tick,
+            # Reclaims image bytes nothing names any more, hourly.
+            ImageStoreCollector(sessions, image_cache_root, clock=clock).tick,
+        )
         worker_background_closers += (prebuilt_importer.close,)
     if recipe_image_artifact_root is not None:
         from .availability_production import build_recipe_image_availability
