@@ -1642,12 +1642,21 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 if *cancellation.borrow() {
                     return cancelled("controller cancelled before model installation began");
                 }
-                match self.runtime.install_with_space_check(
+                // The image check above leaves "verifying" as the phase; the
+                // long step that follows is a local copy of the model files
+                // into this installation, measured in bytes. Say so instead
+                // of showing a stale phase with no progress for minutes.
+                self.report_phase(claim, "copying").await;
+                let progress_client = self.client.clone();
+                let fence = claim.fence;
+                let installed = self.runtime.install_with_space_check_observed(
                     &spec,
                     &request.installation_id.to_string(),
                     &spec.identity.recipe_revision_sha256,
                     request.expected_bytes,
-                ) {
+                    &mut |done, total| progress_client.set_progress_bytes(fence, done, total),
+                );
+                match installed {
                     Ok(()) => {}
                     Err(OciError::Capacity) => {
                         return failed("local disk capacity changed after install admission");

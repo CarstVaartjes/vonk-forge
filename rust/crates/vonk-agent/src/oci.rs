@@ -442,7 +442,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     ) -> Result<(), OciError> {
         let _lock = self.lock_installation_reconciliation(installation_id)?;
         self.refuse_reconciled_installation(installation_id)?;
-        self.install_unlocked(spec, installation_id, recipe_content_sha256)
+        self.install_unlocked(spec, installation_id, recipe_content_sha256, &mut |_, _| {})
     }
 
     fn install_unlocked(
@@ -450,6 +450,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         recipe_content_sha256: &str,
+        progress: &mut dyn FnMut(u64, u64),
     ) -> Result<(), OciError> {
         if recipe_content_sha256.len() != 64
             || !recipe_content_sha256
@@ -470,7 +471,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .map_err(|error| install_error("installation-directory", error))?;
         self.ensure_runtime_cache(installation_id)
             .map_err(|error| install_error("runtime-cache", error))?;
-        self.materialize_compiled_models(spec, installation_id)
+        materialize_compiled_models_observed(self.data_root, spec, installation_id, progress)
             .map_err(|error| install_error("model-materialization", error))?;
         let encoded_spec = serde_json::to_vec(spec)
             .map_err(OciError::Json)
@@ -505,13 +506,32 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         recipe_content_sha256: &str,
         expected_bytes: u64,
     ) -> Result<(), OciError> {
+        self.install_with_space_check_observed(
+            spec,
+            installation_id,
+            recipe_content_sha256,
+            expected_bytes,
+            &mut |_, _| {},
+        )
+    }
+
+    /// As `install_with_space_check`, reporting `(copied, total)` model bytes
+    /// while the installation's own model copies are written.
+    pub fn install_with_space_check_observed(
+        &self,
+        spec: &CompiledExecutionPlan,
+        installation_id: &str,
+        recipe_content_sha256: &str,
+        expected_bytes: u64,
+        progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<(), OciError> {
         let _lock = self.lock_installation_reconciliation(installation_id)?;
         self.refuse_reconciled_installation(installation_id)?;
         if self.reuse_completed_install(spec, installation_id, recipe_content_sha256)? {
             return Ok(());
         }
         self.ensure_disk_available(expected_bytes)?;
-        self.install_unlocked(spec, installation_id, recipe_content_sha256)
+        self.install_unlocked(spec, installation_id, recipe_content_sha256, progress)
     }
 
     /// Write or resume a durable cleanup checkpoint for the exact installed
@@ -2033,6 +2053,20 @@ fn materialize_compiled_models(
     plan: &CompiledExecutionPlan,
     installation_id: &str,
 ) -> Result<Vec<PathBuf>, OciError> {
+    materialize_compiled_models_observed(data_root, plan, installation_id, &mut |_, _| {})
+}
+
+/// Bytes between two progress reports while one model file is copied.
+const MATERIALIZE_PROGRESS_STEP: u64 = 64 * 1024 * 1024;
+
+/// Give the installation its own copy of every planned model file, reporting
+/// `(done, total)` bytes. Files already in place count as done at once.
+fn materialize_compiled_models_observed(
+    data_root: &Path,
+    plan: &CompiledExecutionPlan,
+    installation_id: &str,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<Vec<PathBuf>, OciError> {
     if !data_root.is_absolute() {
         return Err(OciError::Artifact);
     }
@@ -2060,6 +2094,12 @@ fn materialize_compiled_models(
         });
     let mut materialized = Vec::with_capacity(plan.artifacts.len());
     let mut physical_by_path: BTreeMap<(String, String), PhysicalMaterialization> = BTreeMap::new();
+    let total_bytes: u64 = unique_plan_artifacts(plan)
+        .iter()
+        .map(|artifact| artifact.size_bytes)
+        .sum();
+    let mut done_bytes = 0_u64;
+    progress(0, total_bytes);
     for artifact in &plan.artifacts {
         let physical_key = (artifact.selection_id.clone(), artifact.path.clone());
         let destination = destination_root
@@ -2106,6 +2146,8 @@ fn materialize_compiled_models(
                 if metadata_matches_receipt(&opened_metadata, entry) {
                     physical_by_path.insert(physical_key, (destination.clone(), physical));
                     materialized.push(destination);
+                    done_bytes += artifact.size_bytes;
+                    progress(done_bytes, total_bytes);
                     continue;
                 }
             }
@@ -2136,6 +2178,7 @@ fn materialize_compiled_models(
         // retained source handle, exact size and stable metadata bind this
         // copy to the object opened above.
         let mut copied = 0_u64;
+        let mut reported = 0_u64;
         let mut buffer = [0_u8; 64 * 1024];
         loop {
             let read = source_file.read(&mut buffer)?;
@@ -2146,6 +2189,10 @@ fn materialize_compiled_models(
             copied = copied.checked_add(read as u64).ok_or(OciError::Artifact)?;
             if copied > artifact.size_bytes {
                 return Err(OciError::Artifact);
+            }
+            if copied - reported >= MATERIALIZE_PROGRESS_STEP {
+                reported = copied;
+                progress(done_bytes + copied, total_bytes);
             }
         }
         output.sync_all()?;
@@ -2172,6 +2219,8 @@ fn materialize_compiled_models(
         release_page_cache(&source)?;
         physical_by_path.insert(physical_key, (destination.clone(), physical));
         materialized.push(destination);
+        done_bytes += artifact.size_bytes;
+        progress(done_bytes, total_bytes);
     }
     File::open(&destination_root)?.sync_all()?;
     Ok(materialized)
@@ -2423,10 +2472,10 @@ fn canonical_uuid(value: &str) -> bool {
 mod tests {
     use super::{
         InstallationReconciliationState, OciError, OciRuntime, ensure_runtime_tmp,
-        materialize_compiled_models, read_installation_metadata,
-        read_reconciliation_directory_identity, reconciliation_checkpoint_path,
-        reconciliation_quarantine_path, release_page_cache, unique_plan_artifacts,
-        write_installation_metadata, write_reconciliation_checkpoint,
+        materialize_compiled_models, materialize_compiled_models_observed,
+        read_installation_metadata, read_reconciliation_directory_identity,
+        reconciliation_checkpoint_path, reconciliation_quarantine_path, release_page_cache,
+        unique_plan_artifacts, write_installation_metadata, write_reconciliation_checkpoint,
     };
     use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
     use serde_json::{Value, json};
@@ -3084,7 +3133,7 @@ mod tests {
             // and persists the installation receipt. Its acknowledgement is lost.
             // The host's free space is irrelevant to this setup step.
             first_runtime
-                .install_unlocked(&plan, &installation_id, &recipe_digest)
+                .install_unlocked(&plan, &installation_id, &recipe_digest, &mut |_, _| {})
                 .unwrap();
             assert_eq!(
                 fs::read(installation.join("models/primary/config.json")).unwrap(),
@@ -3515,6 +3564,45 @@ mod tests {
             ))
             .unwrap(),
             b"secondary"
+        );
+    }
+
+    #[test]
+    fn model_materialization_reports_bytes_while_a_large_file_is_copied() {
+        // A first install copies hundreds of gigabytes. Its progress must move
+        // inside a file, not only between files, or the operation shows no
+        // bytes for minutes at a time.
+        const LARGE: u64 = 70 * 1024 * 1024;
+        let mut value = compiled_plan();
+        value["artifacts"][0]["size_bytes"] = json!(LARGE);
+        let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let data = tempdir().unwrap();
+        let root = data.path().join("distribution").join("models");
+        fs::create_dir_all(&root).unwrap();
+        let large = root.join(&plan.artifacts[0].sha256);
+        fs::File::create(&large).unwrap().set_len(LARGE).unwrap();
+        fs::set_permissions(&large, fs::Permissions::from_mode(0o600)).unwrap();
+        let small = root.join(&plan.artifacts[1].sha256);
+        fs::write(&small, b"secondary").unwrap();
+        fs::set_permissions(&small, fs::Permissions::from_mode(0o600)).unwrap();
+        let total = LARGE + plan.artifacts[1].size_bytes;
+
+        let mut reports = Vec::new();
+        materialize_compiled_models_observed(
+            data.path(),
+            &plan,
+            "cb555393-764b-4eb6-8f15-b416d289428f",
+            &mut |done, of| reports.push((done, of)),
+        )
+        .unwrap();
+
+        assert!(reports.iter().all(|(_, of)| *of == total));
+        assert!(reports.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        assert_eq!(reports.first(), Some(&(0, total)));
+        assert_eq!(reports.last(), Some(&(total, total)));
+        assert!(
+            reports.iter().any(|(done, _)| *done > 0 && *done < LARGE),
+            "no progress inside the large file: {reports:?}"
         );
     }
 
