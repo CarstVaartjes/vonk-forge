@@ -792,6 +792,7 @@ class RunAdmissionService:
                     for node_id, demand in port_demands.items()
                 },
                 workload_intent_ordinal=workload_intent_ordinal,
+                now=now,
             )
             if profile_application_id is not None
             else {}
@@ -811,6 +812,7 @@ class RunAdmissionService:
                     for node in plan.nodes
                 },
                 workload_intent_ordinal=workload_intent_ordinal,
+                now=now,
             )
             if profile_application_id is not None
             else {}

@@ -534,7 +534,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
         ],
     }
     selects = [statement for statement in statements if statement.startswith("select")]
-    assert len(selects) == 12
+    assert len(selects) == 13
     certificate_reads = [
         statement for statement in selects if "agent_certificates" in statement
     ]

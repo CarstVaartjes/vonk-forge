@@ -4818,7 +4818,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "run.degraded" | "recipe.update_available" | "cpu.low-clock";
+            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "profile.retrying" | "run.degraded" | "recipe.update_available" | "cpu.low-clock";
             /** Detail */
             detail: string;
             /**

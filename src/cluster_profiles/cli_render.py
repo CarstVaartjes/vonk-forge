@@ -1212,6 +1212,9 @@ def _application(payload: Mapping[str, object]) -> None:
     _field("State", payload.get("state"))
     if payload.get("status_reason") is not None:
         _field("Reason", payload["status_reason"])
+    cancellation = _optional(payload.get("cancellation"), "cancellation")
+    if cancellation:
+        _field("Cancellation", cancellation.get("state"))
     _waiting(payload)
     progress = _optional(payload.get("progress"), "progress")
     _field(
@@ -1805,7 +1808,8 @@ def render_payload(
             )
         elif action == "preview":
             _preview(payload)
-        elif action in {"progress", "load"}:
+        elif action in {"progress", "load", "cancel"}:
+            # These return the profile application, not the saved profile.
             _application(payload)
         elif action == "export":
             _field("Profile", payload.get("profile"))

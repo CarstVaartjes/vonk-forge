@@ -781,3 +781,30 @@ def test_fleet_overview_shows_cpu_clock_only_through_attention_and_wide(capsys):
 
     render_payload(payload, "fleet", wide=True)
     assert "2.1 of 3.9 GHz" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "application",
+    [
+        # The observed cancelled application and the accepted receipt that
+        # `--detach` returns are applications, never the saved profile.
+        {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "state": "cancelled",
+            "status_reason": "Cancelled by the operator",
+            "cancellation": {"state": "cancelled", "cause": "operator"},
+            "progress": {"completed_steps": 1, "total_steps": 3},
+        },
+        {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "state": "running",
+            "cancellation": {"state": "cancelling", "cause": "operator"},
+        },
+    ],
+)
+def test_profile_cancel_renders_the_application(application, capsys):
+    render_payload(application, "profile", action="cancel")
+    output = capsys.readouterr().out
+    assert application["id"] in output
+    assert str(application["state"]) in output
+    assert str(application["cancellation"]["state"]) in output

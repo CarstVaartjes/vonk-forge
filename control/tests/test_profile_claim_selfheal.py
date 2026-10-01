@@ -1,0 +1,265 @@
+"""A live profile load never loops on a capacity claim that went missing.
+
+The disk, port and memory claims of a profile application are bookkeeping for
+a promise, not a precondition of its work. When a row is gone (never reserved,
+or released together with the installation that held it) or has drifted from
+the accepted plan, the live load reserves again under the ordinary admission
+locks and capacity check. Without room it waits with a named reason that the
+profile and the Fleet both show, and it resumes by itself once room returns.
+"""
+
+from __future__ import annotations
+
+import uuid
+from pathlib import Path
+
+import pytest
+from sqlalchemy import select
+from vonk_control.fleet_projection import FleetProjection
+from vonk_control.models import (
+    FleetProfileApplication,
+    Job,
+    NodeInventorySnapshot,
+    RecipeInstallation,
+    ResourceReservation,
+)
+
+from .test_attempt_residues import _at_phase, _load, _loop, _switch
+
+
+def _settle(load, *, rounds: int = 40) -> bool:
+    """Run to success, skipping the (clock-independent) retry backoff waits."""
+
+    for _ in range(rounds):
+        if load.profiles.application(load.application.id).state == "succeeded":
+            return True
+        _loop(load, lambda: False, rounds=1)
+        _skip_backoff(load)
+    return load.profiles.application(load.application.id).state == "succeeded"
+
+
+def _the_switch(load) -> Job:
+    switch = _switch(load)
+    assert switch is not None
+    return switch
+
+
+def _skip_backoff(load) -> None:
+    switch = _switch(load)
+    if switch is None:
+        return
+    with load.sessions.begin() as session:
+        job = session.get(Job, switch.id)
+        assert job is not None and isinstance(job.result, dict)
+        if job.state == "running" and job.result.get("observation_due_at"):
+            job.result = {**job.result, "observation_due_at": None}
+
+
+def _application(load):
+    return load.profiles.application(load.application.id)
+
+
+def _claims(load, *, owner_kind: str, kind: str | None = None):
+    with load.sessions() as session:
+        return tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_kind == owner_kind,
+                    *([ResourceReservation.kind == kind] if kind else []),
+                )
+            )
+        )
+
+
+def _installed(load) -> list[RecipeInstallation]:
+    with load.sessions() as session:
+        return [
+            row
+            for row in session.scalars(select(RecipeInstallation))
+            if row.state != "uninstalled"
+        ]
+
+
+@pytest.mark.parametrize("damage", ["absent", "released", "plan-drift", "amount-drift"])
+def test_a_load_reserves_disk_again_when_its_claim_is_gone_or_stale(
+    tmp_path: Path, damage: str
+) -> None:
+    load = _load(tmp_path)
+    assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
+    with load.sessions.begin() as session:
+        claims = list(
+            session.scalars(
+                select(ResourceReservation).where(ResourceReservation.kind == "disk")
+            )
+        )
+        assert len(claims) == 2
+        for claim in claims:
+            if damage == "absent":
+                session.delete(claim)
+            elif damage == "released":
+                claim.state = "released"
+            elif damage == "plan-drift":
+                claim.plan_digest = "0" * 64
+            else:
+                claim.amount_bytes += 1
+    assert _settle(load), _application(load).status_reason
+    (installation,) = _installed(load)
+    assert installation.state == "installed"
+
+
+def test_a_resumed_load_reserves_what_its_transient_failure_released(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The live trigger: a transient fault while advancing a live child.
+
+    That marks the application failed, which releases its unassigned claims;
+    resuming the still-live child (the retry) returns the same application to
+    running without them. The child then looped on the missing claim.
+    """
+
+    load = _load(tmp_path)
+    assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
+    adapter = load.profiles._switch_adapter
+    real_advance = adapter.advance
+    faults: list[str] = []
+
+    def advance_once_flaky(operation_id, *, session):
+        if not faults:
+            faults.append(operation_id)
+            raise RuntimeError("Run/Switch child is unavailable")
+        return real_advance(operation_id, session=session)
+
+    monkeypatch.setattr(adapter, "advance", advance_once_flaky)
+    load.profiles.tick()
+    with load.sessions() as session:
+        row = session.get(FleetProfileApplication, load.application.id)
+        assert faults and row is not None and row.state == "failed"
+    claims = _claims(load, owner_kind="fleet-profile", kind="disk")
+    assert claims and all(claim.state == "released" for claim in claims)
+
+    resumed = load.profiles.retry(
+        load.application.id, request_key=str(uuid.uuid4()), actor="admin"
+    )
+    assert resumed.id == load.application.id and resumed.state == "running"
+    assert _settle(load), _application(load).status_reason
+    (installation,) = _installed(load)
+    assert installation.state == "installed"
+
+
+def test_a_load_survives_the_release_of_the_installation_that_held_its_claim(
+    tmp_path: Path,
+) -> None:
+    """Cleaning up an earlier attempt's plan frees the claim it was handed."""
+
+    load = _load(tmp_path)
+    assert _loop(load, lambda: _at_phase(load, "target-copy"), complete=False)
+    (held,) = {claim.owner_id for claim in _claims(load, owner_kind="installation")}
+    load.lifecycle.abandon_never_installed(held)
+    assert all(
+        claim.state == "released" for claim in _claims(load, owner_kind="installation")
+    )
+    # A retry from the first phase (as any replanned attempt does).
+    with load.sessions.begin() as session:
+        job = session.get(Job, _the_switch(load).id)
+        assert job is not None and isinstance(job.result, dict)
+        job.result = {**job.result, "phase_index": 0, "item_index": 0}
+    assert _settle(load), _application(load).status_reason
+    (installation,) = _installed(load)
+    assert installation.id != held and installation.state == "installed"
+
+
+def test_active_claims_with_different_owners_are_named_not_adopted(
+    tmp_path: Path,
+) -> None:
+    """A handoff is atomic: split ownership is a fault, never silently replaced."""
+
+    load = _load(tmp_path)
+    assert _loop(load, lambda: _at_phase(load, "target-copy"), complete=False)
+    with load.sessions.begin() as session:
+        claim = session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "installation",
+                ResourceReservation.kind == "disk",
+            )
+        ).first()
+        assert claim is not None
+        claim.owner_kind = "fleet-profile"
+        claim.owner_id = load.application.id
+        job = session.get(Job, _the_switch(load).id)
+        assert job is not None and isinstance(job.result, dict)
+        job.result = {**job.result, "phase_index": 0, "item_index": 0}
+    for _ in range(20):
+        _loop(load, lambda: False, rounds=1)
+        _skip_backoff(load)
+        if "run-switch.installation-handoff-inconsistent" in (
+            _the_switch(load).status_reason or ""
+        ):
+            break
+    assert "run-switch.installation-handoff-inconsistent" in (
+        _the_switch(load).status_reason or ""
+    )
+    assert _application(load).state == "running"
+
+
+@pytest.mark.parametrize("kind", ["port", "unified-memory"])
+def test_a_load_starts_when_its_port_or_memory_promise_is_gone(
+    tmp_path: Path, kind: str
+) -> None:
+    load = _load(tmp_path)
+    assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
+    with load.sessions.begin() as session:
+        promises = list(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_kind == "fleet-profile",
+                    ResourceReservation.kind == kind,
+                )
+            )
+        )
+        assert promises
+        for promise in promises:
+            session.delete(promise)
+    assert _settle(load), _application(load).status_reason
+
+
+def test_without_room_a_lost_claim_waits_visibly_and_resumes(tmp_path: Path) -> None:
+    load = _load(tmp_path)
+    fleet = FleetProjection(load.sessions, clock=load.lifecycle._clock)
+    assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
+    with load.sessions.begin() as session:
+        for claim in session.scalars(
+            select(ResourceReservation).where(ResourceReservation.kind == "disk")
+        ):
+            session.delete(claim)
+        snapshots = list(session.scalars(select(NodeInventorySnapshot)))
+        free = {row.node_id: row.disk_free_bytes for row in snapshots}
+        for snapshot in snapshots:
+            snapshot.disk_free_bytes = 100
+
+    def stalled() -> bool:
+        return any(blocker.code == "run-switch.phase-retry" for blocker in blockers())
+
+    def blockers():
+        return _application(load).blockers
+
+    for _ in range(12):
+        _loop(load, lambda: False, rounds=1)
+        _skip_backoff(load)
+        if stalled():
+            break
+    application = _application(load)
+    # Waiting, not failed, and the profile itself names what it keeps retrying.
+    assert application.state == "running"
+    assert stalled()
+    assert application.status_reason
+    reasons = {warning.code for node in fleet.read().nodes for warning in node.warnings}
+    assert "profile.retrying" in reasons
+
+    with load.sessions.begin() as session:
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            snapshot.disk_free_bytes = free[snapshot.node_id]
+    assert _settle(load), _application(load).status_reason
+    assert not _application(load).blockers
+    assert "profile.retrying" not in {
+        warning.code for node in fleet.read().nodes for warning in node.warnings
+    }

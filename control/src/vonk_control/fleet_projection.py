@@ -28,6 +28,7 @@ from .models import (
     CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
+    FleetProfileApplication,
     InstallationNode,
     NodeInventorySnapshot,
     RecipeInstallation,
@@ -35,6 +36,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .operation_blockers import PHASE_RETRY_CODE, read_blockers
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
@@ -233,6 +235,7 @@ class ProjectionReason(_StrictModel):
         "telemetry.delayed",
         "telemetry.stale",
         "install.partial",
+        "profile.retrying",
         "run.degraded",
         "recipe.update_available",
         "cpu.low-clock",
@@ -550,6 +553,7 @@ class FleetProjection:
                 run_rows, mapping_nodes, frozenset(node_ids), current, newest
             )
             reservations = self._reservations(session, node_ids)
+            stalls = self._stalled_loads(session, node_ids)
         return FleetSnapshot(
             event_cursor=event_cursor,
             generated_at=current,
@@ -568,6 +572,7 @@ class FleetProjection:
                     installed=installed.get(node_id, ()),
                     loaded=loaded.get(node_id, ()),
                     reservations=reservations.get(node_id, {}),
+                    stalls=stalls.get(node_id, ()),
                 )
                 for node_id in node_ids
             ],
@@ -1026,6 +1031,34 @@ class FleetProjection:
             values.setdefault(node_id, {})[kind] = (int(amount or 0), int(count))
         return values
 
+    @staticmethod
+    def _stalled_loads(
+        session: Session, node_ids: Sequence[str]
+    ) -> dict[str, tuple[str, ...]]:
+        """What each Spark's live profile load keeps retrying, by the load's own words.
+
+        The application mirrors the stall of its child (the same typed blocker
+        the child shows), so this reads that one fact instead of deriving a
+        second classification. An unreadable document yields no stall.
+        """
+
+        stalls: dict[str, list[str]] = {}
+        known = frozenset(node_ids)
+        for progress in session.scalars(
+            select(FleetProfileApplication.progress)
+            .where(FleetProfileApplication.state == "running")
+            .order_by(FleetProfileApplication.id)
+            .limit(_MAX_OPERATIONAL_GROUPS)
+        ):
+            raw = progress.get("blockers") if isinstance(progress, Mapping) else None
+            for blocker in read_blockers(raw):
+                if blocker.code != PHASE_RETRY_CODE:
+                    continue
+                for node_id in blocker.node_ids:
+                    if node_id in known:
+                        stalls.setdefault(node_id, []).append(blocker.detail)
+        return {node_id: tuple(details) for node_id, details in stalls.items()}
+
     def _node(
         self,
         node_id: str,
@@ -1041,6 +1074,7 @@ class FleetProjection:
         installed: Sequence[RecipePresence],
         loaded: Sequence[RunPresence],
         reservations: Mapping[str, tuple[int, int]],
+        stalls: Sequence[str] = (),
     ) -> FleetNode:
         warnings: list[ProjectionReason] = []
         connection = self._connection(agent, certificate, current)
@@ -1109,6 +1143,14 @@ class FleetProjection:
                 ProjectionReason(
                     code="install.partial",
                     detail="A recipe installation group is incomplete.",
+                    severity="warning",
+                )
+            )
+        for detail in stalls:
+            warnings.append(
+                ProjectionReason(
+                    code="profile.retrying",
+                    detail=f"A profile load keeps retrying: {detail}"[:256],
                     severity="warning",
                 )
             )

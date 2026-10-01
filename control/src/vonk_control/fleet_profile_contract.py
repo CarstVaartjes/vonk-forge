@@ -941,6 +941,8 @@ class FleetProfileChildOperation(_StrictModel):
     progress: FleetProfileChildProgress | None = None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     result: FleetProfileChildResult | None = None
+    #: A phase the child keeps retrying; empty while it makes progress.
+    stalls: list[OperationBlocker] = Field(default_factory=list, max_length=16)
 
 
 class FleetProfileSwitchAdapter(Protocol):
