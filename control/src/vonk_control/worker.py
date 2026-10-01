@@ -353,6 +353,7 @@ def assemble_production_worker(
     from .artifact_jobs import ArtifactJobService
     from .artifact_maintenance import ArtifactMaintenanceCadence
     from .attempt_residues import AttemptResidueReconciler
+    from .catalog_revision_collection import CatalogRevisionCollector
     from .cluster_mappings import ClusterMappingService
     from .distributed_recovery import DistributedRecoveryCoordinator
     from .distribution import build_distribution_service_from_components
@@ -528,6 +529,10 @@ def assemble_production_worker(
         )
         worker_background_services += (image_production.scheduler.tick,)
         worker_background_closers += (image_production.close,)
+    # Removes superseded catalog revisions nothing uses any more, hourly.
+    worker_background_services += (
+        CatalogRevisionCollector(sessions, clock=clock).tick,
+    )
     telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)
     artifact_jobs = ArtifactJobService(
         sessions,

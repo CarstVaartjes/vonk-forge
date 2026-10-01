@@ -219,6 +219,10 @@ class DatabaseSourceBundleStore:
                 raise SourceBundleError(
                     "bundle.storage_collision", "stored source bundle is inconsistent"
                 )
+            if stored is not None and metadata is not None:
+                # Verified again just now: a bundle a new revision is about to
+                # name must not look old to the unreferenced-bundle sweep.
+                metadata.verified_at = datetime.now(UTC)
             if stored is None:
                 if metadata is None:
                     metadata = RecipeSourceBundle(
