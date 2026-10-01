@@ -99,6 +99,11 @@ class CatalogEntityService:
         As with catalog publication metadata, only the typed projection is
         updated. Documents, content digests, heads, and already dispatched
         build requests retain their immutable identities.
+
+        This runs at the start of every sync over every active revision, so it
+        is also where a projection written under an earlier contract is
+        re-derived from its immutable document: the sync leaves an unchanged
+        head alone and never visits a superseded revision.
         """
         with self._write() as session:
             revisions = session.scalars(
@@ -109,27 +114,59 @@ class CatalogEntityService:
                 )
                 .with_for_update()
             ).all()
-            for revision in revisions:
-                # Validate stored data before deriving anything; corruption
-                # must not be repaired into an apparently valid projection.
-                try:
-                    projected = read_catalog_projection(revision).model_dump(
-                        mode="json",
-                        exclude_none=True,
+            heads = set(
+                session.scalars(
+                    select(CatalogDocumentHead.active_revision_id).where(
+                        CatalogDocumentHead.kind == "recipe"
                     )
+                )
+            )
+            for revision in revisions:
+                try:
                     recipe = read_catalog_document(revision)
                 except CatalogRevisionContractError as error:
-                    # Written under another contract; the next sync replaces
-                    # it. One such row must not stop the rest of the catalog.
-                    _LOGGER.warning(
+                    # Written under an earlier contract. Nothing can read the
+                    # document, so there is nothing to derive a projection
+                    # from; a superseded revision is simply history. One such
+                    # row must not stop the rest of the catalog.
+                    _LOGGER.log(
+                        logging.WARNING if revision.id in heads else logging.DEBUG,
                         "skipping build policy refresh for revision %s: %s",
                         revision.id,
                         error,
                     )
                     continue
                 assert isinstance(recipe, RecipeDefinition)
+                try:
+                    projected = read_catalog_projection(revision).model_dump(
+                        mode="json",
+                        exclude_none=True,
+                    )
+                    healed = False
+                except CatalogRevisionContractError as error:
+                    # The document is readable but the stored projection is
+                    # not (it predates the current projection contract).
+                    try:
+                        projected = _rederive_projection(session, revision, recipe)
+                    except CatalogRevisionContractError as failure:
+                        _LOGGER.warning(
+                            "skipping build policy refresh for revision %s: %s; "
+                            "it cannot be re-derived: %s",
+                            revision.id,
+                            error,
+                            failure,
+                        )
+                        continue
+                    healed = True
+                    _LOGGER.info(
+                        "re-derived the catalog projection of revision %s from "
+                        "its document",
+                        revision.id,
+                    )
                 policy = build_policy_projection(recipe)
-                if all(projected.get(key) == value for key, value in policy.items()):
+                if not healed and all(
+                    projected.get(key) == value for key, value in policy.items()
+                ):
                     continue
                 projected.update(policy)
                 session.execute(
@@ -537,14 +574,7 @@ def _revision(
             "installed_bytes": installed,
         }
     else:
-        projected = {
-            "title": parsed.metadata.title,
-            "description": parsed.metadata.description,
-            "tags": parsed.metadata.tags,
-            "runtime_engine": parsed.runtime.engine,
-            "topology": parsed.topology.model_dump(mode="json"),
-        }
-        projected.update(build_policy_projection(parsed))
+        projected = recipe_document_projection(parsed)
     return CatalogDocumentRevision(
         document_id=root.id,
         kind=str(parsed.kind),
@@ -563,6 +593,82 @@ def _revision(
         created_by=actor,
         created_at=now,
     )
+
+
+def recipe_document_projection(recipe: RecipeDefinition) -> dict[str, object]:
+    """Every projection field the immutable recipe document alone determines."""
+    return {
+        "title": recipe.metadata.title,
+        "description": recipe.metadata.description,
+        "tags": recipe.metadata.tags,
+        "runtime_engine": recipe.runtime.engine,
+        "topology": recipe.topology.model_dump(mode="json"),
+        **build_policy_projection(recipe),
+    }
+
+
+# Fields the catalog sync records beside the document; the document cannot
+# supply them, so a re-derived projection keeps each one that is still valid.
+_SYNC_RECORDED_FIELDS = (
+    "publication_commit",
+    "source_path",
+    "package_sha256",
+    "source_bundle_sha256",
+    "package_handle",
+    "release_version",
+    "release_released_at",
+    "prebuilt_image",
+)
+
+
+def _rederive_projection(
+    session: Session,
+    revision: CatalogDocumentRevision,
+    recipe: RecipeDefinition,
+) -> dict[str, object]:
+    """Rebuild a recipe projection that no longer validates from its document.
+
+    Only a document that parsed and still matches its stored content digest is
+    trusted; anything else is corruption and is left for the caller to report
+    rather than repaired into a valid-looking projection.
+    """
+    if document_sha256(revision.document) != revision.content_digest:
+        raise CatalogRevisionContractError(
+            f"catalog revision {revision.id} document digest does not match"
+        )
+    projected = recipe_document_projection(recipe)
+    stored = revision.projected if isinstance(revision.projected, Mapping) else {}
+    for key in _SYNC_RECORDED_FIELDS:
+        if stored.get(key) is None:
+            continue
+        try:
+            write_catalog_projection(
+                {**projected, key: stored[key]},
+                kind="recipe",
+            )
+        except CatalogRevisionContractError:
+            continue  # the next sync records it again from the signed catalog
+        projected[key] = stored[key]
+    selections = {selection.id for selection in recipe.models}
+    bindings = {
+        row.selection_id: artifact_key
+        for row, artifact_key in session.execute(
+            select(CatalogRecipeModelReference, CatalogDocumentRevision.artifact_key)
+            .join(
+                CatalogDocumentRevision,
+                CatalogDocumentRevision.id
+                == CatalogRecipeModelReference.model_revision_id,
+            )
+            .where(CatalogRecipeModelReference.recipe_revision_id == revision.id)
+        )
+    }
+    if selections <= bindings.keys() and all(bindings[i] for i in selections):
+        projected["artifact_inputs"] = [
+            {"selection_id": selection.id, "artifact_key": bindings[selection.id]}
+            for selection in recipe.models
+        ]
+    write_catalog_projection(projected, kind="recipe")  # still invalid: corrupt
+    return projected
 
 
 def build_policy_projection(recipe: RecipeDefinition) -> dict[str, object]:

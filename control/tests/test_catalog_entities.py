@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from importlib import resources
 
 import pytest
-from sqlalchemy import create_engine, delete, event, select
+from sqlalchemy import create_engine, delete, event, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from vonk_control.catalog_entities import (
@@ -15,6 +16,7 @@ from vonk_control.catalog_entities import (
     CatalogEntityService,
     CatalogValidationError,
 )
+from vonk_control.catalog_revision_contract import read_catalog_projection
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -322,3 +324,123 @@ def test_canonical_head_tracks_the_active_revision(
     assert head is not None
     assert head.active_revision_id == active.id
     assert head.candidate_revision_id is None
+
+
+# A projection as the release before the 2.0.0 recipe contract wrote it: the old
+# topology shape and the retired test_report, plus the publication fields the
+# sync recorded beside it.
+_SOURCE_BUNDLE = "b" * 64
+
+
+def _pre_contract_projection(valid: dict[str, object]) -> dict[str, object]:
+    projected = copy.deepcopy(valid)
+    topology = projected["topology"]
+    assert isinstance(topology, dict)
+    topology["mode"] = "single"
+    topology["fabric"] = {"connectivity": "none", "minimum_bandwidth_mbps": 0}
+    projected["test_report"] = {"result": "passed"}
+    del projected["artifact_inputs"]  # derived again from the model bindings
+    projected["source_bundle_sha256"] = _SOURCE_BUNDLE
+    projected["publication_commit"] = "a" * 40
+    # Itself invalid under the current contract: dropped, not carried over.
+    projected["package_handle"] = {"archive_path": 3}
+    return projected
+
+
+def _store_projection(
+    session: Session, revision: CatalogDocumentRevision, projected: object
+) -> None:
+    session.execute(
+        update(CatalogDocumentRevision)
+        .where(CatalogDocumentRevision.id == revision.id)
+        .values(projected=projected)
+    )
+    session.expire(revision, ["projected"])
+
+
+def _recipe_revision(
+    service: CatalogEntityService,
+) -> CatalogDocumentRevision:
+    _resolve(service, _model())
+    return _resolve(service, _recipe(_model()))
+
+
+def test_refresh_rederives_a_projection_an_earlier_release_wrote(
+    session: Session, service: CatalogEntityService
+) -> None:
+    revision = _recipe_revision(service)
+    valid = dict(revision.projected)
+    _store_projection(session, revision, _pre_contract_projection(valid))
+    with pytest.raises(ValueError, match="invalid projected data"):
+        read_catalog_projection(revision)
+
+    service.refresh_build_policy()
+
+    session.refresh(revision)
+    healed = read_catalog_projection(revision).model_dump(
+        mode="json", exclude_none=True
+    )
+    assert healed == {
+        **valid,
+        "source_bundle_sha256": _SOURCE_BUNDLE,
+        "publication_commit": "a" * 40,
+    }
+    again = dict(revision.projected)
+    service.refresh_build_policy()
+    session.refresh(revision)
+    assert revision.projected == again
+
+
+def test_refresh_does_not_repair_a_projection_of_a_document_that_does_not_match(
+    session: Session,
+    service: CatalogEntityService,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    revision = _recipe_revision(service)
+    broken = _pre_contract_projection(dict(revision.projected))
+    _store_projection(session, revision, broken)
+    session.execute(
+        update(CatalogDocumentRevision)
+        .where(CatalogDocumentRevision.id == revision.id)
+        .values(content_digest="c" * 64)
+    )
+    session.expire(revision)
+
+    with caplog.at_level(logging.WARNING):
+        service.refresh_build_policy()
+
+    session.refresh(revision)
+    assert revision.projected == broken
+    assert any(
+        revision.id in message and "digest does not match" in message
+        for message in caplog.messages
+    )
+
+
+def test_refresh_leaves_a_superseded_old_contract_revision_alone_and_quiet(
+    session: Session,
+    service: CatalogEntityService,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    first = _recipe_revision(service)
+    # The document predates the 2.0.0 contract, so it cannot be read at all.
+    # Bulk SQL stands in for the row an earlier release left behind.
+    old = {**first.document, "topology": {"mode": "single"}}
+    broken = _pre_contract_projection(dict(first.projected))
+    session.execute(
+        update(CatalogDocumentRevision)
+        .where(CatalogDocumentRevision.id == first.id)
+        .values(document=old, projected=broken)
+    )
+    session.expire(first)
+    changed = _recipe(_model())
+    _metadata(changed)["description"] = "a newer revision"
+    successor = service.revise(first.document_id, changed, actor="operator")
+    service.resolve(successor.id, actor="operator")
+
+    with caplog.at_level(logging.INFO):
+        service.refresh_build_policy()
+
+    session.refresh(first)
+    assert first.projected == broken
+    assert first.id not in caplog.text
