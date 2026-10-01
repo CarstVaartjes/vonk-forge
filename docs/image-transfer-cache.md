@@ -49,3 +49,20 @@ skipped. The NAS-to-Spark distribution endpoint already supports authenticated
 HTTP Range and resumable partial files; archive transfers synchronize storage
 at completion rather than per fragment. Distribution progress and per-Spark
 readiness are reported before workloads are stopped and replaced.
+
+## Layered image store (being introduced)
+
+Runtime images are moving from whole Docker archives to one content-addressed
+OCI layout in `image-cache/oci/`, which shares layers between images: a
+recipe update moves only its changed layers (about 90 MB compressed for a GLM
+1.7.x update instead of the whole ~21 GB archive). The agent site serves that
+layout read-only and by digest only (`GET`/`HEAD` of `/v2/` and
+`/v2/vonk/runtime/{manifests,blobs}/sha256:<hex>`), to verified agent
+identities. A Spark pulls a pinned image with `docker pull`: for one pull the
+agent serves those routes on a loopback port through its authenticated
+client (Docker treats loopback registries as plain HTTP), Docker fetches only
+the layers it lacks and verifies each against the manifest, and the helper's
+`image-pull` action requires the pulled image to carry the pinned identity
+before tagging it `localhost/vonk/compiled-runtime-<manifest>`. Agents
+advertise this as `recipe.image.pull.v1`.
+

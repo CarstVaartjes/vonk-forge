@@ -1755,6 +1755,37 @@ impl AgentHttpClient {
         Ok(())
     }
 
+    /// Read one object of the Controller's runtime image store.
+    ///
+    /// Only the registry ping and the two digest routes are reachable; the
+    /// caller (the loopback image store) passes Docker's `Accept` and
+    /// `Range` through so manifests negotiate and interrupted blobs resume.
+    pub async fn image_store_request(
+        &self,
+        head: bool,
+        path: &str,
+        accept: Option<&str>,
+        range: Option<&str>,
+    ) -> Result<reqwest::Response, ClientError> {
+        if !crate::image_store::valid_store_path(path) {
+            return Err(ClientError::Protocol);
+        }
+        let client = self.current_client().await;
+        let url = self.endpoint(path)?;
+        let mut request = if head {
+            client.head(url)
+        } else {
+            client.get(url)
+        };
+        if let Some(accept) = accept {
+            request = request.header("accept", accept);
+        }
+        if let Some(range) = range {
+            request = request.header("range", range);
+        }
+        Ok(request.send().await?)
+    }
+
     fn endpoint(&self, path: &str) -> Result<Url, ClientError> {
         self.controller
             .join(path)
@@ -1853,6 +1884,7 @@ fn host_runtime_grant_action(action: HostRuntimeAction) -> HostRuntimeGrantReque
     match action {
         HostRuntimeAction::RuntimePreflight => HostRuntimeGrantRequestAction::RuntimePreflight,
         HostRuntimeAction::ImageImport => HostRuntimeGrantRequestAction::ImageImport,
+        HostRuntimeAction::ImagePull => HostRuntimeGrantRequestAction::ImagePull,
         HostRuntimeAction::ImageInspect => HostRuntimeGrantRequestAction::ImageInspect,
         HostRuntimeAction::RunInspect => HostRuntimeGrantRequestAction::RunInspect,
         HostRuntimeAction::Start => HostRuntimeGrantRequestAction::Start,

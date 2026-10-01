@@ -631,6 +631,7 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
             action: match request.action {
                 HostRuntimeAction::RuntimePreflight => ContainerRuntimeAction::RuntimePreflight,
                 HostRuntimeAction::ImageImport => ContainerRuntimeAction::ImageImport,
+                HostRuntimeAction::ImagePull => ContainerRuntimeAction::ImagePull,
                 HostRuntimeAction::ImageInspect => ContainerRuntimeAction::ImageInspect,
                 HostRuntimeAction::RunInspect => ContainerRuntimeAction::RunInspect,
                 HostRuntimeAction::Start => ContainerRuntimeAction::Start,

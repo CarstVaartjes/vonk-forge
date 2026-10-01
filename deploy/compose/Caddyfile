@@ -67,6 +67,51 @@
 	}
 }
 
+(runtime_image_store) {
+	# Runtime images are one content-addressed OCI layout in the Controller's
+	# image cache. Agents read it by digest only, through a loopback forwarder
+	# that serves it to the Spark's Docker daemon: the registry ping, a
+	# manifest and a blob. Uploads, tags, listings and every other path of the
+	# layout are unreachable, and every route requires the verified agent
+	# identity the site maps from the client certificate.
+	@runtime_image_ping {
+		method GET HEAD
+		path /v2/
+		expression {vonk_agent_node}.matches("^spk_[0-9a-f]{32}$")
+	}
+	handle @runtime_image_ping {
+		header Docker-Distribution-API-Version registry/2.0
+		respond 200
+	}
+	@runtime_image_manifest {
+		method GET HEAD
+		expression {vonk_agent_node}.matches("^spk_[0-9a-f]{32}$")
+		path_regexp runtime_manifest ^/v2/vonk/runtime/manifests/sha256:([0-9a-f]{64})$
+	}
+	handle @runtime_image_manifest {
+		root * /srv/state/agent-artifacts/image-cache/oci
+		rewrite * /blobs/sha256/{re.runtime_manifest.1}
+		# The Controller admits only OCI image manifests into the layout.
+		header Content-Type application/vnd.oci.image.manifest.v1+json
+		header Docker-Content-Digest sha256:{re.runtime_manifest.1}
+		header Docker-Distribution-API-Version registry/2.0
+		file_server
+	}
+	@runtime_image_blob {
+		method GET HEAD
+		expression {vonk_agent_node}.matches("^spk_[0-9a-f]{32}$")
+		path_regexp runtime_blob ^/v2/vonk/runtime/blobs/sha256:([0-9a-f]{64})$
+	}
+	handle @runtime_image_blob {
+		root * /srv/state/agent-artifacts/image-cache/oci
+		rewrite * /blobs/sha256/{re.runtime_blob.1}
+		header Content-Type application/octet-stream
+		header Docker-Content-Digest sha256:{re.runtime_blob.1}
+		header Docker-Distribution-API-Version registry/2.0
+		file_server
+	}
+}
+
 (control_proxy) {
 	reverse_proxy control-api:8000 {
 		# PostgreSQL migrations can keep the API socket closed briefly after a
@@ -292,6 +337,8 @@ https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} 
 		~^CN=(spk_[0-9a-f]{32})$ "${1}"
 		default ""
 	}
+
+	import runtime_image_store
 
 	@agent_api {
 		path /agent/*

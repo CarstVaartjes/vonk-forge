@@ -523,6 +523,7 @@ impl<R> RecipeExecutor<'_, R> {
             claim,
             match action {
                 HostRuntimeAction::ImageImport => "extracting",
+                HostRuntimeAction::ImagePull => "pulling",
                 HostRuntimeAction::Start => "starting",
                 HostRuntimeAction::Stop => "stopping",
                 _ => "verifying",
@@ -537,6 +538,27 @@ impl<R> RecipeExecutor<'_, R> {
         }
         .execute(claim, action, arguments)
         .await
+    }
+
+    /// Pull a pinned runtime image from the Controller's layered image store.
+    ///
+    /// The store is served to the local Docker daemon on a loopback port only
+    /// for the duration of this pull, through this agent's authenticated
+    /// Controller client; Docker then fetches only the layers it lacks.
+    pub async fn pull_runtime_image(
+        &self,
+        claim: &AgentClaim,
+        manifest_digest: &str,
+        config_digest: &str,
+    ) -> Result<(), crate::host_runtime::HostRuntimeError> {
+        let store = crate::image_store::LoopbackImageStore::bind().await?;
+        let arguments = store.pull_arguments(manifest_digest, config_digest);
+        store
+            .serve_while(
+                self.client,
+                self.execute_host_runtime(claim, HostRuntimeAction::ImagePull, arguments),
+            )
+            .await
     }
 
     async fn execute_host_runtime(

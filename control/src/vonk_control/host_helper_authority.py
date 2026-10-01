@@ -238,6 +238,9 @@ class HostRuntimeAuthorityService:
         ContainerRuntimeAction.IMAGE_IMPORT: frozenset(
             {"recipe.image.import.v1", "artifact.distribution.v1"}
         ),
+        # A registry pull of a pinned runtime image from the Controller's
+        # layered image store, as part of distributing it to a Spark.
+        ContainerRuntimeAction.IMAGE_PULL: frozenset({"artifact.distribution.v1"}),
         ContainerRuntimeAction.IMAGE_INSPECT: frozenset({"recipe.install"}),
         ContainerRuntimeAction.RUN_INSPECT: frozenset({"recipe.start"}),
         ContainerRuntimeAction.START: frozenset({"recipe.start", "recipe.job.run.v1"}),
