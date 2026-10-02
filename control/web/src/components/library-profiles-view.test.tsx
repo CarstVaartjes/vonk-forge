@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import {vi} from "vitest";
 import {ApiError} from "../api/client";
 import type {ControlApi, FleetProfile, FleetProfileApplicationView, FleetProfilePreview} from "../api/types";
-import {LibraryProfilesView} from "./library-profiles-view";
+import {forgetUnsavedProfileDrafts, LibraryProfilesView} from "./library-profiles-view";
 import {ToastProvider} from "./toast";
 
 const nodeA = "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -18,6 +18,8 @@ const profile = {
 const preview = {allowed: true, plan_digest: "b".repeat(64), steps: [{index: 0, kind: "switch", label: "Switch to Qwen Code", node_ids: [nodeA]}], reasons: []} as unknown as FleetProfilePreview;
 const application = {state: "running", progress: {child_progress: {phase: "start", node_ids: [nodeA], bytes: 50, total_bytes: 100}}, status_reason: null} as unknown as FleetProfileApplicationView;
 
+beforeEach(forgetUnsavedProfileDrafts);
+
 function apiFor(overrides: Partial<ControlApi> = {}): ControlApi {
   return {profiles: vi.fn(async () => ({generated_at: "2026-09-10T00:00:00Z", profiles: [profile]})), previewProfile: vi.fn(async () => preview), autosaveProfile: vi.fn(async () => profile), loadProfile: vi.fn(async () => application), profileApplicationByRequest: vi.fn(async () => application), profileProgress: vi.fn(async () => application), ...overrides} as unknown as ControlApi;
 }
@@ -27,7 +29,7 @@ test("reads and loads a numbered profile without legacy status or application ro
   const api = apiFor();
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
   expect((await screen.findAllByText("Profile 2 · Coding"))[0]).toBeVisible();
-  await user.click(await screen.findByRole("button", {name: "Load profile"}));
+  await user.click(await screen.findByRole("button", {name: "Apply profile"}));
   expect(api.previewProfile).toHaveBeenCalledWith(2, expect.any(AbortSignal));
   expect(api.loadProfile).toHaveBeenCalledWith(2, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   expect(await screen.findByRole("region", {name: "Profile load progress"})).toBeVisible();
@@ -42,7 +44,7 @@ test("reconciles an ambiguous profile load with the same request key", async () 
   });
   const api = apiFor({loadProfile, profileApplicationByRequest});
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
-  await user.click(await screen.findByRole("button", {name: "Load profile"}));
+  await user.click(await screen.findByRole("button", {name: "Apply profile"}));
 
   expect(await screen.findByRole("region", {name: "Profile load progress"})).toBeVisible();
   expect(profileApplicationByRequest).toHaveBeenCalledWith(2, expect.stringMatching(/^[0-9a-f-]{36}$/));
@@ -81,7 +83,7 @@ test("shows a refused profile load without resubmitting it", async () => {
   loadProfile.mockRejectedValueOnce(new ApiError(409, "Profile admission refused"));
   const api = apiFor({loadProfile});
   render(<ToastProvider><LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/></ToastProvider>);
-  await user.click(await screen.findByRole("button", {name: "Load profile"}));
+  await user.click(await screen.findByRole("button", {name: "Apply profile"}));
   expect(await within(screen.getByRole("region", {name: "Notifications"})).findByText(/Profile admission refused/)).toBeVisible();
   expect(loadProfile).toHaveBeenCalledTimes(1);
 });
@@ -114,7 +116,7 @@ test("a load waiting for preparation is offered, and a waiting application says 
   const api = apiFor({previewProfile: vi.fn(async () => waitingPreview), loadProfile: vi.fn(async () => waiting)});
   render(<ToastProvider><LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/></ToastProvider>);
   expect(await screen.findByText(/The Controller prepares this first/)).toBeVisible();
-  await user.click(await screen.findByRole("button", {name: "Load profile"}));
+  await user.click(await screen.findByRole("button", {name: "Apply profile"}));
   const list = await screen.findByRole("list", {name: "Waiting for"});
   expect(within(list).getByText("run-switch.inventory-unknown")).toBeVisible();
   expect(within(list).getByText(/Next attempt/)).toBeVisible();
@@ -160,7 +162,48 @@ test("a completed load refreshes the saved profile and shows the endpoint withou
   })) as unknown as ControlApi["profileEndpoints"];
   const api = apiFor({profiles, profileProgress: profileProgress as unknown as ControlApi["profileProgress"], profileEndpoints});
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
-  await user.click(await screen.findByRole("button", {name: "Load profile"}));
+  await user.click(await screen.findByRole("button", {name: "Apply profile"}));
   expect(await screen.findByRole("region", {name: "Qwen Code client endpoint"}, {timeout: 8_000})).toBeVisible();
   expect(profileProgress.mock.calls.length).toBeGreaterThanOrEqual(2);
 }, 15_000);
+
+test("a running profile application does not lock navigation", async () => {
+  const user = userEvent.setup();
+  const onBusyChange = vi.fn();
+  render(<LibraryProfilesView api={apiFor()} entries={[]} onBusyChange={onBusyChange} onNavigate={vi.fn()}/>);
+  await user.click(await screen.findByRole("button", {name: "Apply profile"}));
+  expect(await screen.findByRole("region", {name: "Profile load progress"})).toBeVisible();
+  expect(onBusyChange).toHaveBeenLastCalledWith(false);
+});
+
+test("unsaved edits survive selecting another profile", async () => {
+  const user = userEvent.setup();
+  const second = {...profile, number: 3, name: "Other"} as FleetProfile;
+  const api = apiFor({profiles: vi.fn(async () => ({generated_at: "2026-09-10T00:00:00Z", profiles: [profile, second]}))});
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+  const saved = await screen.findByRole("region", {name: "Profile 2 saved profile"});
+  await user.click(within(saved).getByRole("button", {name: "Edit profile"}));
+  await user.clear(screen.getByLabelText("Assignment name"));
+  await user.type(screen.getByLabelText("Assignment name"), "kept-edit");
+  await user.click(screen.getByRole("button", {name: /Profile 3 · Other/}));
+  await user.click(screen.getByRole("button", {name: /Profile 2 · Coding/}));
+  expect(await screen.findByLabelText("Assignment name")).toHaveValue("kept-edit");
+});
+
+test("the profile screen reviews the changes before Apply", async () => {
+  const reviewed = {...preview, steps: [{index: 0, kind: "switch", label: "Switch Spark A to Qwen Code", node_ids: [nodeA]}], summary: {starts: 1, stops: 0, installs: 0, uninstalls: 0, builds: 0, distributions: 0, placements: 0, already_correct: 0, blockers: 0}} as unknown as FleetProfilePreview;
+  render(<LibraryProfilesView api={apiFor({previewProfile: vi.fn(async () => reviewed)})} entries={[]} onNavigate={vi.fn()}/>);
+  const review = await screen.findByRole("region", {name: "Review changes"});
+  expect(within(review).getByText("Switch Spark A to Qwen Code")).toBeVisible();
+  expect(within(review).getByText("1 start")).toBeVisible();
+  expect(within(review).getByText("Technical detail")).toBeVisible();
+});
+
+test("a profile named in the URL is selected", async () => {
+  const second = {...profile, number: 3, name: "Other"} as FleetProfile;
+  window.history.replaceState(null, "", "/library/profiles?profile=3");
+  try {
+    render(<LibraryProfilesView api={apiFor({profiles: vi.fn(async () => ({generated_at: "2026-09-10T00:00:00Z", profiles: [profile, second]}))})} entries={[]} onNavigate={vi.fn()}/>);
+    expect(await screen.findByRole("region", {name: "Profile 3 saved profile"})).toBeVisible();
+  } finally { window.history.replaceState(null, "", "/"); }
+});
