@@ -228,6 +228,12 @@ curl -fsSL --proto '=https' --tlsv1.2 "$origin/$selected_path" -o "$bootstrap" |
 [ "$(sha256 "$bootstrap")" = "$selected_sha256" ] ||
     fail "the immutable release bootstrap failed checksum verification"
 
+if [ "$channel" = stable ]; then
+    installer_url="$origin/$kind"
+else
+    installer_url="$origin/$channel/$kind"
+fi
+VONK_INSTALLER_URL="$installer_url" \
 VONK_INSTALL_BASE_URL="$origin/$release_prefix" \
 VONK_INSTALL_RELEASE_MANIFEST="$release" \
 VONK_INSTALL_RELEASE_SIGNATURE="$release_signature" \

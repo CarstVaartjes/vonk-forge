@@ -1766,12 +1766,46 @@ def promote(arguments: argparse.Namespace) -> None:
         (entry, source) for entry, source in entries if entry["phase"] == "endpoint"
     )
     _copy_promotion_group(filesystem, remote, endpoints)
+    fallbacks = _unqualified_fallback_endpoints(plan, endpoints, filesystem, remote)
+    _copy_promotion_group(filesystem, remote, fallbacks)
     pointers = tuple(
         (entry, source) for entry, source in entries if entry["phase"] == "pointer"
     )
     if len(pointers) != 1:
         raise PublicationError("publication plan pointer is invalid")
     _copy_publication_entry(filesystem, remote, *pointers[0])
+
+
+def _stable_published(filesystem: Path | None, remote: str | None) -> bool:
+    key = "artifacts/stable/current.manifest"
+    if filesystem is not None:
+        return (filesystem / key).exists()
+    assert remote is not None
+    return _rclone_object_exists(remote, key)
+
+
+def _unqualified_fallback_endpoints(
+    plan: dict[str, Any],
+    endpoints: tuple[tuple[dict[str, Any], Path], ...],
+    filesystem: Path | None,
+    remote: str | None,
+) -> tuple[tuple[dict[str, Any], Path], ...]:
+    """Serve the unqualified /nas, /spark and /vonkctl from dev until stable exists.
+
+    Documentation points at the short URLs. While no stable release has been
+    published they would 404, so a dev promotion also writes its (dev-bound)
+    endpoints there. The stable promotion overwrites them, and a dev promotion
+    never touches them once the stable pointer exists.
+    """
+    if plan["channel"] != "dev" or _stable_published(filesystem, remote):
+        return ()
+    fallbacks = []
+    for entry, source in endpoints:
+        key = entry["key"]
+        if not key.startswith("dev/"):
+            raise PublicationError("dev endpoint key is invalid")
+        fallbacks.append(({**entry, "key": key.removeprefix("dev/")}, source))
+    return tuple(fallbacks)
 
 
 def _published_bytes(

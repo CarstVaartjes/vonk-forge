@@ -2313,6 +2313,70 @@ def test_static_endpoints_do_not_change_between_release_generations(
     ).read_bytes()
 
 
+def test_dev_promotion_serves_unqualified_endpoints_until_stable_exists(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "dev", _inputs(tmp_path / "dev", channel="dev"))
+    destination = tmp_path / "public"
+
+    result = _publish_accepted(publication, destination, tmp_path / "dev-acceptance")
+
+    assert result.returncode == 0, result.stderr
+    for name in ("nas", "spark", "vonkctl"):
+        assert (destination / name).read_bytes() == (
+            destination / "dev" / name
+        ).read_bytes()
+    assert b"channel='dev'" in (destination / "nas").read_bytes()
+    operations = [json.loads(line) for line in result.stdout.splitlines()]
+    assert [item["key"] for item in operations if item["phase"] == "endpoint"][3:] == [
+        "nas",
+        "spark",
+        "vonkctl",
+    ]
+
+
+def test_dev_promotion_never_replaces_unqualified_endpoints_once_stable_exists(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "public"
+    stable_inputs = _inputs(tmp_path / "stable")
+    stable = _assemble(tmp_path / "stable", stable_inputs)
+    first = _publish_accepted(stable, destination, tmp_path / "stable-acceptance")
+    assert first.returncode == 0, first.stderr
+    stable_nas = (destination / "nas").read_bytes()
+    assert b"channel='stable'" in stable_nas
+
+    dev_inputs = _inputs(tmp_path / "dev", channel="dev")
+    dev_inputs["signing_key"] = stable_inputs["signing_key"]
+    dev_inputs["signing_public_key"] = stable_inputs["signing_public_key"]
+    dev = _assemble(tmp_path / "dev", dev_inputs)
+    second = _publish_accepted(dev, destination, tmp_path / "dev-acceptance")
+
+    assert second.returncode == 0, second.stderr
+    assert (destination / "nas").read_bytes() == stable_nas
+    assert b"channel='dev'" in (destination / "dev/nas").read_bytes()
+
+
+def test_stable_promotion_replaces_the_development_fallback_endpoints(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "public"
+    dev_inputs = _inputs(tmp_path / "dev", channel="dev")
+    dev = _assemble(tmp_path / "dev", dev_inputs)
+    published = _publish_accepted(dev, destination, tmp_path / "dev-acceptance")
+    assert published.returncode == 0, published.stderr
+    assert b"channel='dev'" in (destination / "nas").read_bytes()
+
+    stable_inputs = _inputs(tmp_path / "stable")
+    stable_inputs["signing_key"] = dev_inputs["signing_key"]
+    stable_inputs["signing_public_key"] = dev_inputs["signing_public_key"]
+    stable = _assemble(tmp_path / "stable", stable_inputs)
+    result = _publish_accepted(stable, destination, tmp_path / "stable-acceptance")
+
+    assert result.returncode == 0, result.stderr
+    assert b"channel='stable'" in (destination / "nas").read_bytes()
+
+
 @pytest.mark.parametrize("preflight_only", [False, True])
 def test_stable_publication_refuses_version_rollback_before_writing(
     tmp_path: Path,
@@ -2450,7 +2514,7 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
     for setup in _input_mapping(inputs, "nas").values():
         assert isinstance(setup, Path)
         setup.write_text(
-            '#!/bin/sh\nset -eu\nprintf \'%s\\n\' "$*" > "$VONK_TEST_RECEIPT"\n'
+            '#!/bin/sh\nset -eu\nprintf \'%s\\n%s\\n\' "$*" "${VONK_INSTALLER_URL:-}" > "$VONK_TEST_RECEIPT"\n'
         )
         setup.chmod(0o755)
     publication = _assemble(tmp_path / "inputs", inputs)
@@ -2490,6 +2554,8 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
 
     assert result.returncode == 0, result.stderr
     assert receipt.read_text().startswith("--template ")
+    # The setup program names the exact rerun command from this URL.
+    assert receipt.read_text().splitlines()[1] == "https://install.example.test/nas"
     receipt.unlink()
     manifest = destination / "artifacts/stable/current.manifest"
     manifest.write_bytes(
