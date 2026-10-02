@@ -335,7 +335,7 @@ def test_changed_executable_cannot_reuse_the_retained_build(tmp_path):
     assert resolution.build_id is None
 
 
-def test_install_does_not_substitute_receipt_from_another_build(tmp_path):
+def test_install_accepts_a_sibling_build_of_the_same_image(tmp_path):
     fixture = _prepared_successor(tmp_path)
     assert isinstance(fixture, tuple)
     (
@@ -354,7 +354,7 @@ def test_install_does_not_substitute_receipt_from_another_build(tmp_path):
         original = session.get(RecipeBuild, build_id)
         assert original is not None
         # Independent builds can have the same executable inputs and image
-        # digest. The authorized archive still names its exact producing build.
+        # digest. The image is its content, so either build installs it.
         session.add(
             RecipeBuild(
                 id=other_id,
@@ -378,11 +378,7 @@ def test_install_does_not_substitute_receipt_from_another_build(tmp_path):
             )
         )
     plan = admission.plan_install(mapping, other_id, now=now)
-    assert not plan.allowed
-    assert any(
-        "differs from the selected build" in blocker.detail
-        for blocker in plan.nodes[0].blockers
-    )
+    assert plan.allowed, plan.nodes[0].blockers
 
 
 def test_install_rechecks_the_stored_image_after_preview(tmp_path):

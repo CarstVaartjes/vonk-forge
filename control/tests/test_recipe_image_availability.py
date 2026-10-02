@@ -734,6 +734,51 @@ def test_download_after_cache_removal_restores_the_image(tmp_path):
     assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
 
 
+def test_sibling_recipes_publishing_the_same_image_both_download(tmp_path):
+    """The same image bytes under another build are the same image.
+
+    Two recipes publish one prebuilt image and each has its own build row. The
+    second download used to fail with a permanent
+    ``runtime_image.receipt_identity_conflict`` because the stored receipt
+    named the first recipe's build.
+    """
+
+    first = _recipe("recipe-source-build.json")
+    document = first.model_dump(mode="json")
+    document["identity"]["slug"] = "sibling-recipe"
+    second = RecipeDefinition.model_validate(document)
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_head(session, _add_revision(session, "sibling-first", first))
+        _add_head(session, _add_revision(session, "sibling-second", second))
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    recipes = {"sibling-first": first, "sibling-second": second}
+    service = _service(
+        sessions,
+        storage=storage,
+        transport=Transport(),
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipes[recipe_revision_id],
+            _runtime(),
+        ),
+        clock=lambda: datetime.now(UTC),
+    )
+    downloads = [
+        service.start_selector(
+            recipe.identity.slug, actor="operator", request_id=str(index) * 36
+        )
+        for index, recipe in enumerate((first, second), start=1)
+    ]
+    service.run_pending()
+    service.run_pending()
+    for download in downloads:
+        result = service.get(download.id)
+        assert result.state == "succeeded", result.failure
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
+
+
 def test_build_failure_waits_for_retry_and_exposes_step_contract(
     tmp_path: Path,
 ) -> None:

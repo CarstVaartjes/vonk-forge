@@ -977,7 +977,6 @@ def _compiled_build_matches(
         isinstance(identity, Mapping)
         and identity.get("recipe_revision_sha256") == recipe_digest
         and isinstance(image, Mapping)
-        and image.get("build_id") == build.id
         and image.get("image_digest") == build.image_digest
         and image.get("oci_layout_sha256") == build.oci_layout_sha256
         and image.get("image_bytes") == build.image_bytes

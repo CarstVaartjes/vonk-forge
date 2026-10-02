@@ -824,24 +824,24 @@ def test_preparation_backfills_a_missing_build_input_identity(
         == repaired
     )
 
-    # A different build input claiming the same verified bytes is a build
-    # identity conflict: it is refused, never swapped under existing owners.
-    with pytest.raises(RuntimeImagePreparationError) as conflict:
-        prepare_runtime_image(
-            _document("recipe-source-build.json"),
-            runtime=_runtime(),
-            storage=storage,
-            transport=TinyTransport(),
-            build_receipt={
-                "state": "succeeded",
-                "build_id": "build-1",
-                "build_input_sha256": "b" * 64,
-                "image_digest": BUILT_IMAGE_DIGEST,
-                "oci_layout_sha256": ARCHIVE_DIGEST,
-                "image_bytes": len(ARCHIVE),
-            },
-        )
-    assert conflict.value.code == "runtime_image.receipt_identity_conflict"
+    # Another build of the same verified bytes is the same image: it succeeds,
+    # answers with its own provenance and leaves the stored receipt alone.
+    sibling = prepare_runtime_image(
+        _document("recipe-source-build.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+        build_receipt={
+            "state": "succeeded",
+            "build_id": "build-2",
+            "build_input_sha256": "b" * 64,
+            "image_digest": BUILT_IMAGE_DIGEST,
+            "oci_layout_sha256": ARCHIVE_DIGEST,
+            "image_bytes": len(ARCHIVE),
+        },
+    )
+    assert (sibling.build_id, sibling.build_input_sha256) == ("build-2", "b" * 64)
+    assert sibling.oci_archive_sha256 == repaired.oci_archive_sha256
     assert storage.read_receipt(ARCHIVE_DIGEST).build_input_sha256 == build_input
 
 
@@ -1090,7 +1090,7 @@ def test_stale_receipt_is_discarded_once_by_scan(
     assert raised.value.code == "runtime_image.receipt_unavailable"
 
 
-def test_parseable_receipt_with_a_different_identity_stays_a_conflict(
+def test_receipt_content_is_the_identity_and_provenance_never_conflicts(
     tmp_path: Path,
 ) -> None:
 
@@ -1121,12 +1121,17 @@ def test_parseable_receipt_with_a_different_identity_stays_a_conflict(
     manifest = storage.existing_archive(digest, len(archive))
     storage.commit(manifest, receipt=existing)
 
-    disagreeing = existing.model_copy(update={"build_id": "build-two"})
-    with pytest.raises(RuntimeImagePreparationError) as raised:
-        storage.commit(manifest, receipt=disagreeing)
-
-    # A parseable receipt binds these bytes to an identity that workloads may
-    # already use; it is never swapped underneath them.
-    assert raised.value.code == "runtime_image.receipt_identity_conflict"
+    # The same bytes asked for by another build are the same image: the
+    # answer carries the asking build, the stored receipt keeps its content.
+    sibling = existing.model_copy(update={"build_id": "build-two"})
+    assert storage.commit(manifest, receipt=sibling).build_id == "build-two"
     assert storage.read_receipt(digest).build_id == existing.build_id
     assert storage.read_receipt(digest).build_input_sha256 == "b" * 64
+
+    # A receipt whose content disagrees with what was just observed in the
+    # stored bytes is stale metadata: the observation replaces it.
+    observed = existing.model_copy(
+        update={"local_image_config_id": "sha256:" + "9" * 64}
+    )
+    storage.commit(manifest, receipt=observed)
+    assert storage.read_receipt(digest).local_image_config_id == ("sha256:" + "9" * 64)
