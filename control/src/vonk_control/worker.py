@@ -362,7 +362,6 @@ def assemble_production_worker(
     from .fleet_profiles import build_production_fleet_profile_service
     from .install_admission import (
         InstallAdmissionService,
-        authorize_installation_runtime_images,
     )
     from .recipe_builds import RecipeBuildService
     from .recipe_operation_worker import RecipeOperationWorker
@@ -437,7 +436,6 @@ def assemble_production_worker(
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
             compiled_plan_provider=compiled_plan_provider,
-            runtime_image_authorizer=authorize_installation_runtime_images,
         ),
         run_admission=RunAdmissionService(
             sessions,
@@ -599,14 +597,11 @@ if __name__ == "__main__":
     from datetime import UTC, datetime
     from pathlib import Path
 
-    from sqlalchemy import select
-
     from .agent_jobs import AgentJobService
     from .db import build_engine, session_factory, wait_for_database
     from .execution_plan_service import ControllerExecutionPlanService
     from .logging import configure_controller_logging
     from .model_cache import ModelCacheService
-    from .models import CatalogDocumentRevision
     from .presence import ManagementAddressPolicy
     from .route_runtime import (
         AtomicRouteBundlePublisher,
@@ -616,7 +611,7 @@ if __name__ == "__main__":
         FilesystemRuntimeImageStorage,
         OciLayoutImageTransport,
         make_runtime_image_receipt_preparer,
-        resolve_persisted_runtime_image_receipt,
+        stored_runtime_image_resolver,
     )
     from .settings import (
         ARTIFACT_JOB_RECONCILE_BATCH_LIMIT,
@@ -677,70 +672,9 @@ if __name__ == "__main__":
         clock=clock,
     )
 
-    def resolve_runtime_image_receipt(document, image_digest, runtime_spec):
-        runtime = (
-            runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None
-        )
-        if not isinstance(runtime, Mapping):
-            raise TypeError(
-                "runtime image preparation is required: runtime projection is unavailable"
-            )
-        architecture = runtime.get("architecture")
-        interface = runtime.get("interface", runtime.get("runtime_interface"))
-        if not isinstance(architecture, str) or not isinstance(interface, str):
-            raise TypeError(
-                "runtime image preparation is required: platform identity is unavailable"
-            )
-        receipt = runtime_image_storage.find_verified(
-            image_digest,
-            expected_architecture=architecture,
-            expected_runtime_interface=interface,
-        )
-        if receipt is None:
-            raise ValueError(
-                "runtime image preparation is required before compile/install"
-            )
-        identity = runtime_spec.get("identity")
-        execution_key = (
-            identity.get("execution_sha256") if isinstance(identity, Mapping) else None
-        )
-        recipe_digest = (
-            identity.get("recipe_revision_sha256")
-            if isinstance(identity, Mapping)
-            else None
-        )
-        if not isinstance(execution_key, str) or not isinstance(recipe_digest, str):
-            raise TypeError(
-                "runtime image preparation execution identity is unavailable"
-            )
-        with sessions() as session:
-            revision = session.scalar(
-                select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == "active",
-                    CatalogDocumentRevision.content_digest == recipe_digest,
-                )
-            )
-            if revision is None:
-                raise ValueError(
-                    "durable runtime image receipt is unavailable before compile/install"
-                )
-            resolve_persisted_runtime_image_receipt(
-                session,
-                recipe_revision_id=revision.id,
-                current_content_digest=recipe_digest,
-                effective_execution_key=execution_key,
-                receipt=receipt,
-            )
-        if revision is None:
-            raise ValueError(
-                "durable runtime image receipt is unavailable before compile/install"
-            )
-        return receipt
-
     execution_plans = ControllerExecutionPlanService(
         model_cache,
-        runtime_image_resolver=resolve_runtime_image_receipt,
+        runtime_image_resolver=stored_runtime_image_resolver(runtime_image_storage),
     )
     worker = assemble_production_worker(
         distributed_start_timeout_seconds=DISTRIBUTED_START_TIMEOUT_SECONDS,

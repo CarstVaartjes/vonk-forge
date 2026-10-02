@@ -20,6 +20,7 @@ from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import artifact_reference_scan
+from vonk_control import recipe_image_availability as availability_module
 from vonk_control.artifact_lifecycle import ArtifactLifecycleError
 from vonk_control.artifact_reference_scan import (
     runtime_image_reference_findings,
@@ -69,7 +70,6 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
     read_runtime_image_reference_intent,
-    resolve_persisted_runtime_image_receipt,
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -677,10 +677,7 @@ def test_replay_does_not_collapse_different_image_actions(tmp_path: Path) -> Non
     assert refused.value.code == "recipe_image.request_key_reused"
 
 
-@pytest.mark.parametrize("revoked", [None, "receipt", "authorization"])
-def test_download_after_cache_removal_restores_only_unrevoked_authority(
-    tmp_path, revoked
-):
+def test_download_after_cache_removal_restores_the_image(tmp_path):
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -701,17 +698,6 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
     )
     service.run_pending()
     assert service.get(first.id).state == "succeeded"
-    cached = storage.read_receipt(ARCHIVE_SHA)
-    with sessions.begin() as session:
-        # One verified archive has one authorization here; the storage receipt
-        # beside the bytes is the immutable observation and has no state.
-        authorization = session.scalar(select(RuntimeImageAuthorization))
-        assert authorization is not None
-        archive_sha256 = authorization.oci_archive_sha256
-        authorization_id = authorization.id
-        execution_key = authorization.effective_execution_key
-        if revoked is not None:
-            authorization.state = "revoked"
     removal = remove_after_review(
         service,
         recipe.identity.slug,
@@ -727,7 +713,7 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
     assert isinstance(removed, dict)
     assert removed["state"] == "succeeded"
     # The worker takes the storage receipt only after committing its exact
-    # checkpoint and deletion fence; SQL keeps the authorization decision.
+    # checkpoint and deletion fence.
     # The image's blobs wait for garbage collection, which then reclaims them.
     assert not (storage.root / f"{ARCHIVE_SHA}.receipt.json").exists()
     remove_test_image(storage, ARCHIVE_SHA)
@@ -744,24 +730,8 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
     )
     restarted.run_pending()
     result = restarted.get(download.id)
-    if revoked is None:
-        assert result.state == "succeeded", result.failure
-        assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
-        with sessions() as session:
-            restored = resolve_persisted_runtime_image_receipt(
-                session,
-                recipe_revision_id="revision-restore",
-                current_content_digest=document_sha256(recipe.model_dump(mode="json")),
-                effective_execution_key=execution_key,
-                receipt=cached,
-            )
-            assert restored.oci_archive_sha256 == archive_sha256
-            authorization = session.get(RuntimeImageAuthorization, authorization_id)
-            assert authorization is not None and authorization.state == "authorized"
-    else:
-        assert result.state == "failed"
-        assert result.failure is not None
-        assert result.failure["code"] == ("runtime_image.authorization_revoked")
+    assert result.state == "succeeded", result.failure
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
 
 
 def test_build_failure_waits_for_retry_and_exposes_step_contract(
@@ -819,12 +789,12 @@ def test_build_failure_waits_for_retry_and_exposes_step_contract(
 
 
 def test_database_integrity_failure_names_the_violated_constraint(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A database failure must not be reported as SQLAlchemy's own slug.
 
     The availability worker records the verified archive through
-    ``persist_runtime_image_receipt``, which inserts into
+    ``record_runtime_image_reference``, which inserts into
     ``runtime_image_authorizations`` and flushes. When the database refuses
     that write the raw ``sqlalchemy.exc.IntegrityError`` reaches ``_fail``.
     That exception carries ``code = "gkpj"`` -- SQLAlchemy's documentation slug
@@ -896,7 +866,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
     # ``orig``): the driver error is the ``orig`` the failure reporter must
     # surface, while the SQLAlchemy wrapper contributes the empty ``detail``
     # list and the ``gkpj`` slug that used to win.
-    def receipt_writer(*_args: object) -> None:
+    def receipt_writer(*_args: object, **_kwargs: object) -> None:
         refusal = sqlite3.IntegrityError(
             "UNIQUE constraint failed: runtime_image_authorizations."
             "recipe_revision_id, runtime_image_authorizations."
@@ -917,8 +887,10 @@ def test_database_integrity_failure_names_the_violated_constraint(
         ),
         transport=BuildTransport(),
         builder=builder,
-        receipt_writer=receipt_writer,
         clock=lambda: datetime.now(UTC),
+    )
+    monkeypatch.setattr(
+        availability_module, "record_runtime_image_reference", receipt_writer
     )
     queued = service.start(
         "revision-integrity-failure",
@@ -1035,7 +1007,6 @@ def test_build_mode_dispatches_when_no_verified_build_receipt_exists(
         ),
         transport=BuildTransport(),
         builder=builder,
-        receipt_writer=lambda *_args: None,
         clock=lambda: datetime.now(UTC),
     )
     queued = service.start(

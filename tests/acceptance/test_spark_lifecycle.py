@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import copy
+import gzip
 import hashlib
 import http.client
 import io
@@ -449,6 +451,68 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         role=roles[0].name,
         serving_check=check,
         recipe=raw_recipe,
+    )
+
+
+def _editorial_successor(fixture: CanonicalCanaryFixture) -> CanonicalCanaryFixture:
+    """The same Recipe with a reworded description: a new revision, the same image.
+
+    Only editorial text changes, so the executable inputs, the build context
+    and the model stay identical. The package and index are rebuilt around the
+    new Recipe document exactly as a producer would publish them.
+    """
+
+    from vonk_forge_contracts import document_sha256
+
+    index = json.loads(fixture.index_bytes)
+    entry = index["recipes"][0]
+    recipe = copy.deepcopy(entry["document"])
+    recipe["metadata"]["description"] = (
+        f"{recipe['metadata']['description']} Editorially revised."
+    )
+    digest = document_sha256(recipe)
+    recipe_bytes = json.dumps(recipe, sort_keys=True, indent=2).encode() + b"\n"
+    with tarfile.open(fileobj=io.BytesIO(fixture.package_bytes), mode="r:gz") as source:
+        members = [
+            (member, source.extractfile(member).read() if member.isfile() else b"")  # type: ignore[union-attr]
+            for member in source.getmembers()
+        ]
+    archive = io.BytesIO()
+    with (
+        gzip.GzipFile(fileobj=archive, mode="wb", mtime=0) as compressed,
+        tarfile.open(fileobj=compressed, mode="w") as target,
+    ):
+        for member, payload in members:
+            if member.name == "recipe.json":
+                payload = recipe_bytes
+            elif member.name == "manifest.json":
+                manifest = json.loads(payload)
+                manifest["recipe_content_sha256"] = digest
+                for item in manifest["files"]:
+                    if item["path"] == "recipe.json":
+                        item["sha256"] = hashlib.sha256(recipe_bytes).hexdigest()
+                        item["size"] = len(recipe_bytes)
+                payload = json.dumps(
+                    manifest, sort_keys=True, separators=(",", ":")
+                ).encode()
+            member.size = len(payload)
+            target.addfile(member, io.BytesIO(payload) if member.isfile() else None)
+    package_bytes = archive.getvalue()
+    entry["document"] = recipe
+    entry["content_sha256"] = digest
+    entry["package"] = {
+        **entry["package"],
+        "expected_bytes": len(package_bytes),
+        "recipe_content_sha256": digest,
+        "sha256": hashlib.sha256(package_bytes).hexdigest(),
+    }
+    index["source_commit"] = hashlib.sha1(digest.encode()).hexdigest()
+    return fixture._replace(
+        index_bytes=json.dumps(index, sort_keys=True).encode(),
+        package_bytes=package_bytes,
+        source_commit=index["source_commit"],
+        recipe_content_sha256=digest,
+        recipe=recipe,
     )
 
 
@@ -2068,7 +2132,10 @@ class SparkLifecycle:
         return require_object(sync, "synthetic canary catalog sync")
 
     def _run_synthetic_canary(
-        self, node_id: str, *, carry: Callable[[], None] | None = None
+        self,
+        node_id: str,
+        *,
+        carry: Callable[[], tuple[str, str] | None] | None = None,
     ) -> dict[str, object]:
         """Run the canary from catalog sync to uninstall.
 
@@ -2368,7 +2435,11 @@ class SparkLifecycle:
             )
             completed.append("inference-ok")
             if carry is not None:
-                carry()
+                # A carry that replaced the workload reports the installation
+                # and run that now serve, which the cleanup must remove.
+                carried = carry()
+                if carried is not None:
+                    installation_id, run_id = carried
             cleanup_payload = {
                 "name": "Acceptance synthetic canary",
                 "description": "Disposable whole-fleet lifecycle canary cleanup",

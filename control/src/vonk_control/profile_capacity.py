@@ -360,9 +360,10 @@ def _profile_build_memory_claim(
         "planned",
     ):
         raise ValueError("profile build consumer is outside preparation")
+    if plan.recipe_revision_id is None:
+        raise ValueError("profile build consumer revision is unavailable")
     if (
-        plan.recipe_revision_id != build.recipe_revision_id
-        or plan.recipe_build_id != build.id
+        plan.recipe_build_id != build.id
         or plan.build.build_input_sha256 != build.build_input_sha256
         or plan.build.builder_node_id != build.builder_node_id
     ):
@@ -380,12 +381,12 @@ def _profile_build_memory_claim(
     application, assignment, requirements = _profile_assignment(
         session,
         progress.profile_application_id,
-        build.recipe_revision_id,
+        plan.recipe_revision_id,
         nodes,
         workload_intent_ordinal=progress.workload_intent_ordinal,
     )
     image = accepted_profile_runtime_image(
-        session, application.id, build.recipe_revision_id, nodes
+        session, application.id, plan.recipe_revision_id, nodes
     )
     if image.build_id != build.id or assignment.alias != plan.alias:
         raise ValueError("build is outside the reviewed profile preparation")

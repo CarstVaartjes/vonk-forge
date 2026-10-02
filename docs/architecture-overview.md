@@ -123,12 +123,14 @@ Today, `ModelCacheSet` and `ModelCacheSetArtifact` retain the logical
 artifact-set identity and membership in SQL, while every model object's bytes,
 size, and verification receipt are owned by managed storage under the cache
 root. `ModelCacheOperation` retains the operation record and its checkpoints.
-Image preparation writes managed filesystem receipts. SQL
-`RuntimeImageAuthorization` records current recipe authorization for the exact
-image; the former SQL `RuntimeImageReceipt` table has been removed. Admission
-requires both current authorization and the managed receipt with a complete
-stored image. `RecipeBuild`, `Job`, and agent-operation rows retain request and
-output identities, coordination, and reported results; they do not
+Image preparation writes managed filesystem receipts, and an image is
+identified by its content: its archive and image digests and size, accepted once
+at ingress. Any recipe revision with the same executable build inputs reuses it,
+so admission needs only the managed receipt with a complete stored image and no
+per-revision permission. SQL `RuntimeImageAuthorization` rows remain only as an
+index of which archive a revision uses, for retention and the library; nothing
+reads them as a gate. `RecipeBuild`, `Job`, and agent-operation rows retain
+request and output identities, coordination, and reported results; they do not
 independently prove that an image is available.
 
 Recent cache-recovery work already reconciles absent bytes after a NAS restore

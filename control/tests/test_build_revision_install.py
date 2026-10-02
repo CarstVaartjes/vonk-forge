@@ -16,13 +16,13 @@ from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.install_admission import (
     InstallAdmissionService,
     InstallPlanConflict,
-    authorize_installation_runtime_images,
 )
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentPresence,
     CatalogDocumentRevision,
-    ClusterMappingNode,
+    NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
     RuntimeImageAuthorization,
@@ -34,11 +34,9 @@ from vonk_control.recipe_operations import (
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
-    persist_runtime_image_receipt,
-    prepare_runtime_image,
-    resolve_persisted_runtime_image_receipt,
+    stored_runtime_image_resolver,
 )
-from vonk_forge_contracts import document_sha256, read_model
+from vonk_forge_contracts import read_model
 
 from .preflight_fixtures import record_passing_preflight
 from .runtime_image_fixtures import remove_test_image
@@ -49,6 +47,7 @@ from .test_recipe_builds import (
     _write_controller_build_receipt,
     setup,
 )
+from .test_recipe_operations import complete_started_recipe
 
 
 def _prepared_successor(tmp_path, *, change="runtime"):
@@ -193,73 +192,8 @@ def _prepared_successor(tmp_path, *, change="runtime"):
                 for file in model.files
             )
 
-    def prepare(document, runtime_spec, selected_build):
-        def authorize(prepared_receipt):
-            with sessions.begin() as session:
-                persist_runtime_image_receipt(
-                    session,
-                    recipe_revision_id=revision.id,
-                    original_content_digest=revision.content_digest,
-                    effective_execution_key=runtime_spec["identity"][
-                        "execution_sha256"
-                    ],
-                    receipt=prepared_receipt,
-                    verified_at=now,
-                )
-
-        return prepare_runtime_image(
-            document,
-            runtime=runtime_spec["runtime"],
-            storage=storage,
-            transport=NoBuild(),
-            build_receipt={
-                "state": selected_build.state,
-                "build_id": selected_build.id,
-                "build_input_sha256": selected_build.build_input_sha256,
-                "image_digest": selected_build.image_digest,
-                "oci_layout_sha256": selected_build.oci_layout_sha256,
-                "image_bytes": selected_build.image_bytes,
-            },
-            now=now,
-            receipt_writer=authorize,
-        )
-
-    def resolve(document, image_digest, runtime_spec):
-        current = storage.find_verified(
-            image_digest,
-            expected_architecture="linux/arm64",
-            expected_runtime_interface="vonk.runtime.v1",
-        )
-        if current is None:
-            raise ValueError("verified runtime image archive is missing")
-        with sessions() as session:
-            return resolve_persisted_runtime_image_receipt(
-                session,
-                recipe_revision_id=revision.id,
-                current_content_digest=document_sha256(document),
-                effective_execution_key=runtime_spec["identity"]["execution_sha256"],
-                receipt=current,
-            )
-
-    preparation = ControllerExecutionPlanService(
-        ModelReceipts(), runtime_image_preparer=prepare
-    )
-    with sessions() as session:
-        preparation.compile_installation(
-            session,
-            revision=revision,
-            build=build,
-            mapping_nodes=tuple(
-                session.scalars(
-                    select(ClusterMappingNode).where(
-                        ClusterMappingNode.mapping_id == mapping_id
-                    )
-                )
-            ),
-            parameters={},
-        )
     compiler = ControllerExecutionPlanService(
-        ModelReceipts(), runtime_image_resolver=resolve
+        ModelReceipts(), runtime_image_resolver=stored_runtime_image_resolver(storage)
     )
 
     def compile_without_transaction(**kwargs):
@@ -270,16 +204,35 @@ def _prepared_successor(tmp_path, *, change="runtime"):
         sessions,
         disk_floor_bytes=10,
         compiled_plan_provider=compile_without_transaction,
-        runtime_image_authorizer=authorize_installation_runtime_images,
     )
-    return sessions, now, successor, receipt, storage, admission, mapping_id, build.id
+    return (
+        sessions,
+        now,
+        successor,
+        receipt,
+        storage,
+        admission,
+        mapping_id,
+        build.id,
+        builds,
+    )
 
 
 @pytest.mark.parametrize("change", ["editorial", "runtime"])
 def test_prepared_successor_installs_the_original_verified_build(tmp_path, change):
     fixture = _prepared_successor(tmp_path, change=change)
     assert isinstance(fixture, tuple)
-    sessions, now, successor, receipt, _storage, admission, mapping, build_id = fixture
+    (
+        sessions,
+        now,
+        successor,
+        receipt,
+        _storage,
+        admission,
+        mapping,
+        build_id,
+        _builds,
+    ) = fixture
     plan = admission.plan_install(mapping, build_id, now=now)
     assert plan.allowed, plan.nodes[0].blockers
     installed_id = admission.accept_install(plan, actor="admin", now=now)
@@ -298,6 +251,83 @@ def test_prepared_successor_installs_the_original_verified_build(tmp_path, chang
         assert argv[argv.index("--max-model-len") + 1] == "16384"
 
 
+def test_editorial_successor_installs_and_starts_with_no_image_grant(tmp_path):
+    """An image is its content: a successor revision runs its predecessor's build.
+
+    The recipe's image is already on the Sparks, so no phase prepares it for
+    the successor, and nothing records any per-revision grant. Review, install
+    plan, install and start must still go through.
+    """
+
+    fixture = _prepared_successor(tmp_path, change="editorial")
+    assert isinstance(fixture, tuple)
+    (
+        sessions,
+        now,
+        successor,
+        receipt,
+        _storage,
+        admission,
+        mapping,
+        build_id,
+        builds,
+    ) = fixture
+    with sessions.begin() as session:
+        session.query(RuntimeImageAuthorization).delete()
+    queue = RecordingQueue()
+    service = RecipeOperationService(
+        sessions,
+        install_admission=admission,
+        run_admission=RunAdmissionService(sessions),
+        agent_jobs=queue,
+        builds=builds,
+        clock=lambda: now,
+    )
+    # Review: the successor finds the identical build by content.
+    plan = service.preview_install(mapping, build_id)
+    assert plan.allowed, plan.nodes[0].blockers
+    install = service.install(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid4())
+    )
+    for node in plan.nodes:
+        service.record_node_result(
+            install.id,
+            node.node_id,
+            succeeded=True,
+            evidence={"installed_bytes": 120},
+        )
+    with sessions() as session:
+        installed = session.scalar(select(RecipeInstallation))
+        assert installed is not None
+        assert installed.recipe_revision_id == successor.id
+        assert installed.recipe_build_id == receipt.build_id
+        assert session.query(RuntimeImageAuthorization).count() == 0
+    with sessions.begin() as session:
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            snapshot.host_memory_total_bytes = 10**12
+            snapshot.host_memory_free_bytes = 10**12
+            snapshot.gpu_memory_total_bytes = 10**12
+            snapshot.gpu_memory_free_bytes = 10**12
+        session.add(
+            AgentPresence(
+                node_id=plan.nodes[0].node_id,
+                certificate_serial="revision-reuse-preflight",
+                certificate_fingerprint="revision-reuse-preflight",
+                management_address="192.168.1.211",
+                observed_at=now,
+            )
+        )
+    run_plan = service.preview_run(installed.id, "qwen")
+    start = service.start(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid4()),
+    )
+    complete_started_recipe(sessions, service, start.id)
+    assert service.get(start.id).state == "succeeded"
+
+
 def test_changed_executable_cannot_reuse_the_retained_build(tmp_path):
     resolution = _prepared_successor(tmp_path, change="build")
     assert isinstance(resolution, RecipeBuildResolution)
@@ -308,7 +338,17 @@ def test_changed_executable_cannot_reuse_the_retained_build(tmp_path):
 def test_install_does_not_substitute_receipt_from_another_build(tmp_path):
     fixture = _prepared_successor(tmp_path)
     assert isinstance(fixture, tuple)
-    sessions, now, successor, receipt, _storage, admission, mapping, build_id = fixture
+    (
+        sessions,
+        now,
+        successor,
+        receipt,
+        _storage,
+        admission,
+        mapping,
+        build_id,
+        _builds,
+    ) = fixture
     other_id = str(uuid4())
     with sessions.begin() as session:
         original = session.get(RecipeBuild, build_id)
@@ -345,53 +385,43 @@ def test_install_does_not_substitute_receipt_from_another_build(tmp_path):
     )
 
 
-@pytest.mark.parametrize("lost_authority", ["revoked", "missing"])
-def test_install_rechecks_reused_receipt_after_preview(tmp_path, lost_authority):
+def test_install_rechecks_the_stored_image_after_preview(tmp_path):
     fixture = _prepared_successor(tmp_path)
     assert isinstance(fixture, tuple)
-    sessions, now, successor, receipt, storage, admission, mapping, build_id = fixture
+    (
+        sessions,
+        now,
+        _successor,
+        receipt,
+        storage,
+        admission,
+        mapping,
+        build_id,
+        _builds,
+    ) = fixture
     plan = admission.plan_install(mapping, build_id, now=now)
     assert plan.allowed
-    if lost_authority == "missing":
-        remove_test_image(storage, receipt.oci_archive_sha256)
-    else:
-        with sessions.begin() as session:
-            for authorization in session.scalars(
-                select(RuntimeImageAuthorization).where(
-                    RuntimeImageAuthorization.recipe_revision_id == successor.id
-                )
-            ):
-                authorization.state = "revoked"
+    remove_test_image(storage, receipt.oci_archive_sha256)
     with pytest.raises(InstallPlanConflict):
         admission.accept_install(plan, actor="admin", now=now)
     with sessions() as session:
         assert session.scalar(select(RecipeInstallation)) is None
 
 
-def test_revocation_after_storage_check_is_rejected_inside_acceptance(tmp_path):
-    fixture = _prepared_successor(tmp_path)
-    assert isinstance(fixture, tuple)
-    sessions, now, successor, _receipt, _storage, admission, mapping, build_id = fixture
-    plan = admission.plan_install(mapping, build_id, now=now)
-    admission.refresh_install_receipts(plan, now=now)
-    with sessions.begin() as session:
-        for authorization in session.scalars(
-            select(RuntimeImageAuthorization).where(
-                RuntimeImageAuthorization.recipe_revision_id == successor.id
-            )
-        ):
-            authorization.state = "revoked"
-    with (
-        pytest.raises(InstallPlanConflict, match="authority_stale"),
-        sessions.begin() as session,
-    ):
-        admission.accept_install_in_session(session, plan, actor="admin", now=now)
-
-
 def test_installation_replay_adopts_accepted_effect_before_cache_refresh(tmp_path):
     fixture = _prepared_successor(tmp_path)
     assert isinstance(fixture, tuple)
-    sessions, now, _successor, receipt, storage, admission, mapping, build_id = fixture
+    (
+        sessions,
+        now,
+        _successor,
+        receipt,
+        storage,
+        admission,
+        mapping,
+        build_id,
+        _builds,
+    ) = fixture
     operations = RecipeOperationService(
         sessions,
         install_admission=admission,

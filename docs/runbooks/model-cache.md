@@ -113,10 +113,11 @@ newer cache entry or select from a Spark copy. Cache updates and garbage
 collection do not change running workloads; a later apply must pass the cache
 gate before distributing exact assets to selected Sparks in parallel. Apply
 skips verified local copies, then stops/replaces workloads and reports durable
-per-Spark progress and readiness. For a multi-Spark recipe, the Controller
-records image authorization for every compiled role and rank before installing
-the group. Those authorizations reuse the same cached image archive; they do
-not trigger another image download or build.
+per-Spark progress and readiness. A runtime image is identified by its
+content, so every recipe revision with the same executable build inputs (an
+editorial revision, for instance) runs the same cached image archive; no
+per-revision permission is recorded or required, and nothing triggers another
+image download or build.
 
 Active Spark transfers renew their node- and plan-bound download authorization
 through the existing authenticated job heartbeat. A large copy can continue

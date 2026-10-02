@@ -6,8 +6,10 @@ canary keeps serving, the Controller is redeployed with the candidate release
 and the Spark agent is upgraded in place to the candidate. A prober asks the
 gateway for its models and runs one canary inference every few seconds the
 whole time. The lane fails when the route drops, the model disappears from
-the gateway or inference fails beyond a tiny tolerance. Then the canary's own
-stop and uninstall run on the candidate.
+the gateway or inference fails beyond a tiny tolerance. Then a new editorial
+revision of the canary's recipe (same image, reworded description) is loaded
+over it end to end on the candidate, and the canary's own stop and uninstall
+run.
 
 Release d30de9199 would have failed here: its new agent could not inspect a
 run the previous agent started, the ranks went stale and the Controller
@@ -57,6 +59,7 @@ from tests.acceptance.test_spark_lifecycle import (
     SparkLifecycle,
     _atomic_write,
     _canonical,
+    _editorial_successor,
     _run_spark_bootstrap,
 )
 
@@ -207,6 +210,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         self.evidence = CarryEvidence()
         self.failure_evidence: dict[str, object] | None = None
         self._phase = "baseline-install"
+        self._successor_identity: tuple[str, str] = ("", "")
         self._probing = threading.Event()
         self._prober: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -328,7 +332,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
 
     # -- the carry ---------------------------------------------------------
 
-    def _carry(self) -> None:
+    def _carry(self) -> tuple[str, str]:
         fixture = self.synthetic_canary_fixture
         self._alias = fixture.slug
         self._serving_check = fixture.serving_check
@@ -344,6 +348,10 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         finally:
             self._stop_prober()
         self._judge()
+        # The carried workload is judged; now a new revision of its recipe
+        # replaces it, which is what the hourly recipe refresh does.
+        self._run_phase("editorial-successor", self._load_editorial_successor)
+        return self._successor_identity
 
     def _run_phase(self, name: str, action) -> None:
         started = time.monotonic()
@@ -423,6 +431,106 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             raise LifecycleError(f"candidate Spark upgrade failed: {error}") from error
         self._wait_for_agent_identity(
             package_version=self.candidate.package_version, timeout=300
+        )
+
+    def _load_editorial_successor(self) -> None:
+        """Load a new editorial revision of the running recipe, end to end.
+
+        The successor changes only the description, so its image, build and
+        model are the running workload's. It goes through the owner's path:
+        catalog sync, recipe download, profile review, admission, install plan,
+        install and start, and must serve inference as the new revision.
+        """
+
+        assert self.control is not None and self.browser is not None
+        fixture = self.synthetic_canary_fixture
+        successor = _editorial_successor(fixture)
+        nodes = self._fleet_snapshot().get("nodes")
+        node_ids = [
+            node["id"]
+            for node in (nodes if isinstance(nodes, list) else [])
+            if isinstance(node, dict) and isinstance(node.get("id"), str)
+        ]
+        if len(node_ids) != 1:
+            raise LifecycleError("the editorial successor needs exactly one Spark")
+        node_id = node_ids[0]
+        sync = self._import_canary_catalog(
+            successor, self._canary_request_key(successor, node_id, "editorial-sync")
+        )
+        if (
+            sync.get("state") != "current"
+            or sync.get("commit") != successor.source_commit
+            or sync.get("problems") != []
+        ):
+            raise LifecycleError(
+                "editorial successor catalog sync is incomplete: "
+                + json.dumps(sync, sort_keys=True, default=str)[:1024]
+            )
+        selector = f"{successor.publisher}/{successor.slug}"
+        _, detail_payload = self.control.request("GET", f"/api/recipe/{selector}")
+        identity = require_object(
+            require_object(detail_payload, "editorial successor detail").get(
+                "identity"
+            ),
+            "editorial successor identity",
+        )
+        revision_id = identity.get("recipe_revision_id")
+        if identity.get("content_sha256") != successor.recipe_content_sha256 or not (
+            isinstance(revision_id, str)
+        ):
+            raise LifecycleError("the editorial successor is not the newest revision")
+        download = self._await_recipe_download(
+            self._request_recipe_download(
+                selector,
+                request_key=self._canary_request_key(
+                    successor, node_id, "editorial-download"
+                ),
+            ),
+            fixture=successor,
+            recipe_revision_id=revision_id,
+        )
+        if download.get("state") != "succeeded":
+            raise LifecycleError("the editorial successor download did not succeed")
+        _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
+        preview = require_object(preview_payload, "editorial successor preview")
+        if preview.get("allowed") is not True:
+            raise LifecycleError(
+                "editorial successor profile preview is not admitted: "
+                + self._preview_diagnostic(preview)
+            )
+        application = self._await_profile_application(
+            require_object(
+                self._load_canary_profile(
+                    preview,
+                    request_key=self._canary_request_key(
+                        successor, node_id, "editorial-load"
+                    ),
+                ),
+                "editorial successor profile application",
+            ),
+            label="editorial successor profile load",
+            node_id=node_id,
+        )
+        if application.get("state") != "succeeded":
+            raise LifecycleError(
+                "editorial successor profile load did not succeed: "
+                + str(application.get("status_reason"))[:512]
+            )
+        self._await_canary_endpoint(successor.slug, published=True)
+        inference = self.browser.bearer(self._inference_key, timeout=30)
+        self._run_canonical_inference(
+            inference, successor.serving_check, successor.slug
+        )
+        progress = require_object(application.get("progress"), "successor progress")
+        run_result = self._profile_run_switch_result(
+            require_object(progress.get("step_results"), "successor step results")
+        )
+        phase_results = run_result.get("phase_results")
+        if not isinstance(phase_results, list):
+            raise LifecycleError("the editorial successor run receipt is invalid")
+        self._successor_identity = (
+            self._canary_phase_identity(phase_results, "installation_id"),
+            self._canary_phase_identity(phase_results, "run_id"),
         )
 
     def _require_published(self) -> None:

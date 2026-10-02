@@ -45,7 +45,6 @@ from .recipe_update_contract import (
 )
 from .runtime_image_preparation import (
     RuntimeImagePreparationError,
-    resolve_persisted_runtime_image_receipt,
 )
 from .strict_json import serialize_json_value
 from .user_authority import serialize_user_authority
@@ -205,14 +204,6 @@ class RecipeUpdateBatches:
                 ):
                     continue
                 raise
-            with self.sessions() as session:
-                resolve_persisted_runtime_image_receipt(
-                    session,
-                    recipe_revision_id=revision.id,
-                    current_content_digest=revision.content_digest,
-                    effective_execution_key=authorization.effective_execution_key,
-                    receipt=receipt,
-                )
             logical = (revision.publisher, revision.slug)
             if logical not in heads:
                 raise _error(

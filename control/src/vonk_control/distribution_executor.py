@@ -36,7 +36,6 @@ from .models import (
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
-    RuntimeImageAuthorization,
 )
 from .operation_progress import aggregate_progress, project_progress
 from .run_switch_contract import (
@@ -55,7 +54,6 @@ from .runtime_image_preparation import (
     RuntimeImagePreparationError,
     RuntimeImageReceipt,
     RuntimeImageStorage,
-    prefixed_image_digest,
 )
 from .strict_json import read_stored_model
 
@@ -300,14 +298,11 @@ class DurableDistributionPhaseExecutor:
         image_digest, layout_digest, image_bytes, build_id = self._runtime_identity(
             plan, progress
         )
-        effective_execution_key = self._runtime_execution_key(progress)
         image = self._archive(
-            plan,
             build_id=build_id,
             image_digest=image_digest,
             layout_digest=layout_digest,
             image_bytes=image_bytes,
-            effective_execution_key=effective_execution_key,
         )
         assignments = {
             node_id: self._assignment(
@@ -904,75 +899,22 @@ class DurableDistributionPhaseExecutor:
                 return storage
         return None
 
-    def _archive_is_published(
-        self, image_digest: str, archive_sha256: str, image_bytes: int
-    ) -> bool:
-        """Whether a live authorization covers an archive that is present.
-
-        SQL owns the authorization decision and managed storage owns whether
-        the bytes and their receipt are present, so both must hold: a stored
-        archive with no live, matching authorization is not usable, and an
-        authorization whose bytes are gone is not usable either. A source with
-        no Controller image cache -- the in-memory fixture source -- declares
-        its published archives instead, and that declaration answers the
-        presence half.
-        """
-
-        expected_image_digest = prefixed_image_digest(image_digest)
-        with self._sessions() as session:
-            authorized = session.scalar(
-                select(RuntimeImageAuthorization.id).where(
-                    RuntimeImageAuthorization.state == "authorized",
-                    RuntimeImageAuthorization.oci_archive_sha256 == archive_sha256,
-                    RuntimeImageAuthorization.image_digest == expected_image_digest,
-                    RuntimeImageAuthorization.image_bytes == image_bytes,
-                )
-            )
-        if authorized is None:
-            return False
-        storage = self._source_runtime_storage(self._distribution.source)
-        if storage is None:
-            verifier = getattr(self._distribution.source, "verify_runtime_image", None)
-            if not callable(verifier):
-                return False
-            return bool(verifier(expected_image_digest, archive_sha256))
-        try:
-            receipt = storage.read_receipt(archive_sha256)
-        except (RuntimeImagePreparationError, OSError, ValueError):
-            return False
-        return (
-            receipt.oci_archive_sha256 == archive_sha256
-            and receipt.image_bytes == image_bytes
-        )
-
-    @staticmethod
-    def _runtime_execution_key(progress: Mapping[str, object]) -> str | None:
-        phase_results = progress.get("phase_results")
-        if not isinstance(phase_results, list):
-            return None
-        for raw in reversed(phase_results):
-            if not isinstance(raw, Mapping):
-                continue
-            runtime_receipt = raw.get("runtime_image")
-            if isinstance(runtime_receipt, Mapping):
-                value = runtime_receipt.get("effective_execution_key")
-                if isinstance(value, str):
-                    return value
-            value = raw.get("effective_execution_key")
-            if isinstance(value, str):
-                return value
-        return None
-
     def _archive(
         self,
-        plan: RunSwitchPlan,
         *,
         build_id: str | None,
         image_digest: str,
         layout_digest: str,
         image_bytes: int,
-        effective_execution_key: str | None = None,
     ) -> RuntimeImagePull:
+        """The stored archive of a succeeded build, identified by its content.
+
+        The bytes were verified at ingress and managed storage holds the image.
+        The plan names the build, and the build's recorded result must equal
+        the archive being copied; which recipe revision asks for it does not
+        matter.
+        """
+
         if not image_digest or not layout_digest or image_bytes < 1:
             raise RuntimeError("verified OCI runtime image identity is unavailable")
         if build_id is None:
@@ -987,53 +929,9 @@ class DurableDistributionPhaseExecutor:
                 or build.image_bytes != image_bytes
             ):
                 raise RuntimeError("OCI build authority changed")
-            if plan.recipe_revision_id is not None:
-                # The revision's authority is over the exact archive: its
-                # digest, config and size. Which build row first produced those
-                # bytes, and which role's execution key recorded the receipt,
-                # do not change what the revision may pull. Prefer the exact
-                # build and key, but never refuse an authorized identical image
-                # because a sibling build or role holds the matching row.
-                authorizations = session.scalars(
-                    select(RuntimeImageAuthorization).where(
-                        RuntimeImageAuthorization.recipe_revision_id
-                        == plan.recipe_revision_id,
-                        RuntimeImageAuthorization.image_digest == image_digest,
-                        RuntimeImageAuthorization.oci_archive_sha256 == layout_digest,
-                        RuntimeImageAuthorization.image_bytes == image_bytes,
-                        RuntimeImageAuthorization.state == "authorized",
-                    )
-                )
-                authorization = min(
-                    authorizations,
-                    key=lambda item: (
-                        item.build_id != build.id,
-                        item.effective_execution_key != effective_execution_key,
-                        item.id,
-                    ),
-                    default=None,
-                )
-                if authorization is None:
-                    raise RuntimeError(
-                        "current recipe is not authorized for OCI build receipt"
-                    )
-                if not self._archive_is_published(
-                    authorization.image_digest,
-                    authorization.oci_archive_sha256,
-                    authorization.image_bytes,
-                ):
-                    raise RuntimeError(
-                        "runtime_image.authorization_invalid: "
-                        "OCI build receipt authority changed"
-                    )
-            config_digest = (
-                authorization.local_image_config_id
-                if plan.recipe_revision_id is not None
-                else self._stored_config_digest(layout_digest)
-            )
         return RuntimeImagePull(
             image_digest=image_digest,
-            config_digest=config_digest,
+            config_digest=self._stored_config_digest(layout_digest),
             address=layout_digest,
         )
 

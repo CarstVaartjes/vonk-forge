@@ -25,7 +25,6 @@ from .models import (
     FleetProfileApplication,
     Job,
     RecipeBuild,
-    RuntimeImageAuthorization,
 )
 from .recipe_availability_intent import read_availability_intent
 from .recipe_lifecycle_contract import (
@@ -64,38 +63,6 @@ class BuildConsumerError(RuntimeError):
         self.code = code
         self.retryable = retryable
         super().__init__(detail)
-
-
-def build_serves_revision(
-    session: Session, build: RecipeBuild, recipe_revision_id: str | None
-) -> bool:
-    """Whether ``recipe_revision_id`` may consume ``build``'s verified artifact.
-
-    A build keeps the revision that produced it. A successor whose executable
-    inputs are unchanged (a notes-only edit, a dropped option) reuses it through
-    its own current authorization of that exact archive. One predicate owns the
-    question for every consumer check, so a reused build is never mistaken for
-    a changed identity.
-    """
-
-    if recipe_revision_id is None:
-        return False
-    if build.recipe_revision_id == recipe_revision_id:
-        return True
-    return (
-        build.oci_layout_sha256 is not None
-        and session.scalar(
-            select(RuntimeImageAuthorization.id)
-            .where(
-                RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id,
-                RuntimeImageAuthorization.state == "authorized",
-                RuntimeImageAuthorization.build_id == build.id,
-                RuntimeImageAuthorization.oci_archive_sha256 == build.oci_layout_sha256,
-            )
-            .limit(1)
-        )
-        is not None
-    )
 
 
 def needs_container_build(plan: RunSwitchPlan, phase_index: int = 0) -> bool:
@@ -245,11 +212,6 @@ def lock_build_dependency(
         raise BuildConsumerError(
             "build.consumer_invalid", "accepted build consumer identity changed"
         )
-    if not build_serves_revision(session, build, recipe_revision_id):
-        raise BuildConsumerError(
-            "build.consumer_invalid",
-            "build is not authorized for the consuming recipe revision",
-        )
     # Detachment removes demand; pending cleanup must not prevent it. New
     # consumers retain the default refusal and cannot join a cancelling child.
     if allow_cancelling:
@@ -300,7 +262,6 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
                 and_(
                     Job.kind == "recipe.image.availability.v2",
                     Job.state.in_(("queued", "running", "partial")),
-                    Job.authority_revision == build.recipe_revision_id,
                     Job.payload["runtime"]["builder_node_id"].as_string()
                     == build.builder_node_id,
                     Job.payload["build_input_sha256"].as_string()
@@ -382,8 +343,6 @@ def _profile_consumer(
     for assignment, build_id in _profile_build_dependencies(review):
         if build_id != build.id:
             continue
-        if not build_serves_revision(session, build, assignment.recipe_revision_id):
-            raise ValueError("profile build consumer revision changed")
         adapter = progress.switch_adapter
         if adapter is None:
             return True
@@ -453,8 +412,7 @@ def _run_switch_consumer(session: Session, parent: Job, build: RecipeBuild) -> b
     if any(node.workload_intent_ordinal != ordinal for node in nodes):
         return False
     if (
-        not build_serves_revision(session, build, plan.recipe_revision_id)
-        or plan.build.build_id != build.id
+        plan.build.build_id != build.id
         or plan.recipe_build_id not in (None, build.id)
         or plan.build.build_input_sha256 != build.build_input_sha256
         or plan.build.builder_node_id != build.builder_node_id
@@ -474,8 +432,7 @@ def _availability_consumer(parent: Job, build: RecipeBuild) -> bool:
     read_recipe(recipe)
     runtime = payload["runtime"]
     if (
-        payload["recipe_revision_id"] != build.recipe_revision_id
-        or not isinstance(runtime, Mapping)
+        not isinstance(runtime, Mapping)
         or runtime.get("build_input_sha256") != build.build_input_sha256
     ):
         raise ValueError("availability build consumer identity changed")

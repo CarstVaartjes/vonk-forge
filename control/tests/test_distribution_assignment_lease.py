@@ -138,7 +138,7 @@ def _transfer(agent_system):  # noqa: F811
         def _model_objects(self, _plan, _progress):
             return (MODEL,), "d" * 64, 10
 
-        def _archive(self, _plan, **_kwargs):
+        def _archive(self, **_kwargs):
             return IMAGE
 
     executor = Executor(

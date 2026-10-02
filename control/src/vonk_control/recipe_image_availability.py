@@ -134,9 +134,9 @@ from .runtime_image_preparation import (
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
     RuntimeImageStorage,
-    persist_runtime_image_receipt,
     prepare_runtime_image,
     read_runtime_image_reference_intent,
+    record_runtime_image_reference,
 )
 from .strict_json import read_stored_model, serialize_json_value
 
@@ -725,8 +725,6 @@ class RecipeImageAvailabilityService:
         transport: OCIImageTransport | None = None,
         builder: RecipeImageBuilder | None = None,
         clock: Callable[[], datetime],
-        receipt_writer: Callable[[Session, str, str, str, RuntimeImageReceipt], object]
-        | None = None,
         model_cache: Any | None = None,
         max_parallel: int = 4,
         builder_admission: Callable[[RecipeDefinition, Mapping[str, object]], None]
@@ -743,7 +741,6 @@ class RecipeImageAvailabilityService:
         self._transport = transport
         self._builder = builder
         self._clock = clock
-        self._receipt_writer = receipt_writer
         self._model_cache = model_cache
         self._max_parallel = max_parallel
         self._builder_admission = builder_admission
@@ -804,21 +801,7 @@ class RecipeImageAvailabilityService:
                 authorization.oci_archive_sha256,
                 field="runtime image archive digest",
             )
-            if (
-                authorization.original_content_digest != revision.content_digest
-                or authorization.effective_execution_key != revision.execution_key
-                or authorization.state not in {"authorized", "revoked"}
-            ):
-                raise RecipeImageAvailabilityError(
-                    "runtime_image.authorization_invalid",
-                    "stored recipe image authorization does not match its exact revision",
-                )
-            observed_size = image_sizes.setdefault(archive, authorization.image_bytes)
-            if observed_size != authorization.image_bytes:
-                raise RecipeImageAvailabilityError(
-                    "runtime_image.authorization_invalid",
-                    "stored recipe image authorizations disagree on archive size",
-                )
+            image_sizes.setdefault(archive, authorization.image_bytes)
 
         model_scope: ModelCacheRemovalScope | None = None
         if with_model:
@@ -5011,23 +4994,13 @@ class RecipeImageAvailabilityService:
                 and reference is None
             ):
                 raise _AvailabilityClaimLost()
-            if self._receipt_writer is None:
-                persist_runtime_image_receipt(
-                    session,
-                    recipe_revision_id=str(payload["recipe_revision_id"]),
-                    original_content_digest=str(payload["recipe_content_sha256"]),
-                    effective_execution_key=execution_key,
-                    receipt=receipt,
-                    verified_at=self._clock(),
-                )
-            else:
-                self._receipt_writer(
-                    session,
-                    str(payload["recipe_revision_id"]),
-                    str(payload["recipe_content_sha256"]),
-                    execution_key,
-                    receipt,
-                )
+            record_runtime_image_reference(
+                session,
+                recipe_revision_id=str(payload["recipe_revision_id"]),
+                effective_execution_key=execution_key,
+                receipt=receipt,
+                recorded_at=self._clock(),
+            )
             operation.payload = dict(operation.payload) | {
                 "image_result": receipt.to_mapping()
             }

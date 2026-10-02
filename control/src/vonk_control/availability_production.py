@@ -70,8 +70,6 @@ from .recovery_policy import RecoveryDecision, classify, kind_for_agent_error
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     OciLayoutImageTransport,
-    RuntimeImageReceipt,
-    persist_runtime_image_receipt,
 )
 from .strict_json import read_stored_model
 
@@ -486,7 +484,6 @@ def build_recipe_image_availability(
             if (
                 child.kind != "recipe.build.v1"
                 or owner is None
-                or owner.recipe_revision_id != revision_id
                 or owner.builder_node_id != builder_id
                 or owner.build_input_sha256 != digest
                 or child.payload.get("plan_digest") != digest
@@ -987,22 +984,6 @@ def build_recipe_image_availability(
             progress=progress,
         )
 
-    def receipt_writer(
-        session: Session,
-        recipe_revision_id: str,
-        content_digest: str,
-        execution_key: str,
-        receipt: RuntimeImageReceipt,
-    ) -> None:
-        persist_runtime_image_receipt(
-            session,
-            recipe_revision_id=recipe_revision_id,
-            original_content_digest=content_digest,
-            effective_execution_key=execution_key,
-            receipt=receipt,
-            verified_at=clock(),
-        )
-
     service = RecipeImageAvailabilityService(
         sessions,
         storage=storage,
@@ -1010,7 +991,6 @@ def build_recipe_image_availability(
         transport=transport,
         builder=builder,
         clock=clock,
-        receipt_writer=receipt_writer,
         model_cache=model_cache,
         max_parallel=max_parallel,
     )
