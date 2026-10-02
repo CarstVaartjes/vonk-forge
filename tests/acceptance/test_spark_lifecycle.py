@@ -2915,6 +2915,33 @@ class SparkLifecycle:
             raise LifecycleError(f"synthetic canary {field} evidence is invalid")
         return identities.pop()
 
+    @staticmethod
+    def _serving_identity(results: list[object]) -> tuple[str, str]:
+        """The installation and run that now serve, from a load that replaced one.
+
+        A load over a running workload also stops the old run, so its receipts
+        name two runs; the serving one is the run its final verification
+        checked, installed by the runtime-install phase.
+        """
+
+        def named(field: str, **where: str) -> str:
+            values = {
+                value[field]
+                for value in results
+                if isinstance(value, dict)
+                and all(value.get(key) == wanted for key, wanted in where.items())
+                and isinstance(value.get(field), str)
+                and UUID.fullmatch(value[field]) is not None
+            }
+            if len(values) != 1:
+                raise LifecycleError(f"synthetic canary {field} evidence is invalid")
+            return values.pop()
+
+        return (
+            named("installation_id", phase="prepare", subphase="runtime-install"),
+            named("run_id", phase="final_verify"),
+        )
+
     def _await_canary_endpoint(self, alias: str, *, published: bool) -> None:
         deadline = time.monotonic() + _CANARY_ROUTE_SECONDS
         while True:

@@ -108,3 +108,28 @@ def test_the_first_release_is_skipped_visibly(tmp_path: Path, monkeypatch, capsy
     )
     report = json.loads(output.read_text())
     assert report["status"] == "skipped" and "no previous promoted" in report["reason"]
+
+
+def test_a_load_that_replaces_the_workload_names_the_run_that_now_serves():
+    """The load also stops the old run, so its receipts name two runs.
+
+    The first hardware run failed with "run_id evidence is invalid" because the
+    helper required exactly one run in the whole application.
+    """
+
+    old_run = "11111111-1111-4111-8111-111111111111"
+    new_run = "22222222-2222-4222-8222-222222222222"
+    installation = "33333333-3333-4333-8333-333333333333"
+    results: list[object] = [
+        {"phase": "stop", "run_id": old_run},
+        {
+            "phase": "prepare",
+            "subphase": "runtime-install",
+            "installation_id": installation,
+        },
+        {"phase": "final_verify", "run_id": new_run},
+    ]
+    lane = object.__new__(carry.UpgradeCarryLifecycle)
+    assert lane._serving_identity(results) == (installation, new_run)
+    with pytest.raises(LifecycleError):
+        lane._serving_identity([results[0], results[1]])
