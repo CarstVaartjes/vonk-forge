@@ -2838,6 +2838,8 @@ export interface components {
         FleetProfileLoadRequest: {
             /** Request Key */
             request_key: string;
+            /** Reviewed Effects Digest */
+            reviewed_effects_digest?: string | null;
         };
         /** FleetProfileNode */
         FleetProfileNode: {
@@ -2935,6 +2937,8 @@ export interface components {
             /** Assignments */
             assignments: components["schemas"]["FleetProfileAssignmentPreview"][];
             effects: components["schemas"]["FleetProfileEffects"];
+            /** Effects Digest */
+            effects_digest?: string | null;
             /**
              * Generated At
              * Format: date-time

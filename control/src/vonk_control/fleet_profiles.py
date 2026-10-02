@@ -659,6 +659,12 @@ class FleetProfileStalePlanConflict(FleetProfileConflict):
     code = "profile.stale_plan"
 
 
+class FleetProfileReviewStale(FleetProfileStalePlanConflict):
+    """The reviewed effects differ from the current plan; nothing was accepted."""
+
+    code = "profile.review_stale"
+
+
 class _FleetProfileSupersededIntentConflict(FleetProfileStalePlanConflict):
     """A later accepted intent owns an overlapping workload effect scope."""
 
@@ -2558,6 +2564,46 @@ def _digest(value: object) -> str:
     return hashlib.sha256(canonical_message(value)).hexdigest()
 
 
+def _review_effects_digest(decision: FleetProfileReviewedDecision) -> str:
+    """Digest what an operator consents to, never what the Controller observes.
+
+    The effects are the saved intent it applies (profile revision and digest,
+    the resolved placements and options), the workloads it keeps, stops,
+    replaces and installs, and the switch and preparation steps. Free capacity,
+    readiness and reuse of already-prepared assets, blockers, reasons and
+    timestamps are observations: a review stays valid across them, and the
+    Controller still refuses or parks an inadmissible plan on its own.
+    """
+
+    return _digest(
+        {
+            "profile_id": decision.profile_id,
+            "profile_digest": decision.profile_digest,
+            "profile_revision": decision.profile_revision,
+            "scope": decision.scope.node_ids,
+            "assignments": [
+                {
+                    "assignment_id": item.assignment_id,
+                    "recipe_revision_id": item.recipe_revision_id,
+                    "desired_state": item.desired_state,
+                    "node_ids": item.node_ids,
+                    "option_choices": item.option_choices,
+                    "actions": item.actions,
+                }
+                for item in decision.assignments
+            ],
+            "resolved_assignments": [
+                item.model_dump(mode="json") for item in decision.resolved_assignments
+            ],
+            "effects": decision.effects.model_dump(mode="json"),
+            "steps": [(step.kind, step.node_ids) for step in decision.steps],
+            "preparation_steps": [
+                (step.kind, step.node_ids) for step in decision.preparation_steps
+            ],
+        }
+    )
+
+
 def _roster_digest(node_ids: Sequence[str]) -> str:
     return _digest({"node_ids": sorted(node_ids)})
 
@@ -3542,15 +3588,25 @@ class FleetProfileService:
         *,
         actor: str,
         request_key: str,
+        reviewed_effects_digest: str | None = None,
     ) -> FleetProfileApplicationView:
-        """Admit the current plan; replay before consulting mutable choices."""
+        """Admit the current plan; replay before consulting mutable choices.
+
+        A caller that showed a review names its effects digest. The plan is
+        then admitted only while it still has those effects.
+        """
         with self._sessions() as session:
             profile_id = session.scalar(
                 select(FleetProfile.id).where(FleetProfile.number == number)
             )
         if profile_id is None:
             raise KeyError(number)
-        return self.apply(profile_id, request_key=request_key, actor=actor)
+        return self.apply(
+            profile_id,
+            request_key=request_key,
+            actor=actor,
+            reviewed_effects_digest=reviewed_effects_digest,
+        )
 
     def progress_number(self, number: int) -> FleetProfileApplicationView:
         profile = self.get_number(number)
@@ -4177,6 +4233,7 @@ class FleetProfileService:
                 assessments=ordered_assessments,
                 preparations=ordered_preparations,
                 plan_digest=_digest(decision),
+                effects_digest=_review_effects_digest(decision),
             )
 
     @classmethod
@@ -4978,7 +5035,12 @@ class FleetProfileService:
             raise
 
     def apply(
-        self, profile_id: str, *, request_key: str, actor: str
+        self,
+        profile_id: str,
+        *,
+        request_key: str,
+        actor: str,
+        reviewed_effects_digest: str | None = None,
     ) -> FleetProfileApplicationView:
         replay = self._load_replay(profile_id, request_key=request_key, actor=actor)
         if replay is not None:
@@ -4986,6 +5048,16 @@ class FleetProfileService:
         pending: FleetProfileApplicationView | None = None
         try:
             preview = self.preview(profile_id)
+            if (
+                reviewed_effects_digest is not None
+                and preview.effects_digest != reviewed_effects_digest
+            ):
+                # Refused before anything is persisted: the caller reviews the
+                # current plan and asks again, with the same or a new key.
+                raise FleetProfileReviewStale(
+                    "The profile plan changed since it was reviewed; review the "
+                    "current plan and load again."
+                )
             if not preview.allowed:
                 if not _profile_preview_is_waitable(preview):
                     raise FleetProfileConflict(
@@ -9077,6 +9149,7 @@ __all__ = [
     "FleetProfileAdmissionEffectBusy",
     "FleetProfileConflict",
     "FleetProfileResourceRecheckUnavailable",
+    "FleetProfileReviewStale",
     "FleetProfileService",
     "FleetProfileStalePlanConflict",
     "RunSwitchFleetProfileAdapter",
