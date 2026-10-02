@@ -866,10 +866,9 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
     second = admitted.children[1]
     assert second.operation_id is not None
     child_claims = service.claim_pending(limit=2, owner_id="shared-update-children")
-    assert {claim.operation_id for claim in child_claims} == {
-        first.operation_id,
-        second.operation_id,
-    }
+    # The first child only waits on the shared download: it is parked without
+    # a worker slot, so only the newly admitted child is claimed.
+    assert {claim.operation_id for claim in child_claims} == {second.operation_id}
     for claim in child_claims:
         service.run_claim(claim)
     first_view = service.get(first.operation_id)
