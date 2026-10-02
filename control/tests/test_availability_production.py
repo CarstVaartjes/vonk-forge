@@ -40,8 +40,10 @@ from vonk_control.recipe_builds import (
     RecipeBuildPlan,
     RecipeBuildResolution,
     RecipeBuildService,
+    RecipeSourcePolicyError,
 )
 from vonk_control.recipe_image_availability import (
+    SOURCE_POLICY_REFUSED_CODE,
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
@@ -51,6 +53,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
 )
+from vonk_control.source_policy import SourcePolicyFinding, SourcePolicyReport
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .runtime_image_fixtures import place_test_image
@@ -339,6 +342,89 @@ def test_source_build_without_builder_queues_provisional_parent(
         row = session.get(CatalogDocumentRevision, "saturated-revision")
         assert row is not None
     production.close()
+
+
+def test_source_policy_refusal_is_named_and_not_retryable(
+    tmp_path, monkeypatch
+) -> None:
+    """A recipe whose stored source the policy refuses must not read as a transient
+    outage: a retry reads the same source, and the operator needs the file and line."""
+
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-source-build.json")
+            .read_text()
+        )
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'policy.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        session.add(
+            CatalogDocumentRevision(
+                id="policy-revision",
+                document_id="policy-document",
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=recipe.model_dump(mode="json"),
+                content_digest=document_sha256(recipe.model_dump(mode="json")),
+                artifact_key="c" * 64,
+                execution_key="a" * 64,
+                projected={},
+                created_by="test",
+                created_at=now,
+            )
+        )
+    report = SourcePolicyReport(
+        False,
+        "b" * 64,
+        "Dockerfile",
+        (
+            SourcePolicyFinding(
+                "dockerfile.heredoc_forbidden",
+                "Dockerfile",
+                106,
+                "Dockerfile heredocs are not accepted",
+            ),
+        ),
+    )
+
+    class Builds:
+        def resolve(self, _revision_id: str):
+            raise RecipeSourcePolicyError(report)
+
+    monkeypatch.setattr(
+        availability_production,
+        "resolve_recipe_entities",
+        lambda _session, _document: {},
+    )
+
+    class Settings:
+        agent_artifact_root = tmp_path / "artifacts"
+
+    production = build_recipe_image_availability(
+        sessions,
+        settings=Settings(),
+        managed_catalog_sync=None,
+        recipe_builds=Builds(),
+        recipe_operations=object(),
+        clock=lambda: now,
+    )
+    with pytest.raises(RecipeImageAvailabilityError) as refused:
+        production.service.start(
+            "policy-revision", actor="operator", request_id="p" * 36
+        )
+    production.close()
+
+    assert refused.value.code == SOURCE_POLICY_REFUSED_CODE
+    assert refused.value.retryable is False
+    assert "dockerfile.heredoc_forbidden Dockerfile:106" in str(refused.value)
 
 
 def test_authority_resolves_builds_without_an_open_transaction(

@@ -22,6 +22,7 @@ from .operation_contract import (
 )
 from .recipe_availability_intent import RecipeAvailabilityIntent
 from .recipe_image_availability import (
+    SOURCE_POLICY_REFUSED_CODE,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
     RecipeImageAvailabilityView,
@@ -362,6 +363,13 @@ def _recipe_error(error: BaseException) -> HTTPException:
     if isinstance(error, KeyError):
         return HTTPException(status_code=404, detail="recipe operation was not found")
     code = str(getattr(error, "code", ""))
+    if code == SOURCE_POLICY_REFUSED_CODE:
+        # Final for this source: a named conflict, never "controller.unavailable".
+        return HTTPException(
+            status_code=409,
+            detail=_refusal_detail(error),
+            headers={"x-vonk-error-code": code},
+        )
     if code.endswith("selector_missing"):
         return HTTPException(status_code=404, detail=str(error))
     if code.endswith("authority_denied"):

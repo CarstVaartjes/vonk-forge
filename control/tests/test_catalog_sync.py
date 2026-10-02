@@ -38,7 +38,11 @@ from vonk_control.recipe_library_types import (
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
 )
-from vonk_control.source_bundles import SourceBundleStore
+from vonk_control.source_bundles import (
+    SourceBundleStore,
+    generate_source_bundle,
+    parse_source_bundle,
+)
 from vonk_forge_contracts import (
     CONTRACT_VERSION,
     ModelDefinition,
@@ -955,3 +959,86 @@ def test_stale_running_sync_never_blocks_a_new_sync(tmp_path: Path) -> None:
         row = session.get(RecipeLibrarySyncRun, dead)
         assert row is not None
         assert (row.state, row.error_code) == ("failed", "catalog.sync_lease_expired")
+
+
+def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
+    tmp_path: Path,
+) -> None:
+    """A repaired build source keeps the recipe digest; the stored bundle must follow.
+
+    A package fix that touches only the Dockerfile or its context leaves the
+    recipe document, and so its content digest, unchanged.  Sync used to count
+    that recipe as unchanged and keep the superseded source bundle, which the
+    Controller then kept refusing at download time.
+    """
+
+    sessions, service, reader, item = _fixture(tmp_path)
+    first = _sync(sessions, service, reader).sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        expected_commit=reader.snapshot.commit,
+    )
+    assert first.state == "current"
+    assert item.package_handle is not None and item.source_bundle is not None
+    with sessions() as session:
+        stored = read_catalog_projection(
+            session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                    active_head_revision(),
+                )
+            )
+        )
+    assert stored.source_bundle_sha256 == item.source_bundle_sha256
+    assert stored.package_sha256 == item.package_sha256
+
+    files = dict(parse_source_bundle(item.source_bundle).files)
+    files["vonk-patches/repaired.py"] = b"print('repaired')\n"
+    repaired_bundle = generate_source_bundle(files)
+    republished = replace(
+        item,
+        library_commit="6" * 40,
+        package_sha256="7" * 64,
+        package_handle=replace(item.package_handle, package_sha256="7" * 64),
+        source_bundle=repaired_bundle.archive,
+        source_bundle_sha256=repaired_bundle.sha256,
+    )
+    assert republished.content_sha256 == item.content_sha256
+    assert republished.source_bundle_sha256 != item.source_bundle_sha256
+    republished_reader = Reader(
+        replace(reader.snapshot, commit="6" * 40, items=(republished,))
+    )
+
+    second = _sync(sessions, service, republished_reader).sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        expected_commit="6" * 40,
+    )
+
+    assert second.state == "current"
+    assert second.unchanged_count == 0
+    assert second.updated_count == 1
+    assert republished_reader.fetches == [republished.uri]
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+                active_head_revision(),
+            )
+        )
+        projected = read_catalog_projection(revision)
+    assert projected.source_bundle_sha256 == repaired_bundle.sha256
+    assert projected.package_sha256 == "7" * 64
+
+    third = _sync(sessions, service, republished_reader).sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        expected_commit="6" * 40,
+    )
+    assert third.unchanged_count == 1
+    assert republished_reader.fetches == [republished.uri]

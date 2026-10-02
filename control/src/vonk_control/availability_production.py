@@ -51,6 +51,7 @@ from .recipe_builds import (
     BUILD_ARTIFACT_FORMAT,
     RecipeBuildAdmissionBusy,
     RecipeBuildResolution,
+    RecipeSourcePolicyError,
 )
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -58,6 +59,7 @@ from .recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from .recipe_image_availability import (
+    SOURCE_POLICY_REFUSED_CODE,
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
@@ -245,6 +247,16 @@ def build_recipe_image_availability(
             if isinstance(resolve, Callable):
                 try:
                     resolution = resolve(recipe_revision_id)
+                except RecipeSourcePolicyError as error:
+                    # The stored build source breaks the Controller's policy.
+                    # A later identical request reads the same source, so name
+                    # the refusal and do not offer a retry.
+                    raise RecipeImageAvailabilityError(
+                        SOURCE_POLICY_REFUSED_CODE,
+                        str(error)[:512],
+                        retryable=False,
+                        recovery_actions=("inspect",),
+                    ) from error
                 except Exception as error:
                     raise RecipeImageAvailabilityError(
                         str(getattr(error, "code", "recipe_image.build_unavailable")),
