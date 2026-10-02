@@ -591,7 +591,9 @@ def build_recipe_image_availability(
                     for candidate_id in candidate_ids:
                         try:
                             acquire_admission_keys(
-                                session, (node_admission_key(candidate_id),)
+                                session,
+                                (node_admission_key(candidate_id),),
+                                holder="image-availability",
                             )
                         except AdmissionLockBusy:
                             skipped[candidate_id] = (
@@ -671,7 +673,11 @@ def build_recipe_image_availability(
                 prebuilt_unused = planned_decision
             with sessions.begin() as session:
                 try:
-                    acquire_admission_keys(session, (node_admission_key(candidate_id),))
+                    acquire_admission_keys(
+                        session,
+                        (node_admission_key(candidate_id),),
+                        holder="image-availability",
+                    )
                 except AdmissionLockBusy:
                     skipped[candidate_id] = (
                         "recipe_image.builder_busy",

@@ -31,9 +31,17 @@ _ROW_LOCK_RANK = {table: rank for rank, table in enumerate(_ROW_LOCK_ORDER)}
 
 
 class AdmissionLockBusy(RuntimeError):
-    """An admission lock could not be acquired without waiting."""
+    """An admission lock could not be acquired without waiting.
+
+    ``holder`` names the kind of work that holds the lock when PostgreSQL could
+    say (see ``acquire_admission_keys``); it is ``None`` when it is unknown.
+    """
 
     code = "admission.capacity_busy"
+
+    def __init__(self, message: str, *, holder: str | None = None) -> None:
+        super().__init__(message)
+        self.holder = holder
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -89,15 +97,26 @@ def is_admission_contention(error: DBAPIError) -> bool:
 
 
 def acquire_admission_keys(
-    session: Session, keys: Collection[AdmissionLockKey]
+    session: Session,
+    keys: Collection[AdmissionLockKey],
+    *,
+    holder: str | None = None,
 ) -> None:
-    """Try every declared advisory key in canonical order, without waiting."""
+    """Try every declared advisory key in canonical order, without waiting.
+
+    ``holder`` names the kind of work taking the keys (for example
+    ``"profile-admission"``). It labels this transaction's PostgreSQL session
+    for as long as the transaction lives, which is how a taker that finds a key
+    busy can name the work that holds it instead of only saying "busy".
+    """
 
     if not keys:
         return
     if session.get_bind().dialect.name != "postgresql":
         return
     _set_local_admission_timeout(session)
+    if holder:
+        _label_transaction(session, holder)
     statement = text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))")
     for key in sorted(set(keys)):
         try:
@@ -106,7 +125,12 @@ def acquire_admission_keys(
             _raise_if_busy(error)
             raise
         if acquired is not True:
-            raise AdmissionLockBusy(f"admission lock {key.namespace} is busy")
+            owner = _key_holder(session, key)
+            raise AdmissionLockBusy(
+                f"admission lock {key.namespace} is busy"
+                + (f" (held by {owner})" if owner else ""),
+                holder=owner,
+            )
 
 
 def lock_admission_rows(
@@ -148,6 +172,46 @@ def lock_admission_rows(
             _raise_if_busy(error)
             raise
     return locked
+
+
+_HOLDER_PREFIX = "vonk:"
+
+
+def _label_transaction(session: Session, holder: str) -> None:
+    """Name this transaction's work in ``pg_stat_activity`` until it ends."""
+
+    session.execute(
+        text("SELECT set_config('application_name', :name, true)"),
+        {"name": f"{_HOLDER_PREFIX}{holder}"[:63]},
+    )
+
+
+def _key_holder(session: Session, key: AdmissionLockKey) -> str | None:
+    """The labelled work holding one advisory key, when PostgreSQL can say.
+
+    Best effort and read only: an unlabelled holder (another process, an older
+    release) or any failure answers ``None`` and never changes the refusal.
+    """
+
+    try:
+        with session.begin_nested():
+            name = session.scalar(
+                text(
+                    "SELECT a.application_name FROM pg_locks l "
+                    "JOIN pg_stat_activity a ON a.pid = l.pid "
+                    "WHERE l.locktype = 'advisory' AND l.granted "
+                    "AND l.pid <> pg_backend_pid() AND l.objsubid = 1 "
+                    "AND ((l.classid::bigint << 32) | l.objid::bigint) "
+                    "= hashtextextended(:key, 0) "
+                    "AND a.application_name LIKE :prefix LIMIT 1"
+                ),
+                {"key": key.database_key, "prefix": f"{_HOLDER_PREFIX}%"},
+            )
+    except DBAPIError:
+        return None
+    if isinstance(name, str) and name.startswith(_HOLDER_PREFIX):
+        return name[len(_HOLDER_PREFIX) :] or None
+    return None
 
 
 def _set_local_admission_timeout(session: Session) -> None:

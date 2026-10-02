@@ -6,6 +6,7 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -33,6 +34,7 @@ from vonk_control.models import (
     ResourceReservation,
     User,
 )
+from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_forge_contracts import RecipeDefinition
 
 from cluster_profiles.cli_render import render_payload
@@ -240,6 +242,52 @@ def test_load_parks_capacity_lost_after_its_last_preview(
             )
             == original_intents
         )
+
+
+def test_parked_load_names_a_failing_resource_recheck_and_proceeds_when_it_clears(
+    tmp_path, postgres_engine, monkeypatch
+) -> None:
+    """A recheck that fails is shown with its cause, and the load resumes alone."""
+
+    sessions, profiles, _, profile, api, headers, _review, _nodes = _capacity_profile(
+        tmp_path, postgres_engine
+    )
+    original = RunSwitchOperationService.recheck_resources_in_session
+
+    def defective(self, *args, **kwargs):
+        raise ValueError("synthetic recheck defect")
+
+    monkeypatch.setattr(
+        RunSwitchOperationService, "recheck_resources_in_session", defective
+    )
+    response = api.post(
+        f"/api/profile/{profile.number}/load",
+        headers=headers,
+        json={"request_key": str(uuid4())},
+    )
+    assert response.status_code == 202, response.text
+    with sessions() as session:
+        (parked,) = tuple(session.scalars(select(FleetProfileApplication)))
+        assert parked.state == "queued" and parked.current_operation_id is None
+        assert parked.progress["admission_pending"] is True
+        (blocker,) = cast(list[dict[str, str]], parked.progress["blockers"])
+        # Not the misleading "another change is using a Spark" busy code, and
+        # the cause is in the reason.
+        assert blocker["code"] == "profile.resource_recheck_unavailable"
+        assert "ValueError: synthetic recheck defect" in blocker["detail"]
+        application_id = parked.id
+
+    monkeypatch.setattr(
+        RunSwitchOperationService, "recheck_resources_in_session", original
+    )
+    for _ in range(6):
+        profiles.tick()
+        with sessions() as session:
+            admitted = session.get(FleetProfileApplication, application_id)
+            assert admitted is not None
+            if admitted.current_operation_id is not None:
+                break
+    assert admitted.current_operation_id is not None, admitted.status_reason
 
 
 @pytest.mark.parametrize("port_kind", ["service", "rendezvous"])

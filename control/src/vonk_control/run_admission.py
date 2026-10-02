@@ -646,6 +646,7 @@ class RunAdmissionService:
             acquire_admission_keys(
                 session,
                 tuple(node_admission_key(node.node_id) for node in plan.nodes),
+                holder="run-admission",
             )
             return self._accept_run_locked_in_session(
                 session,
