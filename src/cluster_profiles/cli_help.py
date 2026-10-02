@@ -58,6 +58,9 @@ def invocation(prog: str, parser: argparse.ArgumentParser) -> str:
             option = action.option_strings[-1]
             value = str(action.metavar or action.dest).lower().replace("_", "-")
             parts.append(option if action.nargs == 0 else f"{option} <{value}>")
+    if parser.get_default("requires_profile"):
+        # Chosen explicitly so a command never changes profile 1 by omission.
+        parts.append("--profile <n>")
     return " ".join(parts)
 
 
