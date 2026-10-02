@@ -5,6 +5,7 @@ import type {
   FleetSnapshotEvent,
   FleetTelemetryEvent,
 } from "../api/types";
+import {backoffDelay} from "./use-operation-observer";
 import {fleetStreamReducer, initialFleetStreamState} from "./fleet-stream-state";
 
 const POLL_INTERVAL_MS = 10_000;
@@ -13,6 +14,7 @@ const FRESHNESS_TICK_MS = 1_000;
 const SPARSE_REFRESH_DELAY_MS = 75;
 const SPARSE_RETRY_BASE_MS = 1_000;
 const SPARSE_RETRY_MAX_MS = 10_000;
+const STALE_AFTER_MS = 90_000;
 const MAX_ERROR_LENGTH = 512;
 
 function cursorFrom(event: MessageEvent<string>): number | null {
@@ -39,6 +41,9 @@ export function useFleetStream(api: ControlApi) {
   const [state, dispatch] = useReducer(fleetStreamReducer, initialFleetStreamState);
   const [now, setNow] = useState(() => new Date());
   const [generation, setGeneration] = useState(0);
+  // A failed refresh never discards the last snapshot: it is kept, with its age and why it is not fresh.
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number>();
+  const [refreshError, setRefreshError] = useState("");
   const retry = useCallback(() => {
     dispatch({type: "retry"});
     setGeneration(value => value + 1);
@@ -46,6 +51,7 @@ export function useFleetStream(api: ControlApi) {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     const snapshot = await api.visualFleet(signal);
     dispatch({type: "requested-snapshot", snapshot});
+    setLastUpdatedAt(Date.now()); setRefreshError("");
   }, [api]);
 
   useEffect(() => {
@@ -72,7 +78,7 @@ export function useFleetStream(api: ControlApi) {
 
     function scheduleRefreshRetry(): void {
       if (requiredRefreshCursor === null) return;
-      const delay = Math.min(SPARSE_RETRY_BASE_MS * (2 ** refreshAttempt), SPARSE_RETRY_MAX_MS);
+      const delay = backoffDelay(refreshAttempt, SPARSE_RETRY_BASE_MS, SPARSE_RETRY_MAX_MS);
       refreshAttempt += 1;
       scheduleRefresh(delay);
     }
@@ -93,6 +99,7 @@ export function useFleetStream(api: ControlApi) {
             && requestTimelineGeneration === timelineGeneration
             && snapshot.event_cursor >= appliedCursor) {
           dispatch({type: "requested-snapshot", snapshot});
+          setLastUpdatedAt(Date.now()); setRefreshError("");
           appliedCursor = snapshot.event_cursor;
           if (requiredRefreshCursor !== null && snapshot.event_cursor >= requiredRefreshCursor) {
             requiredRefreshCursor = null;
@@ -100,10 +107,11 @@ export function useFleetStream(api: ControlApi) {
           }
         }
       } catch (value) {
-        if (active && !controller.signal.aborted
-            && requestTimelineGeneration === timelineGeneration
-            && reason === "initial") {
-          dispatch({type: "request-error", message: errorMessage(value)});
+        if (active && !controller.signal.aborted) {
+          setRefreshError(errorMessage(value));
+          if (requestTimelineGeneration === timelineGeneration && reason === "initial") {
+            dispatch({type: "request-error", message: errorMessage(value)});
+          }
         }
       } finally {
         controllers.delete(controller);
@@ -174,6 +182,7 @@ export function useFleetStream(api: ControlApi) {
         sparseRefreshTimer = undefined;
       }
       dispatch({type: "reset-snapshot", snapshot: data.snapshot, reason: data.reset_reason});
+      setLastUpdatedAt(Date.now()); setRefreshError("");
     }
 
     function onTelemetry(rawEvent: Event): void {
@@ -187,6 +196,7 @@ export function useFleetStream(api: ControlApi) {
       if (cursor <= appliedCursor) return;
       appliedCursor = cursor;
       dispatch({type: "node-telemetry", cursor, nodeId: data.node_id, sample: data.sample, receivedAt: new Date()});
+      setLastUpdatedAt(Date.now()); setRefreshError("");
     }
 
     function onSparse(rawEvent: Event): void {
@@ -235,5 +245,6 @@ export function useFleetStream(api: ControlApi) {
     };
   }, [api, generation]);
 
-  return {...state, now, refresh, retry};
+  const stale = Boolean(state.snapshot) && (refreshError !== "" || (lastUpdatedAt !== undefined && now.getTime() - lastUpdatedAt > STALE_AFTER_MS));
+  return {...state, now, refresh, retry, lastUpdatedAt, refreshError, stale};
 }
