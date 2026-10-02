@@ -4185,3 +4185,294 @@ def test_job_rendering_tolerates_a_missing_progress_object(capsys) -> None:
     assert status == 0
     assert "Job: upgrade-job" in captured.out
     assert "not a valid object" not in captured.out + captured.err
+
+
+_RUN_KEY = "11111111-1111-4111-8111-111111111111"
+_RUN_APPLICATION = "33333333-3333-4333-8333-333333333333"
+_RUN_DIGEST = "e" * 64
+
+
+def _run_preview(plan_digest: str, effects_digest: str) -> dict[str, object]:
+    return {
+        "allowed": True,
+        "profile_name": "Default",
+        "plan_digest": plan_digest,
+        "effects_digest": effects_digest,
+        "scope": {"node_ids": [], "idle_node_ids": []},
+        "summary": {},
+        "assignments": [],
+        "steps": [],
+        "preparations": [],
+        "preparation_decisions": [],
+        "assessments": [],
+        "admission_decisions": [],
+        "effects": {"runs": [], "installations": [], "superseded": []},
+        "reasons": [],
+    }
+
+
+def _run_responses(**overrides: object) -> dict[tuple[str, str], object]:
+    profile = {
+        "name": "Default",
+        "description": "",
+        "favorite": False,
+        "installation_policy": "keep-cached",
+        "labels": {},
+        "assignments": [],
+    }
+    responses: dict[tuple[str, str], object] = {
+        ("GET", "/api/recipe/library"): {
+            "recipes": [
+                {
+                    "selector": "vonk-forge/qwen-code",
+                    "identity": {
+                        "publisher": "vonk-forge",
+                        "slug": "qwen-code",
+                        "title": "Qwen Code",
+                    },
+                    "models": [],
+                }
+            ],
+            "next_cursor": None,
+        },
+        ("GET", "/api/fleet"): {
+            "nodes": [{"id": "spk_" + "a" * 32, "display_name": "Atlas"}]
+        },
+        ("GET", "/api/profile/1/definition"): {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "number": 1,
+            "revision": 0,
+            "definition": profile,
+        },
+        ("PUT", "/api/profile/1"): {"number": 1, "revision": 1, "definition": profile},
+        ("POST", "/api/profile/1/preview"): _run_preview("b" * 64, _RUN_DIGEST),
+        ("POST", "/api/profile/1/load"): {
+            "id": _RUN_APPLICATION,
+            "request_key": _RUN_KEY,
+            "state": "succeeded",
+            "progress": {},
+        },
+        ("GET", f"/api/profile/applications/{_RUN_APPLICATION}"): {
+            "id": _RUN_APPLICATION,
+            "state": "succeeded",
+        },
+        ("GET", "/api/profile/1/endpoints"): {
+            "assignments": [],
+            "number": 1,
+            "observed_at": "2026-09-27T10:00:00Z",
+            "application_id": _RUN_APPLICATION,
+            "application_state": "succeeded",
+        },
+    }
+    responses.update(overrides)  # type: ignore[arg-type]
+    return responses
+
+
+def _effects(client: FakeClient) -> list[tuple[str, str]]:
+    """The calls that change something, ignoring reads and the plan review."""
+
+    return [
+        (method, path)
+        for method, path, *_ in client.calls
+        if method in {"PUT", "DELETE"} or path.endswith(("/load", "/remove"))
+    ]
+
+
+class _Prompt:
+    """A terminal that answers the confirmation questions it is asked."""
+
+    def __init__(self, monkeypatch, *answers: str) -> None:
+        import sys
+
+        class Stderr(StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        class Stdin:
+            def __init__(self, replies: list[str]) -> None:
+                self.replies = replies
+
+            def isatty(self) -> bool:
+                return True
+
+            def readline(self, _limit: int = -1) -> str:
+                return self.replies.pop(0) + "\n" if self.replies else ""
+
+        self.stderr = Stderr()
+        monkeypatch.setattr(sys, "stdin", Stdin(list(answers)))
+        monkeypatch.setattr(sys, "stderr", self.stderr)
+
+    @property
+    def transcript(self) -> str:
+        return self.stderr.getvalue()
+
+
+def test_run_lost_load_response_reports_the_submission_to_reconnect_to(capsys) -> None:
+    client = FakeClient(
+        _run_responses()
+        | {
+            ("POST", "/api/profile/1/load"): ControlTransportError("response lost"),
+            ("GET", f"/api/profile/1/requests/{_RUN_KEY}"): ControlNotFound(
+                404, "request was not accepted"
+            ),
+        }
+    )
+
+    status = cli.main(
+        ("--json", "--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    document = json.loads(capsys.readouterr().out)
+    assert status == 2
+    assert document["error"] == "Load acceptance is unknown"
+    assert document["request_key"] == _RUN_KEY
+    assert document["submission"]["acceptance"] == "unknown"
+    assert document["submission"]["request_key"] == _RUN_KEY
+    assert (
+        f"profile progress --request-key {_RUN_KEY}"
+        in document["reconcile"]["operation"]
+    )
+
+
+@pytest.mark.parametrize("flags", [(), ("--no-input",), ("--json",)])
+def test_run_that_cannot_be_confirmed_saves_nothing(flags, capsys) -> None:
+    client = FakeClient(_run_responses())
+
+    status = cli.main(
+        (*flags, "--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    capsys.readouterr()
+    assert status == 2
+    assert _effects(client) == []
+
+
+def test_declined_run_exits_nonzero_and_says_the_draft_was_saved(
+    monkeypatch, capsys
+) -> None:
+    client = FakeClient(_run_responses())
+    prompt = _Prompt(monkeypatch, "no")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    capsys.readouterr()
+    assert status == 2
+    # The recipe was saved to review its plan; nothing was loaded.
+    assert _effects(client) == [("PUT", "/api/profile/1")]
+    assert "saved draft" in prompt.transcript
+    assert "control.api_error" not in prompt.transcript
+
+
+@pytest.mark.parametrize(
+    ("argv", "effect_suffix"),
+    [
+        (("--profile", "1", "profile", "load"), "/load"),
+        (("model", "remove", "qwen"), "/remove"),
+        (("recipe", "remove", "vision", "--keep-model"), "/remove"),
+    ],
+)
+def test_declined_action_exits_nonzero_without_an_effect(
+    argv, effect_suffix, monkeypatch, capsys
+) -> None:
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/preview"): _run_preview("b" * 64, _RUN_DIGEST),
+            ("GET", "/api/model/qwen/remove-review"): _removal_review(
+                "model", "qwen", model_digest="a" * 64
+            ),
+            ("GET", "/api/recipe/vision/remove-review"): _removal_review(
+                "recipe", "vision", with_model=False
+            ),
+        }
+    )
+    prompt = _Prompt(monkeypatch, "no")
+
+    status = cli.main(argv, control_client=client, request_id_factory=lambda: _RUN_KEY)
+
+    capsys.readouterr()
+    assert status == 2
+    assert not [
+        path
+        for method, path, *_ in client.calls
+        if method == "POST" and path.endswith(effect_suffix)
+    ]
+    assert "Not confirmed" in prompt.transcript
+    assert "control.api_error" not in prompt.transcript
+
+
+def test_run_binds_the_load_to_the_plan_it_showed_and_asks_again_when_it_changed(
+    monkeypatch, capsys
+) -> None:
+    changed = "f" * 64
+    stale = ControlConflict(
+        409, "The profile plan changed", code="profile.review_stale"
+    )
+    receipt = {
+        "id": _RUN_APPLICATION,
+        "request_key": _RUN_KEY,
+        "state": "succeeded",
+        "progress": {},
+    }
+    client = FakeClient(
+        _run_responses()
+        | {
+            ("POST", "/api/profile/1/preview"): [
+                _run_preview("b" * 64, _RUN_DIGEST),
+                _run_preview("c" * 64, changed),
+            ],
+            ("POST", "/api/profile/1/load"): [stale, receipt],
+        }
+    )
+    prompt = _Prompt(monkeypatch, "yes", "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    capsys.readouterr()
+    assert status == 0, prompt.transcript
+    loads = [call[2] for call in client.calls if call[1] == "/api/profile/1/load"]
+    assert loads == [
+        {"request_key": _RUN_KEY, "reviewed_effects_digest": _RUN_DIGEST},
+        {"request_key": _RUN_KEY, "reviewed_effects_digest": changed},
+    ]
+    assert prompt.transcript.count("[y/N]") == 2
+
+
+def test_run_yes_starts_the_current_plan_without_binding_a_digest(capsys) -> None:
+    client = FakeClient(_run_responses())
+
+    status = cli.main(
+        ("--json", "--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    capsys.readouterr()
+    assert status == 0
+    loads = [call[2] for call in client.calls if call[1] == "/api/profile/1/load"]
+    assert loads == [{"request_key": _RUN_KEY}]
+
+
+def test_a_successful_run_prints_its_result_and_exits_zero(capsys) -> None:
+    client = FakeClient(_run_responses())
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    output = capsys.readouterr()
+    assert status == 0, output.err
+    assert _RUN_APPLICATION in output.out

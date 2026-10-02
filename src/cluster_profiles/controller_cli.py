@@ -934,7 +934,9 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     run = commands.add_parser(
         "run",
         help="Prepare a recipe, review it, and start it",
-        description="Prepare a recipe, review the plan, and start it on the fleet.",
+        description="Prepare a recipe, review the plan, and start it on the fleet. "
+        "The recipe is first saved into the profile as a draft so the plan can be "
+        "reviewed; declining leaves that draft and the fleet unchanged.",
     )
     run.set_defaults(outcome_context="mutation")
     run.add_argument(
@@ -950,7 +952,11 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "--as", dest="assignment_name", metavar="NAME", help="Name in the profile"
     )
     _option_flag(run)
-    run.add_argument("--yes", action="store_true", help="Confirm without asking")
+    run.add_argument(
+        "--yes",
+        action="store_true",
+        help="Start the plan that is current when accepted, without asking",
+    )
     run.add_argument(
         "--request-key",
         help="Original request UUID; supply and retain it to reconnect after process death",
@@ -1215,19 +1221,33 @@ def _review_and_submit_profile_load(
     number: int,
     args: argparse.Namespace,
     factory: Callable[[], str],
+    *,
+    question: str,
+    review_when_confirmed: bool,
 ) -> dict[str, object]:
     """Show the plan, ask, then submit a load bound to the effects just shown.
 
     The Controller refuses a bound load whose plan changed since the review,
     without accepting anything. The current plan is then shown and asked about
-    again; the operator never consents to a plan they did not see.
+    again; the operator never consents to a plan they did not see. With
+    ``--yes`` nothing is reviewed or bound: the plan current at acceptance is
+    loaded. ``review_when_confirmed`` still shows that plan (``run`` does) and
+    refuses on a security denial before asking.
     """
 
-    question = f"Load profile {number} with these effects?"
+    if args.yes and not review_when_confirmed:
+        return _submit_profile_load(client, number, args, factory)
     for round_number in range(1, _MAX_REVIEW_ROUNDS + 1):
         preview = client.request("POST", f"/api/profile/{number}/preview")
-        with redirect_stdout(sys.stderr):
-            render_payload(preview, "profile", action="preview")
+        security = _security_blocker_codes(preview.get("reasons"))
+        if security and review_when_confirmed:
+            raise ControlConflict(
+                409,
+                f"profile load is refused by the Controller: {', '.join(security)}",
+            )
+        if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
+            with redirect_stdout(sys.stderr):
+                render_payload(preview, "profile", action="preview")
         _confirm_action(args, question)
         try:
             return _submit_profile_load(
@@ -1235,13 +1255,65 @@ def _review_and_submit_profile_load(
                 number,
                 args,
                 factory,
-                reviewed_effects_digest=_reviewed_effects_digest(preview),
+                reviewed_effects_digest=(
+                    None if args.yes else _reviewed_effects_digest(preview)
+                ),
             )
         except ControlConflict as error:
             if error.code != _REVIEW_STALE_CODE or round_number == _MAX_REVIEW_ROUNDS:
                 raise
-        question = f"The plan changed since your review. Load profile {number} with the current effects?"
+        question = (
+            "The plan changed since your review. "
+            f"Load profile {number} with the current effects?"
+        )
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _load_profile(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    factory: Callable[[], str],
+    number: int,
+    *,
+    question: str,
+    review_when_confirmed: bool = False,
+) -> dict[str, object]:
+    """The one load path: review, confirm, submit, then follow the application.
+
+    ``profile load`` and ``run`` both take it with their own namespace, so the
+    submission identity, the request key and the observation they leave behind
+    are what the error path reports when a response is lost.
+    """
+
+    result = _review_and_submit_profile_load(
+        client,
+        number,
+        args,
+        factory,
+        question=question,
+        review_when_confirmed=review_when_confirmed,
+    )
+    if getattr(args, "detach", False):
+        return result
+    application_id = result.get("id")
+    if not isinstance(application_id, str) or not application_id:
+        raise ControlMalformedResponse(
+            "profile load has no durable application identity"
+        )
+
+    def same_application(observed: Mapping[str, object]) -> None:
+        if observed.get("id") != application_id:
+            raise ControlMalformedResponse(
+                "profile observation identifies another application"
+            )
+
+    return _poll_path(
+        client,
+        f"/api/profile/applications/{_quoted(application_id)}",
+        result,
+        args,
+        validate=same_application,
+    )
 
 
 def _submit_profile_load(
@@ -1427,18 +1499,6 @@ def _validate_cache_removal_receipt(
     return _cache_operation_id(noun, receipt)
 
 
-def _removal_is_interactive(args: argparse.Namespace) -> bool:
-    return (
-        not (
-            getattr(args, "global_json", False)
-            or getattr(args, "json", False)
-            or getattr(args, "no_input", False)
-        )
-        and sys.stdin.isatty()
-        and sys.stderr.isatty()
-    )
-
-
 def _cache_removal_review(
     client: ControllerClient,
     noun: str,
@@ -1519,7 +1579,7 @@ def _confirm_removal(
     *,
     with_model: bool | None,
 ) -> None:
-    interactive = _removal_is_interactive(args)
+    interactive = _can_prompt(args)
     if not args.yes and not interactive:
         raise ValueError(f"{noun} remove requires --yes in noninteractive mode")
 
@@ -2276,22 +2336,45 @@ def _fleet_selector(args: argparse.Namespace) -> str:
     return selector
 
 
+class ActionDeclined(ValueError):
+    """The operator answered no, or gave no answer; the action was not taken."""
+
+    def __init__(self, message: str, *, next_steps: Sequence[str] = ()) -> None:
+        super().__init__(message)
+        self.next_steps = tuple(next_steps)
+
+
+def _can_prompt(args: argparse.Namespace) -> bool:
+    """True when this invocation can ask the operator a question."""
+
+    return (
+        not (
+            getattr(args, "no_input", False)
+            or getattr(args, "global_json", False)
+            or getattr(args, "json", False)
+        )
+        and sys.stdin.isatty()
+        and sys.stderr.isatty()
+    )
+
+
+def _require_confirmation(args: argparse.Namespace, subject: str) -> None:
+    """Refuse before any effect when nobody can confirm this invocation."""
+
+    if not args.yes and not _can_prompt(args):
+        raise ValueError(f"{subject} requires --yes in noninteractive mode")
+
+
 def _confirm_action(args: argparse.Namespace, message: str) -> None:
     if args.yes:
         if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
             print(terminal_text(message), file=sys.stderr)
         return
-    if (
-        getattr(args, "no_input", False)
-        or getattr(args, "global_json", False)
-        or getattr(args, "json", False)
-        or not sys.stdin.isatty()
-        or not sys.stderr.isatty()
-    ):
+    if not _can_prompt(args):
         raise ValueError(f"{message} Pass --yes to confirm in noninteractive mode")
     print(terminal_text(message) + " [y/N] ", end="", file=sys.stderr, flush=True)
     if sys.stdin.readline(1024).strip().casefold() not in {"y", "yes"}:
-        raise ValueError("action was not confirmed")
+        raise ActionDeclined("Not confirmed; nothing was changed.")
 
 
 def _deliver_enrollment(
@@ -3784,42 +3867,13 @@ def _profile(
             if args.yes or args.detach:
                 raise ValueError("--review cannot be combined with --yes or --detach")
             return client.request("POST", f"/api/profile/{number}/preview")
-        interactive = (
-            not (
-                args.global_json
-                or getattr(args, "json", False)
-                or getattr(args, "no_input", False)
-            )
-            and sys.stdin.isatty()
-            and sys.stderr.isatty()
-        )
-        if not args.yes and not interactive:
-            raise ValueError("profile load requires --yes in noninteractive mode")
-        result = (
-            _submit_profile_load(client, number, args, factory)
-            if args.yes
-            else _review_and_submit_profile_load(client, number, args, factory)
-        )
-        if args.detach:
-            return result
-        application_id = result.get("id")
-        if not isinstance(application_id, str) or not application_id:
-            raise ControlMalformedResponse(
-                "profile load has no durable application identity"
-            )
-
-        def same_application(observed: Mapping[str, object]) -> None:
-            if observed.get("id") != application_id:
-                raise ControlMalformedResponse(
-                    "profile observation identifies another application"
-                )
-
-        return _poll_path(
-            client,
-            f"/api/profile/applications/{_quoted(application_id)}",
-            result,
+        _require_confirmation(args, "profile load")
+        return _load_profile(
             args,
-            validate=same_application,
+            client,
+            factory,
+            number,
+            question=f"Load profile {number} with these effects?",
         )
     raise ValueError(f"unsupported profile action: {action}")
 
@@ -3829,8 +3883,16 @@ def _run(
     client: ControllerClient,
     factory: Callable[[], str],
 ) -> dict[str, object]:
-    """Run one exact library recipe; the Controller prepares what the load needs."""
+    """Run one exact library recipe; the Controller prepares what the load needs.
+
+    Two separate effects follow one invocation. The recipe is first saved into
+    the selected profile as a draft (the Controller can only review a saved
+    profile; the running fleet is unchanged), then the reviewed load starts it.
+    Everything that can be refused is refused before the first effect.
+    """
     number = _profile_number(args)
+    _require_confirmation(args, "run")
+    _request_key(args, factory)
     deadline = time.monotonic() + args.timeout_seconds
     selector = _resolve_run_recipe(client, args.selector, deadline=deadline)
 
@@ -3870,41 +3932,26 @@ def _run(
     )
     _profile_authoring(edit_args, client)
 
-    preview = client.request("POST", f"/api/profile/{number}/preview")
-    security = _security_blocker_codes(preview.get("reasons"))
-    if security:
-        raise ControlConflict(
-            409, f"profile load is refused by the Controller: {', '.join(security)}"
+    try:
+        application = _load_profile(
+            args,
+            client,
+            factory,
+            number,
+            question=f"Start {selector} on profile {number} with this reviewed plan?",
+            review_when_confirmed=True,
         )
-    if not (args.global_json or getattr(args, "json", False)):
-        with redirect_stdout(sys.stderr):
-            render_payload(preview, "profile", action="preview")
-    _confirm_action(
-        args, f"Start {selector} on profile {number} with this reviewed plan?"
-    )
-
-    load_args = argparse.Namespace(
-        command="profile",
-        profile_number=number,
-        profile_action="load",
-        dry_run=False,
-        yes=True,
-        request_key=args.request_key,
-        detach=False,
-        follow=True,
-        watch=getattr(args, "watch", False),
-        timeout_seconds=args.timeout_seconds,
-        interval_seconds=args.interval_seconds,
-        global_json=getattr(args, "global_json", False),
-        json=getattr(args, "json", False),
-        no_input=getattr(args, "no_input", False),
-        _watch_callback=getattr(args, "_watch_callback", None),
-    )
-    application = _profile(load_args, client, factory)
+    except ActionDeclined as declined:
+        raise ActionDeclined(
+            f"Not confirmed; the fleet is unchanged. {selector} stays in profile "
+            f"{number} as a saved draft.",
+            next_steps=(
+                f"vonkctl --profile {number} profile load  (load the saved profile)",
+                f"vonkctl --profile {number} profile  (review or edit the saved profile)",
+            ),
+        ) from declined
     application_state = operation_state(application)
     if application_state not in {"succeeded", "completed"}:
-        if isinstance(getattr(load_args, "observation", None), Observation):
-            args.observation = load_args.observation
         return {
             "recipe": selector,
             "application": application,

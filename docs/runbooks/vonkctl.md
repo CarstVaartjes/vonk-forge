@@ -671,13 +671,22 @@ prepares the recipe and its model, adds the assignment to the selected saved
 profile (profile 1 by default), previews the complete profile change, asks for
 confirmation, follows the application, and prints the current endpoints. Use
 `--spark` more than once to choose the target group; without it, every enrolled
-Spark is included. The profile edit is saved before the preview so the
-Controller can review the exact whole-profile effects. If the review is
-blocked, the saved draft remains and the fleet is unchanged.
+Spark is included. `run` has two separate effects: the recipe is saved into
+the profile as a draft (the Controller can only review a saved profile, and
+saving does not change the running fleet), then the reviewed plan is loaded.
+Everything that can be refused is refused before the first effect: without
+`--yes`, a run that cannot ask (JSON, redirected input, `--no-input`) saves
+nothing. If you decline the confirmation, or the review is blocked, the saved
+draft remains, the fleet is unchanged, and the command exits non-zero.
+Interactively, the load is bound to the effects you reviewed exactly as
+`profile load` is (see below) and asks again if they changed.
 
-For scripts, JSON, redirected input, or `--no-input`, pass `--yes`. The command
-still obtains a fresh Controller review and binds its exact plan before it
-starts. It waits for the application before looking up the endpoint.
+For scripts, JSON, redirected input, or `--no-input`, pass `--yes`: nothing is
+asked, so the command shows the current Controller review and starts the plan
+that is current when the Controller accepts it. A lost response keeps the same
+request key and prints the reconnect command (`profile progress
+--request-key`), as `profile load` does. It waits for the application before
+looking up the endpoint.
 
 The CLI currently runs recipes from the active catalog. It does not turn an
 arbitrary Hugging Face repository into a runnable unqualified recipe. The
