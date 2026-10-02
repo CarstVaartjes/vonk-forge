@@ -27,6 +27,7 @@ class Control:
         assert (method, path, kwargs) == (
             "POST", "/api/profile/1/load", {"allowed": (202,)}
         )
+        assert set(payload) == {"request_key"}  # an older Controller refuses more
         requests.append(FleetProfileLoadRequest.model_validate_json(json.dumps(payload)))
         return 202, {"id": str(len(requests))}
 
