@@ -835,7 +835,9 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         help="Review the plan without applying it",
     )
     profile_load.add_argument(
-        "--yes", action="store_true", help="Confirm without asking"
+        "--yes",
+        action="store_true",
+        help="Load the plan that is current when accepted, without a review",
     )
     profile_load.add_argument("--request-key")
     profile_load.add_argument(
@@ -1192,16 +1194,70 @@ def _poll_path(
         interval = _bounded_interval(args)
 
 
-def _submit_profile_load(
+_REVIEW_STALE_CODE = "profile.review_stale"
+_MAX_REVIEW_ROUNDS = 3
+
+
+def _reviewed_effects_digest(preview: Mapping[str, object]) -> str | None:
+    """The reviewed effects a load binds to; absent from an older Controller.
+
+    Without it the load takes the plan current at acceptance, as `--yes` does.
+    """
+
+    digest = preview.get("effects_digest")
+    if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest):
+        return digest
+    return None
+
+
+def _review_and_submit_profile_load(
     client: ControllerClient,
     number: int,
     args: argparse.Namespace,
     factory: Callable[[], str],
 ) -> dict[str, object]:
+    """Show the plan, ask, then submit a load bound to the effects just shown.
+
+    The Controller refuses a bound load whose plan changed since the review,
+    without accepting anything. The current plan is then shown and asked about
+    again; the operator never consents to a plan they did not see.
+    """
+
+    question = f"Load profile {number} with these effects?"
+    for round_number in range(1, _MAX_REVIEW_ROUNDS + 1):
+        preview = client.request("POST", f"/api/profile/{number}/preview")
+        with redirect_stdout(sys.stderr):
+            render_payload(preview, "profile", action="preview")
+        _confirm_action(args, question)
+        try:
+            return _submit_profile_load(
+                client,
+                number,
+                args,
+                factory,
+                reviewed_effects_digest=_reviewed_effects_digest(preview),
+            )
+        except ControlConflict as error:
+            if error.code != _REVIEW_STALE_CODE or round_number == _MAX_REVIEW_ROUNDS:
+                raise
+        question = f"The plan changed since your review. Load profile {number} with the current effects?"
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _submit_profile_load(
+    client: ControllerClient,
+    number: int,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
+    *,
+    reviewed_effects_digest: str | None = None,
+) -> dict[str, object]:
     key = _request_key(args, factory)
     path = f"/api/profile/{number}/load"
     lookup = f"/api/profile/{number}/requests/{key}"
     body: dict[str, object] = {"request_key": key}
+    if reviewed_effects_digest is not None:
+        body["reviewed_effects_digest"] = reviewed_effects_digest
 
     def validate(result: Mapping[str, object]) -> str:
         operation_id = result.get("id")
@@ -3739,12 +3795,11 @@ def _profile(
         )
         if not args.yes and not interactive:
             raise ValueError("profile load requires --yes in noninteractive mode")
-        if not args.yes:
-            preview = client.request("POST", f"/api/profile/{number}/preview")
-            with redirect_stdout(sys.stderr):
-                render_payload(preview, "profile", action="preview")
-            _confirm_action(args, f"Load profile {number} with these effects?")
-        result = _submit_profile_load(client, number, args, factory)
+        result = (
+            _submit_profile_load(client, number, args, factory)
+            if args.yes
+            else _review_and_submit_profile_load(client, number, args, factory)
+        )
         if args.detach:
             return result
         application_id = result.get("id")

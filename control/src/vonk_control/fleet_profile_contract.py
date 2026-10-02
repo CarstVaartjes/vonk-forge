@@ -1064,6 +1064,12 @@ class FleetProfilePreview(FleetProfileReviewedDecision):
         default_factory=list, max_length=64
     )
     plan_digest: Digest
+    #: Digest of the effects an operator consents to (what stops, starts, is
+    #: installed or placed and which workloads are replaced), without
+    #: observations such as free capacity, readiness or timestamps. A load that
+    #: names it is accepted only while the fresh plan still has the same
+    #: effects. Absent on plans stored before it existed.
+    effects_digest: Digest | None = None
 
     def reviewed_decision(self) -> FleetProfileReviewedDecision:
         return FleetProfileReviewedDecision.model_validate(
@@ -1076,6 +1082,9 @@ class FleetProfilePreview(FleetProfileReviewedDecision):
 
 class FleetProfileLoadRequest(_StrictModel):
     request_key: UuidId
+    #: The ``effects_digest`` of the preview the caller showed. Omitted means
+    #: "the current plan": nothing was reviewed, so nothing can be stale.
+    reviewed_effects_digest: Digest | None = None
 
 
 class FleetProfileApplicationCancelRequest(_StrictModel):

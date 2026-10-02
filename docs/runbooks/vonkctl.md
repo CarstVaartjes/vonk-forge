@@ -691,9 +691,17 @@ When a run or enrollment is refused, the CLI gives a short next step and keeps
 the Controller error code and original detail in JSON output for debugging.
 
 In an interactive terminal, load shows the current review and asks for one
-default-no confirmation. `--detach` returns the accepted application instead
-of following it. For scripts, JSON, redirected input, or `--no-input`, use
-`--yes`; the CLI submits the load directly and the Controller plans it:
+default-no confirmation. The load is bound to the effects you reviewed: the
+CLI sends the review's `effects_digest` internally (never copy it by hand), and
+the Controller accepts the load only while its current plan has the same
+effects (profile revision, placements, what stops, starts or is installed, and
+which workloads are replaced). Free capacity, readiness, timestamps and other
+observations do not invalidate a review. If the effects changed, nothing is
+accepted (`profile.review_stale`); the CLI shows the current plan and asks
+again. `--detach` returns the accepted application instead of following it.
+For scripts, JSON, redirected input, or `--no-input`, use `--yes`: nothing was
+reviewed, so the CLI submits the load without a digest and the Controller
+applies the plan that is current when it accepts the request:
 
 ```bash
 vonkctl --profile 2 --json profile load --review > reviewed-plan.json
@@ -714,9 +722,12 @@ before saving; the web editor likewise sends the selected library row's
 canonical selector. It does not pin a recipe revision or declare a subset scope.
 The Controller returns warnings for incomplete groups and resource pressure at
 save time. A load preview reports blockers, resolved immutable identities, the
-whole-fleet snapshot, resource fit, and a `plan_digest`. A load request carries
-only its request key; the Controller plans the current profile at admission and
-parks requests with waitable blockers until their dependencies clear.
+whole-fleet snapshot, resource fit, a `plan_digest` and an `effects_digest`. A
+load request carries its request key and, when a review was shown, that
+review's `effects_digest`; the Controller plans the current profile at
+admission and parks requests with waitable blockers until their dependencies
+clear. A replayed request key returns the original application even if the
+plan has changed since.
 
 ### Batched recipe qualification
 

@@ -220,6 +220,7 @@ def install_fleet_profile_routes(
                 number,
                 actor=actor.subject,
                 request_key=body.request_key,
+                reviewed_effects_digest=body.reviewed_effects_digest,
             )
         except FleetProfilePermissionDenied as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
