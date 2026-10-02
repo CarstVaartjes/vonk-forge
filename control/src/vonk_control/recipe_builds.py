@@ -408,6 +408,20 @@ class RecipeBuildError(ValueError):
         super().__init__(detail)
 
 
+class RecipeSourcePolicyError(RecipeBuildError):
+    """The recipe's stored build source violates the Controller's source policy.
+
+    Retrying cannot change the answer: only a different source bundle can.  The
+    report keeps every finding with its file and line so the refusal can name
+    them instead of the first finding's bare sentence.
+    """
+
+    def __init__(self, report: SourcePolicyReport) -> None:
+        finding = report.findings[0]
+        super().__init__(finding.code, report.describe())
+        self.report = report
+
+
 class RecipeBuildAdmissionBusy(RecipeBuildError):
     code = "build.capacity_busy"
 
@@ -641,8 +655,7 @@ class RecipeBuildService:
         except SourceBundleError as error:
             raise RecipeBuildError(error.code, str(error)) from error
         except SourcePolicyError as error:
-            finding = error.report.findings[0]
-            raise RecipeBuildError(finding.code, finding.detail) from error
+            raise RecipeSourcePolicyError(error.report) from error
 
         dockerfile_path = build.get("dockerfile")
         dockerfile_payload = (
@@ -970,8 +983,7 @@ class RecipeBuildService:
         except SourceBundleError as error:
             raise RecipeBuildError(error.code, str(error)) from error
         except SourcePolicyError as error:
-            finding = error.report.findings[0]
-            raise RecipeBuildError(finding.code, finding.detail) from error
+            raise RecipeSourcePolicyError(error.report) from error
         dockerfile_path = build.get("dockerfile") if isinstance(build, dict) else None
         dockerfile_payload = (
             bundle.files.get(dockerfile_path)

@@ -236,6 +236,11 @@ SUPERSEDED_PREPARATION_CODE = "recipe_image.superseded_by_newer_revision"
 _RECOVERABLE_MISS_CODES = frozenset({"runtime_image.cache_missing"})
 
 
+# A recipe whose stored build source the Controller's source policy refuses; the
+# refusal is final for that source and names the file and line of each finding.
+SOURCE_POLICY_REFUSED_CODE = "recipe_image.source_policy_refused"
+
+
 class RecipeImageAvailabilityError(RuntimeError):
     """A bounded operator-facing availability failure."""
 

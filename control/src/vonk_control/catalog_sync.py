@@ -427,7 +427,18 @@ class ManagedRecipeCatalogSyncService:
                     "canonical recipe identity changed",
                 )
             elif (
-                previous is not None and previous.content_sha256 == item.content_sha256
+                previous is not None
+                and previous.content_sha256 == item.content_sha256
+                # A recipe's content digest does not cover its build source:
+                # a package republished with a repaired Dockerfile keeps the
+                # same recipe document.  Re-import until the stored package is
+                # the published one, so the Controller never keeps a stale
+                # source bundle.  A reader that publishes no package digest has
+                # nothing to compare; a stored row without one is re-imported.
+                and (
+                    item.package_sha256 is None
+                    or previous.package_sha256 == item.package_sha256
+                )
             ):
                 result["unchanged_count"] = (
                     require_integer(

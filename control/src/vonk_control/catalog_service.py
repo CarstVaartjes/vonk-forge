@@ -81,6 +81,9 @@ class RecipeCatalogLocalRevision:
     release_version: str | None
     # Spark count of the active revision; None when it cannot be read.
     node_count: int | None = None
+    # The package the active revision's source bundle was imported from; None
+    # when an older import recorded none or the projection cannot be read.
+    package_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +223,7 @@ class CatalogService:
                         content_sha256=row.content_digest,
                         release_version=_release_version(row.document),
                         node_count=_node_count(row.document),
+                        package_sha256=_projected_package_sha256(row),
                     )
         return result
 
@@ -521,6 +525,15 @@ def _node_count(document: Mapping[str, object]) -> int | None:
         return recipe_topology(document).node_count
     except (RecipeRuntimeSpecError, TypeError, ValueError):
         return None
+
+
+def _projected_package_sha256(row: CatalogDocumentRevision) -> str | None:
+    try:
+        projection = read_catalog_projection(row)
+    except Exception:  # noqa: BLE001 - an unreadable projection is re-imported
+        return None
+    value = getattr(projection, "package_sha256", None)
+    return value if isinstance(value, str) else None
 
 
 def _release_version(document: Mapping[str, object]) -> str | None:

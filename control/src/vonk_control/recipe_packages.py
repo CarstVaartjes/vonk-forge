@@ -831,6 +831,7 @@ class RecipePackageClient:
                     content_sha256=str(digest),
                     uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}",
                     document=dict(document),
+                    package_sha256=str(package_digest),
                     # Optional; an unreadable entry only means no prebuilt image.
                     prebuilt_image=read_prebuilt_image(
                         package_entry.get("prebuilt_image")

@@ -15,6 +15,7 @@ from vonk_control.cache_removal_review import (
 )
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
+    SOURCE_POLICY_REFUSED_CODE,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityView,
 )
@@ -330,6 +331,24 @@ def test_download_keeps_the_special_case_refusals_unchanged(
 
     assert response.status_code == status_code, response.text
     assert response.json()["detail"] == detail
+
+
+def test_download_names_a_source_policy_refusal_instead_of_unavailable() -> None:
+    """A source-policy refusal answers 409 under its own error code, so the
+    middleware does not stamp it ``controller.unavailable``."""
+
+    service = Mock()
+    service.start_selector.side_effect = RecipeImageAvailabilityError(
+        SOURCE_POLICY_REFUSED_CODE,
+        "dockerfile.heredoc_forbidden Dockerfile:106: Dockerfile heredocs are not accepted",
+        retryable=False,
+    )
+
+    response = _download(service)
+
+    assert response.status_code == 409, response.text
+    assert response.headers["x-vonk-error-code"] == SOURCE_POLICY_REFUSED_CODE
+    assert "dockerfile.heredoc_forbidden Dockerfile:106" in response.json()["detail"]
 
 
 def test_remove_names_a_terminal_availability_refusal() -> None:
