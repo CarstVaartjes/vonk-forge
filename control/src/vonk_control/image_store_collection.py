@@ -6,8 +6,10 @@ The layered store keeps an image's blobs while something still names it:
 - a build that is not finished, or finished within the grace period (a
   stored image waiting for its first receipt).
 
-Everything else is proven unreferenced. Its blobs go once they are older than
-the grace period, and a later request that needs the image again stores or
+Everything else is proven unreferenced. A failed scan proves nothing: when
+the receipts, an image's manifest or the database cannot be read, the pass
+deletes nothing, names the reason in the log and runs again next interval.
+Unreferenced blobs go once they are older than the grace period, and a later request that needs the image again stores or
 builds it again, as for any cache loss. A Spark build's uploaded archive that
 no build still waits on is removed the same way.
 """
@@ -15,6 +17,7 @@ no build still waits on is removed the same way.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from collections.abc import Callable
@@ -24,8 +27,15 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .logging import log_event
 from .models import ArtifactDistributionAssignment, RecipeBuild
-from .oci_image_store import IMAGE_CACHE_DIRECTORY, Collection, OciImageStore
+from .oci_image_store import (
+    IMAGE_CACHE_DIRECTORY,
+    REFERENCE_SCAN_FAILED,
+    Collection,
+    OciImageStore,
+    OciImageStoreError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _ADDRESS = re.compile(r"^[0-9a-f]{64}$")
@@ -61,9 +71,16 @@ class ImageStoreCollector:
         return result is not None and result.blobs_removed > 0
 
     def collect(self) -> Collection | None:
-        collection = self._store.collect(
-            self._referenced_images, grace_seconds=GRACE.total_seconds()
-        )
+        try:
+            collection = self._store.collect(
+                self._referenced_images, grace_seconds=GRACE.total_seconds()
+            )
+        except OciImageStoreError as error:
+            if error.code != REFERENCE_SCAN_FAILED:
+                raise
+            # Nothing was removed: what the Controller still names is unknown.
+            _log_deferred(error.code, error.detail)
+            collection = None
         uploads = self._collect_uploads()
         if collection is None:
             return None
@@ -80,11 +97,7 @@ class ImageStoreCollector:
         return result
 
     def _referenced_images(self) -> set[str]:
-        referenced = {
-            match.group(1)
-            for path in self._image_cache.glob("*.receipt.json")
-            if (match := _RECEIPT.fullmatch(path.name)) is not None
-        }
+        referenced = self._receipt_addresses()
         now = self._clock()
         with self._sessions() as session:
             referenced.update(
@@ -97,6 +110,30 @@ class ImageStoreCollector:
             )
             referenced.update(self._waiting_builds(session, now))
         return referenced
+
+    def _receipt_addresses(self) -> set[str]:
+        """Images with a receipt. An unreadable directory is an error, not none.
+
+        ``Path.glob`` silently yields nothing for a directory it may not list,
+        which would read as "no image is published".
+        """
+
+        try:
+            with os.scandir(self._image_cache) as entries:
+                names = [entry.name for entry in entries]
+        except FileNotFoundError:
+            return set()
+        except OSError as error:
+            raise OciImageStoreError(
+                REFERENCE_SCAN_FAILED,
+                f"image receipts cannot be listed, so nothing was removed: "
+                f"{type(error).__name__}: {error}",
+            ) from error
+        return {
+            match.group(1)
+            for name in names
+            if (match := _RECEIPT.fullmatch(name)) is not None
+        }
 
     @staticmethod
     def _waiting_builds(session: Session, now: datetime) -> set[str]:
@@ -130,7 +167,16 @@ class ImageStoreCollector:
             )
         cutoff = time.time() - GRACE.total_seconds()
         removed = reclaimed = 0
-        for upload in self._image_cache.iterdir():
+        try:
+            uploads = list(self._image_cache.iterdir())
+        except OSError as error:
+            _log_deferred(
+                REFERENCE_SCAN_FAILED,
+                f"uploaded archives cannot be listed, so none was removed: "
+                f"{type(error).__name__}: {error}",
+            )
+            return Collection(0, 0)
+        for upload in uploads:
             if _ADDRESS.fullmatch(upload.name) is None or upload.name in waiting:
                 continue
             try:
@@ -143,6 +189,16 @@ class ImageStoreCollector:
             removed += 1
             reclaimed += status.st_size
         return Collection(removed, reclaimed)
+
+
+def _log_deferred(code: str, detail: str) -> None:
+    log_event(
+        _LOGGER,
+        "image_store.collection_deferred",
+        service="control-worker",
+        code=code,
+        detail=detail,
+    )
 
 
 def _aware(value: datetime, reference: datetime) -> datetime:
