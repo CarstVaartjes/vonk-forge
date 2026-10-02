@@ -379,6 +379,7 @@ def test_development_image_compose_enables_complete_step_ca_agent_settings(
         "cluster-egress",
         "litellm-data",
         "litellm-edge",
+        "litellm-metrics",
     }
     assert services["litellm"].get("ports") in (None, [])
     # Caddy waits for its staged Caddyfile, never for a healthy Controller.
