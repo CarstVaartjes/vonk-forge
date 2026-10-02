@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -100,9 +100,11 @@ class _RecoveryJobQueue(Protocol):
 class _RecoveryRoutes(Protocol):
     def publication_transaction(self) -> AbstractContextManager[Session]: ...
 
-    def withdraw_run_in_session(
-        self, session: Session, run_id: str
-    ) -> LiteLlmGeneration: ...
+    def withdraw_runs(self, run_ids: Iterable[str]) -> LiteLlmGeneration: ...
+
+    def withdrawal_complete_in_session(
+        self, session: Session, run_ids: Iterable[str]
+    ) -> bool: ...
 
 
 class _RecoveryRunStops(Protocol):
@@ -146,9 +148,13 @@ class DistributedRecoveryCoordinator:
     def tick(self) -> bool:
         now = _aware(self._clock())
         queued = False
-        worked = False
+        # Claim, effect, conditional completion: the routes of runs about to be
+        # recovered or settled are withdrawn with no transaction open, and the
+        # transaction below acts on a run only while that withdrawal is
+        # complete. A crash in between resumes here, from the durable intent.
+        worked = self._withdraw_routes(now)
         with self._routes.publication_transaction() as session:
-            worked = self._settle_unreadable_runs(session, now)
+            worked = self._settle_unreadable_runs(session, now) or worked
             candidates = tuple(
                 session.scalars(
                     select(RecipeRun)
@@ -181,11 +187,10 @@ class DistributedRecoveryCoordinator:
                     )
                 )
                 singleton = len(run_nodes) == 1
-                if run.route_state != "withdrawn":
-                    self._routes.withdraw_run_in_session(session, run.id)
-                    run.route_state = "withdrawn"
-                    run.updated_at = now
-                    worked = True
+                if not self._routes.withdrawal_complete_in_session(
+                    session, frozenset({run.id})
+                ):
+                    continue  # withdrawn first on the next tick
                 if self._active_recovery(session, run.id):
                     continue
                 if _superseded(session, run, run_nodes):
@@ -371,6 +376,42 @@ class DistributedRecoveryCoordinator:
             self._agent_jobs.notify_available()
         return worked
 
+    def _withdraw_routes(self, now: datetime) -> bool:
+        """Withdraw the routes of runs this pass may recover or settle."""
+
+        with self._routes.publication_transaction() as session:
+            candidates = {
+                *_unreadable_run_ids(session),
+                *session.scalars(
+                    select(RecipeRun.id)
+                    .where(
+                        RecipeRun.state == "running",
+                        or_(
+                            RecipeRun.route_next_attempt_at.is_(None),
+                            RecipeRun.route_next_attempt_at <= now,
+                        ),
+                        select(RunNode.run_id)
+                        .where(
+                            RunNode.run_id == RecipeRun.id,
+                            RunNode.state == "failed",
+                        )
+                        .exists(),
+                    )
+                    .order_by(RecipeRun.created_at, RecipeRun.id)
+                ),
+            }
+            pending = frozenset(
+                run_id
+                for run_id in sorted(candidates)
+                if not self._routes.withdrawal_complete_in_session(
+                    session, frozenset({run_id})
+                )
+            )
+        if not pending:
+            return False
+        self._routes.withdraw_runs(pending)
+        return True
+
     def _settle_unreadable_runs(self, session: Session, now: datetime) -> bool:
         """A run whose stored plan this Controller cannot read is settled.
 
@@ -380,21 +421,15 @@ class DistributedRecoveryCoordinator:
         released by the ownership rule below.
         """
 
-        unreadable = []
-        for run in session.scalars(
-            select(RecipeRun).where(RecipeRun.state.in_(STOPPABLE_RUN_STATES))
-        ):
-            try:
-                run_plan_document(run.plan)
-            except RecipeExecutionContractError:
-                unreadable.append(run.id)
         settled = False
-        for run_id in unreadable:
+        for run_id in _unreadable_run_ids(session):
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is None or run.state not in STOPPABLE_RUN_STATES:
                 continue
-            if run.route_state != "withdrawn":
-                self._routes.withdraw_run_in_session(session, run.id)
+            if not self._routes.withdrawal_complete_in_session(
+                session, frozenset({run.id})
+            ):
+                continue  # withdrawn first on the next tick
             _settle_unrecoverable(
                 run,
                 "the stored run plan is unreadable (older contract); the run is "
@@ -417,6 +452,18 @@ class DistributedRecoveryCoordinator:
             and isinstance(job.payload.get("recovery"), Mapping)
             for job in jobs
         )
+
+
+def _unreadable_run_ids(session: Session) -> list[str]:
+    unreadable = []
+    for run in session.scalars(
+        select(RecipeRun).where(RecipeRun.state.in_(STOPPABLE_RUN_STATES))
+    ):
+        try:
+            run_plan_document(run.plan)
+        except RecipeExecutionContractError:
+            unreadable.append(run.id)
+    return unreadable
 
 
 def recovery_start_plan(

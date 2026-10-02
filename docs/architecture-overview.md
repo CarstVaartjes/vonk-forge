@@ -312,9 +312,14 @@ lifecycle publication supersedes the one in flight, which records nothing and is
 retried, never counted as a failed attempt. Withdrawals record their intent with
 the claim, so a superseded withdrawal is never lost. A crash between effect and
 completion is recovered by the maintenance pass, which adopts the exact live
-marker instead of activating again. The stop and distributed-recovery
-withdrawals still publish inside their own transaction; the coordination
-baseline lists them as reviewed deferrals.
+marker instead of activating again. A Stop and distributed recovery withdraw
+the same way and dispatch afterwards: the withdrawal is claimed and published
+with no transaction open, and the Stop (or recovery) is dispatched in its own
+short transaction only while the live bundle is still the one without the run
+(a competing publication that lists it again sends the dispatch back to
+withdraw). A crash in between resumes from the durable withdrawal intent; the
+maintenance pass also converges the bundle on it. The coordination scanner
+refuses a route publication reachable from a transaction.
 
 ```mermaid
 flowchart TD
