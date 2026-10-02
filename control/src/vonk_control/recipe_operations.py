@@ -699,14 +699,10 @@ class RecipeOperationService:
             raise RecipeOperationConflict("recipe build service is unavailable")
         return self._builds.plan(recipe_revision_id, builder_node_id, now=self._clock())
 
-    def reusable_build_id(
-        self, recipe_revision_id: str, builder_node_id: str
-    ) -> str | None:
+    def reusable_build_id(self, recipe_revision_id: str) -> str | None:
         if self._builds is None:
             return None
-        return self._builds.reusable_build_id(
-            recipe_revision_id, builder_node_id, now=self._clock()
-        )
+        return self._builds.reusable_build_id(recipe_revision_id)
 
     def check_build_source(self, recipe_revision_id: str) -> SourcePolicyReport:
         if self._builds is None:

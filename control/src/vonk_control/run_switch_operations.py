@@ -4433,11 +4433,10 @@ class RunSwitchOperationService:
         # first built it: reuse that build by content, creating nothing.
         reusable_build_id = getattr(self._lifecycle, "reusable_build_id", None)
         if callable(reusable_build_id):
-            for node in self._builder_nodes(session, group_ids):
-                found_id = reusable_build_id(revision.id, node.node_id)
-                found = session.get(RecipeBuild, found_id) if found_id else None
-                if found is not None and self._build_is_available(found):
-                    return _BuildSelection(build=found, candidate=found)
+            found_id = reusable_build_id(revision.id)
+            found = session.get(RecipeBuild, found_id) if found_id else None
+            if found is not None and self._build_is_available(found):
+                return _BuildSelection(build=found, candidate=found)
 
         preview_build = getattr(self._lifecycle, "preview_build", None)
         if not create_build:

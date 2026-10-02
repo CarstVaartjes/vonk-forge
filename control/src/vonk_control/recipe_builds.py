@@ -945,14 +945,7 @@ class RecipeBuildService:
         *,
         now: datetime,
         resolution: RecipeBuildResolution | None = None,
-        admit: bool = True,
     ) -> RecipeBuildPlan:
-        """Plan one build; ``admit=False`` derives its identity without capacity.
-
-        Looking up an existing build by its exact inputs needs only the
-        identity, never room to run a new build.
-        """
-
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, recipe_revision_id)
             if revision is None:
@@ -1025,7 +1018,7 @@ class RecipeBuildService:
         capabilities = list(security.capabilities)
         output_bytes = _declared_image_bytes(document)
         base_image_storage_bytes = resources.download_bytes if base_images else 0
-        if prebuilt is None and admit:
+        if prebuilt is None:
             try:
                 self._admit_spark_build(
                     builder_node_id,
@@ -1163,43 +1156,19 @@ class RecipeBuildService:
         with self._sessions.begin() as session:
             return self.persist_plan_in_session(session, prepared, now=now)
 
-    def reusable_build_id(
-        self, recipe_revision_id: str, builder_node_id: str, *, now: datetime
-    ) -> str | None:
-        """The succeeded build with this revision's exact inputs, whoever built it.
+    def reusable_build_id(self, recipe_revision_id: str) -> str | None:
+        """The succeeded build whose inputs this revision reproduces, whoever built it.
 
-        Executable inputs identify an image, not the revision that first
-        produced it. Nothing is created or changed.
+        The executable inputs identify an image, not the revision that first
+        produced it, nor the builder binary that happened to build it: the
+        same resolution that lets a download reuse a build. It needs no
+        capacity and creates or changes nothing.
         """
 
         try:
-            prepared = self.prepare_plan(
-                recipe_revision_id, builder_node_id, now=now, admit=False
-            )
-        except (RecipeBuildError, RecipeSourcePolicyError):
+            return self.resolve(recipe_revision_id).build_id
+        except (RecipeBuildError, KeyError, TypeError, ValueError):
             return None
-        with self._sessions() as session:
-            candidates = tuple(
-                session.scalars(
-                    select(RecipeBuild)
-                    .where(
-                        RecipeBuild.builder_node_id == prepared.builder_node_id,
-                        RecipeBuild.build_input_sha256 == prepared.build_input_sha256,
-                        RecipeBuild.state == "succeeded",
-                    )
-                    .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
-                )
-            )
-        # Managed storage is consulted after the read transaction ends.
-        return next(
-            (
-                candidate.id
-                for candidate in candidates
-                if _valid_succeeded_receipt(candidate)
-                and self._succeeded_build_available(candidate)
-            ),
-            None,
-        )
 
     def persist_plan_in_session(
         self, session: Session, plan: RecipeBuildPlan, *, now: datetime
