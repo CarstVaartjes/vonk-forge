@@ -633,6 +633,12 @@ reconcile its actual state against the accepted snapshot before scheduling work
 there. The worker also checks accepted running assignments for live-state drift
 and reconciles them through the existing run and route recovery paths.
 
+Commands that change a profile (`add`, `remove`, `configure`, `import`, `load`,
+`cancel`) need an explicit profile number so profile 1 is never changed by
+omission. Give it before or after the command: `vonkctl --profile 2 profile
+load` and `vonkctl profile load --profile 2` are the same. Reading commands
+default to profile 1.
+
 ```bash
 vonkctl profile
 vonkctl profile list
