@@ -27,20 +27,33 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .artifact_lifecycle import (
+    ArtifactIdentity,
+    ArtifactLifecycleError,
+    lock_reference_gates,
+)
+from .artifact_reference_scan import runtime_image_reference_findings
 from .logging import log_event
 from .models import ArtifactDistributionAssignment, RecipeBuild
 from .oci_image_store import (
     IMAGE_CACHE_DIRECTORY,
     REFERENCE_SCAN_FAILED,
+    REFERENCED_MANIFEST_DAMAGED,
     Collection,
     OciImageStore,
     OciImageStoreError,
+)
+from .runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    RuntimeImagePreparationError,
 )
 
 _LOGGER = logging.getLogger(__name__)
 _ADDRESS = re.compile(r"^[0-9a-f]{64}$")
 _RECEIPT = re.compile(r"^([0-9a-f]{64})\.receipt\.json$")
 _UNFINISHED_BUILD_STATES = ("planned", "building")
+# Damaged receipted images evicted by one pass; the rest follow next interval.
+_MAX_REPAIRS = 64
 GRACE = timedelta(hours=24)
 INTERVAL = timedelta(hours=1)
 
@@ -57,6 +70,7 @@ class ImageStoreCollector:
         self._sessions = sessions
         self._image_cache = artifact_root / IMAGE_CACHE_DIRECTORY
         self._store = store or OciImageStore(artifact_root)
+        self._images = FilesystemRuntimeImageStorage(artifact_root)
         self._clock = clock
         self._due_at: datetime | None = None
 
@@ -71,16 +85,26 @@ class ImageStoreCollector:
         return result is not None and result.blobs_removed > 0
 
     def collect(self) -> Collection | None:
-        try:
-            collection = self._store.collect(
-                self._referenced_images, grace_seconds=GRACE.total_seconds()
-            )
-        except OciImageStoreError as error:
-            if error.code != REFERENCE_SCAN_FAILED:
-                raise
-            # Nothing was removed: what the Controller still names is unknown.
-            _log_deferred(error.code, error.detail)
-            collection = None
+        collection: Collection | None = None
+        for _attempt in range(_MAX_REPAIRS):
+            try:
+                collection = self._store.collect(
+                    self._referenced_images, grace_seconds=GRACE.total_seconds()
+                )
+                break
+            except OciImageStoreError as error:
+                if error.code not in (
+                    REFERENCE_SCAN_FAILED,
+                    REFERENCED_MANIFEST_DAMAGED,
+                ):
+                    raise
+                # Nothing was removed: what the Controller still names is unknown.
+                _log_deferred(error.code, error.detail)
+                if error.code != REFERENCED_MANIFEST_DAMAGED or not (
+                    error.address and self._evict_damaged_receipt(error.address)
+                ):
+                    break
+                # The damaged image no longer holds the sweep back: go again.
         uploads = self._collect_uploads()
         if collection is None:
             return None
@@ -95,6 +119,51 @@ class ImageStoreCollector:
                 result.bytes_reclaimed,
             )
         return result
+
+    def _evict_damaged_receipt(self, address: str) -> bool:
+        """Retire the receipt of an image whose manifest is damaged.
+
+        A receipt names an image the store can no longer serve: it is derived
+        metadata, and the next request prepares the image again (a damaged
+        manifest reads as cache loss), so it must not hold back cleanup of the
+        whole store forever. Fenced like every receipt removal: nothing is
+        removed while an operation works on the image or another removal owns
+        it; that is retried next interval.
+        """
+
+        receipt = self._image_cache / f"{address}.receipt.json"
+        try:
+            with self._images.publication_lock(address):
+                if not receipt.exists():
+                    return False
+                with self._sessions.begin() as session:
+                    rows = lock_reference_gates(
+                        session,
+                        (ArtifactIdentity("runtime-image", address),),
+                        now=self._clock(),
+                    )
+                    if any(row.removal_owner_id is not None for row in rows):
+                        return False
+                    findings = runtime_image_reference_findings(session, (address,))
+                    if any(
+                        finding.classification == "active-work"
+                        for finding in findings.get(address, ())
+                    ):
+                        return False
+                    self._images.remove_published(address)
+        except (RuntimeImagePreparationError, ArtifactLifecycleError, OSError) as error:
+            _log_deferred(
+                getattr(error, "code", type(error).__name__),
+                f"damaged image {address} was not evicted: {error}",
+            )
+            return False
+        log_event(
+            _LOGGER,
+            "image_store.damaged_receipt_evicted",
+            service="control-worker",
+            address=address,
+        )
+        return True
 
     def _referenced_images(self) -> set[str]:
         referenced = self._receipt_addresses()

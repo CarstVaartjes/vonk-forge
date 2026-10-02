@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from urllib.parse import urlsplit
 
 from sqlalchemy import or_, select
@@ -69,6 +70,20 @@ SPARK_SILENT_WITHDRAWAL_SECONDS = 300
 _LOGGER = logging.getLogger(__name__)
 _WITHDRAWAL_ATTEMPTS = 5
 _WITHDRAWAL_BACKOFF_SECONDS = 0.05
+#: Why a running run's route is withdrawn: a Stop claimed it and has not been
+#: dispatched. Shown with the run; the maintenance pass restores the route when
+#: no Stop follows within the grace period (longer than the acknowledgement wait).
+STOP_WITHDRAWAL_PENDING = "route withdrawn for a Stop that is not dispatched yet"
+STOP_DISPATCH_GRACE = timedelta(minutes=5)
+type WithdrawalFollowUp = Literal["stop", "recovery"]
+#: The same, for a distributed recovery that withdrew a failed run's route and
+#: has not queued its recovery yet. The existing health-recovery rule restores
+#: the route once the ranks are healthy again.
+RECOVERY_WITHDRAWAL_PENDING = f"{_HEALTH_RECOVERY_ERROR}: recovery withdrawal pending"
+_FOLLOW_UP_REASONS = {
+    "stop": STOP_WITHDRAWAL_PENDING,
+    "recovery": RECOVERY_WITHDRAWAL_PENDING,
+}
 _SQLITE_ROUTE_PUBLICATION_LOCK = threading.RLock()
 # The one in-flight publication claim lives beside the active publication, in
 # its own row, so an observer reading the active publication never sees a
@@ -811,12 +826,16 @@ class RecipeRouteService:
             raise RecipeRecoveryDeadlineError(str(error), run_id=run.id) from error
         return self._recovery_publication(recovery_job)
 
-    def withdraw_run(self, run_id: str) -> LiteLlmGeneration | None:
+    def withdraw_run(
+        self, run_id: str, *, pending: WithdrawalFollowUp | None = None
+    ) -> LiteLlmGeneration | None:
         """Withdraw one run's route; the caller returns once a bundle without it is live."""
 
-        return self.withdraw_runs(frozenset({run_id}))
+        return self.withdraw_runs(frozenset({run_id}), pending=pending)
 
-    def withdraw_runs(self, run_ids: Iterable[str]) -> LiteLlmGeneration | None:
+    def withdraw_runs(
+        self, run_ids: Iterable[str], *, pending: WithdrawalFollowUp | None = None
+    ) -> LiteLlmGeneration | None:
         """Withdraw these runs' routes with no transaction held by the caller.
 
         Claim in a short transaction (the withdrawal intent is durable with the
@@ -829,12 +848,19 @@ class RecipeRouteService:
         The generation is ``None`` when a newer publication, which already
         excludes these runs through their durable intent, completed the
         withdrawal for us.
+
+        ``pending`` names the follow-up the caller owes (a Stop dispatch or a
+        recovery). The runs show that reason meanwhile and the caller replaces
+        it when it follows up; if it never does, the Controller resolves it
+        itself (a Stop's withdrawal is restored by the maintenance pass, a
+        recovery's by the rank-health rule).
         """
+        reason = _FOLLOW_UP_REASONS[pending] if pending is not None else None
 
         run_ids = frozenset(run_ids)
         for attempt in range(_WITHDRAWAL_ATTEMPTS - 1):
             try:
-                return self._withdraw_runs_once(run_ids)
+                return self._withdraw_runs_once(run_ids, reason)
             except RecipeRouteSuperseded:
                 # A newer publication replaced this claim. It was claimed after
                 # our intent committed, so it excludes these runs too: do not
@@ -843,20 +869,31 @@ class RecipeRouteService:
                 # while the bundle still lists them.
                 if self._withdrawn_after_backoff(run_ids, attempt):
                     return None
-        return self._withdraw_runs_once(run_ids)
+        return self._withdraw_runs_once(run_ids, reason)
 
     def _withdrawn_after_backoff(self, run_ids: frozenset[str], attempt: int) -> bool:
         time.sleep(random.uniform(0.0, _WITHDRAWAL_BACKOFF_SECONDS) * (attempt + 1))
         with self.publication_transaction() as session:
             return self.withdrawal_complete_in_session(session, run_ids)
 
-    def _withdraw_runs_once(self, run_ids: frozenset[str]) -> LiteLlmGeneration:
+    def _withdraw_runs_once(
+        self, run_ids: frozenset[str], reason: str | None = None
+    ) -> LiteLlmGeneration:
         with self.publication_transaction() as session:
             for run_id in sorted(run_ids):
                 if session.get(RecipeRun, run_id, with_for_update=True) is None:
                     raise KeyError(run_id)
+
+            def record_reason(session: Session) -> None:
+                for run_id in sorted(run_ids):
+                    run = session.get(RecipeRun, run_id, with_for_update=True)
+                    if run is not None and run.state == "running" and reason:
+                        run.route_error = reason[:512]
+
             publication = self._withdrawal_publication(
-                session, self.prepare_withdrawal_in_session(session, run_ids)
+                session,
+                self.prepare_withdrawal_in_session(session, run_ids),
+                after=record_reason if reason else None,
             )
         return self._execute(publication)
 
@@ -1017,7 +1054,46 @@ class RecipeRouteService:
                 raise
         return True
 
+    def _restore_abandoned_stop_withdrawals(self, session: Session) -> bool:
+        """Put back the route of a running run whose Stop never followed.
+
+        A Stop withdraws the route first and dispatches afterwards. If the
+        request died in between, nothing owns the withdrawal any more: the run
+        still runs, so its route is published again (a pending run is published
+        by the worker) instead of waiting for a client to retry.
+        """
+
+        now = _aware(self._clock())
+        restored = False
+        for run in session.scalars(
+            select(RecipeRun)
+            .where(
+                RecipeRun.state == "running",
+                RecipeRun.route_state == "withdrawn",
+                RecipeRun.route_error == STOP_WITHDRAWAL_PENDING,
+            )
+            .with_for_update(of=RecipeRun)
+        ):
+            if _aware(run.updated_at) > now - STOP_DISPATCH_GRACE:
+                continue
+            run.route_state = "pending"
+            run.route_error = None
+            run.route_attempts = 0
+            run.route_next_attempt_at = None
+            run.updated_at = now
+            log_event(
+                _LOGGER,
+                "recipe.route.restored",
+                service="control-routes",
+                run_id=run.id,
+                reason="a Stop withdrew the route and was never dispatched",
+            )
+            restored = True
+        return restored
+
     def _maintenance_step_in_session(self, session: Session) -> bool | _Publication:
+        if self._restore_abandoned_stop_withdrawals(session):
+            return True
         pending = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
         if pending is not None and pending.state == "withdrawal-pending":
             return self._withdrawal_publication(

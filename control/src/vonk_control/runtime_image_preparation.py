@@ -39,6 +39,7 @@ from .artifact_lifecycle import (
 )
 from .models import CatalogDocumentRevision, RecipeBuild, RuntimeImageAuthorization
 from .oci_image_store import (
+    DAMAGED_MANIFEST_CODES,
     IMAGE_CACHE_DIRECTORY,
     OciImageStore,
     OciImageStoreError,
@@ -570,6 +571,7 @@ class FilesystemRuntimeImageStorage:
         # Receipts this process already reported, so a scan does not repeat
         # the same warning for a file it could not change.
         self._reported_receipts: set[tuple[str, int]] = set()
+        self._reported_damaged: set[str] = set()
 
     @contextmanager
     def publication_lock(self, archive_sha256: str) -> Iterator[None]:
@@ -727,6 +729,19 @@ class FilesystemRuntimeImageStorage:
         try:
             return self.layout.read(f"sha256:{archive_sha256}")
         except OciImageStoreError as error:
+            if error.code in DAMAGED_MANIFEST_CODES:
+                # A manifest whose content is damaged is cache loss, like a
+                # missing one: the next preparation stores the image again
+                # (which rewrites the manifest and reuses intact layers).
+                if archive_sha256 not in self._reported_damaged:
+                    self._reported_damaged.add(archive_sha256)
+                    _LOGGER.warning(
+                        "stored runtime image %s has a damaged manifest and will "
+                        "be stored again when it is next needed: %s",
+                        archive_sha256,
+                        error.detail,
+                    )
+                return None
             raise RuntimeImagePreparationError(
                 "runtime_image.archive_unavailable", error.detail, retryable=True
             ) from error

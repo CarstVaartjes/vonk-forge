@@ -2365,7 +2365,7 @@ class RecipeOperationService:
         for _attempt in range(_STOP_WITHDRAWAL_ATTEMPTS):
             if self._route_publications is not None:
                 try:
-                    self._route_publications.withdraw_run(run_id)
+                    self._route_publications.withdraw_run(run_id, pending="stop")
                 except RecipeRouteNotReady as error:
                     raise RecipeOperationConflict(
                         "the run's route withdrawal was superseded; retry the stop"

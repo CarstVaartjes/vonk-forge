@@ -1029,6 +1029,25 @@ def test_receipt_no_recipe_needs_is_removed_when_disk_is_short_and_recent_ones_l
     assert result.images == 1
 
 
+def test_an_image_with_a_damaged_manifest_is_evictable_with_its_on_disk_size(
+    world: Catalog, tmp_path: Path
+) -> None:
+    """Catches a receipt over an unservable image holding 0 bytes forever, so
+    that eviction can neither count nor remove it."""
+
+    path = _receipt(tmp_path, AN_IMAGE)
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    storage.layout.blob_path(f"sha256:{AN_IMAGE}").write_bytes(b'{"mediaType": "tr')
+    exact = {"reserve_floor_bytes": 0, "reserve_fraction": 0.0}
+
+    result = _collector(
+        world, image_cache_root=tmp_path, free=100 * GIB - 1, **exact
+    ).collect()
+
+    assert not path.exists()
+    assert result.images == 1
+
+
 def test_receipt_a_profile_points_to_is_kept_and_a_merely_offered_one_is_not(
     world: Catalog, tmp_path: Path
 ) -> None:

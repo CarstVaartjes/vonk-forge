@@ -105,7 +105,11 @@ from .models import (
     RecipeRun,
     RuntimeImageAuthorization,
 )
-from .oci_image_store import IMAGE_CACHE_DIRECTORY
+from .oci_image_store import (
+    DAMAGED_MANIFEST_CODES,
+    IMAGE_CACHE_DIRECTORY,
+    OciImageStoreError,
+)
 from .recipe_action_plans import UninstallPlan
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
@@ -1004,6 +1008,10 @@ class UnusedStorageCollector:
             except (OSError, RuntimeImagePreparationError, ValueError):
                 size = 0
             if size <= 0:
+                # A damaged manifest is removable: its receipt names an image
+                # that cannot be served, and its files go with the next sweep.
+                size = self._damaged_manifest_bytes(archive)
+            if size <= 0:
                 kept["image receipt: holds no bytes"] += 1
                 continue
             items.append(
@@ -1017,6 +1025,23 @@ class UnusedStorageCollector:
                 )
             )
         return items
+
+    def _damaged_manifest_bytes(self, archive: str) -> int:
+        """The on-disk size of a damaged manifest, or 0 when it is not damaged."""
+
+        assert self._images is not None
+        try:
+            self._images.layout.read(f"sha256:{archive}")
+        except OciImageStoreError as error:
+            if error.code not in DAMAGED_MANIFEST_CODES:
+                return 0
+            try:
+                return max(
+                    1, self._images.layout.blob_path(f"sha256:{archive}").stat().st_size
+                )
+            except OSError:
+                return 0
+        return 0
 
     def _remove_receipt(self, archive: str, path: Path) -> None:
         """Remove one receipt under its publication lock and reference gate.

@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Literal, Protocol
 from urllib.parse import urlsplit
 
 from sqlalchemy import or_, select
@@ -100,7 +100,12 @@ class _RecoveryJobQueue(Protocol):
 class _RecoveryRoutes(Protocol):
     def publication_transaction(self) -> AbstractContextManager[Session]: ...
 
-    def withdraw_runs(self, run_ids: Iterable[str]) -> LiteLlmGeneration | None: ...
+    def withdraw_runs(
+        self,
+        run_ids: Iterable[str],
+        *,
+        pending: Literal["stop", "recovery"] | None = None,
+    ) -> LiteLlmGeneration | None: ...
 
     def withdrawal_complete_in_session(
         self, session: Session, run_ids: Iterable[str]
@@ -409,7 +414,7 @@ class DistributedRecoveryCoordinator:
             )
         if not pending:
             return False
-        self._routes.withdraw_runs(pending)
+        self._routes.withdraw_runs(pending, pending="recovery")
         return True
 
     def _settle_unreadable_runs(self, session: Session, now: datetime) -> bool:
