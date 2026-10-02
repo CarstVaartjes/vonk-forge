@@ -28,7 +28,6 @@ from vonk_control.models import (
     RuntimeImageAuthorization,
 )
 from vonk_control.recipe_builds import (
-    RecipeBuildError,
     RecipeBuildResolution,
     RecipeBuildService,
 )
@@ -332,39 +331,42 @@ def test_editorial_successor_installs_and_starts_with_no_image_grant(tmp_path):
     assert service.get(start.id).state == "succeeded"
 
 
-def test_review_of_a_successor_finds_its_build_while_the_builder_is_busy(tmp_path):
-    """A lookup by content needs the build's identity, not room for a new build.
+def test_review_of_a_successor_finds_its_build_after_the_builder_was_upgraded(
+    tmp_path,
+):
+    """A build is found by its executable inputs, not by the builder binary.
 
-    The serving workload holds the Spark's memory, so a new build there would
-    be refused; the successor's review must still find the build it reuses.
-    The acceptance lane failed with "Prepare the exact model and runtime image"
-    because the lookup ran the builder's capacity admission.
+    The Spark agent is upgraded after the image was built, so the builder's
+    binary digest differs from the one recorded on the build, and the Spark is
+    serving, so a new build would not even be admitted. The download of the
+    successor reuses the build; its review must find the same one. The
+    acceptance lane failed with "Prepare the exact model and runtime image"
+    because the lookup compared the full build input, which includes the
+    builder binary.
     """
 
     fixture = _prepared_successor(tmp_path, change="editorial")
     assert isinstance(fixture, tuple)
     (
-        sessions,
-        now,
+        _sessions,
+        _now,
         successor,
         _receipt,
         _storage,
         _admission,
         _mapping,
         build_id,
-        builds,
+        (builds),
     ) = fixture
-    with sessions.begin() as session:
-        node_id = session.scalar(select(AgentNode.node_id))
+    with _sessions.begin() as session:
+        node = session.scalar(select(AgentNode))
+        assert node is not None
+        assert node.binary_digest != "e" * 64
+        node.binary_digest = "e" * 64
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
             snapshot.host_memory_free_bytes = 1
             snapshot.gpu_memory_free_bytes = 1
-    assert node_id is not None
-    # Admission for a new build is refused for lack of memory ...
-    with pytest.raises(RecipeBuildError):
-        builds.prepare_plan(successor.id, node_id, now=now)
-    # ... and the identical build is still found by content.
-    assert builds.reusable_build_id(successor.id, node_id, now=now) == build_id
+    assert builds.reusable_build_id(successor.id) == build_id
 
 
 def test_changed_executable_cannot_reuse_the_retained_build(tmp_path):
