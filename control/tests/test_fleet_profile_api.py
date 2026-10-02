@@ -434,6 +434,51 @@ def test_profile_load_applies_the_current_saved_profile() -> None:
     assert loaded.json()["profile_id"] == changed.json()["id"]
 
 
+def test_profile_load_bound_to_a_review_refuses_a_plan_that_changed() -> None:
+    client, codec = _client(with_idle_spark=True)
+    headers = _headers(codec, "administrator")
+    saved = client.put(
+        "/api/profile/1",
+        headers=headers,
+        json={"name": "Empty profile", "expected_revision": 0},
+    )
+    reviewed = client.post("/api/profile/1/preview", headers=headers).json()
+    assert (
+        client.put(
+            "/api/profile/1",
+            headers=headers,
+            json={
+                "name": "Renamed profile",
+                "expected_revision": saved.json()["revision"],
+            },
+        ).status_code
+        == 200
+    )
+    key = "22222222-2222-4222-8222-222222222222"
+
+    refused = client.post(
+        "/api/profile/1/load",
+        headers=headers,
+        json={
+            "request_key": key,
+            "reviewed_effects_digest": reviewed["effects_digest"],
+        },
+    )
+
+    assert refused.status_code == 409
+    assert refused.headers["x-vonk-error-code"] == "profile.review_stale"
+    assert (
+        client.get(f"/api/profile/1/requests/{key}", headers=headers).status_code == 404
+    )
+    current = client.post("/api/profile/1/preview", headers=headers).json()
+    accepted = client.post(
+        "/api/profile/1/load",
+        headers=headers,
+        json={"request_key": key, "reviewed_effects_digest": current["effects_digest"]},
+    )
+    assert accepted.status_code == 202
+
+
 def test_saving_a_profile_fills_option_defaults_and_refuses_unknown_choices() -> None:
     from .test_fleet_profiles_canonical import NODE_1, NOW, _seed, _sessions
 

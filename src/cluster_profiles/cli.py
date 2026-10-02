@@ -469,6 +469,10 @@ def _plain_language_error(code: object, detail: object) -> str:
             "This model needs more Sparks than are available in the selected "
             "group. Add the missing Sparks and review the run again."
         ),
+        "profile.review_stale": (
+            "The plan changed after you reviewed it, so nothing was loaded. "
+            "Review the current plan and load again."
+        ),
         "profile.preparation_unavailable": (
             "A required model file or runtime image is not ready. Prepare the "
             "named asset, then review the run again."

@@ -40,7 +40,7 @@ type ProfileDraft = {
   assignments: AssignmentDraft[];
 };
 type FleetEntry = {id: string; name: string; state: string};
-type PendingProfileLoad = {requestKey: string};
+type PendingProfileLoad = {requestKey: string; reviewedEffectsDigest?: string | null};
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 
@@ -142,7 +142,9 @@ async function submitProfileLoad(
   number: number,
   pending: PendingProfileLoad,
 ): Promise<FleetProfileApplicationView> {
-  const input = {request_key: pending.requestKey};
+  // The load names the effects the operator reviewed, so a plan that changed since
+  // is refused (409) instead of silently accepted. A retry sends the identical body.
+  const input = {request_key: pending.requestKey, ...(pending.reviewedEffectsDigest ? {reviewed_effects_digest: pending.reviewedEffectsDigest} : {})};
   try {
     return await api.loadProfile(number, input);
   } catch (error) {
@@ -357,14 +359,18 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
           if (!(value instanceof ApiError && value.status === 404)) throw value;
         }
       } else {
-        pending = {requestKey: crypto.randomUUID()};
+        pending = {requestKey: crypto.randomUUID(), reviewedEffectsDigest: preview?.effects_digest};
         setPendingLoad(pending);
       }
       setApplication(await submitProfileLoad(api, selectedNumber, pending));
       setPendingLoad(undefined);
     }
     catch (value) {
-      if (value instanceof ApiError && value.status === 409) setPendingLoad(undefined);
+      if (value instanceof ApiError && value.status === 409) {
+        setPendingLoad(undefined);
+        // The plan may have changed since it was reviewed: show the current one before another attempt.
+        api.previewProfile(selectedNumber).then(setPreview, () => undefined);
+      }
       toast.error(value instanceof Error ? value.message : "The profile could not be loaded.");
     }
     finally { setLoadingProfile(false); }

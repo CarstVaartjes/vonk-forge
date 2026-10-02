@@ -11,6 +11,7 @@ from sqlalchemy import select
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
+    FleetProfileReviewStale,
     FleetProfileService,
     build_production_fleet_profile_service,
 )
@@ -475,3 +476,143 @@ def test_retry_checks_original_review_while_reusing_newly_ready_assets(
     else:
         assert observed.state == "running", observed.status_reason
         assert len(adapter.starts) == 1
+
+
+def _stale_refusal_leaves_nothing(sessions) -> None:
+    with sessions() as session:
+        assert not tuple(session.scalars(select(FleetProfileApplication)))
+
+
+@pytest.mark.parametrize("change", ["replaced-workload", "edited-profile"])
+def test_load_bound_to_a_review_is_refused_when_the_effects_changed(tmp_path, change):
+    sessions, lifecycle, _adapter, service, profile, installed, nodes = (
+        _exact_cleanup_profile(tmp_path)
+    )
+    run = started_recipe(
+        sessions,
+        lifecycle,
+        installed.owner_id,
+        nodes,
+        request_id=str(uuid4()),
+        alias="reviewed-endpoint",
+    )
+    reviewed = service.preview(profile.id)
+    assert reviewed.effects_digest is not None
+    if change == "replaced-workload":
+        _replace_run(sessions, run.owner_id)
+    else:
+        service.update(
+            profile.id,
+            FleetProfileInput.model_validate(
+                {
+                    "name": "Exact cleanup",
+                    "installation_policy": "keep-cached",
+                    "assignments": [],
+                    "expected_revision": profile.revision,
+                }
+            ),
+            actor="admin",
+        )
+    key = str(uuid4())
+
+    with pytest.raises(FleetProfileReviewStale) as refused:
+        service.apply(
+            profile.id,
+            request_key=key,
+            actor="admin",
+            reviewed_effects_digest=reviewed.effects_digest,
+        )
+
+    assert refused.value.code == "profile.review_stale"
+    _stale_refusal_leaves_nothing(sessions)
+    # Nothing was accepted, so the current plan can be reviewed and loaded.
+    current = service.preview(profile.id)
+    assert current.effects_digest != reviewed.effects_digest
+    accepted = service.apply(
+        profile.id,
+        request_key=key,
+        actor="admin",
+        reviewed_effects_digest=current.effects_digest,
+    )
+    assert accepted.request_key == key
+
+
+def test_load_bound_to_a_review_is_accepted_when_only_observations_changed(tmp_path):
+    sessions, lifecycle, _adapter, service, profile, installed, nodes = (
+        _exact_cleanup_profile(tmp_path)
+    )
+    started_recipe(
+        sessions,
+        lifecycle,
+        installed.owner_id,
+        nodes,
+        request_id=str(uuid4()),
+        alias="reviewed-endpoint",
+    )
+    reviewed = service.preview(profile.id)
+    with sessions.begin() as session:
+        inventory = session.scalar(select(NodeInventorySnapshot))
+        assert inventory is not None
+        inventory.host_memory_free_bytes -= 1
+        inventory.gpu_memory_free_bytes -= 1
+    service._clock = lambda: NOW + timedelta(minutes=5)
+
+    refreshed = service.preview(profile.id)
+
+    assert refreshed.generated_at != reviewed.generated_at
+    assert refreshed.effects_digest == reviewed.effects_digest
+    accepted = service.apply(
+        profile.id,
+        request_key=str(uuid4()),
+        actor="admin",
+        reviewed_effects_digest=reviewed.effects_digest,
+    )
+    assert accepted.state in {"queued", "running", "succeeded"}
+
+
+def test_review_binds_effects_but_not_readiness_counters_or_blockers():
+    sessions = _database()
+    _recipe_id, revision = _seed(sessions)
+    evidence = _exact_preparation((_node_id(1),)).model_dump(mode="json")
+    target = evidence["model"]["targets"][0]
+    target.update(
+        state="preparing",
+        present_bytes=10,
+        missing_bytes=90,
+        verified_sha256=None,
+        verified_at=None,
+    )
+    evidence.update(targets_ready=False, ready=False)
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        switch_adapter=_SwitchAdapter(),
+        assessment_provider=lambda *_args, **_kwargs: _assessment(
+            RolloutPreparation.model_validate_json(json.dumps(evidence))
+        ),
+    )
+    profile = service.create(_input(revision), actor="admin")
+    review = service.preview(profile.id)
+    target.update(
+        state="ready",
+        present_bytes=100,
+        missing_bytes=0,
+        verified_sha256="a" * 64,
+        verified_at=NOW.isoformat(),
+    )
+    evidence.update(targets_ready=True, ready=True)
+    reusable = service.preview(profile.id)
+    evidence["reasons"] = [
+        {
+            "code": "preparation.revoked",
+            "detail": "Exact asset is no longer authorized",
+            "severity": "blocker",
+            "node_ids": [_node_id(1)],
+        }
+    ]
+    evidence["ready"] = False
+    refused = service.preview(profile.id)
+
+    # The plan digest follows readiness and blockers; the reviewed effects do not.
+    assert len({review.plan_digest, reusable.plan_digest, refused.plan_digest}) == 3
+    assert review.effects_digest == reusable.effects_digest == refused.effects_digest

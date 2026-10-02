@@ -1,4 +1,4 @@
-import {render, screen, within} from "@testing-library/react";
+import {act, render, screen, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {vi} from "vitest";
 import {ApiError} from "../api/client";
@@ -33,6 +33,26 @@ test("reads and loads a numbered profile without legacy status or application ro
   expect(api.previewProfile).toHaveBeenCalledWith(2, expect.any(AbortSignal));
   expect(api.loadProfile).toHaveBeenCalledWith(2, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   expect(await screen.findByRole("region", {name: "Profile load progress"})).toBeVisible();
+});
+
+test("a load names the reviewed effects, and a changed plan is refused with the current plan shown", async () => {
+  const user = userEvent.setup();
+  const reviewed = {...preview, effects_digest: "e".repeat(64)} as FleetProfilePreview;
+  const changed = {...preview, effects_digest: "f".repeat(64), steps: [{index: 0, kind: "switch", label: "Stop Qwen Code first", node_ids: [nodeA]}]} as unknown as FleetProfilePreview;
+  const previewProfile = vi.fn(async (..._args: Parameters<ControlApi["previewProfile"]>) => reviewed);
+  previewProfile.mockResolvedValueOnce(reviewed).mockResolvedValue(changed);
+  const loadProfile = vi.fn(async (..._args: Parameters<ControlApi["loadProfile"]>) => application);
+  loadProfile.mockRejectedValueOnce(new ApiError(409, "The profile plan changed since it was reviewed"));
+  const api = apiFor({previewProfile, loadProfile});
+  render(<ToastProvider><LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/></ToastProvider>);
+  await user.click(await screen.findByRole("button", {name: "Load profile"}));
+
+  expect(loadProfile).toHaveBeenCalledWith(2, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/), reviewed_effects_digest: "e".repeat(64)});
+  await vi.waitFor(() => expect(previewProfile).toHaveBeenCalledTimes(2));
+  await act(async () => { await Promise.resolve(); });
+
+  await user.click(await screen.findByRole("button", {name: "Load profile"}));
+  expect(loadProfile).toHaveBeenLastCalledWith(2, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/), reviewed_effects_digest: "f".repeat(64)});
 });
 
 test("reconciles an ambiguous profile load with the same request key", async () => {
