@@ -2422,7 +2422,22 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     OperationError::RuntimeFabricUnavailable
                 }
             })?;
+        let run_id = run.run_id.clone();
+        for note in &environment.notes {
+            eprintln!("vonk-agent-helper: run {run_id} fabric rail: {note}");
+        }
+        if environment.rails() > 1 {
+            eprintln!(
+                "vonk-agent-helper: run {run_id} fabric rails: NCCL_IB_HCA={}",
+                environment.launch_hca
+            );
+            run.launch_hca = Some((
+                environment.identity_hca().to_owned(),
+                format!("NCCL_IB_HCA={}", environment.launch_hca),
+            ));
+        }
         let arguments = environment
+            .environment
             .into_iter()
             .flat_map(|value| ["--env".to_owned(), value])
             .collect::<Vec<_>>();
@@ -3125,6 +3140,9 @@ struct ValidatedDockerRun {
     runtime_contract: PathBuf,
     host_endpoint_port: Option<u16>,
     native_fabric: Option<NativeFabric>,
+    /// The `NCCL_IB_HCA` argument as launched, replacing the single-device one
+    /// that the container identity is computed over.
+    launch_hca: Option<(String, String)>,
     job_timeout_seconds: Option<u16>,
 }
 
@@ -3147,6 +3165,13 @@ impl ValidatedDockerRun {
         }
         let mut arguments = self.arguments.clone();
         arguments.remove(marker_index);
+        if let Some((identity, launch)) = &self.launch_hca {
+            for argument in &mut arguments {
+                if argument == identity {
+                    argument.clone_from(launch);
+                }
+            }
+        }
         Ok(arguments)
     }
 }
@@ -3737,6 +3762,7 @@ fn validate_docker_run_with_archive(
         runtime_contract,
         host_endpoint_port: (network == Some("host")).then_some(listen_port).flatten(),
         native_fabric,
+        launch_hca: None,
         job_timeout_seconds,
     })
 }
@@ -6300,6 +6326,51 @@ mod tests {
                 .iter()
                 .any(|arg| arg == "NCCL_SOCKET_IFNAME==enp1s0f1np1")
         );
+        // One device: launch and identity agree.
+        assert!(started.launch_hca.is_none());
+        assert!(
+            started
+                .docker_arguments()
+                .unwrap()
+                .iter()
+                .any(|arg| arg == "NCCL_IB_HCA==rocep1s0f1:1")
+        );
+        // A second device of the same cabled port is launched with the first
+        // while the identity digest, and so every existing run, stays as is.
+        crate::runtime_fabric::tests::gid(
+            &sysfs,
+            "roceP2p1s0f1",
+            "3",
+            "::ffff:192.168.101.10",
+            "RoCE v2",
+        );
+        std::fs::write(
+            sysfs.join("roceP2p1s0f1/ports/1/gid_attrs/ndevs/3"),
+            "enP2p1s0f1np1\n",
+        )
+        .unwrap();
+        crate::runtime_fabric::tests::pci(&sysfs, "rocep1s0f1", "0000:01:00.1", "0x1021");
+        crate::runtime_fabric::tests::pci(&sysfs, "roceP2p1s0f1", "0002:01:00.1", "0x1021");
+        let mut railed = validate_docker_run(&arguments, &roots, None).unwrap();
+        executor.bind_native_fabric(&mut railed, &sysfs).unwrap();
+        assert_eq!(railed.arguments, started.arguments);
+        let launched = railed.docker_arguments().unwrap();
+        assert!(
+            launched
+                .iter()
+                .any(|arg| arg == "NCCL_IB_HCA==rocep1s0f1:1,roceP2p1s0f1:1")
+        );
+        assert!(
+            !launched
+                .iter()
+                .any(|arg| arg == "NCCL_IB_HCA==rocep1s0f1:1")
+        );
+        assert!(
+            launched
+                .iter()
+                .any(|arg| arg == "/dev/infiniband:/dev/infiniband")
+        );
+        std::fs::remove_dir_all(sysfs.join("roceP2p1s0f1")).unwrap();
         let compiled = started.docker_arguments().unwrap();
         assert_eq!(compiled[started.image_index], started.local_image_reference);
         assert_eq!(

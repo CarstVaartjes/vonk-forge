@@ -25,7 +25,19 @@ the exact `/dev/infiniband` device. The helper verifies the configured local
 and master addresses, rank and ports, then resolves one active RoCE v2
 interface/HCA/GID from kernel sysfs. It supplies the platform-owned
 `NCCL_SOCKET_IFNAME`, `NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`,
-`TP_SOCKET_IFNAME`, and `GLOO_SOCKET_IFNAME` settings. The firewall permits peer-only
+`TP_SOCKET_IFNAME`, and `GLOO_SOCKET_IFNAME` settings.
+
+A DGX Spark reaches one cabled QSFP port over two PCIe links, so the port shows
+up as two RDMA devices (`rocep1s0f1` and `roceP2p1s0f1`: the same PCI
+function in two PCI domains, same model). `NCCL_IB_HCA` lists the link's own
+device first and then every such twin whose port is active and whose GID at the
+same index is an addressed RoCE v2 entry, because NCCL takes one GID index for
+all devices. Other QSFP ports, other functions and other models are never
+added. A twin that does not qualify is left out and the helper journal says
+why (`vonk-agent-helper: run <id> fabric rail: <device> left out: <reason>`);
+the start never fails for it. The container identity covers only the link's own
+device, so a run keeps its environment until it is restarted and a rail coming
+or going never makes an existing run look like a different one. The firewall permits peer-only
 TCP/UDP on that selected interface/address for native NCCL/RoCE; it does not
 grant arbitrary devices or claim GPUDirect RDMA.
 
