@@ -624,9 +624,17 @@ class FleetProfileInvalidChoice(ValueError):
 
 
 class FleetProfileAdmissionBusy(FleetProfileConflict):
-    """A transient admission owner must finish before the plan can be bound."""
+    """A transient admission owner must finish before the plan can be bound.
+
+    ``holder`` names the kind of work that holds the Spark's admission lock when
+    that is known, so the wait says what it is waiting for.
+    """
 
     code = "profile.admission_busy"
+
+    def __init__(self, message: str, *, holder: str | None = None) -> None:
+        super().__init__(message)
+        self.holder = holder
 
 
 class FleetProfileAdmissionStorageError(FleetProfileConflict):
@@ -637,6 +645,12 @@ class FleetProfileAdmissionEffectBusy(FleetProfileConflict):
     """A live effect owner must finish before a superseding plan can bind."""
 
     code = "profile.admission_effect_busy"
+
+
+class FleetProfileResourceRecheckUnavailable(FleetProfileAdmissionEffectBusy):
+    """The resource recheck under the admission fence failed for a named cause."""
+
+    code = "profile.resource_recheck_unavailable"
 
 
 class FleetProfileStalePlanConflict(FleetProfileConflict):
@@ -811,6 +825,23 @@ def _profile_preview_is_waitable(preview: FleetProfilePreview) -> bool:
     return not any(
         is_security_failure(code) for code in _preview_blocker_codes(preview)
     )
+
+
+def _deferral_code(error: BaseException) -> str:
+    """The blocker code a parked admission shows for the refusal that parked it."""
+
+    if isinstance(error, FleetProfileResourceRecheckUnavailable):
+        return error.code
+    return "profile.admission_busy"
+
+
+def _error_summary(error: BaseException) -> str:
+    """A short, safe description of an error: its type and the start of its text."""
+
+    code = getattr(error, "code", None)
+    name = code if isinstance(code, str) and code else type(error).__name__
+    text = redact_text(" ".join(str(error).split()))[:160]
+    return f"{name}: {text}" if text else name
 
 
 def _admission_retry_delay(attempt: int) -> timedelta:
@@ -1328,8 +1359,17 @@ class RunSwitchFleetProfileAdapter:
                 TypeError,
                 ValueError,
             ) as error:
-                raise FleetProfileAdmissionEffectBusy(
-                    "Profile resource admission is temporarily unavailable; retrying automatically"
+                # Name the cause: a failure that repeats on every retry is a
+                # defect to see, not a wait to sit through.
+                _LOGGER.warning(
+                    "profile resource recheck for assignment %s failed: %s",
+                    assignment.id,
+                    _error_summary(error),
+                    exc_info=True,
+                )
+                raise FleetProfileResourceRecheckUnavailable(
+                    "Profile resource admission could not be rechecked "
+                    f"({_error_summary(error)}); retrying automatically"
                 ) from error
             current = FleetProfileAdmissionDecision.from_assessment(
                 FleetProfileAssignmentAssessment(
@@ -2993,10 +3033,18 @@ class FleetProfileService:
                 acquire_admission_keys(
                     session,
                     tuple(node_admission_key(node_id) for node_id in node_ids),
+                    holder="profile-admission",
                 )
             except AdmissionLockBusy as error:
                 raise FleetProfileAdmissionBusy(
-                    "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
+                    "Profile admission is busy"
+                    + (
+                        f" ({error.holder} is changing a selected Spark)"
+                        if error.holder
+                        else ""
+                    )
+                    + "; review again after the current fleet, catalog, workload or capacity change completes",
+                    holder=error.holder,
                 ) from error
             except OperationalError as error:
                 if is_admission_contention(error):
@@ -4689,6 +4737,7 @@ class FleetProfileService:
         *,
         retry_delay: timedelta | None = None,
         blockers: Sequence[OperationBlocker] | None = None,
+        code: str = "profile.admission_busy",
     ) -> FleetProfileApplicationView:
         """Record bounded retry state after a nonblocking admission refusal."""
 
@@ -4707,9 +4756,7 @@ class FleetProfileService:
                 _admission_retry_delay(attempt) if retry_delay is None else retry_delay
             )
             current_blockers = (
-                list(blockers)
-                if blockers is not None
-                else [make_blocker("profile.admission_busy", reason)]
+                list(blockers) if blockers is not None else [make_blocker(code, reason)]
             )
             row.progress = _progress_with_blockers(
                 progress,
@@ -4806,6 +4853,7 @@ class FleetProfileService:
                 acquire_admission_keys(
                     session,
                     tuple(node_admission_key(node_id) for node_id in execution_nodes),
+                    holder="profile-workload-fence",
                 )
                 nodes = tuple(
                     session.scalars(
@@ -4979,11 +5027,17 @@ class FleetProfileService:
                         operation_kind="fleet-profile.apply",
                         pending_application_id=pending.id,
                     )
-                except FleetProfileAdmissionBusy:
+                except FleetProfileAdmissionBusy as busy:
                     if retry_delay is None:
                         return self._defer_pending_application(
                             pending.id,
-                            "Profile admission is busy; the Controller will retry automatically.",
+                            "Profile admission is busy"
+                            + (
+                                f" ({busy.holder} holds a selected Spark)"
+                                if busy.holder
+                                else ""
+                            )
+                            + "; the Controller will retry automatically.",
                             retry_delay=timedelta(0),
                         )
                     time.sleep(retry_delay)
@@ -4997,6 +5051,7 @@ class FleetProfileService:
                         retry_delay=timedelta(seconds=60)
                         if isinstance(error, FleetProfileAdmissionStorageError)
                         else timedelta(0),
+                        code=_deferral_code(error),
                     )
             raise FleetProfileAdmissionBusy(
                 "Profile admission retry schedule was exhausted"
@@ -6869,7 +6924,9 @@ class FleetProfileService:
         except (FleetProfileAdmissionBusy, FleetProfileAdmissionEffectBusy) as error:
             if pending is None:
                 raise
-            self._defer_pending_application(pending.id, str(error))
+            self._defer_pending_application(
+                pending.id, str(error), code=_deferral_code(error)
+            )
         except FleetProfileAdmissionStorageError as error:
             if pending is None:
                 raise
@@ -7593,7 +7650,9 @@ class FleetProfileService:
             FleetProfileAdmissionEffectBusy,
             FleetProfileAdmissionStorageError,
         ) as error:
-            self._defer_pending_application(application_id, str(error))
+            self._defer_pending_application(
+                application_id, str(error), code=_deferral_code(error)
+            )
             return True
         except FleetProfileStalePlanConflict as error:
             self._finish_pending_admission(
@@ -9002,6 +9061,7 @@ __all__ = [
     "FleetProfileAdmissionBusy",
     "FleetProfileAdmissionEffectBusy",
     "FleetProfileConflict",
+    "FleetProfileResourceRecheckUnavailable",
     "FleetProfileService",
     "FleetProfileStalePlanConflict",
     "RunSwitchFleetProfileAdapter",

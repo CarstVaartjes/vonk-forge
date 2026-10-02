@@ -708,6 +708,7 @@ class InstallAdmissionService:
             acquire_admission_keys(
                 session,
                 tuple(node_admission_key(node.node_id) for node in plan.nodes),
+                holder="install-admission",
             )
             return self._accept_install_in_session(
                 session,

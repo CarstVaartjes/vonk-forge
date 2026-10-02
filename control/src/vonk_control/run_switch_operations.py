@@ -918,6 +918,16 @@ class DatabaseRunSwitchArtifactInspector:
         )
 
 
+def _refreshed_freshness(
+    reviewed: Sequence[FreshnessEvidence], fresh: Sequence[FreshnessEvidence]
+) -> list[FreshnessEvidence]:
+    """The reviewed evidence, with each source the recheck read replaced by it."""
+
+    current = {item.source: item for item in fresh}
+    kept = [current.pop(item.source, item) for item in reviewed]
+    return [*kept, *current.values()]
+
+
 def _recipe_model_digests(revision: CatalogDocumentRevision | None) -> frozenset[str]:
     """The content digests of the models a recipe revision names."""
 
@@ -5351,6 +5361,14 @@ class RunSwitchOperationService:
                     name: getattr(reviewed, name)
                     for name in RunSwitchAssessment.model_fields
                 },
+                # The fit above read the Spark inventory as it is now, and its
+                # memory evidence names that sample. Carry the same samples, not
+                # the reviewed ones: an inventory refreshed since the review
+                # (a parked admission is retried minutes later) would otherwise
+                # fail the assessment's own sample binding on every retry.
+                "freshness": _refreshed_freshness(
+                    reviewed.freshness, resources.freshness
+                ),
                 "allowed": not blockers,
                 "blockers": blockers,
                 "fit_current": resources.current,

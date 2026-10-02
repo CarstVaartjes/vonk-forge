@@ -3240,6 +3240,104 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     }
 
 
+def test_recheck_binds_the_inventory_sample_it_reads_not_the_reviewed_one(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    node_id = nodes[0]
+    installation_operation = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    installation_id = installation_operation.owner_id
+    run_plan = lifecycle._run_admission.plan_run(
+        installation_id,
+        "old",
+        now=lifecycle._clock(),
+    )
+    run_id = lifecycle._run_admission.accept_run(
+        run_plan,
+        actor="admin",
+        now=lifecycle._clock(),
+    )
+    with sessions.begin() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        run = session.get(RecipeRun, run_id)
+        assert installation is not None and run is not None
+        installation.state = "partial"
+        run.state = "running"
+        run.route_state = "published"
+        for item in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            item.state = "running"
+            item.reserved_memory_bytes = 7_800
+        for reservation in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run_id,
+                ResourceReservation.kind == "unified-memory",
+            )
+        ):
+            reservation.amount_bytes = 7_800
+
+    request = _request(sessions, node_id, action="switch")
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    baseline = service.preview(request, actor="admin")
+    required = baseline.fit_current.nodes[0].memory_required_bytes
+    floor = baseline.fit_current.nodes[0].memory_floor_bytes
+    assert required is not None and floor is not None
+    # Aggregate free already accounts for the running owner. The declared
+    # peak still owns the hard budget until this exact run stops.
+    total = 7_800 + required + floor - 1
+    free = required + floor + 10
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.host_memory_total_bytes = total
+        snapshot.host_memory_free_bytes = free
+        snapshot.gpu_memory_total_bytes = total
+        snapshot.gpu_memory_free_bytes = free
+    plan = service.preview(request, actor="admin")
+
+    assert plan.fit_current.allowed is False
+    assert "run-switch.resource.insufficient_reservation_budget" in {
+        reason.code for reason in plan.fit_current.blockers
+    }
+    assert plan.post_stop_memory_check is not None
+    reviewed_sample = next(
+        item for item in plan.freshness if item.source == f"spark:{node_id}:inventory"
+    )
+
+    # The Spark reports again after the review. A parked profile admission is
+    # retried minutes later, so this is the normal case, not a race.
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.observed_at = snapshot.observed_at + timedelta(seconds=1)
+    with sessions() as session:
+        rechecked = service.recheck_resources_in_session(session, request, plan)
+
+    assert rechecked.allowed
+    sample = next(
+        item
+        for item in rechecked.freshness
+        if item.source == f"spark:{node_id}:inventory"
+    )
+    assert reviewed_sample.observed_at is not None
+    assert sample.observed_at == reviewed_sample.observed_at + timedelta(seconds=1)
+    uncertainty = rechecked.fit_current.nodes[0].memory_usage_uncertainty
+    assert uncertainty is not None
+    assert uncertainty.inventory_observed_at == sample.observed_at
+
+
 def test_switch_replaces_the_run_that_holds_the_nodes_capacity(
     tmp_path: Path,
 ) -> None:

@@ -1498,7 +1498,9 @@ class AgentJobService:
         try:
             if uses_workload_admission:
                 acquire_admission_keys(
-                    session, tuple(node_admission_key(target) for target in scope)
+                    session,
+                    tuple(node_admission_key(target) for target in scope),
+                    holder="agent-job",
                 )
             scopes_locked = self._lock_target_scopes(
                 session,
@@ -1585,7 +1587,9 @@ class AgentJobService:
         ):
             raise ValueError("workload cancellation scope is invalid")
         acquire_admission_keys(
-            session, tuple(node_admission_key(node_id) for node_id in scope)
+            session,
+            tuple(node_admission_key(node_id) for node_id in scope),
+            holder="agent-job",
         )
         parent_ids = tuple(
             session.scalars(

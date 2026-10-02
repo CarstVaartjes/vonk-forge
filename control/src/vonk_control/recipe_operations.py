@@ -766,6 +766,7 @@ class RecipeOperationService:
                         job_request_key(request_id),
                         node_admission_key(plan.builder_node_id),
                     ),
+                    holder="recipe-operation",
                 )
                 locked = lock_admission_rows(
                     session,
@@ -1624,6 +1625,7 @@ class RecipeOperationService:
                         job_request_key(request_id),
                         *(node_admission_key(node.node_id) for node in plan.nodes),
                     ),
+                    holder="recipe-operation",
                 )
             except AdmissionLockBusy as error:
                 raise InstallAdmissionBusy("install.capacity_busy") from error
@@ -1715,6 +1717,7 @@ class RecipeOperationService:
                         job_request_key(request_id),
                         *(node_admission_key(node.node_id) for node in plan.nodes),
                     ),
+                    holder="recipe-operation",
                 )
             except AdmissionLockBusy as error:
                 raise RunAdmissionBusy("run capacity writer is busy") from error
@@ -3356,6 +3359,7 @@ class RecipeOperationService:
                             job_request_key(request_id),
                             *(node_admission_key(node_id) for node_id in target_nodes),
                         ),
+                        holder="recipe-operation",
                     )
                 except AdmissionLockBusy as error:
                     raise InstallAdmissionBusy("reconcile.capacity_busy") from error
@@ -6914,6 +6918,7 @@ class RecipeOperationService:
                     job_request_key(request_id),
                     *(node_admission_key(node_id) for node_id in targets),
                 ),
+                holder="recipe-operation",
             )
         except AdmissionLockBusy as error:
             if kind == "recipe.install":

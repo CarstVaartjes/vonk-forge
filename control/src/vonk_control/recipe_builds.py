@@ -1153,7 +1153,11 @@ class RecipeBuildService:
         called while the availability parent and builder rows are locked.
         """
         try:
-            acquire_admission_keys(session, (node_admission_key(plan.builder_node_id),))
+            acquire_admission_keys(
+                session,
+                (node_admission_key(plan.builder_node_id),),
+                holder="recipe-build",
+            )
             locked = lock_admission_rows(
                 session,
                 (
@@ -1358,7 +1362,11 @@ class RecipeBuildService:
         request_id: str | None = None,
     ) -> None:
         try:
-            acquire_admission_keys(session, (node_admission_key(plan.builder_node_id),))
+            acquire_admission_keys(
+                session,
+                (node_admission_key(plan.builder_node_id),),
+                holder="recipe-build",
+            )
             self._reserve_in_session(session, plan, now=now, request_id=request_id)
         except AdmissionLockBusy as error:
             raise RecipeBuildAdmissionBusy() from error
