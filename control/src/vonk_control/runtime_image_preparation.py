@@ -511,6 +511,49 @@ class RuntimeImageStorage(Protocol):
         ...
 
 
+_IMAGE_CONTENT_FIELDS = (
+    "image_digest",
+    "oci_archive_sha256",
+    "image_bytes",
+    "local_image_config_id",
+    "architecture",
+    "runtime_interface",
+    "runtime_interface_label",
+)
+
+
+def _same_image(stored: RuntimeImageReceipt, observed: RuntimeImageReceipt) -> bool:
+    """Whether two receipts describe the same image bytes.
+
+    Build, build input and runtime adapter say who asked for the image, not
+    what it is, so they are not compared.
+    """
+
+    return all(
+        getattr(stored, field) == getattr(observed, field)
+        for field in _IMAGE_CONTENT_FIELDS
+    )
+
+
+def _with_provenance(
+    stored: RuntimeImageReceipt,
+    *,
+    build_id: str,
+    build_input_sha256: str | None,
+    runtime_adapter: str,
+    runtime_adapter_sha256: str,
+) -> RuntimeImageReceipt:
+    return RuntimeImageReceipt(
+        **{
+            **stored.to_mapping(),
+            "build_id": build_id,
+            "build_input_sha256": build_input_sha256 or stored.build_input_sha256,
+            "runtime_adapter": runtime_adapter,
+            "runtime_adapter_sha256": runtime_adapter_sha256,
+        }
+    )
+
+
 class FilesystemRuntimeImageStorage:
     """Content-addressed Controller/NAS storage under the OCI namespace.
 
@@ -622,43 +665,16 @@ class FilesystemRuntimeImageStorage:
                         recovery_actions=("retry",),
                     ) from rejection
                 existing_receipt = None
-        if existing_receipt is not None and (
-            any(
-                getattr(existing_receipt, field) != getattr(receipt, field)
-                for field in (
-                    "image_digest",
-                    "oci_archive_sha256",
-                    "image_bytes",
-                    "local_image_config_id",
-                    "architecture",
-                    "runtime_interface",
-                    "runtime_interface_label",
-                    "build_id",
-                    "runtime_adapter",
-                    "runtime_adapter_sha256",
-                )
-            )
-            or (
-                receipt.build_input_sha256 is not None
-                and existing_receipt.build_input_sha256
-                not in {None, receipt.build_input_sha256}
-            )
-        ):
-            # A valid receipt binds this image to another build. Workloads and
-            # authorizations may already be bound to that identity, so it is
-            # never swapped underneath them: the conflict is refused.
-            raise RuntimeImagePreparationError(
-                "runtime_image.receipt_identity_conflict",
-                "stored runtime image already has a different immutable identity",
-                retryable=False,
-                recovery_actions=("inspect",),
-            )
-        if existing_receipt is not None:
+        if existing_receipt is not None and _same_image(existing_receipt, receipt):
+            # The same image bytes under another build (a sibling recipe that
+            # publishes the same prebuilt image, an editorial revision) are
+            # the same image. The stored receipt keeps the content; the build
+            # and adapter that ask for it are provenance and travel with the
+            # answer, never a reason to refuse.
             if (
                 existing_receipt.build_input_sha256 is None
                 and receipt.build_input_sha256 is not None
             ):
-                # Complete the receipt from the exact build evidence.
                 existing_receipt = RuntimeImageReceipt(
                     **{
                         **existing_receipt.to_mapping(),
@@ -666,7 +682,15 @@ class FilesystemRuntimeImageStorage:
                     }
                 )
                 _atomic_json_replace(receipt_path, existing_receipt.to_mapping())
-            return existing_receipt
+            return _with_provenance(
+                existing_receipt,
+                build_id=receipt.build_id,
+                build_input_sha256=receipt.build_input_sha256,
+                runtime_adapter=receipt.runtime_adapter,
+                runtime_adapter_sha256=receipt.runtime_adapter_sha256,
+            )
+        # No receipt, or one whose content disagrees with what was just
+        # observed in the stored bytes: the observation wins and is recorded.
         published = RuntimeImageReceipt(
             **{**receipt.to_mapping(), "archive_path": str(final)}
         )
@@ -1182,15 +1206,18 @@ def _prepare_from_build(
         and cached.runtime_interface == expected_interface
         and cached.runtime_interface_label == expected_interface_label
         and cached.image_bytes == image_bytes
-        and cached.build_id == build_id
-        and cached.runtime_adapter == adapter.adapter_id
-        and cached.runtime_adapter_sha256 == adapter.digest
-        and (raw_build_input is None or cached.build_input_sha256 == raw_build_input)
     ):
+        answer = _with_provenance(
+            cached,
+            build_id=build_id,
+            build_input_sha256=raw_build_input,
+            runtime_adapter=adapter.adapter_id,
+            runtime_adapter_sha256=adapter.digest,
+        )
         with storage.publication_lock(cached.oci_archive_sha256):
             if before_publish is not None:
-                before_publish(cached)
-        return cached
+                before_publish(answer)
+            return storage.commit(existing, receipt=answer)
     observed = transport.inspect_archive(
         existing,
         expected_architecture=expected_architecture,
