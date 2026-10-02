@@ -8,9 +8,10 @@ import json
 import logging
 import re
 import threading
+import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
@@ -64,7 +65,14 @@ _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
 # even when their rank reports are missing; a Spark silent this long is gone.
 SPARK_SILENT_WITHDRAWAL_SECONDS = 300
 _LOGGER = logging.getLogger(__name__)
+_WITHDRAWAL_ATTEMPTS = 5
 _SQLITE_ROUTE_PUBLICATION_LOCK = threading.RLock()
+# The one in-flight publication claim lives beside the active publication, in
+# its own row, so an observer reading the active publication never sees a
+# half-made generation.
+RECIPE_ROUTE_CLAIM_ID = str(
+    uuid.uuid5(uuid.NAMESPACE_URL, "https://vonkforge.ai/local-recipes/claim")
+)
 
 
 def route_health_recovery_pending(route_error: str | None) -> bool:
@@ -86,6 +94,14 @@ class RecipeRouteError(RuntimeError):
 
 class RecipeRouteNotReady(RecipeRouteError):
     """A fail-closed route candidate is waiting for current rank evidence."""
+
+
+class RecipeRouteSuperseded(RecipeRouteNotReady):
+    """A newer route change replaced this publication before it completed.
+
+    Nothing was recorded for the superseded publication; the next attempt
+    reads the current state again, so this is never a failed attempt.
+    """
 
 
 class RecipeRecoveryDeadlineError(RecipeRouteError):
@@ -176,6 +192,32 @@ class _AtomicRecipeGeneration(LiteLlmGeneration):
 class _RecoveryPublication:
     job: Job
     deadline: datetime
+
+
+@dataclass(frozen=True)
+class _Claim:
+    """A publication claimed in a short transaction.
+
+    ``ordinal`` counts claims; ``base_generation`` is the owner generation the
+    claim was made against. A completion that finds either the claim replaced
+    or the owner moved on is superseded and records nothing.
+    """
+
+    ordinal: int
+    base_generation: int
+
+
+@dataclass(frozen=True)
+class _Publication:
+    """One claimed publication: effect with no transaction open, then record."""
+
+    claim: _Claim
+    effect: Callable[[], LiteLlmGeneration]
+    complete: Callable[[Session, LiteLlmGeneration], None]
+    fail: Callable[[Session, Exception], None] | None = None
+    # A recovering run's failure is committed on the run; it must not stop the
+    # maintenance pass that found it from being reported as progress.
+    contained: bool = False
 
 
 def route_publication_owner_lock_statement():
@@ -341,10 +383,14 @@ class AtomicRecipeRoutePublisher:
                     routes=route_bytes(generation),
                     litellm=litellm,
                 )
-            try:
-                self._publisher._require_supervisor_ack(marker)
-            except Exception as error:  # noqa: BLE001
-                acknowledgement_error = error
+        # The acknowledgement wait can last minutes. It runs after the file
+        # lock is released so a newer publication is never queued behind it;
+        # a superseded marker simply never acknowledges and its caller
+        # discards that result.
+        try:
+            self._publisher._require_supervisor_ack(marker)
+        except Exception as error:  # noqa: BLE001
+            acknowledgement_error = error
         config_sha256 = hashlib.sha256(litellm).hexdigest()
         path = str(
             self._publisher._root / "generations" / marker.directory / "litellm.json"
@@ -385,30 +431,182 @@ class RecipeRouteService:
         self._retained: dict[str, str] = {}
 
     def publish_run(self, run_id: str) -> LiteLlmGeneration:
+        """Publish one run: claim, then the effect, then record the result.
+
+        No database transaction is open while the bundle is activated or the
+        supervisor acknowledgement is awaited, so a slow LiteLLM reload cannot
+        lose a transaction or block a competing route change.
+        """
+
         committed_error: RecipeRouteError | None = None
+        publication: _Publication | None = None
         with self.publication_transaction() as session:
             try:
-                return self.publish_run_in_session(session, run_id)
+                publication = self._claim_run_publication(session, run_id)
             except (
                 RecipeRecoveryDeadlineError,
                 RecipeRecoveryPublicationError,
             ) as error:
                 committed_error = error
-        assert committed_error is not None
-        raise committed_error
+        if committed_error is not None:
+            raise committed_error
+        assert publication is not None
+        return self._execute(publication)
 
     def publication_transaction(self) -> AbstractContextManager[Session]:
         return route_publication_transaction(self.sessions)
 
-    def publish_run_in_session(
-        self, session: Session, run_id: str
-    ) -> LiteLlmGeneration:
+    # -- claim, effect, conditional completion ------------------------------
+
+    def _claim_in_session(self, session: Session, digest: str) -> _Claim:
+        """Claim the next publication ordinal inside the owner-locked transaction.
+
+        A newer claim replaces the one in flight, which makes the older
+        publication's completion a no-op. The claim row never carries a bundle
+        generation, so it cannot collide with the active publication's.
+        """
+
+        owner = session.get(RoutePublicationOwner, 1)
+        if owner is None:
+            raise RuntimeError("route publication owner is unavailable")
+        now = _aware(self._clock())
+        pending = session.get(RoutePublication, RECIPE_ROUTE_CLAIM_ID)
+        ordinal = (_claim_ordinal(pending) or 0) + 1
+        marker: dict[str, object] = {"claim_ordinal": ordinal}
+        if session.get(RecipeRouteAuthority, RECIPE_ROUTE_CLAIM_ID) is None:
+            session.add(
+                RecipeRouteAuthority(
+                    authority_id=RECIPE_ROUTE_CLAIM_ID, created_at=now, updated_at=now
+                )
+            )
+            session.flush()
+        if pending is None:
+            session.add(
+                RoutePublication(
+                    authority_id=RECIPE_ROUTE_CLAIM_ID,
+                    state="publication-pending",
+                    plan_digest=digest,
+                    activation_marker=marker,
+                )
+            )
+        else:
+            pending.state = "publication-pending"
+            pending.plan_digest = digest
+            pending.activation_marker = marker
+        session.flush()
+        return _Claim(ordinal, owner.owner_generation)
+
+    @staticmethod
+    def _claim_current(session: Session, claim: _Claim) -> bool:
+        pending = session.get(RoutePublication, RECIPE_ROUTE_CLAIM_ID)
+        owner = session.get(RoutePublicationOwner, 1)
+        return (
+            pending is not None
+            and pending.state == "publication-pending"
+            and _claim_ordinal(pending) == claim.ordinal
+            and (owner.owner_generation if owner is not None else 0)
+            == claim.base_generation
+        )
+
+    def _claim_is_current(self, claim: _Claim) -> bool:
+        with self.sessions() as session:
+            return self._claim_current(session, claim)
+
+    def _execute(self, publication: _Publication) -> LiteLlmGeneration:
+        """Run the effect with no transaction open, then complete conditionally."""
+
+        try:
+            if not self._claim_is_current(publication.claim):
+                raise RecipeRouteSuperseded("route publication was superseded")
+            generation = publication.effect()
+        except RecipeRouteSuperseded:
+            raise
+        except Exception as error:
+            if not self._claim_is_current(publication.claim):
+                # A superseded marker may never be acknowledged; that is the
+                # newer publication's business, not a failure of this one.
+                raise RecipeRouteSuperseded(
+                    "route publication was superseded"
+                ) from error
+            self._record_failure(publication, error)
+            raise
+        self._record_completion(publication, generation)
+        return generation
+
+    def _record_failure(self, publication: _Publication, error: Exception) -> None:
+        if publication.fail is None:
+            raise error
+        committed_error: RecipeRouteError | None = None
+        with self.publication_transaction() as session:
+            try:
+                publication.fail(session, error)
+            except (
+                RecipeRecoveryDeadlineError,
+                RecipeRecoveryPublicationError,
+            ) as failure:
+                committed_error = failure
+        if committed_error is not None:
+            self._settle_failed_run_withdrawal(committed_error.run_id)
+            raise committed_error from error
+        raise error
+
+    def _settle_failed_run_withdrawal(self, run_id: str | None) -> None:
+        """Withdraw a failed recovery's route now, with no transaction open.
+
+        The failure is already committed with the owed withdrawal, so a
+        refusal here only defers the withdrawal to the next maintenance pass.
+        """
+
+        if run_id is None:
+            return
+        try:
+            with self.publication_transaction() as session:
+                publication = self._withdrawal_publication(
+                    session,
+                    self.prepare_withdrawal_in_session(session, frozenset({run_id})),
+                )
+            self._execute(publication)
+        # External publishers are plug-ins and may fail with any ordinary
+        # exception; the committed intent is retried by maintenance.
+        except Exception as error:  # noqa: BLE001
+            log_event(
+                _LOGGER,
+                "recipe.route.withdrawal_deferred",
+                service="control-routes",
+                run_id=run_id,
+                reason=type(error).__name__,
+            )
+
+    def _record_completion(
+        self, publication: _Publication, generation: LiteLlmGeneration
+    ) -> None:
+        committed_error: RecipeRouteError | None = None
+        with self.publication_transaction() as session:
+            if not self._claim_current(session, publication.claim):
+                raise RecipeRouteSuperseded("route publication was superseded")
+            pending = session.get(RoutePublication, RECIPE_ROUTE_CLAIM_ID)
+            assert pending is not None
+            pending.state = "completed"
+            try:
+                publication.complete(session, generation)
+            except (
+                RecipeRecoveryDeadlineError,
+                RecipeRecoveryPublicationError,
+            ) as failure:
+                committed_error = failure
+        if committed_error is not None:
+            self._settle_failed_run_withdrawal(committed_error.run_id)
+            raise committed_error
+
+    # -- publication of one run ---------------------------------------------
+
+    def _claim_run_publication(self, session: Session, run_id: str) -> _Publication:
         run = session.get(RecipeRun, run_id, with_for_update=True)
         if run is None:
             raise KeyError(run_id)
         if run.state != "running":
             raise RecipeRouteError("recipe run is not ready for publication")
-        recovery = self._enforce_recovery_publication_deadline(session, run)
+        self._enforce_recovery_publication_deadline(session, run)
         candidate = self.candidate_in_session(
             session,
             include_run_id=run_id,
@@ -417,38 +615,33 @@ class RecipeRouteService:
         )
         if run_id not in candidate.included:
             raise RecipeRouteError("recipe run is absent from route candidate")
-        try:
-            generation = self._publish(candidate)
-        except Exception as publication_error:
-            if recovery is None:
-                raise
-            try:
-                self._enforce_recovery_publication_deadline(session, run)
-            except RecipeRecoveryDeadlineError as deadline_error:
-                failure: RecipeRouteError = deadline_error
-            else:
-                if publication_is_temporary(publication_error):
-                    # The route remains unpublished while the worker schedules
-                    # a bounded retry within the original recovery deadline.
-                    raise
-                failure = RecipeRecoveryPublicationError(
-                    "recovery route publication failed: "
-                    f"{type(publication_error).__name__}",
-                    run_id=run_id,
-                )
-            generation = (
-                publication_error.generation
-                if isinstance(publication_error, _ActivatedRecipeRouteError)
-                else None
-            )
-            self._fail_recovery_publication_in_session(
-                session,
-                run,
-                recovery,
-                failure,
-                generation=generation,
-            )
-            raise failure from publication_error
+        claim = self._claim_in_session(session, candidate.state.digest)
+
+        def complete(session: Session, generation: LiteLlmGeneration) -> None:
+            self._complete_run_publication(session, run_id, candidate, generation)
+
+        def fail(session: Session, error: Exception) -> None:
+            self._fail_run_publication(session, claim, run_id, error)
+
+        return _Publication(
+            claim=claim,
+            effect=lambda: self._publish(candidate),
+            complete=complete,
+            fail=fail,
+            contained=False,
+        )
+
+    def _complete_run_publication(
+        self,
+        session: Session,
+        run_id: str,
+        candidate: _RecipeCandidate,
+        generation: LiteLlmGeneration,
+    ) -> None:
+        run = session.get(RecipeRun, run_id, with_for_update=True)
+        if run is None or run.state != "running":
+            raise RecipeRouteError("recipe run changed during publication")
+        recovery = self._recovery_context(session, run)
         if recovery is not None:
             try:
                 # External activation can cross the bounded recovery window.
@@ -473,7 +666,7 @@ class RecipeRouteService:
             recovery.job.result = {**result, "recovery_route_published": True}
             recovery.job.updated_at = self._clock()
         for included_id in sorted(candidate.included):
-            included = session.get(RecipeRun, included_id)
+            included = session.get(RecipeRun, included_id, with_for_update=True)
             if included is None or included.state != "running":
                 raise RecipeRouteError("recipe run changed during publication")
             included.route_state = "published"
@@ -484,7 +677,43 @@ class RecipeRouteService:
             included.route_next_attempt_at = None
             included.observation_deadline_at = None
             included.updated_at = self._clock()
-        return generation
+
+    def _fail_run_publication(
+        self,
+        session: Session,
+        claim: _Claim,
+        run_id: str,
+        publication_error: Exception,
+    ) -> None:
+        run = session.get(RecipeRun, run_id, with_for_update=True)
+        recovery = self._recovery_context(session, run) if run is not None else None
+        if run is None or recovery is None:
+            raise publication_error
+        try:
+            self._enforce_recovery_publication_deadline(session, run)
+        except RecipeRecoveryDeadlineError as deadline_error:
+            failure: RecipeRouteError = deadline_error
+        else:
+            if publication_is_temporary(publication_error):
+                # The route remains unpublished while the worker schedules
+                # a bounded retry within the original recovery deadline.
+                raise publication_error
+            failure = RecipeRecoveryPublicationError(
+                "recovery route publication failed: "
+                f"{type(publication_error).__name__}",
+                run_id=run_id,
+            )
+        # A newer publication owns the bundle record; do not overwrite it.
+        generation = (
+            publication_error.generation
+            if isinstance(publication_error, _ActivatedRecipeRouteError)
+            and self._claim_current(session, claim)
+            else None
+        )
+        self._fail_recovery_publication_in_session(
+            session, run, recovery, failure, generation=generation
+        )
+        raise failure from publication_error
 
     def _fail_recovery_publication_in_session(
         self,
@@ -495,7 +724,12 @@ class RecipeRouteService:
         *,
         generation: LiteLlmGeneration | None,
     ) -> None:
-        """Commit one fail-closed state for activation, ack, or deadline failure."""
+        """Commit one fail-closed state for activation, ack, or deadline failure.
+
+        The failed run's route is withdrawn from the live bundle by the
+        maintenance pass: the owed withdrawal is recorded here as durable
+        intent, so no transaction waits for the supervisor.
+        """
 
         if generation is not None:
             self.projection_in_session(session, generation, state="withdrawal-pending")
@@ -510,32 +744,17 @@ class RecipeRouteService:
             "recovery_error": str(failure),
         }
         recovery.job.updated_at = self._clock()
-        cleanup_error: Exception | None = None
-        try:
-            self._withdraw_runs_in_session(session, frozenset({run.id}))
-        # External publishers are plug-ins and may fail with any ordinary
-        # exception. Persist retry intent instead of rolling safety state back.
-        except Exception as error:  # noqa: BLE001
-            cleanup_error = error
         run.state = "failed"
         run.route_state = "withdrawn"
         run.route_error = str(failure)[:512]
-        if cleanup_error is not None:
-            if generation is not None:
-                run.route_generation = generation.generation
-                run.route_digest = generation.route_digest
-            publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-            if publication is not None:
-                publication.state = "withdrawal-pending"
-            run.route_error = (
-                f"{failure}; route withdrawal retry pending: "
-                f"{type(cleanup_error).__name__}"
-            )[:512]
+        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+        if publication is not None:
+            publication.state = "withdrawal-pending"
         run.updated_at = self._clock()
 
-    def _enforce_recovery_publication_deadline(
-        self, session: Session, run: RecipeRun
-    ) -> _RecoveryPublication | None:
+    def _recovery_job(self, session: Session, run: RecipeRun) -> Job | None:
+        """The run's recovery start that still owes its route publication."""
+
         jobs = session.scalars(
             select(Job)
             .where(Job.kind == "recipe.start")
@@ -558,6 +777,27 @@ class RecipeRouteService:
             and result.get("recovery_route_published") is True
         ):
             return None
+        return recovery_job
+
+    @staticmethod
+    def _recovery_publication(job: Job) -> _RecoveryPublication:
+        recovery = job.payload["recovery"]
+        assert isinstance(recovery, Mapping)
+        deadline = datetime.fromisoformat(str(recovery["deadline"]))
+        return _RecoveryPublication(job, _aware(deadline))
+
+    def _recovery_context(
+        self, session: Session, run: RecipeRun
+    ) -> _RecoveryPublication | None:
+        job = self._recovery_job(session, run)
+        return None if job is None else self._recovery_publication(job)
+
+    def _enforce_recovery_publication_deadline(
+        self, session: Session, run: RecipeRun
+    ) -> _RecoveryPublication | None:
+        recovery_job = self._recovery_job(session, run)
+        if recovery_job is None:
+            return None
         try:
             enforce_recovery_deadline(recovery_job.payload, now=self._clock())
         except DistributedLifecycleError as error:
@@ -566,14 +806,31 @@ class RecipeRouteService:
             run.route_error = str(error)[:512]
             run.updated_at = self._clock()
             raise RecipeRecoveryDeadlineError(str(error), run_id=run.id) from error
-        recovery = recovery_job.payload["recovery"]
-        assert isinstance(recovery, Mapping)
-        deadline = datetime.fromisoformat(str(recovery["deadline"]))
-        return _RecoveryPublication(recovery_job, _aware(deadline))
+        return self._recovery_publication(recovery_job)
 
     def withdraw_run(self, run_id: str) -> LiteLlmGeneration:
+        """Withdraw one run's route; the caller returns once a bundle without it is live."""
+
+        for _attempt in range(_WITHDRAWAL_ATTEMPTS - 1):
+            try:
+                return self._withdraw_run_once(run_id)
+            except RecipeRouteSuperseded:
+                # The run is already withdrawn in the database, so the newer
+                # publication that replaced this one excludes it; publish
+                # again to confirm a bundle without it is live.
+                continue
+        return self._withdraw_run_once(run_id)
+
+    def _withdraw_run_once(self, run_id: str) -> LiteLlmGeneration:
         with self.publication_transaction() as session:
-            return self.withdraw_run_in_session(session, run_id)
+            run = session.get(RecipeRun, run_id, with_for_update=True)
+            if run is None:
+                raise KeyError(run_id)
+            publication = self._withdrawal_publication(
+                session,
+                self.prepare_withdrawal_in_session(session, frozenset({run_id})),
+            )
+        return self._execute(publication)
 
     def prepare_withdrawal_in_session(
         self, session: Session, initial_run_ids: frozenset[str]
@@ -615,28 +872,73 @@ class RecipeRouteService:
             raise RecipeRouteError("recipe withdrawal candidate is invalid")
         return self._publish_withdrawal_in_session(session, withdrawal)
 
-    def _withdraw_runs_in_session(
-        self, session: Session, initial_run_ids: frozenset[str]
-    ) -> LiteLlmGeneration:
-        withdrawal = self.prepare_withdrawal_in_session(session, initial_run_ids)
-        return self._publish_withdrawal_in_session(session, withdrawal)
-
     def _publish_withdrawal_in_session(
         self, session: Session, withdrawal: _RecipeWithdrawal
     ) -> LiteLlmGeneration:
+        """Publish a withdrawal inside the caller's transaction.
+
+        Used by lifecycle paths that must withdraw a route in the same
+        transaction as their own state change.
+        """
+
+        generation = self._withdrawal_effect(withdrawal)
+        self._record_withdrawal_in_session(session, withdrawal, generation)
+        return generation
+
+    def _withdrawal_effect(self, withdrawal: _RecipeWithdrawal) -> LiteLlmGeneration:
         candidate = withdrawal.candidate
-        generation = (
+        return (
             self._publish(candidate)
             if candidate.state.aliases
             else self._publish_empty(candidate.state.digest)
         )
+
+    def _withdrawal_publication(
+        self,
+        session: Session,
+        withdrawal: _RecipeWithdrawal,
+        *,
+        after: Callable[[Session], None] | None = None,
+    ) -> _Publication:
+        claim = self._claim_in_session(session, withdrawal.candidate.state.digest)
+        # A withdrawal is a safety decision: its intent is durable with the
+        # claim, so a newer publication that supersedes this one already
+        # excludes these runs and no withdrawal is ever lost.
+        for run_id in sorted(withdrawal.excluded):
+            run = session.get(RecipeRun, run_id, with_for_update=True)
+            if run is not None:
+                run.route_state = "withdrawn"
+                run.updated_at = self._clock()
+        if after is not None:
+            # Applied now so a superseding publication keeps the reason, and
+            # again at completion, which resets the withdrawn runs' fields.
+            after(session)
+
+        def complete(session: Session, generation: LiteLlmGeneration) -> None:
+            self._record_withdrawal_in_session(session, withdrawal, generation)
+            if after is not None:
+                after(session)
+
+        return _Publication(
+            claim=claim,
+            effect=lambda: self._withdrawal_effect(withdrawal),
+            complete=complete,
+        )
+
+    def _record_withdrawal_in_session(
+        self,
+        session: Session,
+        withdrawal: _RecipeWithdrawal,
+        generation: LiteLlmGeneration,
+    ) -> None:
+        candidate = withdrawal.candidate
         self.projection_in_session(
             session,
             generation,
             state=("completed" if candidate.state.aliases else "routes-withdrawn"),
         )
         for included_id in sorted(candidate.included):
-            included = session.get(RecipeRun, included_id)
+            included = session.get(RecipeRun, included_id, with_for_update=True)
             if included is not None:
                 included.route_state = "published"
                 included.route_generation = generation.generation
@@ -646,7 +948,7 @@ class RecipeRouteService:
                 included.route_next_attempt_at = None
                 included.updated_at = self._clock()
         for run_id in sorted(withdrawal.excluded):
-            run = session.get(RecipeRun, run_id)
+            run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is None:
                 if run_id in withdrawal.initial:
                     raise RecipeRouteError("recipe run changed during withdrawal")
@@ -656,79 +958,101 @@ class RecipeRouteService:
             run.route_digest = generation.route_digest
             run.route_error = None
             run.updated_at = self._clock()
-        return generation
 
     def maintain(self) -> bool:
-        """Converge the live bundle on the served route set; no periodic renewal."""
+        """Converge the live bundle on the served route set; no periodic renewal.
+
+        The pass decides in one short transaction, performs the bundle effect
+        with none open, and records the result conditionally.
+        """
 
         with self.publication_transaction() as session:
-            pending = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-            if pending is not None and pending.state == "withdrawal-pending":
-                withdrawal = self.prepare_withdrawal_in_session(session, frozenset())
-                self._publish_withdrawal_in_session(session, withdrawal)
-                return True
-            published = tuple(
-                session.scalars(
-                    select(RecipeRun)
-                    .where(RecipeRun.route_state == "published")
-                    .order_by(RecipeRun.created_at, RecipeRun.id)
-                    .with_for_update(of=RecipeRun)
+            step = self._maintenance_step_in_session(session)
+        if isinstance(step, bool):
+            return step
+        try:
+            self._execute(step)
+        except RecipeRouteSuperseded:
+            pass
+        except RecipeRouteError:
+            if not step.contained:
+                raise
+        return True
+
+    def _maintenance_step_in_session(self, session: Session) -> bool | _Publication:
+        pending = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+        if pending is not None and pending.state == "withdrawal-pending":
+            return self._withdrawal_publication(
+                session, self.prepare_withdrawal_in_session(session, frozenset())
+            )
+        published = tuple(
+            session.scalars(
+                select(RecipeRun)
+                .where(RecipeRun.route_state == "published")
+                .order_by(RecipeRun.created_at, RecipeRun.id)
+                .with_for_update(of=RecipeRun)
+            )
+        )
+        recovering = tuple(
+            session.scalars(
+                select(RecipeRun)
+                .where(
+                    RecipeRun.state == "running",
+                    RecipeRun.route_state == "withdrawn",
+                    RecipeRun.route_error.startswith(_HEALTH_RECOVERY_ERROR),
                 )
+                .order_by(RecipeRun.created_at, RecipeRun.id)
+                .with_for_update(of=RecipeRun)
             )
-            recovering = tuple(
-                session.scalars(
-                    select(RecipeRun)
-                    .where(
-                        RecipeRun.state == "running",
-                        RecipeRun.route_state == "withdrawn",
-                        RecipeRun.route_error.startswith(_HEALTH_RECOVERY_ERROR),
-                    )
-                    .order_by(RecipeRun.created_at, RecipeRun.id)
-                    .with_for_update(of=RecipeRun)
-                )
-            )
-            for run in recovering:
-                try:
-                    self.publish_run_in_session(session, run.id)
-                except RecipeRouteError:
-                    continue
-                return True
-            if not published:
-                return self._maintain_empty_routes(session)
-            not_running = frozenset(
-                run.id for run in published if run.state != "running"
-            )
-            if not_running:
-                for run in published:
-                    if run.id in not_running:
-                        log_event(
-                            _LOGGER,
-                            "recipe.route.withdrawn",
-                            service="control-routes",
-                            run_id=run.id,
-                            reason=f"run is {run.state}",
-                        )
-                self._withdraw_runs_in_session(session, not_running)
-                return True
+        )
+        for run in recovering:
             try:
-                candidate = self.candidate_in_session(
-                    session,
-                    include_run_id=None,
-                    exclude_run_ids=frozenset(),
-                    lock=True,
-                )
-            except RecipeRouteError as error:
-                if error.run_id is None:
-                    raise
-                published_ids = frozenset(run.id for run in published)
-                log_event(
-                    _LOGGER,
-                    "recipe.route.withdrawn",
-                    service="control-routes",
-                    run_id=error.run_id,
-                    reason=str(error),
-                )
-                self.withdraw_run_in_session(session, error.run_id)
+                recovery = self._claim_run_publication(session, run.id)
+            except RecipeRouteError:
+                continue
+            return replace(recovery, contained=True)
+        if not published:
+            return self._maintain_empty_routes(session)
+        not_running = frozenset(run.id for run in published if run.state != "running")
+        if not_running:
+            for run in published:
+                if run.id in not_running:
+                    log_event(
+                        _LOGGER,
+                        "recipe.route.withdrawn",
+                        service="control-routes",
+                        run_id=run.id,
+                        reason=f"run is {run.state}",
+                    )
+            return self._withdrawal_publication(
+                session, self.prepare_withdrawal_in_session(session, not_running)
+            )
+        try:
+            candidate = self.candidate_in_session(
+                session,
+                include_run_id=None,
+                exclude_run_ids=frozenset(),
+                lock=True,
+            )
+        except RecipeRouteError as error:
+            if error.run_id is None:
+                raise
+            published_ids = frozenset(run.id for run in published)
+            recovery_error = f"{_HEALTH_RECOVERY_ERROR}: {error}"[:512]
+            log_event(
+                _LOGGER,
+                "recipe.route.withdrawn",
+                service="control-routes",
+                run_id=error.run_id,
+                reason=str(error),
+            )
+            if session.get(RecipeRun, error.run_id, with_for_update=True) is None:
+                raise KeyError(error.run_id) from error
+            withdrawal = self.prepare_withdrawal_in_session(
+                session, frozenset({error.run_id})
+            )
+
+            def record_reason(session: Session) -> None:
                 withdrawn = tuple(
                     session.scalars(
                         select(RecipeRun).where(
@@ -741,42 +1065,50 @@ class RecipeRouteService:
                 for run in withdrawn:
                     # The reason travels with the run so Fleet can show it;
                     # recovery republishes once the ranks are healthy again.
-                    run.route_error = f"{_HEALTH_RECOVERY_ERROR}: {error}"[:512]
+                    run.route_error = recovery_error
                     run.updated_at = self._clock()
-                return True
-            owner = session.get(RoutePublicationOwner, 1)
-            publication = (
-                session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-                if owner is not None and owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
-                else None
+
+            return self._withdrawal_publication(
+                session, withdrawal, after=record_reason
             )
-            current_digest = (
-                publication.plan_digest if publication is not None else None
-            )
-            durable_current = (
-                owner is not None
-                and publication is not None
-                and publication.state == "completed"
-                and publication.generation == owner.owner_generation
-                # A missing, replaced or unreadable live marker is republished.
-                and self._publisher.active_marker_digest()
-                == publication.activation_marker_digest
-            )
-            candidate_changed = current_digest != candidate.state.digest
-            if not durable_current or candidate_changed:
-                generation = self._publish(candidate)
+        owner = session.get(RoutePublicationOwner, 1)
+        publication = (
+            session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+            if owner is not None and owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
+            else None
+        )
+        current_digest = publication.plan_digest if publication is not None else None
+        durable_current = (
+            owner is not None
+            and publication is not None
+            and publication.state == "completed"
+            and publication.generation == owner.owner_generation
+            # A missing, replaced or unreadable live marker is republished.
+            and self._publisher.active_marker_digest()
+            == publication.activation_marker_digest
+        )
+        candidate_changed = current_digest != candidate.state.digest
+        if not durable_current or candidate_changed:
+            claim = self._claim_in_session(session, candidate.state.digest)
+
+            def complete(session: Session, generation: LiteLlmGeneration) -> None:
                 self.projection_in_session(session, generation, state="completed")
                 for run_id in sorted(candidate.included):
-                    run = session.get(RecipeRun, run_id)
+                    run = session.get(RecipeRun, run_id, with_for_update=True)
                     if run is not None:
                         run.route_generation = generation.generation
                         run.route_digest = generation.route_digest
                         run.route_error = None
                         run.updated_at = self._clock()
-                return True
-            return False
 
-    def _maintain_empty_routes(self, session: Session) -> bool:
+            return _Publication(
+                claim=claim,
+                effect=lambda: self._publish(candidate),
+                complete=complete,
+            )
+        return False
+
+    def _maintain_empty_routes(self, session: Session) -> bool | _Publication:
         candidate = self.candidate_in_session(
             session,
             include_run_id=None,
@@ -796,9 +1128,9 @@ class RecipeRouteService:
         ):
             # The live bundle still lists models although no run is published:
             # a lifecycle path withdrew the last route only in the database.
-            withdrawal = self.prepare_withdrawal_in_session(session, frozenset())
-            self._publish_withdrawal_in_session(session, withdrawal)
-            return True
+            return self._withdrawal_publication(
+                session, self.prepare_withdrawal_in_session(session, frozenset())
+            )
         return False
 
     def _publish(self, candidate: _RecipeCandidate) -> LiteLlmGeneration:
@@ -1170,6 +1502,12 @@ def _primary_model_alias(session: Session, run: RecipeRun) -> str:
     return primary
 
 
+def _claim_ordinal(claim_row: RoutePublication | None) -> int | None:
+    marker = None if claim_row is None else claim_row.activation_marker
+    value = marker.get("claim_ordinal") if isinstance(marker, Mapping) else None
+    return value if type(value) is int else None
+
+
 def _aware(value: datetime) -> datetime:
     return (
         value if value.tzinfo is not None else value.replace(tzinfo=UTC)
@@ -1231,5 +1569,6 @@ __all__ = [
     "RecipeRouteError",
     "RecipeRouteNotReady",
     "RecipeRouteService",
+    "RecipeRouteSuperseded",
     "publication_is_temporary",
 ]

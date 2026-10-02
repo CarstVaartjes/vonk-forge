@@ -22,6 +22,7 @@ from .coordination_boundaries import (
     NESTED_ARTIFACT_LOCK,
     SQL_TRANSACTION_SPANS_ARTIFACT_LOCK,
     SQL_TRANSACTION_SPANS_EXTERNAL_WORK,
+    SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION,
     Site,
     evaluate_coordination_gate,
     load_baseline,
@@ -535,6 +536,87 @@ def test_a_nonblocking_flock_on_a_shared_file_is_allowed() -> None:
                     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 """
             )
+        )
+        == []
+    )
+
+
+_ROUTE_SERVICE = """\
+class Routes:
+    def publication_transaction(self):
+        return self.sessions()
+
+    def _settle(self, session):
+        self._publish(session)
+
+    def _publish(self, session):
+        return self._publisher.publish_recipe(session)
+
+    def run(self):
+{body}
+"""
+
+
+def _route(body: str) -> list[tuple[str, str]]:
+    return [
+        (kind, detail)
+        for kind, _line, detail in _scanned(
+            _ROUTE_SERVICE.format(body=indent(dedent(body), "        "))
+        )
+    ]
+
+
+def test_a_route_publication_inside_the_publication_transaction_is_a_site() -> None:
+    assert _route(
+        """\
+            with self.publication_transaction() as session:
+                self._publisher.publish_recipe(session)
+        """
+    ) == [
+        (
+            SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION,
+            "route publication call self._publisher.publish_recipe",
+        )
+    ]
+
+
+def test_a_helper_that_reaches_a_route_publication_is_a_site() -> None:
+    """The indirect shape: the transaction calls a helper, the helper publishes."""
+
+    assert _route(
+        """\
+            with self.publication_transaction() as session:
+                self._settle(session)
+        """
+    ) == [
+        (
+            SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION,
+            "self._settle reaches a route publication: _settle -> _publish",
+        )
+    ]
+
+
+def test_a_transaction_held_in_a_variable_still_counts() -> None:
+    assert [
+        kind
+        for kind, _detail in _route(
+            """\
+                transaction = self.publication_transaction()
+                with transaction as session:
+                    self._settle(session)
+            """
+        )
+    ] == [SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION]
+
+
+def test_a_publication_after_the_transaction_commits_is_allowed() -> None:
+    assert (
+        _route(
+            """\
+                with self.publication_transaction() as session:
+                    claim = session.get(object, 1)
+                self._settle(claim)
+            """
         )
         == []
     )

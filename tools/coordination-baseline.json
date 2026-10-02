@@ -1,4 +1,53 @@
 {
   "schema": 1,
-  "sites": []
+  "sites": [
+    {
+      "detail": "self._settle_unreadable_runs reaches a route publication: _settle_unreadable_runs -> withdraw_run_in_session",
+      "function": "tick",
+      "kind": "sql_transaction_spans_route_publication",
+      "line": 151,
+      "path": "control/src/vonk_control/distributed_recovery.py",
+      "reason": "Reviewed deferral: a stop or recovery withdrawal publishes the route bundle and awaits the supervisor acknowledgement inside the same owner-locked transaction as its own state change, because the route must be gone before the stop is dispatched. It moves to the claim, effect, conditional-completion protocol that RecipeRouteService already uses for publication and maintenance, with the dispatch ordered after the withdrawal, in its own package."
+    },
+    {
+      "detail": "route publication call self._routes.withdraw_run_in_session",
+      "function": "tick",
+      "kind": "sql_transaction_spans_route_publication",
+      "line": 185,
+      "path": "control/src/vonk_control/distributed_recovery.py",
+      "reason": "Reviewed deferral: a stop or recovery withdrawal publishes the route bundle and awaits the supervisor acknowledgement inside the same owner-locked transaction as its own state change, because the route must be gone before the stop is dispatched. It moves to the claim, effect, conditional-completion protocol that RecipeRouteService already uses for publication and maintenance, with the dispatch ordered after the withdrawal, in its own package."
+    },
+    {
+      "detail": "route publication call self._route_publications.withdraw_run_in_session",
+      "function": "stop",
+      "kind": "sql_transaction_spans_route_publication",
+      "line": 2384,
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "reason": "Reviewed deferral: a stop or recovery withdrawal publishes the route bundle and awaits the supervisor acknowledgement inside the same owner-locked transaction as its own state change, because the route must be gone before the stop is dispatched. It moves to the claim, effect, conditional-completion protocol that RecipeRouteService already uses for publication and maintenance, with the dispatch ordered after the withdrawal, in its own package."
+    },
+    {
+      "detail": "route publication call self._route_withdrawer",
+      "function": "stop",
+      "kind": "sql_transaction_spans_route_publication",
+      "line": 2388,
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "reason": "Reviewed deferral: a stop or recovery withdrawal publishes the route bundle and awaits the supervisor acknowledgement inside the same owner-locked transaction as its own state change, because the route must be gone before the stop is dispatched. It moves to the claim, effect, conditional-completion protocol that RecipeRouteService already uses for publication and maintenance, with the dispatch ordered after the withdrawal, in its own package."
+    },
+    {
+      "detail": "route publication call self._route_publications.withdraw_run_in_session",
+      "function": "stop",
+      "kind": "sql_transaction_spans_route_publication",
+      "line": 2401,
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "reason": "Reviewed deferral: a stop or recovery withdrawal publishes the route bundle and awaits the supervisor acknowledgement inside the same owner-locked transaction as its own state change, because the route must be gone before the stop is dispatched. It moves to the claim, effect, conditional-completion protocol that RecipeRouteService already uses for publication and maintenance, with the dispatch ordered after the withdrawal, in its own package."
+    },
+    {
+      "detail": "route publication call self._route_withdrawer",
+      "function": "stop",
+      "kind": "sql_transaction_spans_route_publication",
+      "line": 2405,
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "reason": "Reviewed deferral: a stop or recovery withdrawal publishes the route bundle and awaits the supervisor acknowledgement inside the same owner-locked transaction as its own state change, because the route must be gone before the stop is dispatched. It moves to the claim, effect, conditional-completion protocol that RecipeRouteService already uses for publication and maintenance, with the dispatch ordered after the withdrawal, in its own package."
+    }
+  ]
 }
