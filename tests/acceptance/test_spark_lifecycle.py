@@ -2563,7 +2563,9 @@ class SparkLifecycle:
         _, payload = self.control.request(
             "POST",
             "/api/profile/1/load",
-            request.model_dump(mode="json"),
+            # The lane loads on the previous release's Controller too, which
+            # refuses a field its contract does not know: send only what is set.
+            request.model_dump(mode="json", exclude_none=True),
             allowed=(202,),
         )
         return payload
