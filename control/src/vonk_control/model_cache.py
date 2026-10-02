@@ -4171,9 +4171,8 @@ class ModelCacheService:
             manifest, force=False, cached=cached
         )
         new_bytes = require_integer(transfer["total_bytes"], "transfer total bytes")
-        storage = self.storage_summary()
         blockers = []
-        if new_bytes > storage.available_bytes:
+        if new_bytes > self.free_bytes():
             blockers.append("insufficient-reserved-storage")
             self._request_storage(new_bytes, "insufficient-reserved-storage")
         plan = {
@@ -6109,7 +6108,7 @@ class ModelCacheService:
         if isinstance(error, OSError) and error.errno == errno.ENOSPC:
             try:
                 measured_required = manifest.expected_bytes
-                measured_free = self.storage_summary().free_bytes
+                measured_free = shutil.disk_usage(self._root).free
                 self._request_storage(measured_required, "model_cache.capacity")
                 required_bytes, free_bytes, shortfall_bytes = (
                     measured_required,
@@ -7787,7 +7786,7 @@ class ModelCacheService:
         manifest = self._manifest_for_set(digest)
         transfer = self._transfer_state_for_manifest(manifest, force=True)
         repair_bytes = require_integer(transfer["total_bytes"], "transfer total bytes")
-        if repair_bytes > self.storage_summary().available_bytes:
+        if repair_bytes > self.free_bytes():
             self._request_storage(repair_bytes, "insufficient-reserved-storage")
             raise ModelCacheConflict(
                 "model_cache.download_blocked", "insufficient-reserved-storage"
@@ -8847,6 +8846,16 @@ class ModelCacheService:
                 subject="",
                 reason=reason,
             )
+
+    def free_bytes(self) -> int:
+        """Free NAS bytes beyond the reserve: one ``statvfs``, no object scan.
+
+        Admission and previews need only this number. ``storage_summary`` walks
+        every stored object, set and in-flight operation and is for the storage
+        view, never for a read that repeats once per recipe.
+        """
+
+        return max(0, shutil.disk_usage(self._root).free - self._reserve_bytes)
 
     def storage_summary(self) -> StorageSummary:
         usage = shutil.disk_usage(self._root)

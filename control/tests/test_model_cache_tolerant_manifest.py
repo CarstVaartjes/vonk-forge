@@ -231,6 +231,9 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
         )
 
     assert inspection.artifact_set_bytes == 12
+    # Inspection only reads; protection is recomputed where the cache reports its
+    # storage, and an installation of an unreadable revision still protects.
+    cache.storage_summary()
     with sessions() as session:
         row = session.get(ModelCacheSet, "3" * 64)
         assert row is not None and "recipe-installation" in row.protected_reasons

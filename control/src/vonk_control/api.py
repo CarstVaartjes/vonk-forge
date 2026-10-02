@@ -1355,6 +1355,10 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         cursors=cursor_codec,
         clock=clock,
         runtime_archive_available=runtime_image_storage.build_archive_available,
+        # The Library reports stored images; it never gates on them. Recent
+        # answers are reused so a read does not re-walk network storage.
+        image_present_ttl_seconds=30.0,
+        image_absent_ttl_seconds=5.0,
         assessment=LibraryAssessment(
             sessions,
             run_switch=run_switch_operations,
