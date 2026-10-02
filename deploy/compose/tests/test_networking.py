@@ -103,6 +103,7 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         "cluster-egress",
         "litellm-data",
         "litellm-edge",
+        "litellm-metrics",
     }
     assert services["litellm"].get("ports") in (None, [])
     assert rendered["networks"]["litellm-edge"]["internal"] is True
@@ -119,9 +120,16 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
     } == {"litellm", "postgres"}
     litellm_networks = set(services["litellm"]["networks"])
     for name, service in services.items():
-        if name not in {"caddy", "litellm", "postgres"}:
+        if name not in {"caddy", "litellm", "postgres", "prometheus"}:
             assert litellm_networks.isdisjoint(service.get("networks", {})), name
-    assert set(services["prometheus"]["networks"]) == {"application"}
+    # Prometheus shares only the dedicated metrics network with LiteLLM.
+    assert set(services["prometheus"]["networks"]) == {
+        "application",
+        "litellm-metrics",
+    }
+    assert litellm_networks & set(services["prometheus"]["networks"]) == {
+        "litellm-metrics"
+    }
     # The worker reads the same site configuration as the API.
     assert (
         services["control-worker"]["environment"]

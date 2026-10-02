@@ -266,6 +266,12 @@ http://:8087 {
 		handle @litellm_repository_authority {
 			respond 403
 		}
+		# LiteLLM's Prometheus endpoint is scraped only on the internal
+		# litellm-metrics network; it is never served to browsers.
+		@litellm_metrics path /litellm/metrics /litellm/metrics/*
+		handle @litellm_metrics {
+			respond 404
+		}
 		handle_path /litellm/* {
 			import browser_proxy_headers
 			reverse_proxy litellm:4000
