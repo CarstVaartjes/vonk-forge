@@ -141,6 +141,7 @@ from .recipe_lifecycle_contract import (
 )
 from .recipe_routes import (
     RecipeRouteError,
+    RecipeRouteNotReady,
     RecipeRouteService,
     route_health_recovery_pending,
     route_publication_transaction,
@@ -2363,7 +2364,12 @@ class RecipeOperationService:
                 self._exact_stop_authority(session, run, admitted)
         for _attempt in range(_STOP_WITHDRAWAL_ATTEMPTS):
             if self._route_publications is not None:
-                self._route_publications.withdraw_run(run_id)
+                try:
+                    self._route_publications.withdraw_run(run_id)
+                except RecipeRouteNotReady as error:
+                    raise RecipeOperationConflict(
+                        "the run's route withdrawal was superseded; retry the stop"
+                    ) from error
             else:
                 self._route_withdrawer(run_id)
             try:

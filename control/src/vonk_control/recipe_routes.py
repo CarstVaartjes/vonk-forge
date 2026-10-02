@@ -6,8 +6,10 @@ import hashlib
 import ipaddress
 import json
 import logging
+import random
 import re
 import threading
+import time
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
@@ -66,6 +68,7 @@ _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
 SPARK_SILENT_WITHDRAWAL_SECONDS = 300
 _LOGGER = logging.getLogger(__name__)
 _WITHDRAWAL_ATTEMPTS = 5
+_WITHDRAWAL_BACKOFF_SECONDS = 0.05
 _SQLITE_ROUTE_PUBLICATION_LOCK = threading.RLock()
 # The one in-flight publication claim lives beside the active publication, in
 # its own row, so an observer reading the active publication never sees a
@@ -808,12 +811,12 @@ class RecipeRouteService:
             raise RecipeRecoveryDeadlineError(str(error), run_id=run.id) from error
         return self._recovery_publication(recovery_job)
 
-    def withdraw_run(self, run_id: str) -> LiteLlmGeneration:
+    def withdraw_run(self, run_id: str) -> LiteLlmGeneration | None:
         """Withdraw one run's route; the caller returns once a bundle without it is live."""
 
         return self.withdraw_runs(frozenset({run_id}))
 
-    def withdraw_runs(self, run_ids: Iterable[str]) -> LiteLlmGeneration:
+    def withdraw_runs(self, run_ids: Iterable[str]) -> LiteLlmGeneration | None:
         """Withdraw these runs' routes with no transaction held by the caller.
 
         Claim in a short transaction (the withdrawal intent is durable with the
@@ -822,18 +825,30 @@ class RecipeRouteService:
         complete conditionally. Lifecycle paths that must see the route gone
         before they act call this first and then re-check
         :meth:`withdrawal_complete_in_session` in their own short transaction.
+
+        The generation is ``None`` when a newer publication, which already
+        excludes these runs through their durable intent, completed the
+        withdrawal for us.
         """
 
         run_ids = frozenset(run_ids)
-        for _attempt in range(_WITHDRAWAL_ATTEMPTS - 1):
+        for attempt in range(_WITHDRAWAL_ATTEMPTS - 1):
             try:
                 return self._withdraw_runs_once(run_ids)
             except RecipeRouteSuperseded:
-                # The runs are already withdrawn in the database, so the newer
-                # publication that replaced this one excludes them; publish
-                # again to confirm a bundle without them is live.
-                continue
+                # A newer publication replaced this claim. It was claimed after
+                # our intent committed, so it excludes these runs too: do not
+                # supersede it in turn (two withdrawals would take turns
+                # superseding each other), wait for it, and claim again only
+                # while the bundle still lists them.
+                if self._withdrawn_after_backoff(run_ids, attempt):
+                    return None
         return self._withdraw_runs_once(run_ids)
+
+    def _withdrawn_after_backoff(self, run_ids: frozenset[str], attempt: int) -> bool:
+        time.sleep(random.uniform(0.0, _WITHDRAWAL_BACKOFF_SECONDS) * (attempt + 1))
+        with self.publication_transaction() as session:
+            return self.withdrawal_complete_in_session(session, run_ids)
 
     def _withdraw_runs_once(self, run_ids: frozenset[str]) -> LiteLlmGeneration:
         with self.publication_transaction() as session:
@@ -866,13 +881,11 @@ class RecipeRouteService:
             else None
         )
         if publication is None:
-            # No publication is on record: complete when nothing would be
-            # listed and none of these runs still claims to be published. (The
-            # real publisher records one with every activation; the run-state
-            # check only matters for stand-in publishers that record none.)
-            return not (
-                candidate.included or candidate.endpoints or candidate.state.aliases
-            ) and not any(
+            # No publication is on record (the real publisher records one with
+            # every activation, so this is only a stand-in publisher or a
+            # database that never published): the runs' own route state is the
+            # only evidence there is.
+            return not any(
                 run.route_state == "published"
                 for run in session.scalars(
                     select(RecipeRun).where(RecipeRun.id.in_(set(run_ids)))

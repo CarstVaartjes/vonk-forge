@@ -30,10 +30,13 @@ from vonk_control.models import (
     RecipeRun,
     RunNode,
 )
+from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from tests.recipe_library_source import recipe_library_root
+
+from .runtime_image_fixtures import place_test_image
 
 ROOT = recipe_library_root()
 
@@ -494,6 +497,54 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
 def test_database_local_projection_reads_cache_build_and_spark_evidence(
     tmp_path: Path,
 ) -> None:
+    projection, node_id, recipe_digest, old_digest = _local_projection_world(
+        tmp_path, oci_layout_sha256=None, runtime_archive_available=lambda *_: False
+    )
+    models = projection.models(cached=True).models
+    assert {item.identity.content_sha256 for item in models} == {old_digest}
+    old = next(item for item in models if item.identity.content_sha256 == old_digest)
+    assert old.local.controller == "cached"
+    assert old.local.running_on == [node_id]
+    recipes = projection.recipe_library(cached=True).recipes
+    assert len(recipes) == 1
+    assert recipes[0].identity.content_sha256 == recipe_digest
+    assert recipes[0].local.controller == "not_cached"
+    assert recipes[0].local.running_on == [node_id]
+
+
+def test_a_stored_image_with_an_unreadable_manifest_needs_attention_not_a_cache_miss(
+    tmp_path: Path,
+) -> None:
+    # The receipted image's manifest is damaged: the bytes are not "absent", so
+    # the library must not read that as an ordinary cache miss that a download
+    # would silently fix; it names the damaged image and the Library still loads.
+    address = "e" * 64
+    storage = FilesystemRuntimeImageStorage(tmp_path / "artifacts")
+    place_test_image(storage, address, 1)
+    storage.layout.blob_path(f"sha256:{address}").write_bytes(b'{"mediaType": "tr')
+    projection, _node_id, _recipe_digest, _old_digest = _local_projection_world(
+        tmp_path,
+        oci_layout_sha256=address,
+        runtime_archive_available=storage.build_archive_available,
+    )
+
+    recipes = projection.recipe_library(cached=True).recipes
+
+    assert len(recipes) == 1
+    assert recipes[0].local.controller == "failed"
+    assert recipes[0].local.preparation is not None
+    assert recipes[0].local.preparation.state == "failed"
+    assert recipes[0].local.preparation.phase == (
+        "image unreadable: runtime_image.archive_unavailable"
+    )
+
+
+def _local_projection_world(
+    tmp_path: Path,
+    *,
+    oci_layout_sha256: str | None,
+    runtime_archive_available,
+):
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     recipe_document = copy.deepcopy(index["recipes"][0]["document"])
     selected_models = [
@@ -584,6 +635,7 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
                 policy_report={"state": "passed"},
                 plan={"schema_version": 2},
                 image_digest="sha256:" + "e" * 64,
+                oci_layout_sha256=oci_layout_sha256,
                 image_bytes=1,
                 created_at=now,
                 updated_at=now,
@@ -659,18 +711,9 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
         sessions,
         cursors=TokenCodec(b"q" * 32).cursor_codec(),
         clock=lambda: now,
-        runtime_archive_available=lambda _digest, _size: False,
+        runtime_archive_available=runtime_archive_available,
     )
-    models = projection.models(cached=True).models
-    assert {item.identity.content_sha256 for item in models} == {old_digest}
-    old = next(item for item in models if item.identity.content_sha256 == old_digest)
-    assert old.local.controller == "cached"
-    assert old.local.running_on == [node_id]
-    recipes = projection.recipe_library(cached=True).recipes
-    assert len(recipes) == 1
-    assert recipes[0].identity.content_sha256 == recipe_digest
-    assert recipes[0].local.controller == "not_cached"
-    assert recipes[0].local.running_on == [node_id]
+    return projection, node_id, recipe_digest, old_digest
 
 
 def test_library_pagination_covers_more_than_one_page_without_gaps(

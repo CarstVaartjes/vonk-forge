@@ -64,6 +64,7 @@ from .models import (
     RuntimeImageAuthorization,
 )
 from .request_fault import RequestFault
+from .runtime_image_preparation import RuntimeImagePreparationError
 
 
 class LibraryProjectionError(RuntimeError):
@@ -673,14 +674,28 @@ class LibraryProjection:
                 )
         if self._runtime_archive_available is not None:
             available_recipe_digests: set[str] = set()
+            # A stored image that cannot be read is not an absent one: it is
+            # named, per recipe, instead of failing the whole Library or
+            # reading as a cache miss that a download would never repair.
+            damaged: dict[str, str] = {}
+
+            def archive_available(digest: str | None, archive: str, size: int) -> bool:
+                assert self._runtime_archive_available is not None
+                try:
+                    return self._runtime_archive_available(archive, size)
+                except RuntimeImagePreparationError as error:
+                    if digest is not None:
+                        damaged[digest] = f"image unreadable: {error.code}"[:64]
+                    return False
+
             for build in builds:
                 digest = revision_digests.get(build.recipe_revision_id)
                 if (
                     build.state == "succeeded"
                     and isinstance(build.oci_layout_sha256, str)
                     and type(build.image_bytes) is int
-                    and self._runtime_archive_available(
-                        build.oci_layout_sha256, build.image_bytes
+                    and archive_available(
+                        digest, build.oci_layout_sha256, build.image_bytes
                     )
                     and digest is not None
                 ):
@@ -689,8 +704,10 @@ class LibraryProjection:
                 if (
                     isinstance(authorization.oci_archive_sha256, str)
                     and type(authorization.image_bytes) is int
-                    and self._runtime_archive_available(
-                        authorization.oci_archive_sha256, authorization.image_bytes
+                    and archive_available(
+                        authorization.original_content_digest,
+                        authorization.oci_archive_sha256,
+                        authorization.image_bytes,
                     )
                 ):
                     available_recipe_digests.add(authorization.original_content_digest)
@@ -698,7 +715,19 @@ class LibraryProjection:
                 if revision.kind != "recipe":
                     continue
                 local = result.get(revision.content_digest)
-                if (
+                if revision.content_digest in damaged and (
+                    revision.content_digest not in available_recipe_digests
+                ):
+                    local = result.setdefault(
+                        revision.content_digest,
+                        {"controller": "unknown", "running_on": []},
+                    )
+                    local["controller"] = "failed"
+                    local["preparation"] = {
+                        "state": "failed",
+                        "phase": damaged[revision.content_digest],
+                    }
+                elif (
                     local is not None
                     and local.get("controller") == "cached"
                     and revision.content_digest not in available_recipe_digests
