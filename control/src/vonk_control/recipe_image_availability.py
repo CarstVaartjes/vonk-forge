@@ -250,6 +250,10 @@ _RECOVERABLE_MISS_CODES = frozenset({"runtime_image.cache_missing"})
 SOURCE_POLICY_REFUSED_CODE = "recipe_image.source_policy_refused"
 
 
+_CLAIM_SCAN_WINDOW = 256
+_MODEL_WAIT_POLL_SECONDS = 5
+
+
 class RecipeImageAvailabilityError(RuntimeError):
     """A bounded operator-facing availability failure."""
 
@@ -4124,7 +4128,7 @@ class RecipeImageAvailabilityService:
                         Job.state.in_(("queued", "running", "partial")),
                     )
                     .order_by(Job.updated_at, Job.id)
-                    .limit(limit * 8)
+                    .limit(max(limit * 8, _CLAIM_SCAN_WINDOW))
                 )
             )
             for operation_id in candidate_ids:
@@ -4143,6 +4147,12 @@ class RecipeImageAvailabilityService:
                     operation.payload if isinstance(operation.payload, Mapping) else {}
                 )
                 if not self._retry_due(payload, now):
+                    continue
+                if operation.state == "partial" and self._park_for_model(
+                    operation, payload, now
+                ):
+                    # Only the model download is outstanding: no worker slot is
+                    # spent polling it, so ready work is never queued behind it.
                     continue
                 if operation.state == "running":
                     claimed_until = payload.get("claim_until")
@@ -4181,6 +4191,55 @@ class RecipeImageAvailabilityService:
                 if len(claims) >= limit:
                     break
         return tuple(claims)
+
+    def _park_for_model(
+        self, operation: Job, payload: Mapping[str, object], now: datetime
+    ) -> bool:
+        """Re-park an operation whose only outstanding work is its model download.
+
+        The runtime image is already prepared, so a worker would only look at
+        the model child and release itself again.  The check is one cheap read
+        done at dispatch; the operation is pushed behind other work and
+        re-examined after a short poll.  Anything unclear falls through to a
+        normal claim, so a restart or an unreadable child never strands it.
+        """
+
+        child = payload.get("model_child")
+        if (
+            self._model_cache is None
+            or not isinstance(child, Mapping)
+            or not isinstance(child.get("id"), str)
+            or not isinstance(payload.get("image_result"), Mapping)
+        ):
+            return False
+        try:
+            state = self._model_cache.get_operation(str(child["id"])).state
+        except Exception:  # noqa: BLE001 - dispatch falls back to a normal claim
+            return False
+        if state not in {"queued", "running", "partial"}:
+            return False
+        updated = dict(payload) | {
+            "retry_after_at": _iso(now + timedelta(seconds=_MODEL_WAIT_POLL_SECONDS))
+        }
+        if not any(
+            item.code == "recipe_image.waiting_for_model"
+            for item in read_blockers(payload.get("blockers"))
+        ):
+            self._record_blockers(
+                operation,
+                updated,
+                [
+                    make_blocker(
+                        "recipe_image.waiting_for_model",
+                        "Waiting for the model download to finish; "
+                        "the runtime image is already prepared.",
+                        severity="info",
+                    )
+                ],
+            )
+        operation.payload = updated
+        operation.updated_at = now
+        return True
 
     @staticmethod
     def _holds_live_lease(payload: Mapping[str, object], now: datetime) -> bool:
@@ -5201,8 +5260,8 @@ class RecipeImageAvailabilityService:
                     [
                         make_blocker(
                             "recipe_image.waiting_for_worker",
-                            f"All {busy} image preparation workers are busy; "
-                            "this starts when one is free.",
+                            f"All {busy} image preparation workers are busy preparing "
+                            "other runtime images; this starts when one is free.",
                             severity="info",
                         )
                     ],

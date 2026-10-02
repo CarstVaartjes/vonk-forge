@@ -3677,3 +3677,78 @@ def test_newer_revision_is_prepared_at_once_after_the_older_build_failed(
         and job.state in {"queued", "running"}
         for job in started
     ), [(job.kind, job.state, job.payload) for job in started]
+
+
+def _parked_operation(
+    operation_id: str, *, now: datetime, model_child: bool, updated: datetime
+) -> Job:
+    payload: dict[str, object] = {
+        "recipe_revision_id": f"revision-{operation_id}",
+        "build_input_sha256": "f" * 64,
+    }
+    if model_child:
+        payload["model_child"] = {"id": f"child-{operation_id}", "state": "running"}
+        payload["image_result"] = {"image_bytes": 1}
+    return Job(
+        id=operation_id,
+        request_id=operation_id.ljust(36, "x"),
+        kind="recipe.image.availability.v2",
+        state="partial" if model_child else "queued",
+        actor="operator",
+        authority_revision=f"revision-{operation_id}",
+        targets=[f"revision-{operation_id}"],
+        payload_digest="a" * 64,
+        payload=payload,
+        result=None,
+        current_attempt=1 if model_child else 0,
+        created_at=now,
+        updated_at=updated,
+    )
+
+
+def test_operations_waiting_only_on_a_model_download_take_no_worker_slot(
+    tmp_path: Path,
+) -> None:
+    """Ready work is claimed first; model waiters are parked with a named reason."""
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime(2026, 10, 2, 1, 10, tzinfo=UTC)
+    with sessions.begin() as session:
+        # Many waiters are older than the ready operation, as in production.
+        for index in range(40):
+            session.add(
+                _parked_operation(
+                    f"waiter{index:03d}",
+                    now=now,
+                    model_child=True,
+                    updated=now - timedelta(minutes=30 - index // 2),
+                )
+            )
+        session.add(_parked_operation("ready", now=now, model_child=False, updated=now))
+
+    class ModelCache:
+        def get_operation(self, operation_id: str) -> SimpleNamespace:
+            return SimpleNamespace(state="running")
+
+    service = _service(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (None, {}),
+        model_cache=ModelCache(),
+        clock=lambda: now,
+    )
+    claims = service.claim_pending(limit=4)
+    assert [claim.operation_id for claim in claims] == ["ready"]
+    with sessions() as session:
+        waiter = session.get(Job, "waiter000")
+        assert waiter is not None
+        assert waiter.state == "partial"
+        assert waiter.current_attempt == 1
+        blockers = require_sequence(waiter.payload["blockers"], "blockers")
+        assert [require_mapping(item, "blocker")["code"] for item in blockers] == [
+            "recipe_image.waiting_for_model"
+        ]
+    # Parked waiters are not re-examined until their poll is due.
+    assert service.claim_pending(limit=4) == ()
