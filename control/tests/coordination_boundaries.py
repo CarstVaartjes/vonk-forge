@@ -93,8 +93,9 @@ _ROUTE_PUBLICATION_TAILS = frozenset(
         "_publish",
         "_publish_empty",
         "_withdrawal_effect",
-        "_publish_withdrawal_in_session",
-        "withdraw_run_in_session",
+        "publish_run",
+        "withdraw_run",
+        "withdraw_runs",
         "_require_supervisor_ack",
         "_route_withdrawer",
     }

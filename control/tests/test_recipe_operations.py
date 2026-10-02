@@ -2632,7 +2632,9 @@ def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> Non
         assert (
             session.scalar(select(Job).where(Job.request_id == "1" * 35 + "c")) is None
         )
-    assert withdrawn == []
+    # The route was withdrawn first, with no transaction open; only the Stop's
+    # own state and queue write rolled back, so the retry dispatches it.
+    assert withdrawn == [start.owner_id]
 
 
 def test_stop_withdrawal_failure_rolls_back_job_and_run_state(tmp_path: Path) -> None:
@@ -3052,7 +3054,8 @@ def test_concurrent_duplicate_stop_maps_to_one_operation_on_sqlite(
         operation_ids = list(pool.map(lambda _index: stop(), range(2)))
 
     assert len(set(operation_ids)) == 1
-    assert withdrawn == [run.owner_id]
+    # Each request withdraws before dispatching (idempotent); one Stop exists.
+    assert set(withdrawn) == {run.owner_id}
     with sessions() as session:
         assert (
             len(

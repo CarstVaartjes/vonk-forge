@@ -1514,6 +1514,21 @@ def test_blob_store_stream_rejects_mismatch_oversize_and_interruption(tmp_path) 
     assert not list((tmp_path / "blobs" / ".reservations").glob("*.reserve"))
 
 
+def test_blob_store_reconcile_unlinks_only_objects_with_positive_evidence(
+    tmp_path,
+) -> None:
+    store = ArtifactBlobStore(tmp_path / "blobs", max_stored_bytes=1024)
+    unproven = hashlib.sha256(b"unproven").hexdigest()
+    proven = hashlib.sha256(b"proven").hexdigest()
+    store.put_bytes(unproven, b"unproven", maximum_bytes=16)
+    store.put_bytes(proven, b"proven", maximum_bytes=16)
+
+    # Neither is referenced, but only one is proven unused.
+    store.reconcile(set(), orphan_grace_seconds=0, reclaimable_sha256={proven})
+
+    assert store.usage()["used_bytes"] == len(b"unproven")
+
+
 def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None:
     first_store = ArtifactBlobStore(tmp_path / "blobs", max_stored_bytes=6)
     second_store = ArtifactBlobStore(tmp_path / "blobs", max_stored_bytes=6)
@@ -1576,7 +1591,9 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
     orphan_digest = hashlib.sha256(orphan).hexdigest()
     if first_store.usage()["remaining_bytes"]:
         first_store.put_bytes(orphan_digest, orphan, maximum_bytes=1)
-    report = first_store.reconcile(referenced, orphan_grace_seconds=0)
+    report = first_store.reconcile(
+        referenced, orphan_grace_seconds=0, reclaimable_sha256={orphan_digest}
+    )
     assert report["missing_referenced_blobs"] == []
     assert report["removed_orphan_blobs"] in {0, 1}
 

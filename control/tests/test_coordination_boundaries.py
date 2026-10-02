@@ -620,3 +620,21 @@ def test_a_publication_after_the_transaction_commits_is_allowed() -> None:
         )
         == []
     )
+
+
+def test_the_blocking_withdrawal_entry_points_are_sites_inside_a_transaction() -> None:
+    # A Stop or recovery that withdraws inside its own transaction is the
+    # shape this gate exists to refuse; the entry points that open their own
+    # transactions must be called with none open.
+    for call in ("withdraw_run", "withdraw_runs", "publish_run"):
+        assert _route(
+            f"""\
+                with self.publication_transaction() as session:
+                    self._routes.{call}(session)
+            """
+        ) == [
+            (
+                SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION,
+                f"route publication call self._routes.{call}",
+            )
+        ]

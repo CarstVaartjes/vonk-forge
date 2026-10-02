@@ -141,6 +141,7 @@ from .recipe_lifecycle_contract import (
 )
 from .recipe_routes import (
     RecipeRouteError,
+    RecipeRouteNotReady,
     RecipeRouteService,
     route_health_recovery_pending,
     route_publication_transaction,
@@ -232,6 +233,10 @@ class AgentJobQueue(Protocol):
 
 class RecipeOperationConflict(RuntimeError):
     """A lifecycle request is stale, conflicting, or unsafe to execute."""
+
+
+class _RouteNotWithdrawn(Exception):
+    """The run's route is listed again; withdraw it again before dispatching."""
 
 
 class RecipeReconciliationBlocked(RecipeOperationConflict):
@@ -415,6 +420,9 @@ class RecipeRunStatus:
 
 _TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _INITIAL_OBSERVATION_GRACE_SECONDS = 120
+# A Stop withdraws the run's route again if a competing publication listed it
+# between the withdrawal and the dispatch.
+_STOP_WITHDRAWAL_ATTEMPTS = 3
 _MEMORY_RESERVATION_KINDS = frozenset({"unified-memory", "host-memory", "gpu-memory"})
 _MAX_ACTION_NODES = 1024
 _MAX_ACTIVE_RUNS = 128
@@ -2335,6 +2343,66 @@ class RecipeOperationService:
                 self._agent_jobs.notify_available()
             return logical
         now = self._clock()
+        # Claim, effect, conditional completion. The accepted Stop is checked
+        # read-only first so a stale or blocked request withdraws nothing; the
+        # route is then withdrawn with no transaction open (the withdrawal
+        # intent is durable with its claim, and a crash resumes from it); only
+        # then is the Stop dispatched, in its own short transaction, and only
+        # while the withdrawal is still complete.
+        with self._sessions() as session:
+            admitted = self._stop_plan_in_session(
+                session,
+                run_id,
+                lock=False,
+                profile_target_node_ids=profile_target_node_ids,
+            )
+            if not admitted.allowed:
+                raise RecipeOperationConflict("stop plan is stale or blocked")
+            run = session.get(RecipeRun, run_id)
+            assert run is not None
+            if self._absent_stop_nodes(session, run, admitted, now, lock=False) is None:
+                self._exact_stop_authority(session, run, admitted)
+        for _attempt in range(_STOP_WITHDRAWAL_ATTEMPTS):
+            if self._route_publications is not None:
+                try:
+                    self._route_publications.withdraw_run(run_id)
+                except RecipeRouteNotReady as error:
+                    raise RecipeOperationConflict(
+                        "the run's route withdrawal was superseded; retry the stop"
+                    ) from error
+            else:
+                self._route_withdrawer(run_id)
+            try:
+                job = self._dispatch_stop_after_withdrawal(
+                    run_id,
+                    plan_digest=plan_digest,
+                    actor=actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                    profile_target_node_ids=profile_target_node_ids,
+                )
+            except _RouteNotWithdrawn:
+                continue
+            if job.state != "succeeded":
+                self._agent_jobs.notify_available()
+            return job
+        raise RecipeOperationConflict(
+            "the run's route withdrawal has not settled; retry the stop"
+        )
+
+    def _dispatch_stop_after_withdrawal(
+        self,
+        run_id: str,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None,
+        profile_target_node_ids: Sequence[str] | None,
+    ) -> RecipeOperationView:
+        """Queue the Stop in one short transaction, if the route is still gone."""
+
+        now = self._clock()
         try:
             transaction = (
                 self._route_publications.publication_transaction()
@@ -2361,13 +2429,14 @@ class RecipeOperationService:
                 if not admitted.allowed:
                     raise RecipeOperationConflict("stop plan is stale or blocked")
                 plan_digest = admitted.plan_digest
-                prepared = (
-                    self._route_publications.prepare_withdrawal_in_session(
+                if self._route_publications is not None and (
+                    not self._route_publications.withdrawal_complete_in_session(
                         session, frozenset({run_id})
                     )
-                    if self._route_publications is not None
-                    else None
-                )
+                ):
+                    # A competing publication listed the run again, or the
+                    # withdrawal was superseded before it completed.
+                    raise _RouteNotWithdrawn(run_id)
                 run = session.get(RecipeRun, run_id)
                 assert run is not None
                 job = self._complete_absent_stop_in_session(
@@ -2380,12 +2449,6 @@ class RecipeOperationService:
                     now=now,
                 )
                 if job is not None:
-                    if self._route_publications is not None:
-                        self._route_publications.withdraw_run_in_session(
-                            session, run_id, prepared=prepared
-                        )
-                    else:
-                        self._route_withdrawer(run_id)
                     return self._view(job, session=session)
                 job = self._queue_stop_in_session(
                     session,
@@ -2397,15 +2460,7 @@ class RecipeOperationService:
                     now=now,
                     profile_target_node_ids=profile_target_node_ids,
                 )
-                if self._route_publications is not None:
-                    self._route_publications.withdraw_run_in_session(
-                        session, run_id, prepared=prepared
-                    )
-                else:
-                    self._route_withdrawer(run_id)
-                    run.route_state = "withdrawn"
-                    run.route_error = None
-                    run.updated_at = now
+                run.route_error = None
         except IntegrityError as error:
             raced = self._idempotent(
                 request_id,
@@ -2419,8 +2474,34 @@ class RecipeOperationService:
             raise RecipeOperationConflict(
                 "request key was already used differently"
             ) from error
-        self._agent_jobs.notify_available()
         return self.get(job.id)
+
+    @staticmethod
+    def _absent_stop_nodes(
+        session: Session,
+        run: RecipeRun,
+        admitted: StopPlan,
+        now: datetime,
+        *,
+        lock: bool,
+    ) -> tuple[RunNode, ...] | None:
+        """The run's ranks when every one is already reported not running."""
+
+        if admitted.missing_node_ids:
+            return None
+        statement = (
+            select(RunNode)
+            .where(RunNode.run_id == run.id)
+            .order_by(RunNode.rank, RunNode.node_id)
+        )
+        if lock:
+            statement = statement.with_for_update(of=RunNode)
+        nodes = tuple(session.scalars(statement))
+        if not nodes or not all(
+            run_node_reports_absent(run, node, now) for node in nodes
+        ):
+            return None
+        return nodes
 
     def _complete_absent_stop_in_session(
         self,
@@ -2440,19 +2521,8 @@ class RecipeOperationService:
         and the Stop succeeds without an agent round trip.
         """
 
-        if admitted.missing_node_ids:
-            return None
-        nodes = tuple(
-            session.scalars(
-                select(RunNode)
-                .where(RunNode.run_id == run.id)
-                .order_by(RunNode.rank, RunNode.node_id)
-                .with_for_update(of=RunNode)
-            )
-        )
-        if not nodes or not all(
-            run_node_reports_absent(run, node, now) for node in nodes
-        ):
+        nodes = self._absent_stop_nodes(session, run, admitted, now, lock=True)
+        if nodes is None:
             return None
         ordinal = self._admit_workload_intent(
             session,
@@ -2596,20 +2666,19 @@ class RecipeOperationService:
                 ) from error
             raise
 
-    def _queue_stop_in_session(
+    def _exact_stop_authority(
         self,
         session: Session,
-        *,
         run: RecipeRun,
         admitted: StopPlan,
-        actor: str,
-        request_id: str,
-        workload_intent_ordinal: int | None,
-        now: datetime,
-        job_context: Mapping[str, object] | None = None,
+        *,
         stop_run_generation: int | None = None,
-        profile_target_node_ids: Sequence[str] | None = None,
-    ) -> Job:
+    ) -> tuple[CatalogDocumentRevision, Mapping[str, Mapping[str, object]], set[str]]:
+        """The recipe revision and exact durable Start authority a Stop needs.
+
+        Read-only, so a Stop is refused here before anything is withdrawn.
+        """
+
         installation = session.get(RecipeInstallation, run.installation_id)
         revision = _active_recipe_revision(session, admitted.recipe_revision_id)
         if installation is None or revision is None:
@@ -2635,6 +2704,25 @@ class RecipeOperationService:
             raise RecipeOperationConflict(
                 "recipe Stop target lacks its exact durable Start authority"
             )
+        return revision, exact_stop_payloads, target_ids
+
+    def _queue_stop_in_session(
+        self,
+        session: Session,
+        *,
+        run: RecipeRun,
+        admitted: StopPlan,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None,
+        now: datetime,
+        job_context: Mapping[str, object] | None = None,
+        stop_run_generation: int | None = None,
+        profile_target_node_ids: Sequence[str] | None = None,
+    ) -> Job:
+        revision, exact_stop_payloads, target_ids = self._exact_stop_authority(
+            session, run, admitted, stop_run_generation=stop_run_generation
+        )
         stop_order = _topology_order(revision.document, "stop_order")
         if profile_target_node_ids is not None:
             reachable_roles = {

@@ -800,6 +800,7 @@ def test_withdraw_publishes_empty_generation_before_workload_stop(
     service.publish_run(run_id)
     empty = service.withdraw_run(run_id)
 
+    assert empty is not None
     assert empty.generation == 2
     assert json.loads(applied[-1])["model_list"] == []
     assert publisher.inspect().generation == empty.generation

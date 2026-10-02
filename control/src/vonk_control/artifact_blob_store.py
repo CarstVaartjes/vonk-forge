@@ -217,15 +217,15 @@ class ArtifactBlobStore:
         *,
         batch_limit: int = 1000,
         orphan_grace_seconds: int = 300,
-        reclaimable_sha256: set[str] | None = None,
+        reclaimable_sha256: set[str],
         _reference_fenced: bool = False,
     ) -> dict[str, object]:
         """Remove abandoned temporary/orphan bytes and report referenced gaps.
 
-        ``reclaimable_sha256`` narrows which content-addressed objects may be
-        unlinked. Callers whose reference set may be incomplete after a restore
-        must pass the exact digests they have positive evidence for; ``None``
-        keeps the whole-store sweep used by explicit maintenance.
+        ``reclaimable_sha256`` is required: only those content-addressed
+        objects may be unlinked, and the caller must have positive evidence
+        for each (a reference scan that may be incomplete never proves an
+        object unused). There is deliberately no sweep-everything default.
         """
         if not _reference_fenced:
             with self.reference_reconciliation():
@@ -308,10 +308,7 @@ class ArtifactBlobStore:
                     if digest in referenced_sha256:
                         missing.discard(digest)
                     else:
-                        if (
-                            reclaimable_sha256 is not None
-                            and digest not in reclaimable_sha256
-                        ):
+                        if digest not in reclaimable_sha256:
                             # No positive evidence that this object is unused.
                             continue
                         if time.time() - path.stat().st_mtime < orphan_grace_seconds:

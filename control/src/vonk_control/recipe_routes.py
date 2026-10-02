@@ -6,10 +6,12 @@ import hashlib
 import ipaddress
 import json
 import logging
+import random
 import re
 import threading
+import time
 import uuid
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -66,6 +68,7 @@ _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
 SPARK_SILENT_WITHDRAWAL_SECONDS = 300
 _LOGGER = logging.getLogger(__name__)
 _WITHDRAWAL_ATTEMPTS = 5
+_WITHDRAWAL_BACKOFF_SECONDS = 0.05
 _SQLITE_ROUTE_PUBLICATION_LOCK = threading.RLock()
 # The one in-flight publication claim lives beside the active publication, in
 # its own row, so an observer reading the active publication never sees a
@@ -808,29 +811,94 @@ class RecipeRouteService:
             raise RecipeRecoveryDeadlineError(str(error), run_id=run.id) from error
         return self._recovery_publication(recovery_job)
 
-    def withdraw_run(self, run_id: str) -> LiteLlmGeneration:
+    def withdraw_run(self, run_id: str) -> LiteLlmGeneration | None:
         """Withdraw one run's route; the caller returns once a bundle without it is live."""
 
-        for _attempt in range(_WITHDRAWAL_ATTEMPTS - 1):
-            try:
-                return self._withdraw_run_once(run_id)
-            except RecipeRouteSuperseded:
-                # The run is already withdrawn in the database, so the newer
-                # publication that replaced this one excludes it; publish
-                # again to confirm a bundle without it is live.
-                continue
-        return self._withdraw_run_once(run_id)
+        return self.withdraw_runs(frozenset({run_id}))
 
-    def _withdraw_run_once(self, run_id: str) -> LiteLlmGeneration:
+    def withdraw_runs(self, run_ids: Iterable[str]) -> LiteLlmGeneration | None:
+        """Withdraw these runs' routes with no transaction held by the caller.
+
+        Claim in a short transaction (the withdrawal intent is durable with the
+        claim, and the maintenance pass converges the live bundle on it after a
+        crash), publish and await the acknowledgement with none open, then
+        complete conditionally. Lifecycle paths that must see the route gone
+        before they act call this first and then re-check
+        :meth:`withdrawal_complete_in_session` in their own short transaction.
+
+        The generation is ``None`` when a newer publication, which already
+        excludes these runs through their durable intent, completed the
+        withdrawal for us.
+        """
+
+        run_ids = frozenset(run_ids)
+        for attempt in range(_WITHDRAWAL_ATTEMPTS - 1):
+            try:
+                return self._withdraw_runs_once(run_ids)
+            except RecipeRouteSuperseded:
+                # A newer publication replaced this claim. It was claimed after
+                # our intent committed, so it excludes these runs too: do not
+                # supersede it in turn (two withdrawals would take turns
+                # superseding each other), wait for it, and claim again only
+                # while the bundle still lists them.
+                if self._withdrawn_after_backoff(run_ids, attempt):
+                    return None
+        return self._withdraw_runs_once(run_ids)
+
+    def _withdrawn_after_backoff(self, run_ids: frozenset[str], attempt: int) -> bool:
+        time.sleep(random.uniform(0.0, _WITHDRAWAL_BACKOFF_SECONDS) * (attempt + 1))
         with self.publication_transaction() as session:
-            run = session.get(RecipeRun, run_id, with_for_update=True)
-            if run is None:
-                raise KeyError(run_id)
+            return self.withdrawal_complete_in_session(session, run_ids)
+
+    def _withdraw_runs_once(self, run_ids: frozenset[str]) -> LiteLlmGeneration:
+        with self.publication_transaction() as session:
+            for run_id in sorted(run_ids):
+                if session.get(RecipeRun, run_id, with_for_update=True) is None:
+                    raise KeyError(run_id)
             publication = self._withdrawal_publication(
-                session,
-                self.prepare_withdrawal_in_session(session, frozenset({run_id})),
+                session, self.prepare_withdrawal_in_session(session, run_ids)
             )
         return self._execute(publication)
+
+    def withdrawal_complete_in_session(
+        self, session: Session, run_ids: Iterable[str]
+    ) -> bool:
+        """Whether the live bundle is the one without these runs' routes.
+
+        Call inside :meth:`publication_transaction`. The withdrawal intent on a
+        run says what should be live; this says it is: the completed
+        publication, still the live marker, is the one a candidate without the
+        runs would produce. A withdrawal that was claimed and never executed,
+        or superseded by a publication that has not completed, is not complete.
+        """
+
+        run_ids = frozenset(run_ids)
+        candidate = self.prepare_withdrawal_in_session(session, run_ids).candidate
+        owner = session.get(RoutePublicationOwner, 1)
+        publication = (
+            session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+            if owner is not None and owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
+            else None
+        )
+        if publication is None:
+            # No publication is on record (the real publisher records one with
+            # every activation, so this is only a stand-in publisher or a
+            # database that never published): the runs' own route state is the
+            # only evidence there is.
+            return not any(
+                run.route_state == "published"
+                for run in session.scalars(
+                    select(RecipeRun).where(RecipeRun.id.in_(set(run_ids)))
+                )
+            )
+        assert owner is not None
+        return (
+            publication.state in ("completed", "routes-withdrawn")
+            and publication.generation == owner.owner_generation
+            and publication.plan_digest == candidate.state.digest
+            and self._publisher.active_marker_digest()
+            == publication.activation_marker_digest
+        )
 
     def prepare_withdrawal_in_session(
         self, session: Session, initial_run_ids: frozenset[str]
@@ -854,36 +922,6 @@ class RecipeRouteService:
             excluded=frozenset(excluded),
             initial=initial_run_ids,
         )
-
-    def withdraw_run_in_session(
-        self,
-        session: Session,
-        run_id: str,
-        *,
-        prepared: _RecipeWithdrawal | None = None,
-    ) -> LiteLlmGeneration:
-        run = session.get(RecipeRun, run_id, with_for_update=True)
-        if run is None:
-            raise KeyError(run_id)
-        withdrawal = prepared or self.prepare_withdrawal_in_session(
-            session, frozenset({run_id})
-        )
-        if withdrawal.initial != frozenset({run_id}):
-            raise RecipeRouteError("recipe withdrawal candidate is invalid")
-        return self._publish_withdrawal_in_session(session, withdrawal)
-
-    def _publish_withdrawal_in_session(
-        self, session: Session, withdrawal: _RecipeWithdrawal
-    ) -> LiteLlmGeneration:
-        """Publish a withdrawal inside the caller's transaction.
-
-        Used by lifecycle paths that must withdraw a route in the same
-        transaction as their own state change.
-        """
-
-        generation = self._withdrawal_effect(withdrawal)
-        self._record_withdrawal_in_session(session, withdrawal, generation)
-        return generation
 
     def _withdrawal_effect(self, withdrawal: _RecipeWithdrawal) -> LiteLlmGeneration:
         candidate = withdrawal.candidate
