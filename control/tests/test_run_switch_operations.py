@@ -55,6 +55,10 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import OperationQuery
 from vonk_control.operation_contract import OperationFailureEvidence
+from vonk_control.recipe_build_cancellation import (
+    BuildConsumerError,
+    lock_build_dependency,
+)
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     RecipeBuildService,
@@ -2690,6 +2694,22 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
             _build_receipt_in_session(session, plan)
         reused = session.get(RecipeBuild, build_id)
         assert reused is not None
+
+        def lock_for_successor():
+            return lock_build_dependency(
+                session,
+                recipe_revision_id=successor_id,
+                builder_node_id=reused.builder_node_id,
+                build_input_sha256=reused.build_input_sha256,
+                build_id=reused.id,
+            )
+
+        # Consent is not broadened: an unauthorized successor is still refused,
+        # with the reason that names the missing authorization.
+        with pytest.raises(BuildConsumerError) as refused:
+            lock_for_successor()
+        assert refused.value.code == "build.consumer_invalid"
+        assert "not authorized" in str(refused.value)
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=successor_id,
@@ -2707,6 +2727,9 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
         session.flush()
         receipt = _build_receipt_in_session(session, plan)
         assert reused.recipe_revision_id != successor_id
+        # The authorized successor accepts the reused build as its own
+        # dependency; its original owner's revision is not a changed identity.
+        assert lock_for_successor() is reused
     assert receipt["build_id"] == build_id
     assert receipt["state"] == "succeeded"
 
@@ -3064,6 +3087,68 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
             request_key=request_key,
             progress=progress,
         )
+
+
+def test_a_refusal_that_survives_a_replan_retries_in_place_and_keeps_counting(
+    tmp_path: Path,
+) -> None:
+    """A fresh plan that meets the same refusal again must not loop silently.
+
+    Re-planning forgets the attempt count, so a refusal that planning cannot
+    remove used to cycle fail, re-plan, fail forever and never reached the
+    retry count that surfaces a named stall on the profile and in Fleet.
+    """
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    now = [NOW]
+    service = _service(
+        sessions, NOW, lifecycle, RecordingArtifactExecutor(), phase_executor=None
+    )
+    service._clock = lambda: now[0]
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    assert plan.allowed
+    parent = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            request_key=str(uuid.uuid4()),
+            plan_digest=plan.plan_digest,
+        ),
+        actor="admin",
+    )
+    reason = "RuntimeError: current recipe is not authorized for OCI build receipt"
+
+    def refuse() -> dict[str, object]:
+        service._fail(
+            parent.operation_id,
+            reason,
+            retryable=True,
+            replan=True,
+            checkpoint=(0, 0, None),
+        )
+        with sessions() as session:
+            job = session.get(Job, parent.operation_id)
+            assert job is not None and isinstance(job.result, dict)
+            return dict(job.result)
+
+    first = refuse()
+    assert first["force_replan"] is True
+    assert first["retry_attempt"] == 2
+    now[0] = datetime.fromisoformat(str(first["observation_due_at"])) + timedelta(
+        seconds=1
+    )
+    assert service._refresh_blocked_plan(parent.operation_id, now[0]) is True
+
+    # The same refusal on the fresh plan is retried in place, and counted.
+    second = refuse()
+    assert second["force_replan"] is False
+    assert second["retry_attempt"] == 2
+    assert second["retry_reason"] == reason
+    third = refuse()
+    assert third["force_replan"] is False
+    assert third["retry_attempt"] == 3
 
 
 def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(

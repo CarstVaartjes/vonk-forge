@@ -20,7 +20,13 @@ from .fleet_profile_contract import (
     FleetProfilePreview,
     profile_switch_child_request_key,
 )
-from .models import AgentNode, FleetProfileApplication, Job, RecipeBuild
+from .models import (
+    AgentNode,
+    FleetProfileApplication,
+    Job,
+    RecipeBuild,
+    RuntimeImageAuthorization,
+)
 from .recipe_availability_intent import read_availability_intent
 from .recipe_lifecycle_contract import (
     RecipeOperationCancellationResult,
@@ -58,6 +64,38 @@ class BuildConsumerError(RuntimeError):
         self.code = code
         self.retryable = retryable
         super().__init__(detail)
+
+
+def build_serves_revision(
+    session: Session, build: RecipeBuild, recipe_revision_id: str | None
+) -> bool:
+    """Whether ``recipe_revision_id`` may consume ``build``'s verified artifact.
+
+    A build keeps the revision that produced it. A successor whose executable
+    inputs are unchanged (a notes-only edit, a dropped option) reuses it through
+    its own current authorization of that exact archive. One predicate owns the
+    question for every consumer check, so a reused build is never mistaken for
+    a changed identity.
+    """
+
+    if recipe_revision_id is None:
+        return False
+    if build.recipe_revision_id == recipe_revision_id:
+        return True
+    return (
+        build.oci_layout_sha256 is not None
+        and session.scalar(
+            select(RuntimeImageAuthorization.id)
+            .where(
+                RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id,
+                RuntimeImageAuthorization.state == "authorized",
+                RuntimeImageAuthorization.build_id == build.id,
+                RuntimeImageAuthorization.oci_archive_sha256 == build.oci_layout_sha256,
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def needs_container_build(plan: RunSwitchPlan, phase_index: int = 0) -> bool:
@@ -201,12 +239,16 @@ def lock_build_dependency(
     if build is None:
         return None
     if (
-        build.recipe_revision_id != recipe_revision_id
-        or build.builder_node_id != builder_node_id
+        build.builder_node_id != builder_node_id
         or build.build_input_sha256 != build_input_sha256
     ):
         raise BuildConsumerError(
             "build.consumer_invalid", "accepted build consumer identity changed"
+        )
+    if not build_serves_revision(session, build, recipe_revision_id):
+        raise BuildConsumerError(
+            "build.consumer_invalid",
+            "build is not authorized for the consuming recipe revision",
         )
     # Detachment removes demand; pending cleanup must not prevent it. New
     # consumers retain the default refusal and cannot join a cancelling child.
@@ -340,7 +382,7 @@ def _profile_consumer(
     for assignment, build_id in _profile_build_dependencies(review):
         if build_id != build.id:
             continue
-        if assignment.recipe_revision_id != build.recipe_revision_id:
+        if not build_serves_revision(session, build, assignment.recipe_revision_id):
             raise ValueError("profile build consumer revision changed")
         adapter = progress.switch_adapter
         if adapter is None:
@@ -411,7 +453,7 @@ def _run_switch_consumer(session: Session, parent: Job, build: RecipeBuild) -> b
     if any(node.workload_intent_ordinal != ordinal for node in nodes):
         return False
     if (
-        plan.recipe_revision_id != build.recipe_revision_id
+        not build_serves_revision(session, build, plan.recipe_revision_id)
         or plan.build.build_id != build.id
         or plan.recipe_build_id not in (None, build.id)
         or plan.build.build_input_sha256 != build.build_input_sha256

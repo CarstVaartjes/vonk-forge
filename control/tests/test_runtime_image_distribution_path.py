@@ -270,3 +270,59 @@ def test_archive_gate_requires_the_stored_receipt_even_when_authorized(
     (tmp_path / "image-cache" / f"{ARCHIVE_DIGEST}.receipt.json").unlink()
     with pytest.raises(RuntimeError, match="receipt authority"):
         executor._archive(plan, **call)
+
+
+def test_archive_gate_accepts_an_authorized_image_through_a_sibling_build_and_role(
+    tmp_path: Path,
+) -> None:
+    """The revision is authorized for the archive, whoever first produced it.
+
+    A second build row can yield identical bytes, and the execution key of the
+    phase result may differ from the key that recorded the grant, or be absent
+    when the plan has no runtime-image phase. None of them makes the revision
+    unauthorized; refusing here repeated the phase forever.
+    """
+
+    executor, plan, receipt, sessions = _archive_gate_service(tmp_path)
+    sibling_build = "00000000-0000-4000-8000-0000000000bb"
+    with Session(sessions.kw["bind"]) as session:
+        _add_build(
+            session,
+            "gate-revision",
+            build_id=sibling_build,
+            builder_node_id="other-builder",
+        )
+        session.commit()
+    image = executor._archive(
+        plan,
+        build_id=sibling_build,
+        image_digest=BUILT_IMAGE_DIGEST,
+        layout_digest=ARCHIVE_DIGEST,
+        image_bytes=receipt.image_bytes,
+        effective_execution_key="a" * 64,
+    )
+    assert image.address == ARCHIVE_DIGEST
+    # With no runtime-image phase in the plan (the Sparks already hold the
+    # image) no phase result carries an execution key at all.
+    keyless = executor._archive(
+        plan,
+        build_id=BUILD_ID,
+        image_digest=BUILT_IMAGE_DIGEST,
+        layout_digest=ARCHIVE_DIGEST,
+        image_bytes=receipt.image_bytes,
+        effective_execution_key=None,
+    )
+    assert keyless.address == ARCHIVE_DIGEST
+    # Another revision's grant is still not this plan's.
+    with Session(sessions.kw["bind"]) as session:
+        session.query(RuntimeImageAuthorization).delete(synchronize_session=False)
+        session.commit()
+    with pytest.raises(RuntimeError, match="not authorized"):
+        executor._archive(
+            plan,
+            build_id=sibling_build,
+            image_digest=BUILT_IMAGE_DIGEST,
+            layout_digest=ARCHIVE_DIGEST,
+            image_bytes=receipt.image_bytes,
+            effective_execution_key="a" * 64,
+        )

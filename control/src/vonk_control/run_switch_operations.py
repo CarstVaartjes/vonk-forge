@@ -128,6 +128,7 @@ from .profile_capacity import (
 )
 from .recipe_build_cancellation import (
     BuildConsumerError,
+    build_serves_revision,
     lock_run_switch_build_dependency,
 )
 from .recipe_builds import RecipeBuildAdmissionBusy, RecipeBuildPlan
@@ -6727,7 +6728,8 @@ class RunSwitchOperationService:
                         "force_replan": False,
                     }
                 )
-                progress.pop("retry_reason", None)
+                # The last refusal stays on record: if a fresh plan meets the
+                # same refusal again, ``_fail`` retries in place and counts it.
                 progress.pop("failed_phase", None)
                 current.state = "queued"
                 current.status_reason = None
@@ -8092,8 +8094,13 @@ class RunSwitchOperationService:
                 # live child or changes the exact workload plan.
                 # A re-plan restarts from the first phase, so it is only used
                 # before a Start could have launched this intent's workload.
+                # A cause that a fresh plan did not remove is not planning
+                # drift: the same refusal after a re-plan retries in place, so
+                # the attempts accumulate and surface as a named stall instead
+                # of replanning (and forgetting its attempts) forever.
                 progress["force_replan"] = (
                     replan
+                    and progress.get("retry_reason") != reason[:512]
                     and "start"
                     not in require_sequence(
                         progress.get("completed_phases", []), "completed phases"
@@ -8606,35 +8613,6 @@ def _require_profile_runtime_image(
         )
 
 
-def _build_serves_revision(
-    session: Session, build: RecipeBuild, revision_id: str | None
-) -> bool:
-    """Whether ``revision_id`` may consume ``build``'s verified artifact.
-
-    A build keeps the revision that produced it. A successor whose executable
-    inputs are unchanged, for instance after a title-only edit, reuses it
-    through its own current authorization for that exact build archive.
-    """
-
-    if revision_id is None:
-        return False
-    if build.recipe_revision_id == revision_id:
-        return True
-    return (
-        session.scalar(
-            select(RuntimeImageAuthorization.id)
-            .where(
-                RuntimeImageAuthorization.recipe_revision_id == revision_id,
-                RuntimeImageAuthorization.state == "authorized",
-                RuntimeImageAuthorization.build_id == build.id,
-                RuntimeImageAuthorization.oci_archive_sha256 == build.oci_layout_sha256,
-            )
-            .limit(1)
-        )
-        is not None
-    )
-
-
 def _build_receipt_in_session(
     session: Session,
     plan: RunSwitchPlan,
@@ -8651,7 +8629,7 @@ def _build_receipt_in_session(
     build = session.get(RecipeBuild, build_id)
     if (
         build is None
-        or not _build_serves_revision(session, build, plan.recipe_revision_id)
+        or not build_serves_revision(session, build, plan.recipe_revision_id)
         or build.state != "succeeded"
         or build.build_input_sha256 != plan.build.build_input_sha256
         or not _is_oci_digest(build.image_digest)

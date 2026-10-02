@@ -6649,7 +6649,18 @@ class FleetProfileService:
                     )
                 cancellation = previous
             else:
-                if row.state not in {"queued", "running", "waiting-for-operator"}:
+                # A failed application the Controller will retry by itself is
+                # shown as queued, so it must be cancellable like any queued
+                # one: cancelling stops that retry, and a child it still owns is
+                # reconciled by the same fence and cancellation as for a live
+                # application.
+                retrying_failure = row.state == "failed" and self._recovery_wanted(
+                    session, row, progress
+                )
+                if (
+                    row.state not in {"queued", "running", "waiting-for-operator"}
+                    and not retrying_failure
+                ):
                     raise FleetProfileConflict("Profile application is not cancellable")
                 ordinal = progress.workload_intent_ordinal
                 if ordinal is None and (
@@ -8046,7 +8057,11 @@ class FleetProfileService:
             except (FleetProfileConflict, ValidationError, TypeError, ValueError):
                 retrying = False
             if retrying:
-                return "queued", progress.retry_due_at
+                # Automatic recovery always has a next attempt; name it even
+                # when the failure recorded no explicit due time.
+                return "queued", progress.retry_due_at or (
+                    _aware(row.updated_at) + _cache_recovery_delay(progress.attempt)
+                )
             return state, None
         if state == "queued" and progress.admission_pending:
             return state, progress.admission_retry_at

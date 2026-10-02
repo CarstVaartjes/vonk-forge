@@ -74,12 +74,18 @@ def _projection(recipe: RecipeDefinition) -> dict[str, object]:
     return value
 
 
-def _add_build(session: Session, revision_id: str, *, build_id: str = BUILD_ID) -> None:
+def _add_build(
+    session: Session,
+    revision_id: str,
+    *,
+    build_id: str = BUILD_ID,
+    builder_node_id: str = "builder",
+) -> None:
     session.add(
         RecipeBuild(
             id=build_id,
             recipe_revision_id=revision_id,
-            builder_node_id="builder",
+            builder_node_id=builder_node_id,
             source_bundle_sha256="c" * 64,
             build_input_sha256="d" * 64,
             state="succeeded",
