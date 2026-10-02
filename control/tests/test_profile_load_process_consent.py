@@ -92,7 +92,7 @@ def test_installed_load_requires_terminal_consent_and_never_mutates_on_abort(
     else:
         assert state.calls == [("POST", "/api/profile/1/preview", None)]
         if mode == "eof":
-            assert "action was not confirmed" in stderr
+            assert "Not confirmed" in stderr
         else:
             assert "command interrupted" in stderr
 

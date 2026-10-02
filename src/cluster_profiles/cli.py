@@ -46,7 +46,12 @@ from .control_client import (
     ControlTransportError,
     ControlUnavailable,
 )
-from .controller_cli import ControllerClient, add_controller_commands, run_controller
+from .controller_cli import (
+    ActionDeclined,
+    ControllerClient,
+    add_controller_commands,
+    run_controller,
+)
 
 _MAX_TEXT_CHARS = 1_024
 _SENSITIVE_ASSIGNMENT = re.compile(
@@ -253,10 +258,12 @@ def _control_error(
     result = {key: value for key, value in result.items() if value is not None}
     request_key = getattr(args, "request_key", None) if args is not None else None
     profile_load_not_submitted = (
-        getattr(args, "command", None) == "profile"
-        and getattr(args, "profile_action", None) == "load"
-        and not isinstance(submission, Submission)
-    )
+        getattr(args, "command", None) == "run"
+        or (
+            getattr(args, "command", None) == "profile"
+            and getattr(args, "profile_action", None) == "load"
+        )
+    ) and not isinstance(submission, Submission)
     if isinstance(request_key, str) and request_key and not profile_load_not_submitted:
         result["request_key"] = request_key
         noun = getattr(args, "command", None)
@@ -315,7 +322,7 @@ def _control_error(
                     "--follow",
                 ]
             )
-        elif noun == "profile":
+        elif noun in {"profile", "run"}:
             reconcile_operation = shlex.join(
                 [
                     "vonkctl",
@@ -830,6 +837,17 @@ def _main(
         return outcome.exit_code
     except BrokenPipeError:
         raise
+    except ActionDeclined as error:
+        _emit(
+            {
+                "error": str(error),
+                "error_type": "declined",
+                "recovery_actions": list(error.next_steps),
+            },
+            args,
+            error=True,
+        )
+        return 2
     except EnrollmentDeliveryError as error:
         _emit(error.document, args, error=True)
         return 130 if error.interrupted else 2

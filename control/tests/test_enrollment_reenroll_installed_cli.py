@@ -191,7 +191,7 @@ def test_installed_reenroll_requires_review_before_mutating_the_owner(
             assert not stdout
             assert _review_text() in stderr
             if mode == "eof":
-                assert "action was not confirmed" in stderr
+                assert "Not confirmed" in stderr
 
         assert peer.calls == [("GET", "/api/fleet/Atlas", None)]
         assert not destination.exists()

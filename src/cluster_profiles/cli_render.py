@@ -1207,6 +1207,21 @@ def _cache_removal_review(payload: Mapping[str, object]) -> None:
         _actions(blocker.get("recovery_actions"))
 
 
+def _run_result(payload: Mapping[str, object]) -> None:
+    """A finished run is its recipe, its application, and where it is served."""
+
+    application = payload.get("application")
+    if not isinstance(application, Mapping):
+        # An interrupted or timed-out run reports the application it was following.
+        _application(payload)
+        return
+    _field("Recipe", payload.get("recipe"))
+    _application(application)
+    endpoints = payload.get("endpoints")
+    if isinstance(endpoints, Mapping):
+        _profile_endpoints(endpoints)
+
+
 def _application(payload: Mapping[str, object]) -> None:
     _field("Application", payload.get("id"))
     _field("State", payload.get("state"))
@@ -1787,6 +1802,8 @@ def render_payload(
             _operation(payload, noun)
     elif noun == "key":
         _gateway_keys(payload, action)
+    elif noun == "run":
+        _run_result(payload)
     elif noun == "profile":
         if action == "endpoint":
             _profile_endpoints(payload)
