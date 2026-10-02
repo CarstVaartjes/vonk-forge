@@ -45,6 +45,18 @@ LAYOUT_DIRECTORY = "oci"
 OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
 STORE_BUSY = "image_store.busy"
 REFERENCE_SCAN_FAILED = "image_store.reference_scan_failed"
+#: A manifest a receipt names exists but its content is damaged (not a
+#: permission or I/O fault): ``OciImageStoreError.address`` names it.
+REFERENCED_MANIFEST_DAMAGED = "image_store.referenced_manifest_damaged"
+#: Codes of a stored manifest whose content is damaged or not an image this
+#: store holds. Reading it as absent is cache loss; an OS error is not.
+DAMAGED_MANIFEST_CODES = frozenset(
+    {
+        "image_store.manifest_corrupt",
+        "image_store.manifest_invalid",
+        "image_store.manifest_unsupported",
+    }
+)
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COPY_TIMEOUT_SECONDS = 6 * 60 * 60
 _COPY_RETRIES = 3
@@ -54,9 +66,10 @@ _IMPORT_REFERENCE = "import"
 
 
 class OciImageStoreError(RuntimeError):
-    def __init__(self, code: str, detail: str) -> None:
+    def __init__(self, code: str, detail: str, *, address: str | None = None) -> None:
         self.code = code
         self.detail = detail[:512]
+        self.address = address
         super().__init__(self.detail)
 
 
@@ -115,7 +128,12 @@ class OciImageStore:
             manifest = json.loads(payload)
         except FileNotFoundError:
             return None
-        except (OSError, ValueError) as error:
+        except ValueError as error:
+            raise OciImageStoreError(
+                "image_store.manifest_corrupt",
+                f"stored manifest is damaged: {error}",
+            ) from error
+        except OSError as error:
             raise OciImageStoreError(
                 "image_store.manifest_unreadable",
                 f"stored manifest is unreadable: {error}",
@@ -278,11 +296,22 @@ class OciImageStore:
             image = _stored_image(digest, manifest)
         except FileNotFoundError:
             return set()
-        except (OSError, ValueError, OciImageStoreError) as error:
+        except (ValueError, OciImageStoreError) as error:
+            damaged = (
+                isinstance(error, ValueError) or error.code in DAMAGED_MANIFEST_CODES
+            )
+            raise OciImageStoreError(
+                REFERENCED_MANIFEST_DAMAGED if damaged else REFERENCE_SCAN_FAILED,
+                f"manifest {address} is referenced but cannot be read, "
+                f"so nothing was removed: {type(error).__name__}: {error}",
+                address=address,
+            ) from error
+        except OSError as error:
             raise OciImageStoreError(
                 REFERENCE_SCAN_FAILED,
                 f"manifest {address} is referenced but cannot be read, "
                 f"so nothing was removed: {type(error).__name__}: {error}",
+                address=address,
             ) from error
         return {item.removeprefix("sha256:") for item in image.blob_digests}
 
@@ -350,9 +379,11 @@ def _stored_image(manifest_digest: str, manifest: object) -> StoredImage:
 
 
 __all__ = [
+    "DAMAGED_MANIFEST_CODES",
     "IMAGE_CACHE_DIRECTORY",
     "LAYOUT_DIRECTORY",
     "OCI_MANIFEST",
+    "REFERENCED_MANIFEST_DAMAGED",
     "REFERENCE_SCAN_FAILED",
     "STORE_BUSY",
     "Collection",

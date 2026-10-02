@@ -318,7 +318,11 @@ with no transaction open, and the Stop (or recovery) is dispatched in its own
 short transaction only while the live bundle is still the one without the run
 (a competing publication that lists it again sends the dispatch back to
 withdraw). A crash in between resumes from the durable withdrawal intent; the
-maintenance pass also converges the bundle on it. The coordination scanner
+maintenance pass also converges the bundle on it. A Stop's withdrawal is
+shown with the run ("route withdrawn for a Stop that is not dispatched yet"); if
+no Stop follows within five minutes the Controller restores the route itself,
+and a recovery's withdrawal is restored by the rank-health rule once the ranks
+are healthy. The coordination scanner
 refuses a route publication reachable from a transaction.
 
 ```mermaid

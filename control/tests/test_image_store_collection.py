@@ -19,7 +19,10 @@ from vonk_control.models import (
     Base,
     RecipeBuild,
 )
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    RuntimeImagePreparationError,
+)
 
 from .runtime_image_fixtures import place_test_image
 
@@ -186,33 +189,98 @@ def _damage_manifest(storage, address: str, how: str, monkeypatch) -> None:
         monkeypatch.setattr(Path, "read_bytes", denied)
 
 
-@pytest.mark.parametrize(
-    "how", ["truncated", "garbage", "unknown-schema", "permission-denied"]
-)
 def test_an_unreadable_manifest_deletes_nothing_until_it_can_be_read(
-    system, monkeypatch, how: str
+    system, monkeypatch
 ) -> None:
-    # A failed scan never proves an object unused: the published image's
-    # manifest is the only record of which blobs it needs.
+    # A permission or I/O fault is not a verdict on the image: the published
+    # image's manifest is the only record of which blobs it needs.
     _sessions, storage, collector = system
     published = _image(storage, "a" * 64)
     (storage.root / f"{'a' * 64}.receipt.json").write_text("{}")
     retired = _image(storage, "b" * 64)
     _age(*_blobs(storage))
     manifest = storage.layout.blob_path(f"sha256:{'a' * 64}")
-    intact = manifest.read_bytes()
-    _damage_manifest(storage, "a" * 64, how, monkeypatch)
+    _damage_manifest(storage, "a" * 64, "permission-denied", monkeypatch)
 
     assert collector.collect() is None
     assert published | retired <= _blobs(storage)
+    assert (storage.root / f"{'a' * 64}.receipt.json").exists()
 
     monkeypatch.undo()
-    manifest.write_bytes(intact)
+    result = collector.collect()
+
+    assert manifest.exists() and result is not None
+    assert _blobs(storage) == published
+    assert result.blobs_removed == len(retired - published)
+
+
+@pytest.mark.parametrize("how", ["truncated", "garbage", "unknown-schema"])
+def test_a_damaged_receipted_manifest_is_evicted_and_cleanup_resumes(
+    system, monkeypatch, how: str
+) -> None:
+    # Damaged content is a verdict: the image cannot be served, so its receipt
+    # (derived metadata) must not hold the whole store's cleanup back forever.
+    # The image is stored again when a request next needs it.
+    _sessions, storage, collector = system
+    _image(storage, "a" * 64)
+    receipt = storage.root / f"{'a' * 64}.receipt.json"
+    receipt.write_text("{}")
+    _image(storage, "b" * 64)
+    _damage_manifest(storage, "a" * 64, how, monkeypatch)
+    _age(*_blobs(storage))
+
     result = collector.collect()
 
     assert result is not None
-    assert _blobs(storage) == published
-    assert result.blobs_removed == len(retired - published)
+    assert not receipt.exists()
+    assert _blobs(storage) == set()
+
+
+def test_a_damaged_manifest_an_active_operation_names_is_not_evicted(system) -> None:
+    sessions, storage, collector = system
+    _image(storage, "a" * 64)
+    receipt = storage.root / f"{'a' * 64}.receipt.json"
+    receipt.write_text("{}")
+    retired = _image(storage, "b" * 64)
+    _age(*_blobs(storage))
+    storage.layout.blob_path(f"sha256:{'a' * 64}").write_bytes(b"\xff not json")
+    with sessions.begin() as session:
+        session.add(
+            ArtifactDistributionAssignment(
+                plan_digest="f" * 64,
+                node_id=NODE,
+                generation=1,
+                expires_at=NOW + timedelta(hours=1),
+                model_artifact_set_sha256="d" * 64,
+                objects=[],
+                oci_image_digest="sha256:" + "a" * 64,
+                oci_image_config_digest="sha256:" + "9" * 64,
+                oci_archive_sha256="a" * 64,
+                state="active",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    assert collector.collect() is None
+
+    assert receipt.exists()
+    assert retired <= _blobs(storage)
+
+
+def test_a_damaged_manifest_reads_as_cache_loss_so_the_next_request_prepares_it(
+    system,
+) -> None:
+    # Catches a damaged manifest surfacing as a retryable "unavailable" error
+    # that no preparation ever repairs: it must take the cache-miss path.
+    _sessions, storage, _collector = system
+    _image(storage, "a" * 64)
+    storage.layout.blob_path(f"sha256:{'a' * 64}").write_bytes(b'{"mediaType": "tr')
+
+    assert storage.build_archive_available("a" * 64, 1024) is False
+    with pytest.raises(RuntimeImagePreparationError) as missing:
+        storage.existing_archive("a" * 64, 1024)
+    assert missing.value.code == "runtime_image.cache_missing"
 
 
 def test_unlistable_receipts_delete_nothing(system) -> None:

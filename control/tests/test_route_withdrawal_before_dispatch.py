@@ -16,10 +16,16 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
-from vonk_control.models import AgentPresence, Job, RecipeRun
+from vonk_control.models import AgentPresence, Job, RecipeRun, RunNode
 from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import RecipeOperationService
-from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
+from vonk_control.recipe_routes import (
+    STOP_DISPATCH_GRACE,
+    STOP_WITHDRAWAL_PENDING,
+    AtomicRecipeRoutePublisher,
+    RecipeRouteService,
+)
 from vonk_control.route_runtime import (
     ActivationMarker,
     AtomicRouteBundlePublisher,
@@ -184,9 +190,9 @@ def test_stop_withdraws_again_when_a_competing_publication_lists_the_run(
     withdraw = routes.withdraw_run
     calls: list[str] = []
 
-    def withdraw_then_lose_the_race(run_id: str):
+    def withdraw_then_lose_the_race(run_id: str, **kwargs):
         calls.append(run_id)
-        generation = withdraw(run_id)
+        generation = withdraw(run_id, **kwargs)
         if len(calls) == 1:
             routes.publish_run(run_id)  # a competing change lists the run again
             assert _aliases(root) == {"qwen"}
@@ -323,3 +329,52 @@ def test_recovery_killed_while_withdrawing_resumes_from_the_claim(
     recovery.tick()
 
     assert _aliases(root) == set()
+
+
+def test_a_stop_never_retried_gets_its_route_back_without_a_client(
+    tmp_path: Path,
+) -> None:
+    sessions, service, routes, _queue, run, gate, root, _nodes = _world(tmp_path)
+    plan = service.preview_stop(run.owner_id)
+    gate.arm()
+    gate.die = True
+    gate.release.set()
+    with pytest.raises(_Crash):
+        service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="g" * 36,
+        )
+    # The client is gone. The run still runs and says why its route is withdrawn.
+    with sessions() as session:
+        stored = _required(session.get(RecipeRun, run.owner_id))
+        assert (stored.state, stored.route_state) == ("running", "withdrawn")
+        assert stored.route_error == STOP_WITHDRAWAL_PENDING
+
+    # Within the grace period the Controller leaves the Stop its chance.
+    routes._clock = lambda: NOW + timedelta(minutes=1)
+    routes.maintain()
+    with sessions() as session:
+        assert (
+            _required(session.get(RecipeRun, run.owner_id)).route_error
+            == STOP_WITHDRAWAL_PENDING
+        )
+
+    later = NOW + STOP_DISPATCH_GRACE + timedelta(minutes=1)
+    routes._clock = lambda: later
+    with sessions.begin() as session:  # the Sparks keep reporting meanwhile
+        for node in session.scalars(
+            select(RunNode).where(RunNode.run_id == run.owner_id)
+        ):
+            node.updated_at = later
+    worker = RecipeOperationWorker(sessions, routes, clock=lambda: later)
+    for _ in range(3):
+        worker.tick()
+
+    assert _aliases(root) == {"qwen"}
+    with sessions() as session:
+        stored = _required(session.get(RecipeRun, run.owner_id))
+        assert (stored.state, stored.route_state) == ("running", "published")
+        assert stored.route_error is None
+    assert _stop_jobs(sessions) == []

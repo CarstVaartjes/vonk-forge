@@ -512,16 +512,24 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
     assert recipes[0].local.running_on == [node_id]
 
 
-def test_a_stored_image_with_an_unreadable_manifest_needs_attention_not_a_cache_miss(
-    tmp_path: Path,
+def test_a_stored_image_that_cannot_be_read_is_named_not_a_cache_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The receipted image's manifest is damaged: the bytes are not "absent", so
-    # the library must not read that as an ordinary cache miss that a download
-    # would silently fix; it names the damaged image and the Library still loads.
+    # A permission or I/O fault on a receipted image is not absence: the
+    # library names the recipe's image instead of failing the whole listing or
+    # reading as a cache miss that a download would not repair.
     address = "e" * 64
     storage = FilesystemRuntimeImageStorage(tmp_path / "artifacts")
     place_test_image(storage, address, 1)
-    storage.layout.blob_path(f"sha256:{address}").write_bytes(b'{"mediaType": "tr')
+    manifest = storage.layout.blob_path(f"sha256:{address}")
+    read_bytes = Path.read_bytes
+
+    def denied(path: Path) -> bytes:
+        if path == manifest:
+            raise PermissionError(13, "Permission denied", str(path))
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", denied)
     projection, _node_id, _recipe_digest, _old_digest = _local_projection_world(
         tmp_path,
         oci_layout_sha256=address,
@@ -537,6 +545,25 @@ def test_a_stored_image_with_an_unreadable_manifest_needs_attention_not_a_cache_
     assert recipes[0].local.preparation.phase == (
         "image unreadable: runtime_image.archive_unavailable"
     )
+
+
+def test_a_stored_image_with_a_damaged_manifest_reads_as_not_cached(
+    tmp_path: Path,
+) -> None:
+    # Damaged content is cache loss: the next preparation stores it again.
+    address = "e" * 64
+    storage = FilesystemRuntimeImageStorage(tmp_path / "artifacts")
+    place_test_image(storage, address, 1)
+    storage.layout.blob_path(f"sha256:{address}").write_bytes(b'{"mediaType": "tr')
+    projection, _node_id, _recipe_digest, _old_digest = _local_projection_world(
+        tmp_path,
+        oci_layout_sha256=address,
+        runtime_archive_available=storage.build_archive_available,
+    )
+
+    recipes = projection.recipe_library(cached=True).recipes
+
+    assert [item.local.controller for item in recipes] == ["not_cached"]
 
 
 def _local_projection_world(
