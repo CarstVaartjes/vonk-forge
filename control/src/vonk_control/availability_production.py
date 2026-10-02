@@ -75,6 +75,20 @@ from .runtime_image_preparation import (
 )
 from .strict_json import read_stored_model
 
+# An availability operation whose image is the catalog's prebuilt one: the
+# Controller pulls it, so it holds no Spark and takes no builder slot while it
+# waits for its model or its pull.
+PREBUILT_PULL_KEY = "prebuilt_pull"
+
+
+def _pulls_prebuilt_image(job: Job) -> bool:
+    """Whether a build job is a Controller pull of a prebuilt image."""
+
+    return isinstance(job.payload, Mapping) and isinstance(
+        job.payload.get("prebuilt_image"), str
+    )
+
+
 _BUILDER_ADMISSION_CODES = frozenset(
     {
         "build.node_unknown",
@@ -577,6 +591,7 @@ def build_recipe_image_availability(
                         if candidate.architecture == "linux-arm64"
                     )
                     candidate_ids = tuple(candidate.node_id for candidate in candidates)
+                    occupied: list[str] = []
 
                     def work_for(node_id: str, jobs: tuple[Job, ...]) -> int:
                         return sum(
@@ -585,10 +600,12 @@ def build_recipe_image_availability(
                             if (
                                 job.kind == "recipe.build.v1"
                                 and node_id in (job.targets or ())
+                                and not _pulls_prebuilt_image(job)
                             )
                             or (
                                 job.kind == "recipe.image.availability.v2"
                                 and isinstance(job.payload, Mapping)
+                                and job.payload.get(PREBUILT_PULL_KEY) is not True
                                 and not isinstance(
                                     job.payload.get("image_result"), Mapping
                                 )
@@ -642,9 +659,16 @@ def build_recipe_image_availability(
                                 "recipe_image.builder_occupied",
                                 "already building or preparing another image",
                             )
+                            occupied.append(candidate_id)
                             continue
                         selected_candidate = candidate_id
                         break
+                    if selected_candidate is None and occupied:
+                        # The catalog's prebuilt image is pulled by the
+                        # Controller and needs no free Spark, so an occupied
+                        # Spark is still a candidate: the plan decides below,
+                        # and a Spark build still waits for a free builder.
+                        selected_candidate = occupied[0]
                     if selected_candidate is None:
                         raise _capacity_wait(skipped, candidate_ids)
         while selected_plan is None and selected_candidate is not None:
@@ -683,6 +707,7 @@ def build_recipe_image_availability(
             planned_decision = _recorded_decision(prepared.policy_report)
             if planned_decision is not None and not planned_decision.used:
                 prebuilt_unused = planned_decision
+            pulls_prebuilt = planned_decision is not None and planned_decision.used
             with sessions.begin() as session:
                 try:
                     acquire_admission_keys(
@@ -749,7 +774,7 @@ def build_recipe_image_availability(
                         )
                     )
                 )
-                if work_for(candidate_id, current_jobs) > 0:
+                if work_for(candidate_id, current_jobs) > 0 and not pulls_prebuilt:
                     skipped[candidate_id] = (
                         "recipe_image.builder_occupied",
                         "already building or preparing another image",
@@ -818,6 +843,7 @@ def build_recipe_image_availability(
                     "runtime": assigned_runtime,
                     "build_input_sha256": build_input_sha256,
                     "identity_key": build_input_sha256,
+                    PREBUILT_PULL_KEY: pulls_prebuilt,
                 }
                 parent.updated_at = clock()
         if builder_node_id is None:

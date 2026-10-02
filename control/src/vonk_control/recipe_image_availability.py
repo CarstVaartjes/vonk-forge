@@ -37,6 +37,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
+from .admission_locking import is_admission_contention
 from .artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -215,8 +216,16 @@ _INTEGRITY_FAILURE_CODES = frozenset(
         "runtime_image.evidence_invalid",
     }
 )
+# Another transaction held a record this one needed for an instant (a model
+# download writing its progress, say). That is a wait to retry, never a failure
+# and never a raw database message.
+DATABASE_BUSY_CODE = "recipe_image.database_busy"
+DATABASE_BUSY_DETAIL = (
+    "Another operation was changing the same record; this retries automatically."
+)
 _DEPENDENCY_WAIT_CODES = frozenset(
     {
+        DATABASE_BUSY_CODE,
         "recipe_image.build_capacity_wait",
         "runtime_image.transfer_contended",
         "runtime_image.publication_contended",
@@ -582,6 +591,40 @@ def _retryable(error: BaseException) -> bool:
     )
 
 
+def _is_database_busy(error: BaseException | None) -> bool:
+    """Whether PostgreSQL refused a lock this error (or its cause) waited for."""
+
+    seen = 0
+    while error is not None and seen < 8:
+        if isinstance(error, DBAPIError) and is_admission_contention(error):
+            return True
+        # Only an explicit cause: __context__ is whatever was being handled
+        # when this was raised, which says nothing about this failure.
+        error = error.__cause__
+        seen += 1
+    return False
+
+
+def _model_queue_error(
+    error: BaseException, action: str
+) -> RecipeImageAvailabilityError:
+    """The availability error for a ModelCache call that raised, with its cause."""
+
+    if _is_database_busy(error):
+        return RecipeImageAvailabilityError(
+            DATABASE_BUSY_CODE,
+            DATABASE_BUSY_DETAIL,
+            retryable=True,
+            recovery_actions=("retry",),
+        )
+    return RecipeImageAvailabilityError(
+        "recipe_image.model_cache_unavailable",
+        f"{action} ({_failure_detail(error)[:200]})",
+        retryable=True,
+        recovery_actions=("retry",),
+    )
+
+
 def _failure_code(error: BaseException) -> str:
     """Return the stable operation failure code for an exception.
 
@@ -593,6 +636,8 @@ def _failure_code(error: BaseException) -> str:
     layer raises is therefore reported by its exception class name.
     """
 
+    if isinstance(error, DBAPIError) and _is_database_busy(error):
+        return DATABASE_BUSY_CODE
     code = getattr(error, "code", None)
     if isinstance(error, SQLAlchemyError) or not isinstance(code, str) or not code:
         return type(error).__name__.lower()
@@ -612,6 +657,8 @@ def _failure_detail(error: BaseException) -> str:
     detail = getattr(error, "detail", None)
     if isinstance(detail, str) and detail.strip():
         return detail
+    if isinstance(error, DBAPIError) and _is_database_busy(error):
+        return DATABASE_BUSY_DETAIL
     message: str | None = None
     if isinstance(error, DBAPIError):
         origin = getattr(error, "orig", None)
@@ -3649,11 +3696,8 @@ class RecipeImageAvailabilityService:
         except RecipeImageAvailabilityError:
             raise
         except Exception as error:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.model_cache_unavailable",
-                "exact Model artifact preparation could not be queued",
-                retryable=True,
-                recovery_actions=("retry",),
+            raise _model_queue_error(
+                error, "exact Model artifact preparation could not be queued"
             ) from error
         model_content_digests = manifest_document["model_content_digests"]
         return {
@@ -3817,11 +3861,8 @@ class RecipeImageAvailabilityService:
                 ),
             }
         except Exception as error:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.model_cache_unavailable",
-                "Model artifact operation could not be resumed",
-                retryable=True,
-                recovery_actions=("retry",),
+            raise _model_queue_error(
+                error, "Model artifact operation could not be resumed"
             ) from error
 
     def _matching_request(

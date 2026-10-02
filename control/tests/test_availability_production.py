@@ -809,6 +809,344 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
     production.close()
 
 
+def _prebuilt_policy(*, used: bool) -> dict[str, object]:
+    return {
+        "passed": True,
+        "source_bundle_sha256": "c" * 64,
+        "dockerfile": "Dockerfile",
+        "findings": [],
+        "builder_binary_digest": "d" * 64,
+        "artifact_format": "oci-layout",
+        **(
+            {
+                "prebuilt_image": "ghcr.io/example/image@sha256:" + "d" * 64,
+                "prebuilt_decision": {
+                    "code": "prebuilt.used",
+                    "detail": "pulling the catalog's prebuilt image",
+                },
+            }
+            if used
+            else {
+                "prebuilt_decision": {
+                    "code": "prebuilt.not_pinned",
+                    "detail": "the signed catalog pins no prebuilt image",
+                }
+            }
+        ),
+    }
+
+
+@pytest.mark.parametrize("prebuilt", [True, False])
+def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
+    tmp_path, prebuilt: bool
+) -> None:
+    """The Controller pulls a prebuilt image; no Spark builds, so none is held."""
+
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-source-build.json")
+            .read_text()
+        )
+    )
+    node_id = "builder-node-000000000000000000000000000000"
+    engine = create_engine(f"sqlite:///{tmp_path / 'prebuilt.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime.now(UTC)
+    occupant_id = "00000000-0000-4000-8000-000000000811"
+    waiting_id = "00000000-0000-4000-8000-000000000812"
+
+    def availability_job(job_id: str, request_id: str, payload: dict) -> Job:
+        return Job(
+            id=job_id,
+            request_id=request_id,
+            kind="recipe.image.availability.v2",
+            state="running",
+            actor="operator",
+            authority_revision="revision-builder",
+            targets=["revision-builder"],
+            payload_digest="a" * 64,
+            payload={
+                "recipe_revision_id": "revision-builder",
+                "build_input_sha256": None,
+                **payload,
+            },
+            result=None,
+            current_attempt=1,
+            created_at=now,
+            updated_at=now,
+        )
+
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(node_id=node_id, state="active", architecture="linux-arm64")
+        )
+        # Another preparation holds the only builder (it is waiting for its
+        # model, no image yet).
+        session.add(
+            availability_job(
+                occupant_id,
+                "00000000-0000-4000-8000-000000000813",
+                {
+                    "runtime": {"builder_node_id": node_id},
+                    "claim_until": (now + timedelta(hours=1)).isoformat(),
+                },
+            )
+        )
+        session.add(
+            availability_job(
+                waiting_id,
+                "00000000-0000-4000-8000-000000000814",
+                {
+                    "runtime": {
+                        "recipe_revision_id": "revision-builder",
+                        "input_intent_sha256": "a" * 64,
+                    },
+                    "claim_until": (now - timedelta(seconds=1)).isoformat(),
+                },
+            )
+        )
+
+    class Builds:
+        def resolve(self, revision_id: str):
+            return RecipeBuildResolution(
+                recipe_revision_id=revision_id,
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
+                source_bundle_sha256="c" * 64,
+                input_intent_sha256="a" * 64,
+                input_intent={},
+            )
+
+        def prepare_plan(self, _revision_id: str, candidate: str, **_kwargs):
+            return SimpleNamespace(
+                build_input_sha256="b" * 64,
+                builder_node_id=candidate,
+                build_id="00000000-0000-4000-8000-000000000815",
+                policy_report=_prebuilt_policy(used=prebuilt),
+            )
+
+        def persist_plan_in_session(self, _session, plan, **_kwargs):
+            return plan
+
+    class Operations:
+        def build(self, plan, **_kwargs):
+            return SimpleNamespace(
+                id=str(uuid.uuid4()),
+                state="succeeded",
+                owner_id="build-id",
+                result={
+                    "successful_nodes": [plan.builder_node_id],
+                    "failed_nodes": [],
+                    "node_evidence": {
+                        plan.builder_node_id: {
+                            "image_bytes": 1,
+                            "image_digest": "sha256:" + "d" * 64,
+                            "oci_layout_sha256": "e" * 64,
+                        }
+                    },
+                },
+            )
+
+    class Settings:
+        agent_artifact_root = tmp_path / "artifacts"
+
+    production = build_recipe_image_availability(
+        sessions,
+        settings=Settings(),
+        managed_catalog_sync=None,
+        recipe_builds=Builds(),
+        recipe_operations=Operations(),
+        clock=lambda: now,
+    )
+    assert production.service._builder is not None
+    (claim,) = production.service.claim_pending(limit=1)
+    assert claim.operation_id == waiting_id
+
+    def execute():
+        assert production.service._builder is not None
+        return production.service._builder(
+            recipe,
+            {
+                "recipe_revision_id": "revision-builder",
+                "input_intent_sha256": "a" * 64,
+            },
+            claim=claim,
+            build_input_sha256="",
+            force=False,
+            progress=lambda _progress: None,
+        )
+
+    if prebuilt:
+        assert execute()["builder_node_id"] == node_id
+        with sessions() as session:
+            waiting = session.get(Job, waiting_id)
+            assert waiting is not None
+            # It now holds no builder: a Spark build may take the Spark.
+            assert waiting.payload["prebuilt_pull"] is True
+    else:
+        with pytest.raises(RecipeImageAvailabilityError) as failure:
+            execute()
+        assert failure.value.code == "recipe_image.build_capacity_wait"
+    production.close()
+
+
+def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
+    tmp_path,
+) -> None:
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-source-build.json")
+            .read_text()
+        )
+    )
+    node_id = "builder-node-000000000000000000000000000000"
+    engine = create_engine(f"sqlite:///{tmp_path / 'prebuilt-holder.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime.now(UTC)
+    waiting_id = "00000000-0000-4000-8000-000000000822"
+
+    def availability_job(job_id: str, request_id: str, payload: dict) -> Job:
+        return Job(
+            id=job_id,
+            request_id=request_id,
+            kind="recipe.image.availability.v2",
+            state="running",
+            actor="operator",
+            authority_revision="revision-builder",
+            targets=["revision-builder"],
+            payload_digest="a" * 64,
+            payload={
+                "recipe_revision_id": "revision-builder",
+                "build_input_sha256": None,
+                **payload,
+            },
+            result=None,
+            current_attempt=1,
+            created_at=now,
+            updated_at=now,
+        )
+
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(node_id=node_id, state="active", architecture="linux-arm64")
+        )
+        # A preparation pulling a prebuilt image on this nominal builder, and a
+        # prebuilt build job the Controller executes: neither holds the Spark.
+        session.add(
+            availability_job(
+                "00000000-0000-4000-8000-000000000821",
+                "00000000-0000-4000-8000-000000000823",
+                {
+                    "runtime": {"builder_node_id": node_id},
+                    "prebuilt_pull": True,
+                    "claim_until": (now + timedelta(hours=1)).isoformat(),
+                },
+            )
+        )
+        session.add(
+            Job(
+                id="00000000-0000-4000-8000-000000000824",
+                request_id="00000000-0000-4000-8000-000000000825",
+                kind="recipe.build.v1",
+                state="running",
+                actor="operator",
+                authority_revision="b" * 64,
+                targets=[node_id],
+                payload_digest="a" * 64,
+                payload={"prebuilt_image": "ghcr.io/example/image@sha256:" + "d" * 64},
+                result=None,
+                current_attempt=1,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            availability_job(
+                waiting_id,
+                "00000000-0000-4000-8000-000000000826",
+                {
+                    "runtime": {
+                        "recipe_revision_id": "revision-builder",
+                        "input_intent_sha256": "a" * 64,
+                    },
+                    "claim_until": (now - timedelta(seconds=1)).isoformat(),
+                },
+            )
+        )
+
+    class Builds:
+        def resolve(self, revision_id: str):
+            return RecipeBuildResolution(
+                recipe_revision_id=revision_id,
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
+                source_bundle_sha256="c" * 64,
+                input_intent_sha256="a" * 64,
+                input_intent={},
+            )
+
+        def prepare_plan(self, _revision_id: str, candidate: str, **_kwargs):
+            # A Spark build: it needs the builder free of other Spark work.
+            return SimpleNamespace(
+                build_input_sha256="b" * 64,
+                builder_node_id=candidate,
+                build_id="00000000-0000-4000-8000-000000000827",
+                policy_report=_prebuilt_policy(used=False),
+            )
+
+        def persist_plan_in_session(self, _session, plan, **_kwargs):
+            return plan
+
+    class Operations:
+        def build(self, plan, **_kwargs):
+            return SimpleNamespace(
+                id=str(uuid.uuid4()),
+                state="succeeded",
+                owner_id="build-id",
+                result={
+                    "successful_nodes": [plan.builder_node_id],
+                    "failed_nodes": [],
+                    "node_evidence": {
+                        plan.builder_node_id: {
+                            "image_bytes": 1,
+                            "image_digest": "sha256:" + "d" * 64,
+                            "oci_layout_sha256": "e" * 64,
+                        }
+                    },
+                },
+            )
+
+    class Settings:
+        agent_artifact_root = tmp_path / "artifacts"
+
+    production = build_recipe_image_availability(
+        sessions,
+        settings=Settings(),
+        managed_catalog_sync=None,
+        recipe_builds=Builds(),
+        recipe_operations=Operations(),
+        clock=lambda: now,
+    )
+    assert production.service._builder is not None
+    claims = production.service.claim_pending(limit=3)
+    claim = next(item for item in claims if item.operation_id == waiting_id)
+    result = production.service._builder(
+        recipe,
+        {
+            "recipe_revision_id": "revision-builder",
+            "input_intent_sha256": "a" * 64,
+        },
+        claim=claim,
+        build_input_sha256="",
+        force=False,
+        progress=lambda _progress: None,
+    )
+    assert result["builder_node_id"] == node_id
+    production.close()
+
+
 @pytest.mark.parametrize(
     (
         "failure_kind",
