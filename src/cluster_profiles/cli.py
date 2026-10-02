@@ -642,6 +642,25 @@ def main(
         return 141
 
 
+def _report_usage_error(raw_argv: Sequence[str], error: _UsageError) -> int:
+    error_args = argparse.Namespace(
+        global_json="--json" in raw_argv, json=False, command="profile"
+    )
+    document: dict[str, object] = {
+        "error": (
+            "invalid command arguments"
+            if _arguments_may_contain_secrets(raw_argv)
+            else str(error)
+        ),
+        "error_type": "arguments",
+        "recovery_actions": [error.next_step],
+    }
+    if error.usage is not None:
+        document["usage"] = error.usage
+    _emit(document, error_args, error=True)
+    return 2
+
+
 def _main(
     argv: Sequence[str] | None = None,
     *,
@@ -655,22 +674,7 @@ def _main(
         parser = _parser()
         args = parser.parse_args(raw_argv)
     except _UsageError as error:
-        error_args = argparse.Namespace(
-            global_json="--json" in raw_argv, json=False, command="profile"
-        )
-        document: dict[str, object] = {
-            "error": (
-                "invalid command arguments"
-                if _arguments_may_contain_secrets(raw_argv)
-                else str(error)
-            ),
-            "error_type": "arguments",
-            "recovery_actions": [error.next_step],
-        }
-        if error.usage is not None:
-            document["usage"] = error.usage
-        _emit(document, error_args, error=True)
-        return 2
+        return _report_usage_error(raw_argv, error)
 
     if args.version:
         identity = current_build()
@@ -727,7 +731,21 @@ def _main(
         if args.profile_number is not None and args.profile_number < 1:
             raise ValueError("--profile must be a positive stable profile number")
         if getattr(args, "requires_profile", False) and args.profile_number is None:
-            raise ValueError("this command requires explicit --profile N selection")
+            return _report_usage_error(
+                raw_argv,
+                _UsageError(
+                    "this command changes a profile, so it needs --profile N",
+                    usage=None,
+                    next_step=(
+                        "add --profile N, for example: "
+                        + (
+                            "vonkctl " + shlex.join(["--profile", "1", *raw_argv])
+                            if not _arguments_may_contain_secrets(raw_argv)
+                            else "vonkctl --profile 1 ..."
+                        )
+                    ),
+                ),
+            )
         if args.check_connection and args.command is not None:
             raise ValueError("--check-connection cannot be combined with a command")
         client = (

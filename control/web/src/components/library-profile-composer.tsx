@@ -90,7 +90,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
   }
 
   if (!open) return <button type="button" className="button secondary profile-composer-open" disabled={eligibleGroups.length === 0} title={eligibleGroups.length === 0 ? "No eligible Spark group is available for this recipe" : undefined} onClick={() => setOpen(true)}>Add to Fleet Profile</button>;
-  if (saved) return <section className="profile-composer-success" aria-live="polite"><div><strong>{saved.name} is ready</strong><p>{detail.recipe.title} is saved on profile {saved.number} across {group?.nodes.length ?? 0} Sparks.</p></div><a className="button" href="/fleet">Review in Fleet</a></section>;
+  if (saved) return <section className="profile-composer-success" aria-live="polite"><div><strong>{saved.name} is ready</strong><p>{detail.recipe.title} is saved on profile {saved.number} across {group?.nodes.length ?? 0} Sparks.</p></div><a className="button" href={`/library/profiles?profile=${saved.number}`}>Review and apply profile {saved.number}</a></section>;
 
   return <section className="library-profile-composer" aria-labelledby="profile-composer-title">
     <header><div><h4 id="profile-composer-title">Add recipe to a Fleet Profile</h4><p>Save a recipe choice and Spark group. The latest compatible cached revision is selected when the profile loads.</p></div><button type="button" className="secondary-button" onClick={() => setOpen(false)}>Close</button></header>

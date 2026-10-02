@@ -757,7 +757,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         help="Whole-fleet profiles: edit, load, and endpoints",
         description="A profile is the saved set of recipes the whole fleet "
         "should run. Commands act on profile 1 unless you pass "
-        "vonkctl --profile N.",
+        "--profile N, before or after the command.",
         epilog="Without a command, shows the selected profile.",
     )
     _add_output(profile)
@@ -880,6 +880,11 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "alias", nargs="?", help="Only show this endpoint alias from the profile"
     )
     _add_output(profile_endpoint)
+    # `--profile N` selects the profile for every profile command and `run`.
+    # It is accepted before the command (`vonkctl --profile 2 profile load`)
+    # and after it (`vonkctl profile load --profile 2`).
+    for selecting in (profile, *profile_actions.choices.values()):
+        _add_profile_selection(selecting)
 
     key = commands.add_parser(
         "key",
@@ -949,7 +954,27 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         help="Original request UUID; supply and retain it to reconnect after process death",
     )
     _watch_controls(run)
+    _add_profile_selection(run)
     _add_output(run)
+
+
+def _add_profile_selection(parser: argparse.ArgumentParser) -> None:
+    """Accept ``--profile N`` after the command, as well as before it.
+
+    The suppressed default keeps a value given before the command from being
+    overwritten when the flag is not repeated here.
+    """
+
+    parser.add_argument(
+        "--profile",
+        dest="profile_number",
+        type=int,
+        default=argparse.SUPPRESS,
+        metavar="N",
+        help="Profile number (default: 1; required to change a profile)"
+        if parser.get_default("requires_profile")
+        else "Profile number (default: 1)",
+    )
 
 
 def _option_flag(parser: argparse.ArgumentParser) -> None:

@@ -792,24 +792,40 @@ def _validate_canary_cleanup_application(
     if adapter is None or adapter.result is None:
         raise LifecycleError("synthetic canary cleanup adapter result is missing")
     children = adapter.result.children
-    if [child.kind for child in children] != ["stop", "cleanup"]:
-        raise LifecycleError("synthetic canary cleanup child sequence is incomplete")
-
-    stop_child, cleanup_child = children
-    if stop_child.state != "succeeded" or cleanup_child.state != "succeeded":
+    kinds = [child.kind for child in children]
+    # Cleanup stops what runs and removes what is installed. A canary that was
+    # replaced by a new revision leaves an older installation too, so it may
+    # take more than one cleanup child; every child must be one of the two.
+    if not set(kinds) == {"stop", "cleanup"}:
+        raise LifecycleError(
+            f"synthetic canary cleanup child sequence is incomplete: {kinds}"
+        )
+    if any(child.state != "succeeded" for child in children):
         raise LifecycleError("synthetic canary cleanup child did not succeed")
-    if not isinstance(
-        stop_child.result, FleetProfileSwitchChildResult
-    ) or not isinstance(cleanup_child.result, FleetProfileSwitchChildResult):
+    if not all(
+        isinstance(child.result, FleetProfileSwitchChildResult) for child in children
+    ):
         raise LifecycleError("synthetic canary cleanup child receipt is missing")
-    stop_results = stop_child.result.run_switch.phase_results
+    stop_results = [
+        receipt
+        for child in children
+        if child.kind == "stop"
+        and isinstance(child.result, FleetProfileSwitchChildResult)
+        for receipt in child.result.run_switch.phase_results
+    ]
     if not any(
         isinstance(receipt, RunSwitchStopResult) and receipt.run_id == run_id
         for receipt in stop_results
     ):
         raise LifecycleError("synthetic canary stop receipt is incomplete")
 
-    cleanup_results = cleanup_child.result.run_switch.phase_results
+    cleanup_results = [
+        receipt
+        for child in children
+        if child.kind == "cleanup"
+        and isinstance(child.result, FleetProfileSwitchChildResult)
+        for receipt in child.result.run_switch.phase_results
+    ]
     uninstalled = any(
         isinstance(receipt, RunSwitchUninstallResult)
         and receipt.installation_id == installation_id
