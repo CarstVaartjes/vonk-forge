@@ -945,7 +945,14 @@ class RecipeBuildService:
         *,
         now: datetime,
         resolution: RecipeBuildResolution | None = None,
+        admit: bool = True,
     ) -> RecipeBuildPlan:
+        """Plan one build; ``admit=False`` derives its identity without capacity.
+
+        Looking up an existing build by its exact inputs needs only the
+        identity, never room to run a new build.
+        """
+
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, recipe_revision_id)
             if revision is None:
@@ -1018,7 +1025,7 @@ class RecipeBuildService:
         capabilities = list(security.capabilities)
         output_bytes = _declared_image_bytes(document)
         base_image_storage_bytes = resources.download_bytes if base_images else 0
-        if prebuilt is None:
+        if prebuilt is None and admit:
             try:
                 self._admit_spark_build(
                     builder_node_id,
@@ -1166,7 +1173,9 @@ class RecipeBuildService:
         """
 
         try:
-            prepared = self.prepare_plan(recipe_revision_id, builder_node_id, now=now)
+            prepared = self.prepare_plan(
+                recipe_revision_id, builder_node_id, now=now, admit=False
+            )
         except (RecipeBuildError, RecipeSourcePolicyError):
             return None
         with self._sessions() as session:

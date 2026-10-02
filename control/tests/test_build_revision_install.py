@@ -27,7 +27,11 @@ from vonk_control.models import (
     RecipeInstallation,
     RuntimeImageAuthorization,
 )
-from vonk_control.recipe_builds import RecipeBuildResolution, RecipeBuildService
+from vonk_control.recipe_builds import (
+    RecipeBuildError,
+    RecipeBuildResolution,
+    RecipeBuildService,
+)
 from vonk_control.recipe_operations import (
     RecipeOperationService,
 )
@@ -326,6 +330,41 @@ def test_editorial_successor_installs_and_starts_with_no_image_grant(tmp_path):
     )
     complete_started_recipe(sessions, service, start.id)
     assert service.get(start.id).state == "succeeded"
+
+
+def test_review_of_a_successor_finds_its_build_while_the_builder_is_busy(tmp_path):
+    """A lookup by content needs the build's identity, not room for a new build.
+
+    The serving workload holds the Spark's memory, so a new build there would
+    be refused; the successor's review must still find the build it reuses.
+    The acceptance lane failed with "Prepare the exact model and runtime image"
+    because the lookup ran the builder's capacity admission.
+    """
+
+    fixture = _prepared_successor(tmp_path, change="editorial")
+    assert isinstance(fixture, tuple)
+    (
+        sessions,
+        now,
+        successor,
+        _receipt,
+        _storage,
+        _admission,
+        _mapping,
+        build_id,
+        builds,
+    ) = fixture
+    with sessions.begin() as session:
+        node_id = session.scalar(select(AgentNode.node_id))
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            snapshot.host_memory_free_bytes = 1
+            snapshot.gpu_memory_free_bytes = 1
+    assert node_id is not None
+    # Admission for a new build is refused for lack of memory ...
+    with pytest.raises(RecipeBuildError):
+        builds.prepare_plan(successor.id, node_id, now=now)
+    # ... and the identical build is still found by content.
+    assert builds.reusable_build_id(successor.id, node_id, now=now) == build_id
 
 
 def test_changed_executable_cannot_reuse_the_retained_build(tmp_path):
