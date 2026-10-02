@@ -126,7 +126,12 @@ def test_explicit_retry_preserves_failed_child_recovery_and_replay(
     # about it changed.
     after = service.application(first.id)
     assert after.state == "failed"
-    assert after.model_copy(update={"state": "queued"}) == failed
+    assert (
+        after.model_copy(
+            update={"state": "queued", "next_attempt_at": failed.next_attempt_at}
+        )
+        == failed
+    )
 
     second_child_id = next(child.id for child in children if child.id != first_child)
     with sessions.begin() as session:
@@ -545,6 +550,227 @@ def test_a_retrying_application_reports_waiting_with_its_blockers(
     with sessions() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None and row.state == "failed"  # stored; presented queued
+
+
+def test_a_failed_application_shown_as_queued_can_be_cancelled(
+    tmp_path: Path,
+) -> None:
+    """Whatever is presented as waiting to retry must be cancellable.
+
+    A failed application the Controller will retry is shown as queued. It used
+    to answer "not cancellable" because its stored state was failed, leaving an
+    operator no way to stop a retry that could never succeed.
+    """
+
+    sessions, _lifecycle, service, profile, _desired, application, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    shown = service.application(application.id)
+    assert shown.state == "queued"
+    assert shown.next_attempt_at is not None  # a retry is named, never absent
+
+    cancelled = service.cancel(
+        application.id,
+        profile_number=profile.number,
+        request_key=_uuid(840),
+        actor="admin",
+    )
+
+    assert cancelled.state == "cancelled"
+    assert cancelled.cancellation is not None
+    assert cancelled.cancellation.state == "cancelled"
+    # The retry is stopped for good, and the same request replays as received.
+    assert service.tick() in {True, False}
+    assert service.application(application.id).state == "cancelled"
+    replay = service.cancel(
+        application.id,
+        profile_number=profile.number,
+        request_key=_uuid(840),
+        actor="admin",
+    )
+    assert replay.state == "cancelled"
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None and row.state == "cancelled"
+
+
+def test_a_saved_choice_the_recipe_no_longer_offers_never_blocks_the_load(
+    tmp_path: Path,
+) -> None:
+    """A newer revision may drop an option a saved profile still carries.
+
+    The saved choice is replaced by the recipe default and the load is accepted,
+    instead of failing the profile for an option nobody can offer any more.
+    """
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    service = build_production_fleet_profile_service(
+        sessions, clock=lifecycle._clock, run_switch_operations=run_switch
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Stale thinking choice",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "stale-chat",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        row = session.get(FleetProfile, profile.id)
+        assert row is not None
+        row.assignments = [
+            {**item, "option_choices": {"thinking": "thinking"}}
+            for item in row.assignments
+        ]
+
+    preview = service.preview(profile.id)
+    assert preview.allowed
+    assert all(
+        "thinking" not in assignment.option_choices
+        for assignment in preview.resolved_assignments
+    )
+    application = service.apply(profile.id, request_key=_uuid(850), actor="admin")
+    assert application.state != "failed"
+
+
+def test_profile_load_of_an_editorial_successor_accepts_the_reused_build(
+    tmp_path: Path,
+) -> None:
+    """The build a successor revision reuses is its dependency, not a mismatch.
+
+    A republished recipe whose executable inputs are unchanged reuses the
+    original revision's image build through its own authorization. Accepting a
+    profile load for it refused with "accepted build consumer identity changed"
+    because the build still names the original revision.
+    """
+
+    import copy
+
+    from vonk_control.models import RecipeBuild, RuntimeImageAuthorization
+    from vonk_control.recipe_builds import RecipeBuildPlan
+    from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+    sessions, lifecycle, _queue, _mapping, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    now = lifecycle._clock()
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        original = session.get(CatalogDocumentRevision, build.recipe_revision_id)
+        assert original is not None
+        document = copy.deepcopy(original.document)
+        metadata = document["metadata"]
+        assert isinstance(metadata, dict)
+        metadata["title"] = "Editorially renamed recipe"
+        canonical = RecipeDefinition.model_validate(document)
+        successor = CatalogDocumentRevision(
+            id=str(uuid.uuid4()),
+            document_id=original.document_id,
+            kind=original.kind,
+            publisher=original.publisher,
+            slug=original.slug,
+            revision_number=original.revision_number + 1,
+            schema_version=2,
+            state="active",
+            document=canonical.model_dump(mode="json"),
+            content_digest=document_sha256(canonical.model_dump(mode="json")),
+            artifact_key=original.artifact_key,
+            execution_key=original.execution_key,
+            projected=copy.deepcopy(original.projected),
+            created_by="test",
+            created_at=now,
+        )
+        session.add(successor)
+        session.flush()
+        successor_id = successor.id
+        slug = successor.slug
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=successor_id,
+                original_content_digest=original.content_digest or "d" * 64,
+                effective_execution_key="e" * 64,
+                image_digest=build.image_digest,
+                local_image_config_id="sha256:" + "f" * 64,
+                oci_archive_sha256=build.oci_layout_sha256,
+                image_bytes=build.image_bytes,
+                build_id=build.id,
+                authorized_at=now,
+                state="authorized",
+            )
+        )
+        reused_plan = RecipeBuildPlan(
+            build_id=build.id,
+            recipe_revision_id=successor_id,
+            recipe_content_sha256=document_sha256(canonical.model_dump(mode="json")),
+            builder_node_id=build.builder_node_id,
+            source_bundle_sha256=build.source_bundle_sha256,
+            build_input_sha256=build.build_input_sha256,
+            agent_payload=dict(build.plan),
+            policy_report=dict(build.policy_report),
+        )
+    lifecycle.preview_build = lambda *_args, **_kwargs: reused_plan
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    service = build_production_fleet_profile_service(
+        sessions, clock=lifecycle._clock, run_switch_operations=run_switch
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Successor load",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "successor-chat",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    preview = service.preview(profile.id)
+    assert preview.allowed
+    assert {item.runtime_image.build_id for item in preview.preparation_decisions} == {
+        build_id
+    }
+
+    application = service.apply(profile.id, request_key=_uuid(860), actor="admin")
+    assert application.state != "failed"
 
 
 def test_load_with_a_missing_image_requests_preparation_and_continues_when_ready(

@@ -988,18 +988,30 @@ class DurableDistributionPhaseExecutor:
             ):
                 raise RuntimeError("OCI build authority changed")
             if plan.recipe_revision_id is not None:
-                authorization = session.scalar(
+                # The revision's authority is over the exact archive: its
+                # digest, config and size. Which build row first produced those
+                # bytes, and which role's execution key recorded the receipt,
+                # do not change what the revision may pull. Prefer the exact
+                # build and key, but never refuse an authorized identical image
+                # because a sibling build or role holds the matching row.
+                authorizations = session.scalars(
                     select(RuntimeImageAuthorization).where(
                         RuntimeImageAuthorization.recipe_revision_id
                         == plan.recipe_revision_id,
-                        RuntimeImageAuthorization.build_id == build.id,
-                        RuntimeImageAuthorization.effective_execution_key
-                        == effective_execution_key,
                         RuntimeImageAuthorization.image_digest == image_digest,
                         RuntimeImageAuthorization.oci_archive_sha256 == layout_digest,
                         RuntimeImageAuthorization.image_bytes == image_bytes,
                         RuntimeImageAuthorization.state == "authorized",
                     )
+                )
+                authorization = min(
+                    authorizations,
+                    key=lambda item: (
+                        item.build_id != build.id,
+                        item.effective_execution_key != effective_execution_key,
+                        item.id,
+                    ),
+                    default=None,
                 )
                 if authorization is None:
                     raise RuntimeError(

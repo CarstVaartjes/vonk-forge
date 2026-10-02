@@ -6649,12 +6649,25 @@ class FleetProfileService:
                     )
                 cancellation = previous
             else:
-                if row.state not in {"queued", "running", "waiting-for-operator"}:
+                # A failed application the Controller will retry by itself is
+                # shown as queued, so it must be cancellable: cancelling stops
+                # that retry. Nothing of it is live, so only the retry is retired.
+                retire_retry = row.state == "failed" and self._recovery_wanted(
+                    session, row, progress
+                )
+                if (
+                    row.state not in {"queued", "running", "waiting-for-operator"}
+                    and not retire_retry
+                ):
                     raise FleetProfileConflict("Profile application is not cancellable")
-                ordinal = progress.workload_intent_ordinal
-                if ordinal is None and (
-                    progress.switch_adapter is not None
-                    or row.current_operation_id is not None
+                ordinal = None if retire_retry else progress.workload_intent_ordinal
+                if (
+                    ordinal is None
+                    and not retire_retry
+                    and (
+                        progress.switch_adapter is not None
+                        or row.current_operation_id is not None
+                    )
                 ):
                     # A workload fence precedes every workload effect, so an
                     # issued child without one is evidence that cannot be
@@ -6731,7 +6744,10 @@ class FleetProfileService:
                         _persisted_profile_progress(row),
                         now,
                         reason=(
-                            "Profile application cancelled before any workload "
+                            "Profile application cancelled; its automatic retry "
+                            "was stopped."
+                            if retire_retry
+                            else "Profile application cancelled before any workload "
                             "effect was issued; the running workload was not touched."
                         ),
                     )
@@ -8046,7 +8062,11 @@ class FleetProfileService:
             except (FleetProfileConflict, ValidationError, TypeError, ValueError):
                 retrying = False
             if retrying:
-                return "queued", progress.retry_due_at
+                # Automatic recovery always has a next attempt; name it even
+                # when the failure recorded no explicit due time.
+                return "queued", progress.retry_due_at or (
+                    _aware(row.updated_at) + _cache_recovery_delay(progress.attempt)
+                )
             return state, None
         if state == "queued" and progress.admission_pending:
             return state, progress.admission_retry_at
