@@ -278,8 +278,9 @@ def test_archive_gate_accepts_an_authorized_image_through_a_sibling_build_and_ro
     """The revision is authorized for the archive, whoever first produced it.
 
     A second build row can yield identical bytes, and the execution key of the
-    phase result may differ from the key that recorded the grant. Neither makes
-    the revision unauthorized; refusing here repeated the phase forever.
+    phase result may differ from the key that recorded the grant, or be absent
+    when the plan has no runtime-image phase. None of them makes the revision
+    unauthorized; refusing here repeated the phase forever.
     """
 
     executor, plan, receipt, sessions = _archive_gate_service(tmp_path)
@@ -301,6 +302,17 @@ def test_archive_gate_accepts_an_authorized_image_through_a_sibling_build_and_ro
         effective_execution_key="a" * 64,
     )
     assert image.address == ARCHIVE_DIGEST
+    # With no runtime-image phase in the plan (the Sparks already hold the
+    # image) no phase result carries an execution key at all.
+    keyless = executor._archive(
+        plan,
+        build_id=BUILD_ID,
+        image_digest=BUILT_IMAGE_DIGEST,
+        layout_digest=ARCHIVE_DIGEST,
+        image_bytes=receipt.image_bytes,
+        effective_execution_key=None,
+    )
+    assert keyless.address == ARCHIVE_DIGEST
     # Another revision's grant is still not this plan's.
     with Session(sessions.kw["bind"]) as session:
         session.query(RuntimeImageAuthorization).delete(synchronize_session=False)

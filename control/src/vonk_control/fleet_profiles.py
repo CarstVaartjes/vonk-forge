@@ -6650,24 +6650,22 @@ class FleetProfileService:
                 cancellation = previous
             else:
                 # A failed application the Controller will retry by itself is
-                # shown as queued, so it must be cancellable: cancelling stops
-                # that retry. Nothing of it is live, so only the retry is retired.
-                retire_retry = row.state == "failed" and self._recovery_wanted(
+                # shown as queued, so it must be cancellable like any queued
+                # one: cancelling stops that retry, and a child it still owns is
+                # reconciled by the same fence and cancellation as for a live
+                # application.
+                retrying_failure = row.state == "failed" and self._recovery_wanted(
                     session, row, progress
                 )
                 if (
                     row.state not in {"queued", "running", "waiting-for-operator"}
-                    and not retire_retry
+                    and not retrying_failure
                 ):
                     raise FleetProfileConflict("Profile application is not cancellable")
-                ordinal = None if retire_retry else progress.workload_intent_ordinal
-                if (
-                    ordinal is None
-                    and not retire_retry
-                    and (
-                        progress.switch_adapter is not None
-                        or row.current_operation_id is not None
-                    )
+                ordinal = progress.workload_intent_ordinal
+                if ordinal is None and (
+                    progress.switch_adapter is not None
+                    or row.current_operation_id is not None
                 ):
                     # A workload fence precedes every workload effect, so an
                     # issued child without one is evidence that cannot be
@@ -6744,10 +6742,7 @@ class FleetProfileService:
                         _persisted_profile_progress(row),
                         now,
                         reason=(
-                            "Profile application cancelled; its automatic retry "
-                            "was stopped."
-                            if retire_retry
-                            else "Profile application cancelled before any workload "
+                            "Profile application cancelled before any workload "
                             "effect was issued; the running workload was not touched."
                         ),
                     )

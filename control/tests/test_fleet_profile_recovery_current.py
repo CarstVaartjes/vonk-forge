@@ -562,26 +562,30 @@ def test_a_failed_application_shown_as_queued_can_be_cancelled(
     operator no way to stop a retry that could never succeed.
     """
 
-    sessions, _lifecycle, service, profile, _desired, application, _child, _nodes = (
+    _sessions, _lifecycle, service, profile, _desired, application, _child, _nodes = (
         _failed_profile(tmp_path)
     )
     shown = service.application(application.id)
     assert shown.state == "queued"
     assert shown.next_attempt_at is not None  # a retry is named, never absent
 
-    cancelled = service.cancel(
+    accepted = service.cancel(
         application.id,
         profile_number=profile.number,
         request_key=_uuid(840),
         actor="admin",
     )
-
+    assert accepted.cancellation is not None
+    for _ in range(6):
+        if service.application(application.id).state == "cancelled":
+            break
+        service.tick()
+    cancelled = service.application(application.id)
     assert cancelled.state == "cancelled"
     assert cancelled.cancellation is not None
     assert cancelled.cancellation.state == "cancelled"
     # The retry is stopped for good, and the same request replays as received.
-    assert service.tick() in {True, False}
-    assert service.application(application.id).state == "cancelled"
+    service.tick()
     replay = service.cancel(
         application.id,
         profile_number=profile.number,
@@ -589,9 +593,82 @@ def test_a_failed_application_shown_as_queued_can_be_cancelled(
         actor="admin",
     )
     assert replay.state == "cancelled"
+
+
+def test_cancelling_a_failed_order_that_still_owns_a_live_child_cancels_the_child(
+    tmp_path: Path,
+) -> None:
+    """Cancelling stops the retry and reconciles the child the order still owns."""
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+        tmp_path, nodes=2
+    )
     with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    service = build_production_fleet_profile_service(
+        sessions, clock=lifecycle._clock, run_switch_operations=run_switch
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Cancel live child",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "cancel-chat",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    application = service.apply(profile.id, request_key=_uuid(841), actor="admin")
+    assert service.tick()
+    with sessions() as session:
+        child = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
+        assert child is not None and child.state in {"queued", "running"}
+        child_id = child.id
+    # An advance error failed the order while its child stayed live.
+    with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
-        assert row is not None and row.state == "cancelled"
+        assert row is not None and row.current_operation_id is not None
+        row.state = "failed"
+        row.status_reason = "transient advance failure"
+    assert service.application(application.id).state == "queued"
+
+    service.cancel(
+        application.id,
+        profile_number=profile.number,
+        request_key=_uuid(842),
+        actor="admin",
+    )
+
+    # Not finished while the child it owns is still being cancelled.
+    with sessions() as session:
+        child = session.get(Job, child_id)
+        assert child is not None
+        assert isinstance(child.result, dict)
+        assert child.result.get("cancellation") is not None or child.state in {
+            "cancelled",
+            "failed",
+        }
+    assert service.application(application.id).state != "failed"
 
 
 def test_a_saved_choice_the_recipe_no_longer_offers_never_blocks_the_load(
