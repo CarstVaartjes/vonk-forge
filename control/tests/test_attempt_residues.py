@@ -378,6 +378,72 @@ def test_a_plan_the_next_attempt_replaced_is_released_without_the_wait(
         assert session.get(RecipeInstallation, old_id).state == "uninstalled"
 
 
+def test_a_plan_with_a_missing_rank_row_is_still_released(tmp_path: Path) -> None:
+    """A never-started plan is abandoned however many rank rows it has left.
+
+    The group shows as an incomplete installation. Nothing was ever queued for
+    it, so a missing rank row must not keep the plan, its disk claim and the
+    warning for ever (the sweep refused it on every pass).
+    """
+
+    load = _load(tmp_path)
+    planned_id = _planned_left_by_failed_copy(load)
+    with load.sessions.begin() as session:
+        members = session.scalars(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == planned_id
+            )
+        ).all()
+        assert len(members) == 2
+        session.delete(members[0])
+    later = AttemptResidueReconciler(
+        load.sessions,
+        abandon_never_installed=load.lifecycle.abandon_never_installed,
+        clock=lambda: load.lifecycle._clock() + ADOPTION_WINDOW + timedelta(seconds=1),
+    )
+    assert later.tick()
+    with load.sessions() as session:
+        installation = session.get(RecipeInstallation, planned_id)
+        assert installation is not None and installation.state == "uninstalled"
+        assert not session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_id == planned_id,
+                ResourceReservation.state == "active",
+            )
+        )
+
+
+def test_a_plan_where_a_rank_shows_an_effect_is_not_abandoned(tmp_path: Path) -> None:
+    load = _load(tmp_path)
+    planned_id = _planned_left_by_failed_copy(load)
+    with load.sessions.begin() as session:
+        member = session.scalars(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == planned_id
+            )
+        ).first()
+        assert member is not None
+        member.installed_bytes = 120
+        session.flush()
+        session.delete(
+            session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == planned_id,
+                    InstallationNode.id != member.id,
+                )
+            ).one()
+        )
+    later = AttemptResidueReconciler(
+        load.sessions,
+        abandon_never_installed=load.lifecycle.abandon_never_installed,
+        clock=lambda: load.lifecycle._clock() + ADOPTION_WINDOW + timedelta(seconds=1),
+    )
+    assert not later.tick()
+    with load.sessions() as session:
+        installation = session.get(RecipeInstallation, planned_id)
+        assert installation is not None and installation.state == "planned"
+
+
 def test_a_plan_a_newer_revision_of_the_recipe_replaced_is_released(
     tmp_path: Path,
 ) -> None:

@@ -298,15 +298,18 @@ def uninstall_plan(
     )
     canonical_content = json.loads(canonical_message(recipe_content))
     # A plan that was persisted but never applied has nothing on any node to
-    # remove.  It may only be abandoned while every membership row still proves
-    # that: the deterministic plan still matches, every rank is still
-    # ``planned``, and no rank recorded installed bytes.
-    # Any of those facts contradicting the plan keeps the row on the ordinary
-    # uninstall path, where the integrity check above reports it.
+    # remove.  It may be abandoned while the installation itself is still
+    # ``planned`` (an install moves it on before anything reaches a Spark) and
+    # every membership row it has proves that: each rank is ``planned`` and none
+    # recorded installed bytes.  Whether the membership still matches the plan's
+    # ranks does not matter here: a plan that never started has no effect to
+    # misjudge, and a rank row that went missing must not keep the plan, its
+    # disk claim and an "incomplete installation" warning for ever.  A rank that
+    # shows any effect keeps the row on the ordinary uninstall path, where the
+    # integrity check above reports it.
     never_installed = bool(
         installation_state == "planned"
         and ordered_nodes
-        and immutable_membership_exact
         and all(
             node.state == "planned" and node.installed_bytes in (None, 0)
             for node in ordered_nodes
@@ -343,7 +346,9 @@ def uninstall_plan(
                 f"Installation state {installation_state} cannot be uninstalled.",
             )
         )
-    if not immutable_membership_exact or not ordered_nodes:
+    if (disposition != "abandon" and not immutable_membership_exact) or (
+        not ordered_nodes
+    ):
         blockers.append(
             ActionReason(
                 "uninstall.rank_membership_changed",
