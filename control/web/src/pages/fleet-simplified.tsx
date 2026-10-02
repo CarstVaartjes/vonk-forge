@@ -11,6 +11,7 @@ import {SkeletonRows} from "../components/skeleton";
 import {useToast} from "../components/toast";
 import {EnrollmentGrant} from "../components/enrollment-grant";
 import {SparkDetail} from "../components/spark-detail";
+import {ObservationNotice} from "../components/observation-notice";
 import {safeErrorText} from "../lib/error-display";
 
 function statusTone(status: NodeStatus): "healthy" | "warning" | "danger" {
@@ -105,6 +106,7 @@ export function FleetPage({api}: {api: ControlApi; onBusyChange?(busy: boolean):
       {grant && <><EnrollmentGrant api={api} grant={grant}/><button type="button" className="button secondary" onClick={() => {setGrant(null); setSparkName("");}}>Create another grant</button></>}
     </section>}
     {upgrading && <ConfirmDialog title="Upgrade every Spark agent?" consequence="Agents upgrade one Spark at a time and restart. Running recipes keep serving unless a Spark reports a problem." confirmLabel="Upgrade agents" command="vonkctl fleet upgrade --all --yes" busy={upgradeBusy} onConfirm={() => void upgradeAll()} onCancel={() => setUpgrading(false)}/>}
+    {fleet.snapshot && fleet.stale && <div className="fleet-stale"><StatusPill tone="warning">{fleet.refreshError ? "disconnected" : "stale"}</StatusPill><ObservationNotice connection="reconnecting" lastSuccessAt={fleet.lastUpdatedAt} subject="the Fleet"/></div>}
     {fleet.snapshot && <section className="fleet-command-summary" aria-label="Fleet summary">
       <div className="fleet-command-fact"><strong>{fleet.snapshot.nodes.length}</strong><span>Sparks</span></div>
       <div className="fleet-command-fact"><strong>{fleet.snapshot.nodes.filter(node => node.connection.online_state === "online").length}</strong><span>Online</span></div>

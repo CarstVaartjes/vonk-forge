@@ -1,13 +1,13 @@
-import {useCallback, useEffect, useRef, useState} from "react";
+import {useCallback, useRef, useState} from "react";
 import type {ControlApi, RecipeImageAvailabilityResponse} from "../api/types";
 import {failureNotice} from "../lib/error-display";
 import {CancelOperation} from "./cancel-operation";
+import {FatalObservationError, useOperationObserver} from "../hooks/use-operation-observer";
+import {ObservationNotice} from "./observation-notice";
 import {useToast} from "./toast";
 import {WaitingFor} from "./waiting-for";
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
-const POLL_INTERVAL_MS = 1_000;
-const MAX_POLL_ATTEMPTS = 180;
 
 function failureText(response: RecipeImageAvailabilityResponse): string {
   const failure = response.failure;
@@ -35,66 +35,50 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
   missingModels: string[];
   onDownloaded(): void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [phase, setPhase] = useState("");
-  const [operationId, setOperationId] = useState("");
-  const [error, setError] = useState("");
-  const [waiting, setWaiting] = useState<Pick<RecipeImageAvailabilityResponse, "blockers" | "next_attempt_at">>({});
-  const abort = useRef<AbortController | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const requestKey = useRef("");
   const toast = useToast();
-
-  useEffect(() => () => abort.current?.abort(), []);
+  const observer = useOperationObserver<RecipeImageAvailabilityResponse>({
+    isTerminal: operation => TERMINAL_STATES.has(operation.state),
+    // Terminal: refetch the library and cache state that depends on this download.
+    onTerminal: operation => {
+      if (operation.state === "succeeded") { toast.success("Recipe downloaded."); onDownloaded(); }
+      else if (operation.state !== "cancelled") toast.error(failureNotice(failureText(operation), requestKey.current));
+    },
+  });
+  const operation = observer.value;
+  const running = Boolean(operation && !TERMINAL_STATES.has(operation.state));
+  const busy = submitting || running;
+  const phase = operation && operation.state !== "succeeded" ? progressLabel(operation) : submitting ? "queued" : "";
+  const error = submitError || observer.fatal
+    || (operation?.state === "cancelled" ? "Download cancelled. Partial files are kept; download again to resume." : operation?.state === "failed" ? failureText(operation) : "");
 
   const download = useCallback(async () => {
-    abort.current?.abort();
-    const controller = new AbortController();
-    abort.current = controller;
-    setBusy(true);
-    setError("");
-    setPhase("queued");
-    const requestKey = crypto.randomUUID();
+    observer.reset();
+    setSubmitting(true);
+    setSubmitError("");
+    const key = crypto.randomUUID();
+    requestKey.current = key;
     try {
-      const accepted = await api.downloadRecipe(selector, requestKey, controller.signal);
+      const accepted = await api.downloadRecipe(selector, key);
       toast.info("Recipe download queued.");
-      setPhase(progressLabel(accepted));
-      setWaiting(accepted);
-      setOperationId(accepted.id);
-      let current = accepted;
-      let attempts = 0;
-      while (!TERMINAL_STATES.has(current.state) && attempts < MAX_POLL_ATTEMPTS) {
-        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
-        if (controller.signal.aborted) return;
-        const next = await api.recipeCacheOperation(current.id, controller.signal);
-        if (!("kind" in next) || next.kind !== "recipe.image.availability.v2" || next.id !== current.id) {
-          setBusy(false);
-          setError("Recipe download returned an unexpected operation shape");
-          toast.error(failureNotice("Recipe download returned an unexpected operation shape", requestKey));
-          return;
+      observer.start(accepted, async signal => {
+        const next = await api.recipeCacheOperation(accepted.id, signal);
+        if (!("kind" in next) || next.kind !== "recipe.image.availability.v2" || next.id !== accepted.id) {
+          toast.error(failureNotice("Recipe download returned an unexpected operation shape", key));
+          throw new FatalObservationError("Recipe download returned an unexpected operation shape");
         }
-        current = next;
-        attempts += 1;
-        setPhase(progressLabel(current));
-        setWaiting(current);
-      }
-      if (controller.signal.aborted) return;
-      setBusy(false);
-      if (current.state === "succeeded") {
-        setPhase("");
-        toast.success("Recipe downloaded.");
-        onDownloaded();
-        return;
-      }
-      const failed = current.state === "cancelled" ? "Download cancelled. Partial files are kept; download again to resume." : failureText(current);
-      setError(failed);
-      if (current.state !== "cancelled") toast.error(failureNotice(failed, requestKey));
+        return next;
+      });
     } catch (value) {
-      if (controller.signal.aborted) return;
-      setBusy(false);
       const failed = value instanceof Error ? value.message.slice(0, 256) : "Recipe download failed";
-      setError(failed);
-      toast.error(failureNotice(failed, requestKey));
+      setSubmitError(failed);
+      toast.error(failureNotice(failed, key));
+    } finally {
+      setSubmitting(false);
     }
-  }, [api, onDownloaded, selector, toast]);
+  }, [api, observer, selector, toast]);
 
   const label = missingModels.length > 0
     ? `Download recipe and ${missingModels.length} missing model${missingModels.length === 1 ? "" : "s"}`
@@ -106,8 +90,9 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
     </button>
     {missingModels.length > 0 && <span className="library-cache-missing">Also caches {missingModels.join(", ")}</span>}
     {(busy || phase) && <span role="status">{phase}</span>}
-    {busy && <WaitingFor blockers={waiting.blockers} nextAttemptAt={waiting.next_attempt_at}/>}
-    {busy && operationId && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." command={`vonkctl recipe cancel ${operationId}`} cancel={key => api.cancelRecipeOperation(operationId, key)}/>}
+    {running && <ObservationNotice connection={observer.connection} lastSuccessAt={observer.lastSuccessAt} background={observer.background} subject="this download"/>}
+    {running && operation && <WaitingFor blockers={operation.blockers} nextAttemptAt={operation.next_attempt_at}/>}
+    {running && operation && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." command={`vonkctl recipe cancel ${operation.id}`} cancel={key => api.cancelRecipeOperation(operation.id, key)}/>}
     {error && <span className="library-cache-error" role="alert">{error}</span>}
   </div>;
 }

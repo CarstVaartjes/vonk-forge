@@ -1,0 +1,47 @@
+import {act, render, screen} from "@testing-library/react";
+import {vi} from "vitest";
+import type {ControlApi} from "../api/types";
+import {LibraryRecipeDownloadAction} from "./library-recipe-download-action";
+import {ToastProvider} from "./toast";
+
+const running = {kind: "recipe.image.availability.v2", id: "op-1", state: "running", progress: {phase: "pulling"}, children: [], blockers: [{code: "disk", detail: "Waiting for space"}]};
+
+function setup(recipeCacheOperation: ReturnType<typeof vi.fn>) {
+  const api = {downloadRecipe: vi.fn(async () => running), recipeCacheOperation, cancelRecipeOperation: vi.fn()} as unknown as ControlApi;
+  render(<ToastProvider><LibraryRecipeDownloadAction api={api} selector="vonk-forge/x" missingModels={[]} onDownloaded={vi.fn()}/></ToastProvider>);
+  return api;
+}
+const click = async () => { screen.getByRole("button", {name: "Download recipe"}).click(); await act(async () => { await Promise.resolve(); }); };
+const advance = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+
+afterEach(() => vi.useRealTimers());
+
+test("a download that outlives the observation deadline stays running, not failed", async () => {
+  vi.useFakeTimers();
+  const recipeCacheOperation = vi.fn(async () => running);
+  setup(recipeCacheOperation);
+  await click();
+  await advance(200_000);
+  expect(recipeCacheOperation.mock.calls.length).toBeGreaterThan(180);
+  expect(screen.queryByText(/did not complete/)).toBeNull();
+  expect(screen.getByText(/Still running in the background/)).toBeVisible();
+  expect(screen.getByRole("button", {name: "Downloading…"})).toBeDisabled();
+  expect(screen.getByText("Waiting for space", {exact: false})).toBeVisible();
+  expect(screen.getByRole("button", {name: /Cancel/})).toBeVisible();
+});
+
+test("a download keeps being observed through a temporary disconnection and then completes", async () => {
+  vi.useFakeTimers();
+  const recipeCacheOperation = vi.fn()
+    .mockRejectedValueOnce(new TypeError("offline")).mockRejectedValueOnce(new TypeError("offline")).mockRejectedValueOnce(new TypeError("offline"))
+    .mockResolvedValue({...running, state: "succeeded"});
+  setup(recipeCacheOperation);
+  await click();
+  await advance(1_000);
+  expect(screen.getByText(/Reconnecting to the Controller/)).toBeVisible();
+  expect(screen.getByRole("button", {name: "Downloading…"})).toBeDisabled();
+  await advance(30_000);
+  expect(recipeCacheOperation).toHaveBeenCalledTimes(4);
+  expect(screen.queryByText(/Reconnecting/)).toBeNull();
+  expect(screen.getByRole("button", {name: "Download recipe"})).toBeEnabled();
+});

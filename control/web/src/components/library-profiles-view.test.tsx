@@ -144,3 +144,23 @@ test("a current profile shows no update notice", async () => {
   await screen.findAllByText("Profile 2 · Coding");
   expect(screen.queryByRole("region", {name: "Recipe updates available"})).toBeNull();
 });
+
+test("a completed load refreshes the saved profile and shows the endpoint without a reload, even after a failed progress poll", async () => {
+  const user = userEvent.setup();
+  const loaded = {...profile, status: "loaded", loaded_revision: 4} as unknown as FleetProfile;
+  const profiles = vi.fn()
+    .mockResolvedValueOnce({generated_at: "2026-09-10T00:00:00Z", profiles: [profile]})
+    .mockResolvedValue({generated_at: "2026-09-10T00:01:00Z", profiles: [loaded]});
+  const profileProgress = vi.fn()
+    .mockRejectedValueOnce(new TypeError("connection lost"))
+    .mockResolvedValue({...application, state: "succeeded"});
+  const profileEndpoints = vi.fn(async () => ({
+    number: 2, profile_id: profile.id, application_id: "22222222-2222-4222-8222-222222222222", application_state: "succeeded", observed_at: "2026-09-10T00:00:00Z",
+    assignments: [{assignment_id: "33333333-3333-4333-8333-333333333333", recipe_title: "Qwen Code", desired_state: "running", alias: "qwen-code", state: "published", endpoint: {alias: "qwen-code", api_base: "https://vonk-forge.example.ts.net/v1", backend_api_base: "http://192.168.1.211:8888/v1", generation: 3, node_id: nodeA, observed_at: "2026-09-10T00:00:00Z", plan_digest: "c".repeat(64)}}],
+  })) as unknown as ControlApi["profileEndpoints"];
+  const api = apiFor({profiles, profileProgress: profileProgress as unknown as ControlApi["profileProgress"], profileEndpoints});
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+  await user.click(await screen.findByRole("button", {name: "Load profile"}));
+  expect(await screen.findByRole("region", {name: "Qwen Code client endpoint"}, {timeout: 8_000})).toBeVisible();
+  expect(profileProgress.mock.calls.length).toBeGreaterThanOrEqual(2);
+}, 15_000);

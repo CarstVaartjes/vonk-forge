@@ -1,5 +1,5 @@
-import {useEffect, useMemo, useState} from "react";
-import type {MouseEvent} from "react";
+import {useCallback, useEffect, useMemo, useState} from "react";
+import type {MouseEvent, ReactNode} from "react";
 import {ApiError} from "../api/client";
 import {canonicalRecipeSelector} from "../api/types";
 import type {ControlApi, FleetProfile, FleetProfileApplicationView, FleetProfileEndpoints, FleetProfileInput, FleetProfilePreview, VisualFleetSnapshot} from "../api/types";
@@ -9,6 +9,8 @@ import {CancelOperation} from "./cancel-operation";
 import {ConfirmDialog} from "./confirm-dialog";
 import {StatusPill} from "./status-pill";
 import {WaitingFor} from "./waiting-for";
+import {ObservationNotice} from "./observation-notice";
+import {useOperationObserver} from "../hooks/use-operation-observer";
 import {EmptyState} from "./empty-state";
 import {ProfileExport} from "./profile-export";
 import {SkeletonRows} from "./skeleton";
@@ -144,7 +146,7 @@ const loadable = (preview: FleetProfilePreview | undefined) => preview?.allowed 
 
 const bytes = (value: unknown) => typeof value === "number" && value >= 0 ? formatBytes(value) : undefined;
 
-function ProfileProgress({application, cancel}: {application: FleetProfileApplicationView; cancel?(requestKey: string): Promise<unknown>}) {
+function ProfileProgress({application, cancel, notice}: {application: FleetProfileApplicationView; cancel?(requestKey: string): Promise<unknown>; notice?: ReactNode}) {
   const progress = applicationProgressRecord(application);
   const completed = bytes(progress.bytes);
   const total = bytes(progress.total_bytes);
@@ -157,6 +159,7 @@ function ProfileProgress({application, cancel}: {application: FleetProfileApplic
     {nodeIds.length > 0 && <ul className="library-profile-application-members" aria-label="Profile load targets">{nodeIds.map(nodeId => <li key={nodeId}><span>{nodeId}</span><small>Participating</small></li>)}</ul>}
     {application.status_reason && <p>{application.status_reason}</p>}
     <WaitingFor blockers={application.blockers} nextAttemptAt={application.next_attempt_at}/>
+    {notice}
     {cancel && <CancelOperation what="load" consequence="Stops this profile load and reconciles what it already changed. Sparks may be left partly changed until you load again." command={`vonkctl profile cancel ${application.id}`} cancel={cancel}/>}
   </section>;
 }
@@ -179,7 +182,6 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
   const [preview, setPreview] = useState<FleetProfilePreview>();
   const [endpoints, setEndpoints] = useState<FleetProfileEndpoints>();
   const [pendingLoad, setPendingLoad] = useState<PendingProfileLoad>();
-  const [application, setApplication] = useState<FleetProfileApplicationView>();
   const [error, setError] = useState("");
   const [optionsBySelector, setOptionsBySelector] = useState<Record<string, RecipeOption[]>>({});
   const [confirmingReload, setConfirmingReload] = useState(false);
@@ -211,20 +213,37 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     }
     return () => controller.abort();
   }, [api, draftSelectors]);
+  // The saved-profile list and the endpoint depend on the load's outcome, so a
+  // terminal state refetches them instead of waiting for a page reload.
+  const refreshProfiles = useCallback(async (signal?: AbortSignal) => {
+    const result = await api.profiles(signal);
+    if (signal?.aborted) return;
+    setProfiles([...result.profiles].sort((left, right) => left.number - right.number));
+    setSelectedNumber(current => current && result.profiles.some(profile => profile.number === current) ? current : result.profiles[0]?.number);
+    return result;
+  }, [api]);
+  const observer = useOperationObserver<FleetProfileApplicationView>({
+    isTerminal: next => TERMINAL_STATES.has(next.state),
+    onTerminal: () => { void refreshProfiles().catch(() => undefined); },
+  });
+  const application = observer.value;
+  const setApplication = (next: FleetProfileApplicationView) => {
+    if (selectedNumber === undefined) return;
+    const number = selectedNumber;
+    observer.start(next, signal => api.profileProgress(number, signal));
+  };
   const applicationRunning = Boolean(application && !TERMINAL_STATES.has(application.state));
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    void api.profiles(controller.signal).then(result => {
-      if (controller.signal.aborted) return;
-      setProfiles([...result.profiles].sort((left, right) => left.number - right.number));
-      setSelectedNumber(current => current && result.profiles.some(profile => profile.number === current) ? current : result.profiles[0]?.number);
+    void refreshProfiles(controller.signal).then(result => {
+      if (!result) return;
       if (!initialCreate && result.profiles[0] && !draft) { setDraft(draftFromProfile(result.profiles[0])); setEditing(false); }
       setError("");
     }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Saved profiles are unavailable."); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [api, initialCreate]);
+  }, [refreshProfiles, initialCreate]);
 
   useEffect(() => {
     if (selectedNumber === undefined || editing) { setPreview(undefined); return; }
@@ -232,13 +251,6 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     void api.previewProfile(selectedNumber, controller.signal).then(result => { if (!controller.signal.aborted) setPreview(result); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "The profile preview is unavailable."); });
     return () => controller.abort();
   }, [api, editing, selectedNumber]);
-
-  useEffect(() => {
-    if (selectedNumber === undefined || !application || TERMINAL_STATES.has(application.state)) return;
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => { void api.profileProgress(selectedNumber, controller.signal).then(next => { if (!controller.signal.aborted) setApplication(next); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Profile load progress is unavailable."); }); }, 1_000);
-    return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [api, application, selectedNumber]);
 
   const loadedNumber = selectedProfile?.status === "loaded" && !editing ? selectedProfile.number : undefined;
   const applicationState = application?.state;
@@ -255,10 +267,10 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
   useEffect(() => { onBusyChange?.(saving || loadingProfile || applicationRunning); return () => onBusyChange?.(false); }, [applicationRunning, loadingProfile, onBusyChange, saving]);
 
   function selectProfile(profile: FleetProfile) {
-    setSelectedNumber(profile.number); setDraft(draftFromProfile(profile)); setEditing(false); setPreview(undefined); setApplication(undefined); setPendingLoad(undefined); setNotice("");
+    setSelectedNumber(profile.number); setDraft(draftFromProfile(profile)); setEditing(false); setPreview(undefined); observer.reset(); setPendingLoad(undefined); setNotice("");
   }
 
-  function startNew() { setSelectedNumber(undefined); setDraft(blankDraft()); setEditing(true); setPreview(undefined); setApplication(undefined); setPendingLoad(undefined); setNotice("Draft profile created. Saving does not change the running fleet."); }
+  function startNew() { setSelectedNumber(undefined); setDraft(blankDraft()); setEditing(true); setPreview(undefined); observer.reset(); setPendingLoad(undefined); setNotice("Draft profile created. Saving does not change the running fleet."); }
   function updateDraft(next: Partial<ProfileDraft>) { setDraft(current => current ? {...current, ...next} : current); setNotice(""); }
   function updateAssignment(key: string, next: Partial<AssignmentDraft>) { if (draft) updateDraft({assignments: draft.assignments.map(item => item.key === key ? {...item, ...next} : item)}); }
   function toggleSpark(key: string, sparkId: string) {
@@ -328,7 +340,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     {loading && <SkeletonRows columns={2} rows={3} label="Loading saved profiles"/>}
     {!loading && profiles.length === 0 && !draft && <EmptyState title="No profiles" description="A profile saves which recipes run on which Sparks, so you can load them together." action={{label: "Create profile", onClick: startNew}}/>}
     {selectedProfile && !editing && <section className="library-profile-status state-read" aria-live="polite"><div className="library-profile-status-summary"><strong>Profile {selectedProfile.number} · {selectedProfile.name}</strong><span>{selectedProfile.status.replaceAll("-", " ")} · revision {selectedProfile.revision}</span></div><span className="library-profile-status-scope">{(selectedProfile.fleet ?? []).length} Sparks · loaded revision {selectedProfile.loaded_revision ?? "none"}</span>{(selectedProfile.warnings ?? []).length > 0 && <ul>{(selectedProfile.warnings ?? []).map(warning => <li key={warning}>{warning}</li>)}</ul>}</section>}
-    {application && <ProfileProgress application={application} cancel={applicationRunning && selectedNumber !== undefined ? async key => setApplication(await api.cancelProfileApplication(application.id, selectedNumber, key)) : undefined}/>}
+    {application && <ProfileProgress application={application} notice={applicationRunning ? <ObservationNotice connection={observer.connection} lastSuccessAt={observer.lastSuccessAt} background={observer.background} subject="this profile load"/> : undefined} cancel={applicationRunning && selectedNumber !== undefined ? async key => setApplication(await api.cancelProfileApplication(application.id, selectedNumber, key)) : undefined}/>}
     <div className="library-profile-layout">
       <aside className="library-profile-list" aria-label="Saved profiles"><div className="library-profile-list-heading"><strong>Saved profiles</strong><span>{profiles.length}</span></div>{profiles.map(profile => <button key={profile.number} type="button" className={profile.number === selectedNumber ? "is-selected" : undefined} aria-pressed={profile.number === selectedNumber} onClick={() => selectProfile(profile)}><span>Profile {profile.number} · {profile.name}</span><small>{profile.assignments.length} assignment{profile.assignments.length === 1 ? "" : "s"} · {profile.status.replaceAll("-", " ")}</small></button>)}{profiles.length === 0 && <div className="library-profile-list-empty"><strong>No saved profiles</strong><p>Create a numbered profile to describe the desired fleet setup.</p></div>}<button type="button" className="library-profile-create-link" onClick={startNew}>+ New profile</button></aside>
       {draft && editing && <div className="library-profile-editor"><header className="library-profile-editor-heading"><div><span>{draft.number ? `Edit profile ${draft.number}` : "New numbered profile"}</span><h3>{draft.name || "Unnamed profile"}</h3></div></header><div className="library-profile-fields"><label><span>Profile name</span><input value={draft.name} maxLength={120} onChange={event => updateDraft({name: event.target.value})}/></label><label><span>Retention</span><select value={draft.installationPolicy} onChange={event => updateDraft({installationPolicy: event.target.value as FleetProfileInput["installation_policy"]})}><option value="keep-cached">Keep cached artifacts</option><option value="exact">Exact desired state</option></select></label><label className="library-profile-wide"><span>Purpose</span><textarea value={draft.description} maxLength={1000} rows={2} onChange={event => updateDraft({description: event.target.value})}/></label><label className="library-profile-favorite"><input type="checkbox" checked={draft.favorite} onChange={event => updateDraft({favorite: event.target.checked})}/><span>Favorite profile</span></label></div>
