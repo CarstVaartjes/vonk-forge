@@ -20,6 +20,11 @@ marks every blob of the image it stored as fresh, so a just-stored image is
 kept for the grace period whatever the database says yet; after that, only
 the named images keep their blobs. Collection and copies share the store's
 one writer lock, so they never interleave.
+
+A collection deletes only on positive evidence. If any referenced image's
+manifest cannot be read or understood (an I/O or permission error, truncated
+JSON, an unknown schema), the blobs that image refers to are unknown, so the
+whole pass deletes nothing, names the reason, and runs again next round.
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ IMAGE_CACHE_DIRECTORY = "image-cache"
 LAYOUT_DIRECTORY = "oci"
 OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
 STORE_BUSY = "image_store.busy"
+REFERENCE_SCAN_FAILED = "image_store.reference_scan_failed"
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COPY_TIMEOUT_SECONDS = 6 * 60 * 60
 _COPY_RETRIES = 3
@@ -225,7 +231,9 @@ class OciImageStore:
         can land between the answer and the sweep. A blob is removed only
         when none of them refers to it and it is older than the grace
         period. A missing referenced manifest refers to nothing, which is
-        ordinary cache loss.
+        ordinary cache loss. A manifest that exists but cannot be read or
+        understood proves nothing: ``REFERENCE_SCAN_FAILED`` is raised before
+        anything is removed, because a failed scan never proves a blob unused.
         """
 
         blobs = self.root / "blobs" / "sha256"
@@ -262,11 +270,20 @@ class OciImageStore:
 
     def _referenced_blobs(self, address: str) -> set[str]:
         digest = f"sha256:{address}"
+        if _DIGEST.fullmatch(digest) is None:
+            # No stored manifest can have this name: a definite answer.
+            return set()
         try:
             manifest = json.loads(self.blob_path(digest).read_bytes())
             image = _stored_image(digest, manifest)
-        except (OSError, ValueError, OciImageStoreError):
+        except FileNotFoundError:
             return set()
+        except (OSError, ValueError, OciImageStoreError) as error:
+            raise OciImageStoreError(
+                REFERENCE_SCAN_FAILED,
+                f"manifest {address} is referenced but cannot be read, "
+                f"so nothing was removed: {type(error).__name__}: {error}",
+            ) from error
         return {item.removeprefix("sha256:") for item in image.blob_digests}
 
     @contextmanager
@@ -336,6 +353,7 @@ __all__ = [
     "IMAGE_CACHE_DIRECTORY",
     "LAYOUT_DIRECTORY",
     "OCI_MANIFEST",
+    "REFERENCE_SCAN_FAILED",
     "STORE_BUSY",
     "Collection",
     "OciImageStore",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 import uuid
@@ -155,6 +156,83 @@ def test_an_upload_no_build_waits_on_is_reclaimed(system) -> None:
 
     assert waiting.exists()
     assert not abandoned.exists()
+
+
+def _damage_manifest(storage, address: str, how: str, monkeypatch) -> None:
+    manifest = storage.layout.blob_path(f"sha256:{address}")
+    original = manifest.read_bytes()
+    if how == "truncated":
+        manifest.write_bytes(original[: len(original) // 2])
+    elif how == "garbage":
+        manifest.write_bytes(b"\xff\x00 not json")
+    elif how == "unknown-schema":
+        manifest.write_bytes(
+            json.dumps(
+                {
+                    "schemaVersion": 2,
+                    "mediaType": "application/vnd.oci.image.index.v1+json",
+                    "manifests": [],
+                }
+            ).encode()
+        )
+    else:
+        read_bytes = Path.read_bytes
+
+        def denied(path: Path) -> bytes:
+            if path == manifest:
+                raise PermissionError(13, "Permission denied", str(path))
+            return read_bytes(path)
+
+        monkeypatch.setattr(Path, "read_bytes", denied)
+
+
+@pytest.mark.parametrize(
+    "how", ["truncated", "garbage", "unknown-schema", "permission-denied"]
+)
+def test_an_unreadable_manifest_deletes_nothing_until_it_can_be_read(
+    system, monkeypatch, how: str
+) -> None:
+    # A failed scan never proves an object unused: the published image's
+    # manifest is the only record of which blobs it needs.
+    _sessions, storage, collector = system
+    published = _image(storage, "a" * 64)
+    (storage.root / f"{'a' * 64}.receipt.json").write_text("{}")
+    retired = _image(storage, "b" * 64)
+    _age(*_blobs(storage))
+    manifest = storage.layout.blob_path(f"sha256:{'a' * 64}")
+    intact = manifest.read_bytes()
+    _damage_manifest(storage, "a" * 64, how, monkeypatch)
+
+    assert collector.collect() is None
+    assert published | retired <= _blobs(storage)
+
+    monkeypatch.undo()
+    manifest.write_bytes(intact)
+    result = collector.collect()
+
+    assert result is not None
+    assert _blobs(storage) == published
+    assert result.blobs_removed == len(retired - published)
+
+
+def test_unlistable_receipts_delete_nothing(system) -> None:
+    # A directory that cannot be listed must not read as "nothing is published".
+    _sessions, storage, collector = system
+    published = _image(storage, "a" * 64)
+    receipts = storage.root
+    (receipts / f"{'a' * 64}.receipt.json").write_text("{}")
+    _age(*_blobs(storage))
+    receipts.chmod(0o311)  # searchable, so the layout is reachable, but not listable
+    try:
+        if os.access(receipts, os.R_OK):
+            pytest.skip("permissions are not enforced for this user")
+        assert collector.collect() is None
+    finally:
+        receipts.chmod(0o755)
+
+    assert published <= _blobs(storage)
+    assert collector.collect() is not None
+    assert published <= _blobs(storage)
 
 
 def test_collection_runs_once_per_interval(system) -> None:
