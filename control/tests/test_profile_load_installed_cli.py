@@ -491,8 +491,10 @@ def test_installed_interactive_review_recovers_the_original_load_after_edit(
         ("POST", "/api/profile/1/load"),
         ("GET", f"/api/profile/1/requests/{KEY}"),
     ]
+    # The confirmed load names the effects that were reviewed.
     assert state.calls[2][2] == {
         "request_key": KEY,
+        "reviewed_effects_digest": preview["effects_digest"],
     }
     with sessions() as session:
         applications = list(session.scalars(select(FleetProfileApplication)))
