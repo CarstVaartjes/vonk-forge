@@ -93,7 +93,6 @@ from .models import (
     RecipeSourceBundle,
     ResourceReservation,
     RunNode,
-    RuntimeImageAuthorization,
 )
 from .operation_api import (
     OperationListPage,
@@ -128,7 +127,6 @@ from .profile_capacity import (
 )
 from .recipe_build_cancellation import (
     BuildConsumerError,
-    build_serves_revision,
     lock_run_switch_build_dependency,
 )
 from .recipe_builds import RecipeBuildAdmissionBusy, RecipeBuildPlan
@@ -1133,7 +1131,7 @@ class RecipeLifecyclePhaseExecutor:
         with self._sessions.begin() as session:
             admission_guard(session)
             build = session.get(RecipeBuild, build_id)
-            if build is None or build.recipe_revision_id != revision_id:
+            if build is None:
                 raise RunSwitchOperationConflict(
                     "run-switch.container-build-receipt-unavailable"
                 )
@@ -4356,7 +4354,9 @@ class RunSwitchOperationService:
     ) -> RecipeBuild | None:
         if expected_image is not None:
             # Accepted work remains bound to its approved receipt even when a
-            # newer completed build becomes available while it is waiting.
+            # newer completed build becomes available while it is waiting. The
+            # image is identified by its content: the receipt names the exact
+            # build, and its digest is compared to the compiled image later.
             build = (
                 session.get(RecipeBuild, expected_image.build_id)
                 if expected_image.build_id is not None
@@ -4364,29 +4364,11 @@ class RunSwitchOperationService:
             )
             if build is None or not self._build_is_available(build):
                 return None
-            authorized = (
-                build.recipe_revision_id == revision_id
-                or session.scalar(
-                    select(RuntimeImageAuthorization.id)
-                    .where(
-                        RuntimeImageAuthorization.recipe_revision_id == revision_id,
-                        RuntimeImageAuthorization.state == "authorized",
-                        RuntimeImageAuthorization.build_id == build.id,
-                        RuntimeImageAuthorization.oci_archive_sha256
-                        == expected_image.oci_layout_sha256,
-                    )
-                    .limit(1)
-                )
-                is not None
-            )
-            if not authorized:
-                raise RunSwitchOperationConflict(
-                    "profile.runtime-image-changed: accepted build is not authorized for this recipe"
-                )
             return build
 
-        # A fresh review selects the current completed image, independently of
-        # the immutable build that an older installation still references.
+        # A fresh review selects the current completed image of this revision.
+        # A successor with the same executable inputs finds its predecessor's
+        # build by content in ``_select_build``.
         candidates = session.scalars(
             select(RecipeBuild)
             .where(
@@ -4400,22 +4382,6 @@ class RunSwitchOperationService:
         for candidate in candidates:
             if self._build_is_available(candidate):
                 return candidate
-
-        # An editorial successor may reuse a build from another revision only
-        # through its explicit authorization binding.
-        authorized_build_ids = session.scalars(
-            select(RuntimeImageAuthorization.build_id)
-            .where(
-                RuntimeImageAuthorization.recipe_revision_id == revision_id,
-                RuntimeImageAuthorization.state == "authorized",
-                RuntimeImageAuthorization.build_id.is_not(None),
-            )
-            .order_by(RuntimeImageAuthorization.authorized_at.desc())
-        )
-        for build_id in authorized_build_ids:
-            build = session.get(RecipeBuild, build_id)
-            if build is not None and self._build_is_available(build):
-                return build
         return None
 
     @staticmethod
@@ -4463,6 +4429,16 @@ class RunSwitchOperationService:
                     builder_freshness=freshness,
                 )
 
+        # The same executable inputs mean the same image, whichever revision
+        # first built it: reuse that build by content, creating nothing.
+        reusable_build_id = getattr(self._lifecycle, "reusable_build_id", None)
+        if callable(reusable_build_id):
+            for node in self._builder_nodes(session, group_ids):
+                found_id = reusable_build_id(revision.id, node.node_id)
+                found = session.get(RecipeBuild, found_id) if found_id else None
+                if found is not None and self._build_is_available(found):
+                    return _BuildSelection(build=found, candidate=found)
+
         preview_build = getattr(self._lifecycle, "preview_build", None)
         if not create_build:
             # The same missing-build evidence below explains the blocker.
@@ -4482,23 +4458,7 @@ class RunSwitchOperationService:
                 ),
             )
 
-        nodes = tuple(
-            session.scalars(
-                select(AgentNode)
-                .where(
-                    AgentNode.state == "active",
-                    AgentNode.revoked_at.is_(None),
-                    AgentNode.architecture == "linux-arm64",
-                )
-                .order_by(AgentNode.node_id)
-            )
-        )
-        # A builder may be a member of the selected group, but a separate
-        # active worker is preferred so build memory cannot contend with the
-        # inference admission.  Both choices remain deterministic.
-        ordered_nodes = tuple(
-            sorted(nodes, key=lambda node: (node.node_id in group_ids, node.node_id))
-        )
+        ordered_nodes = self._builder_nodes(session, group_ids)
         errors: list[str] = []
         saw_builder = False
         for node in ordered_nodes:
@@ -4569,6 +4529,26 @@ class RunSwitchOperationService:
                     node_ids=[node.node_id for node in group.nodes],
                 ),
             ),
+        )
+
+    @staticmethod
+    def _builder_nodes(session: Session, group_ids: set[str]) -> tuple[AgentNode, ...]:
+        nodes = tuple(
+            session.scalars(
+                select(AgentNode)
+                .where(
+                    AgentNode.state == "active",
+                    AgentNode.revoked_at.is_(None),
+                    AgentNode.architecture == "linux-arm64",
+                )
+                .order_by(AgentNode.node_id)
+            )
+        )
+        # A builder may be a member of the selected group, but a separate
+        # active worker is preferred so build memory cannot contend with the
+        # inference admission.  Both choices remain deterministic.
+        return tuple(
+            sorted(nodes, key=lambda node: (node.node_id in group_ids, node.node_id))
         )
 
     def _builder_admission(
@@ -8629,7 +8609,6 @@ def _build_receipt_in_session(
     build = session.get(RecipeBuild, build_id)
     if (
         build is None
-        or not build_serves_revision(session, build, plan.recipe_revision_id)
         or build.state != "succeeded"
         or build.build_input_sha256 != plan.build.build_input_sha256
         or not _is_oci_digest(build.image_digest)

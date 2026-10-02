@@ -24,7 +24,6 @@ from .admission_locking import (
 from .cluster_mappings import validate_mapping_parameters
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
-    CompiledRuntimeImage,
     validate_compiled_launch_payload,
 )
 from .disk_reservations import (
@@ -56,7 +55,6 @@ from .recipe_runtime_specs import (
     resolve_recipe_entities,
 )
 from .resource_planning import installation_disk_requirement
-from .runtime_image_preparation import require_runtime_image_authorization
 from .runtime_preflight import (
     admission_blockers,
     latest_result,
@@ -214,14 +212,12 @@ class InstallAdmissionService:
         disk_floor_bytes: int = 10_000_000_000,
         compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]]
         | None = None,
-        runtime_image_authorizer: Callable[[Session, InstallPlan], None] | None = None,
     ) -> None:
         self._sessions = sessions
         self._inventory = InventoryRepository(sessions)
         self._inventory_max_age = inventory_max_age
         self._disk_floor = disk_floor_bytes
         self._compiled_plan_provider = compiled_plan_provider
-        self._runtime_image_authorizer = runtime_image_authorizer
 
     def plan_install(
         self,
@@ -851,13 +847,6 @@ class InstallAdmissionService:
             != tuple((node.node_id, node.rank, node.role) for node in plan.nodes)
         ):
             raise InstallPlanConflict("install.plan_stale")
-        if self._runtime_image_authorizer is not None:
-            try:
-                self._runtime_image_authorizer(session, plan)
-            except (TypeError, ValueError) as error:
-                raise InstallPlanConflict(
-                    "install.runtime_image_authority_stale"
-                ) from error
         try:
             resolve_recipe_entities(session, revision.document)
         except RecipeRuntimeSpecError as error:
@@ -993,20 +982,6 @@ def _compiled_build_matches(
         and image.get("oci_layout_sha256") == build.oci_layout_sha256
         and image.get("image_bytes") == build.image_bytes
     )
-
-
-def authorize_installation_runtime_images(session: Session, plan: InstallPlan) -> None:
-    """Recheck current SQL grants while acceptance owns its short transaction.
-
-    A grant of this exact archive to the current recipe revision suffices.
-    """
-    for payload in plan.compiled_plan_by_node.values():
-        require_runtime_image_authorization(
-            session,
-            recipe_revision_id=plan.recipe_revision_id,
-            current_content_digest=plan.recipe_content_sha256,
-            receipt=CompiledRuntimeImage.model_validate(payload["runtime_image"]),
-        )
 
 
 def _node_document(node: InstallNodePlan) -> dict[str, object]:

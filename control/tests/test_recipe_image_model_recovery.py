@@ -190,7 +190,6 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
         transport=ImageTransport(),
         builder=builder,
         # This test is about model recovery; image authorization has its own.
-        receipt_writer=lambda *_args: None,
         model_cache=cache,
         clock=lambda: datetime.now(UTC),
     )

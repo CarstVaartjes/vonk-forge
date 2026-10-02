@@ -1210,13 +1210,12 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from .fleet_stream import FleetStream
     from .install_admission import (
         InstallAdmissionService,
-        authorize_installation_runtime_images,
     )
     from .jobs import JobService
     from .library_projection import LibraryProjection
     from .metrics import MetricsRegistry, OperationalMetricsCollector
     from .model_cache import ModelCacheService
-    from .models import CatalogDocumentRevision, Job
+    from .models import Job
     from .operation_api import durable_operation_services
     from .presence import ManagementAddressPolicy
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
@@ -1225,10 +1224,8 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from .runtime_image_preparation import (
         FilesystemRuntimeImageStorage,
         OciLayoutImageTransport,
-        RuntimeImageReceipt,
         make_runtime_image_receipt_preparer,
-        resolve_persisted_runtime_image_receipt,
-        runtime_image_expectations,
+        stored_runtime_image_resolver,
     )
     from .telemetry import TelemetryRepository
 
@@ -1291,69 +1288,9 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         clock=clock,
     )
 
-    def resolve_runtime_image_receipt(
-        document, image_digest, runtime_spec
-    ) -> RuntimeImageReceipt:
-        """Read an already prepared OCI receipt without pulling or exporting."""
-
-        runtime = (
-            runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None
-        )
-        if not isinstance(runtime, Mapping):
-            raise TypeError(
-                "runtime image preparation is required: runtime projection is unavailable"
-            )
-        expectations = runtime_image_expectations(runtime)
-        receipt = runtime_image_storage.find_verified(
-            image_digest,
-            expected_architecture=expectations["architecture"],
-            expected_runtime_interface=expectations["interface"],
-        )
-        if receipt is None:
-            raise ValueError(
-                "runtime image preparation is required before compile/install"
-            )
-        identity = runtime_spec.get("identity")
-        execution_key = (
-            identity.get("execution_sha256") if isinstance(identity, Mapping) else None
-        )
-        recipe_digest = (
-            identity.get("recipe_revision_sha256")
-            if isinstance(identity, Mapping)
-            else None
-        )
-        if not isinstance(execution_key, str) or not isinstance(recipe_digest, str):
-            raise TypeError(
-                "runtime image preparation execution identity is unavailable"
-            )
-        with sessions() as session:
-            revision = session.scalar(
-                select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == "active",
-                    CatalogDocumentRevision.content_digest == recipe_digest,
-                )
-            )
-            if revision is None:
-                raise ValueError(
-                    "durable runtime image receipt is unavailable before compile/install"
-                )
-            resolve_persisted_runtime_image_receipt(
-                session,
-                recipe_revision_id=revision.id,
-                current_content_digest=recipe_digest,
-                effective_execution_key=execution_key,
-                receipt=receipt,
-            )
-        if revision is None:
-            raise ValueError(
-                "durable runtime image receipt is unavailable before compile/install"
-            )
-        return receipt
-
     execution_plans = ControllerExecutionPlanService(
         model_cache,
-        runtime_image_resolver=resolve_runtime_image_receipt,
+        runtime_image_resolver=stored_runtime_image_resolver(runtime_image_storage),
     )
 
     recipe_route_runtime = AtomicRouteBundlePublisher(
@@ -1385,7 +1322,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
             compiled_plan_provider=execution_plans.compile_installation,
-            runtime_image_authorizer=authorize_installation_runtime_images,
         ),
         run_admission=RunAdmissionService(
             sessions,

@@ -16,11 +16,10 @@ from vonk_control.distribution import (
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor import DurableDistributionPhaseExecutor
-from vonk_control.models import Base, RuntimeImageAuthorization
+from vonk_control.models import Base
 from vonk_control.run_switch_contract import RunSwitchPhase, RunSwitchPlan
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
-    persist_runtime_image_receipt,
 )
 
 from .test_runtime_image_preparation import (
@@ -44,7 +43,7 @@ class _ModelObjectSource(MemoryObjectSource):
 
 
 def test_built_image_receipt_flows_from_prepare_to_target_verify(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = _prepare(storage=storage)
@@ -71,14 +70,6 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
     with Session(engine) as session:
         _add_revision(session, revision_id, _recipe("recipe-source-build.json"))
         _add_build(session, revision_id)
-        persist_runtime_image_receipt(
-            session,
-            recipe_revision_id=revision_id,
-            original_content_digest=receipt.distribution_content_sha256,
-            effective_execution_key="f" * 64,
-            receipt=receipt,
-            verified_at=datetime.now(UTC),
-        )
         session.commit()
     nodes = ("spk_" + "1" * 32,)
     plan = RunSwitchPlan.model_construct(
@@ -113,6 +104,10 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
         return "child-direct"
 
     executor._ensure_child = ensure_child
+    # The memory source has no image layout to read the config id from.
+    monkeypatch.setattr(
+        executor, "_stored_config_digest", lambda _address: "sha256:" + "d" * 64
+    )
     phase = RunSwitchPhase(
         index=0,
         kind="transfer",
@@ -159,17 +154,6 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
     )
     assert verify.result is not None
     assert verify.result["verified"] is True
-    with Session(engine) as session:
-        session.query(RuntimeImageAuthorization).delete(synchronize_session=False)
-        session.commit()
-    with pytest.raises(RuntimeError, match="not authorized"):
-        executor._archive(
-            plan,
-            build_id=BUILD_ID,
-            image_digest=BUILT_IMAGE_DIGEST,
-            layout_digest=ARCHIVE_DIGEST,
-            image_bytes=receipt.image_bytes,
-        )
 
 
 def _archive_gate_service(tmp_path: Path):
@@ -188,14 +172,6 @@ def _archive_gate_service(tmp_path: Path):
     with Session(engine) as session:
         _add_revision(session, "gate-revision", _recipe("recipe-source-build.json"))
         _add_build(session, "gate-revision")
-        persist_runtime_image_receipt(
-            session,
-            recipe_revision_id="gate-revision",
-            original_content_digest=receipt.distribution_content_sha256,
-            effective_execution_key="f" * 64,
-            receipt=receipt,
-            verified_at=datetime.now(UTC),
-        )
         session.commit()
     source = RecipeBuildObjectSource(sessions, tmp_path)
     service = DistributionService(source, sessions=sessions)
@@ -220,109 +196,37 @@ def _archive_gate_service(tmp_path: Path):
     return executor, plan, receipt, sessions
 
 
-def test_archive_gate_requires_the_authorization_even_when_bytes_are_stored(
-    tmp_path: Path,
-) -> None:
-    """A stored archive with no live authorization is not usable.
+def test_archive_is_identified_by_content_for_any_revision(tmp_path: Path) -> None:
+    """No recipe revision is part of an image's identity.
 
-    It fails on the wrong implementation that treats managed-storage presence
-    as sufficient, which would serve bytes whose authorization was deleted.
+    The build row records the exact archive and managed storage holds the
+    image; whichever revision's plan names the build copies it.
     """
 
-    executor, plan, receipt, sessions = _archive_gate_service(tmp_path)
+    executor, _plan, receipt, _sessions = _archive_gate_service(tmp_path)
     call = {
         "build_id": BUILD_ID,
         "image_digest": BUILT_IMAGE_DIGEST,
         "layout_digest": ARCHIVE_DIGEST,
         "image_bytes": receipt.image_bytes,
-        "effective_execution_key": "f" * 64,
     }
-    assert executor._archive(plan, **call).address == ARCHIVE_DIGEST
-    with Session(sessions.kw["bind"]) as session:
-        session.query(RuntimeImageAuthorization).delete(synchronize_session=False)
-        session.commit()
-    # The bytes and their receipt are still in managed storage.
-    assert (
-        tmp_path / "image-cache" / "oci" / "blobs" / "sha256" / ARCHIVE_DIGEST
-    ).is_file()
-    with pytest.raises(RuntimeError, match="not authorized"):
-        executor._archive(plan, **call)
+    assert executor._archive(**call).address == ARCHIVE_DIGEST
+    # Another build's bytes are not this build's.
+    with pytest.raises(RuntimeError, match="build authority changed"):
+        executor._archive(**{**call, "image_bytes": receipt.image_bytes + 1})
 
 
-def test_archive_gate_requires_the_stored_receipt_even_when_authorized(
-    tmp_path: Path,
-) -> None:
-    """A live authorization with no stored receipt is not usable either.
+def test_archive_gate_requires_the_image_in_managed_storage(tmp_path: Path) -> None:
+    """A build row whose image is gone from managed storage is not copyable."""
 
-    It fails on the wrong implementation that trusts the SQL authorization
-    alone, which would admit an archive removed from managed storage.
-    """
-
-    executor, plan, receipt, _sessions = _archive_gate_service(tmp_path)
+    executor, _plan, receipt, _sessions = _archive_gate_service(tmp_path)
     call = {
         "build_id": BUILD_ID,
         "image_digest": BUILT_IMAGE_DIGEST,
         "layout_digest": ARCHIVE_DIGEST,
         "image_bytes": receipt.image_bytes,
-        "effective_execution_key": "f" * 64,
     }
-    assert executor._archive(plan, **call).address == ARCHIVE_DIGEST
-    (tmp_path / "image-cache" / f"{ARCHIVE_DIGEST}.receipt.json").unlink()
-    with pytest.raises(RuntimeError, match="receipt authority"):
-        executor._archive(plan, **call)
-
-
-def test_archive_gate_accepts_an_authorized_image_through_a_sibling_build_and_role(
-    tmp_path: Path,
-) -> None:
-    """The revision is authorized for the archive, whoever first produced it.
-
-    A second build row can yield identical bytes, and the execution key of the
-    phase result may differ from the key that recorded the grant, or be absent
-    when the plan has no runtime-image phase. None of them makes the revision
-    unauthorized; refusing here repeated the phase forever.
-    """
-
-    executor, plan, receipt, sessions = _archive_gate_service(tmp_path)
-    sibling_build = "00000000-0000-4000-8000-0000000000bb"
-    with Session(sessions.kw["bind"]) as session:
-        _add_build(
-            session,
-            "gate-revision",
-            build_id=sibling_build,
-            builder_node_id="other-builder",
-        )
-        session.commit()
-    image = executor._archive(
-        plan,
-        build_id=sibling_build,
-        image_digest=BUILT_IMAGE_DIGEST,
-        layout_digest=ARCHIVE_DIGEST,
-        image_bytes=receipt.image_bytes,
-        effective_execution_key="a" * 64,
-    )
-    assert image.address == ARCHIVE_DIGEST
-    # With no runtime-image phase in the plan (the Sparks already hold the
-    # image) no phase result carries an execution key at all.
-    keyless = executor._archive(
-        plan,
-        build_id=BUILD_ID,
-        image_digest=BUILT_IMAGE_DIGEST,
-        layout_digest=ARCHIVE_DIGEST,
-        image_bytes=receipt.image_bytes,
-        effective_execution_key=None,
-    )
-    assert keyless.address == ARCHIVE_DIGEST
-    # Another revision's grant is still not this plan's.
-    with Session(sessions.kw["bind"]) as session:
-        session.query(RuntimeImageAuthorization).delete(synchronize_session=False)
-        session.commit()
-    with pytest.raises(RuntimeError, match="not authorized"):
-        executor._archive(
-            plan,
-            build_id=sibling_build,
-            image_digest=BUILT_IMAGE_DIGEST,
-            layout_digest=ARCHIVE_DIGEST,
-            image_bytes=receipt.image_bytes,
-            effective_execution_key="a" * 64,
-        )
+    assert executor._archive(**call).address == ARCHIVE_DIGEST
+    (tmp_path / "image-cache" / "oci" / "blobs" / "sha256" / ARCHIVE_DIGEST).unlink()
+    with pytest.raises(RuntimeError, match="identity is unavailable"):
+        executor._archive(**call)

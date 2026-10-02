@@ -211,7 +211,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
                 raise RuntimeError("NAS source is temporarily unavailable")
             return (model, config), "d" * 64, 15
 
-        def _archive(self, _plan, **_kwargs):
+        def _archive(self, **_kwargs):
             return archive
 
     executor = StubExecutor(

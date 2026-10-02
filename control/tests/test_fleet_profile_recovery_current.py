@@ -742,14 +742,14 @@ def test_profile_load_of_an_editorial_successor_accepts_the_reused_build(
     """The build a successor revision reuses is its dependency, not a mismatch.
 
     A republished recipe whose executable inputs are unchanged reuses the
-    original revision's image build through its own authorization. Accepting a
-    profile load for it refused with "accepted build consumer identity changed"
-    because the build still names the original revision.
+    original revision's image build; the build still names the original
+    revision. Accepting a profile load for it refused with "accepted build
+    consumer identity changed". An image is its content, not a revision's.
     """
 
     import copy
 
-    from vonk_control.models import RecipeBuild, RuntimeImageAuthorization
+    from vonk_control.models import RecipeBuild
     from vonk_control.recipe_builds import RecipeBuildPlan
     from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -788,20 +788,6 @@ def test_profile_load_of_an_editorial_successor_accepts_the_reused_build(
         session.flush()
         successor_id = successor.id
         slug = successor.slug
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=successor_id,
-                original_content_digest=original.content_digest or "d" * 64,
-                effective_execution_key="e" * 64,
-                image_digest=build.image_digest,
-                local_image_config_id="sha256:" + "f" * 64,
-                oci_archive_sha256=build.oci_layout_sha256,
-                image_bytes=build.image_bytes,
-                build_id=build.id,
-                authorized_at=now,
-                state="authorized",
-            )
-        )
         reused_plan = RecipeBuildPlan(
             build_id=build.id,
             recipe_revision_id=successor_id,
@@ -813,6 +799,7 @@ def test_profile_load_of_an_editorial_successor_accepts_the_reused_build(
             policy_report=dict(build.policy_report),
         )
     lifecycle.preview_build = lambda *_args, **_kwargs: reused_plan
+    lifecycle.reusable_build_id = lambda *_args, **_kwargs: build_id
     run_switch = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,

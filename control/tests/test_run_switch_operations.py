@@ -51,12 +51,10 @@ from vonk_control.models import (
     RecipeSourceBundle,
     ResourceReservation,
     RunNode,
-    RuntimeImageAuthorization,
 )
 from vonk_control.operation_api import OperationQuery
 from vonk_control.operation_contract import OperationFailureEvidence
 from vonk_control.recipe_build_cancellation import (
-    BuildConsumerError,
     lock_build_dependency,
 )
 from vonk_control.recipe_builds import RecipeBuildPlan
@@ -443,6 +441,9 @@ class PendingBuilds(RecipeBuildService):
         self.template_plan = template_plan
         self.template_policy_report = template_policy_report
         self.calls: list[str] = []
+
+    def reusable_build_id(self, *_args, **_kwargs):
+        return None
 
     def plan(self, recipe_revision_id: str, builder_node_id: str, *, now):
         self.calls.append(builder_node_id)
@@ -2675,7 +2676,7 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
     )
 
     # The successor's own mapping is admitted against the reused build: the
-    # build keeps its original owner and the successor is authorized to use it.
+    # build keeps its original owner and the successor uses it by content.
     mappings = ClusterMappingService(sessions)
     successor_mapping = mappings.materialize(
         mappings.preview(successor_id, nodes, {}, "admin"), actor="admin", now=NOW
@@ -2685,51 +2686,24 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
     )
     assert admitted.allowed
 
-    # The container-build receipt path validates the reused build for the
-    # successor plan without treating the original revision as a mismatch.
-    # Without the successor's own authorization the original owner's build is
-    # not consumable; with it, the same verified artifact is.
+    # The container-build receipt path and the build's consumer lock take the
+    # reused build for the successor plan: an image is its content, not the
+    # revision that first built it.
     with sessions.begin() as session:
-        with pytest.raises(RunSwitchOperationConflict):
-            _build_receipt_in_session(session, plan)
+        receipt = _build_receipt_in_session(session, plan)
         reused = session.get(RecipeBuild, build_id)
         assert reused is not None
-
-        def lock_for_successor():
-            return lock_build_dependency(
+        assert reused.recipe_revision_id != successor_id
+        assert (
+            lock_build_dependency(
                 session,
                 recipe_revision_id=successor_id,
                 builder_node_id=reused.builder_node_id,
                 build_input_sha256=reused.build_input_sha256,
                 build_id=reused.id,
             )
-
-        # Consent is not broadened: an unauthorized successor is still refused,
-        # with the reason that names the missing authorization.
-        with pytest.raises(BuildConsumerError) as refused:
-            lock_for_successor()
-        assert refused.value.code == "build.consumer_invalid"
-        assert "not authorized" in str(refused.value)
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=successor_id,
-                original_content_digest="d" * 64,
-                effective_execution_key="e" * 64,
-                image_digest=reused.image_digest,
-                local_image_config_id="sha256:" + "f" * 64,
-                oci_archive_sha256=reused.oci_layout_sha256,
-                image_bytes=reused.image_bytes,
-                build_id=reused.id,
-                authorized_at=NOW,
-                state="authorized",
-            )
+            is reused
         )
-        session.flush()
-        receipt = _build_receipt_in_session(session, plan)
-        assert reused.recipe_revision_id != successor_id
-        # The authorized successor accepts the reused build as its own
-        # dependency; its original owner's revision is not a changed identity.
-        assert lock_for_successor() is reused
     assert receipt["build_id"] == build_id
     assert receipt["state"] == "succeeded"
 

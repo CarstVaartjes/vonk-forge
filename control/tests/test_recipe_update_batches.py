@@ -28,8 +28,8 @@ from vonk_control.recipe_image_availability import (
 from vonk_control.recipe_update_contract import RecipeUpdateResponse
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
-    persist_runtime_image_receipt,
     prepare_runtime_image,
+    record_runtime_image_reference,
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -384,13 +384,12 @@ def test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope
                     "image_bytes": len(archive),
                 },
             )
-            persist_runtime_image_receipt(
+            record_runtime_image_reference(
                 session,
                 recipe_revision_id=revision_id,
-                original_content_digest=revision.content_digest,
                 effective_execution_key=revision.execution_key,
                 receipt=receipt,
-                verified_at=now[0],
+                recorded_at=now[0],
             )
             receipts.append(receipt)
             expected.append(revision_id)
