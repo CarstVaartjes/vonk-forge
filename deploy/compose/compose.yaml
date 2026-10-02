@@ -203,7 +203,7 @@ services:
     tmpfs:
       - /tmp
       - /root:exec,mode=0700,uid=10002,gid=10001
-    networks: [litellm-data, cluster-egress, litellm-edge]
+    networks: [litellm-data, cluster-egress, litellm-edge, litellm-metrics]
     depends_on:
       postgres: {condition: service_healthy}
       control-api: {condition: service_started, required: false, restart: true}
@@ -225,8 +225,11 @@ services:
     command:
       - --config.file=/run/vonk-runtime-assets/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=15d
-      - --storage.tsdb.retention.size=10GB
+      # One year of history for inference statistics. The size cap is a
+      # backstop (oldest blocks go first), sized for roughly 100 series per
+      # active model/key pair at a 30s scrape plus the Controller's metrics.
+      - --storage.tsdb.retention.time=365d
+      - --storage.tsdb.retention.size=40GB
     read_only: true
     user: "65534:65534"
     # Binds the internal high port 9090 as nobody; no capabilities needed.
@@ -238,7 +241,7 @@ services:
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - runtime-assets:/run/vonk-runtime-assets:ro
     tmpfs: [/tmp]
-    networks: [application]
+    networks: [application, litellm-metrics]
     depends_on:
       control-api: {condition: service_started, required: false, restart: true}
     healthcheck:
@@ -421,6 +424,8 @@ networks:
   litellm-data: {internal: true}
   cluster-egress: {}
   litellm-edge: {internal: true}
+  # Only LiteLLM and Prometheus: the unauthenticated /metrics scrape path.
+  litellm-metrics: {internal: true}
   registry-edge: {internal: true}
   # No standing service joins this network. A Docker-daemon administrator may
   # attach a version-pinned one-shot ORAS publisher as documented in

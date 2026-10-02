@@ -12,3 +12,14 @@ scrape_configs:
     bearer_token_file: /run/vonk-normalized-secrets/prometheus-metrics-token
     static_configs:
       - targets: [control-api:8000]
+
+  # LiteLLM inference metrics. The scrape path is the internal litellm-metrics
+  # network shared only with LiteLLM; Caddy never routes /metrics. A slower
+  # interval bounds a year of retention.
+  - job_name: litellm
+    scheme: http
+    metrics_path: /metrics/
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: [litellm:4000]

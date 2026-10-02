@@ -5,6 +5,18 @@ published port. Platform metrics use stable generated node IDs and bounded enum
 labels; they never include prompts, responses, credentials, hostnames, private
 addresses, raw serials, request IDs, or job IDs.
 
+## Inference statistics
+
+LiteLLM exports bounded Prometheus metrics (requests, input and output tokens,
+latency, time to first token, failures) per model alias and gateway key alias;
+the Grafana "Vonk Forge Inference" dashboard charts them. Labels never carry
+prompts, raw keys or end-user identities. `/metrics` is reachable only by
+Prometheus over the internal `litellm-metrics` network and Caddy answers 404 for
+it. Prometheus keeps one year (`365d`, capped at 40GB; the oldest blocks go
+first if the cap is reached). Changing the retention flags keeps the existing
+TSDB. Time to first token covers streaming requests only; the error rate is
+failed over total deployment attempts, so it can include retried attempts.
+
 Operational JSON logs are rotated by Docker's local driver. Remote output is
 redacted and truncated before persistence. Full sanitized job evidence is
 content-addressed and available only to operator/administrator API roles.

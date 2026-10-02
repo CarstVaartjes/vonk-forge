@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from vonk_control.litellm import (
@@ -98,3 +99,20 @@ def test_litellm_accepts_only_already_rendered_route_strings() -> None:
 
     with pytest.raises(LiteLlmPolicyError, match="rendered strings"):
         render_config(snapshot, _policy())
+
+
+def test_every_rendered_config_enables_bounded_prometheus_metrics() -> None:
+    bootstrap = json.loads(
+        (
+            Path(__file__).resolve().parents[2]
+            / "deploy/compose/litellm/bootstrap-config.json"
+        ).read_text()
+    )["litellm_settings"]
+    for rendered in (render_config(_snapshot(), _policy()), render_empty_config()):
+        settings = json.loads(rendered)["litellm_settings"]
+        assert settings == bootstrap
+        assert settings["success_callback"] == ["prometheus"]
+        assert settings["failure_callback"] == ["prometheus"]
+        assert {"end_user", "user", "user_email", "client_ip", "user_agent"} <= set(
+            settings["prometheus_exclude_labels"]
+        )
