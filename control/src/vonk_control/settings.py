@@ -67,7 +67,12 @@ STORAGE_SCAN_INTERVAL_SECONDS = 30
 # Removals that free far less than they promised (files another installation
 # still links) pause eviction on that Spark or the NAS for this long.
 STORAGE_INEFFECTIVE_COOLDOWN_SECONDS = 900
-MODEL_CACHE_PARALLEL_DOWNLOADS = 8
+# File transfers in flight across all models. Live HTTP streams (a file, or one
+# of the four ranges of a large file) are bounded separately and adaptively:
+# the Controller climbs toward the stream cap while aggregate throughput grows
+# and backs off on a provider 429 or 5xx.
+MODEL_CACHE_PARALLEL_DOWNLOADS = 16
+MODEL_CACHE_MAX_DOWNLOAD_STREAMS = 16
 RECIPE_IMAGE_PARALLEL_PREPARATIONS = 4
 # Cheap: an unchanged release answers 304 to a conditional request.
 RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS = 60

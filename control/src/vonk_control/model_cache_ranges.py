@@ -10,6 +10,7 @@ import os
 import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from threading import Event, Lock
 
@@ -71,6 +72,8 @@ def download_ranges(
     on_progress: Callable[[int], None],
     *,
     workers: int = 4,
+    stream_gate: Callable[[], AbstractContextManager[object]] | None = None,
+    on_bytes: Callable[[int], None] | None = None,
 ) -> bool:
     """Complete target atomically, or return False for sequential fallback.
 
@@ -121,6 +124,12 @@ def download_ranges(
         offset = start + counts[start]
         if offset > end:
             return
+        # The gate bounds live streams only; a range that waits for a permit
+        # holds no connection and resumes from its retained prefix.
+        with stream_gate() if stream_gate is not None else nullcontext():
+            _transfer_body(start, end, path, offset)
+
+    def _transfer_body(start: int, end: int, path: Path, offset: int) -> None:
         response = open_range(offset, end)
         invalid_body = False
         try:
@@ -158,6 +167,8 @@ def download_ranges(
                             )
                         output.write(chunk)
                         remaining -= len(chunk)
+                        if on_bytes is not None:
+                            on_bytes(len(chunk))
                         with lock:
                             counts[start] += len(chunk)
                             on_progress(sum(counts.values()))

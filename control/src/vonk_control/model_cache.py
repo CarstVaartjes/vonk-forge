@@ -107,6 +107,7 @@ from .model_cache_contract import (
 )
 from .model_cache_progress import cache_phase, cache_progress
 from .model_cache_ranges import cleanup_ranges, download_ranges, range_partial_bytes
+from .model_cache_streams import StreamGovernor
 from .models import (
     ArtifactLifecycleGate,
     CatalogDocumentRevision,
@@ -139,8 +140,9 @@ _CHUNK_BYTES = 1024 * 1024
 _PARALLEL_RANGE_MIN_BYTES = 64 * 1024 * 1024
 _PARALLEL_RANGE_WORKERS = 4
 _MAX_HTTP_REDIRECTS = 3
-_DEFAULT_MAX_PARALLEL_DOWNLOADS = 8
-_MAX_PARALLEL_DOWNLOADS = 16
+_DEFAULT_MAX_PARALLEL_DOWNLOADS = 16
+_MAX_PARALLEL_DOWNLOADS = 32
+_DEFAULT_MAX_DOWNLOAD_STREAMS = 16
 _RETRY_BASE_SECONDS = 5
 _RETRY_MAX_SECONDS = 300
 _MAX_RETRY_HINT_SECONDS = 365 * 24 * 60 * 60
@@ -1315,6 +1317,7 @@ class ModelCacheService:
         *,
         reserve_bytes: int = 10 * 1024**3,
         max_parallel_downloads: int = _DEFAULT_MAX_PARALLEL_DOWNLOADS,
+        max_download_streams: int = _DEFAULT_MAX_DOWNLOAD_STREAMS,
         clock: Callable[[], datetime] | None = None,
         http_client: httpx2.Client | None = None,
         fixture_sources: bool = False,
@@ -1341,7 +1344,13 @@ class ModelCacheService:
             or isinstance(max_parallel_downloads, bool)
             or not 1 <= max_parallel_downloads <= _MAX_PARALLEL_DOWNLOADS
         ):
-            raise ValueError("model cache parallel downloads must be between 1 and 16")
+            raise ValueError("model cache parallel downloads must be between 1 and 32")
+        if (
+            not isinstance(max_download_streams, int)
+            or isinstance(max_download_streams, bool)
+            or not 1 <= max_download_streams <= _MAX_PARALLEL_DOWNLOADS
+        ):
+            raise ValueError("model cache download streams must be between 1 and 32")
         root.mkdir(parents=True, exist_ok=True, mode=0o750)
         for child in ("objects", "partials", "quarantine", "manifests", "locks"):
             directory = root / child
@@ -1353,6 +1362,7 @@ class ModelCacheService:
         self._reserve_bytes = reserve_bytes
         self._storage_demands: StorageDemands | None = None
         self._max_parallel_downloads = max_parallel_downloads
+        self._streams = StreamGovernor(max_download_streams)
         self._clock = clock or (lambda: datetime.now(UTC))
         self._http = http_client
         # Local file and caller-supplied HTTP sources are useful for isolated
@@ -4769,6 +4779,39 @@ class ModelCacheService:
                 spec, set_digest, part, operation_id, completed_artifacts
             )
             return
+        with self._stream_gate(operation_id)():
+            self._download_sequential(
+                spec,
+                set_digest,
+                part,
+                offset,
+                received,
+                operation_id=operation_id,
+                completed_artifacts=completed_artifacts,
+                interrupt_after_bytes=interrupt_after_bytes,
+            )
+        self._complete_download(
+            spec, set_digest, part, operation_id, completed_artifacts
+        )
+
+    def _stream_gate(self, operation_id: str):
+        stop = self._transfer_stop(operation_id)
+        return lambda: self._streams.stream(
+            lambda: stop.is_set() or self._closed.is_set()
+        )
+
+    def _download_sequential(
+        self,
+        spec: ArtifactSpec,
+        set_digest: str,
+        part: Path,
+        offset: int,
+        received: int,
+        *,
+        operation_id: str,
+        completed_artifacts: int,
+        interrupt_after_bytes: int | None,
+    ) -> None:
         try:
             stream, effective_offset, close = self._open_source(spec, offset)
         except ModelCacheStorageError as error:
@@ -4812,6 +4855,7 @@ class ModelCacheService:
                                 recovery="resume",
                             )
                         output.write(chunk)
+                        self._streams.record_bytes(len(chunk))
                         received = next_received
                         if (
                             interrupt_after_bytes is not None
@@ -4870,9 +4914,6 @@ class ModelCacheService:
                 "source ended before the immutable artifact size",
                 recovery="resume",
             )
-        self._complete_download(
-            spec, set_digest, part, operation_id, completed_artifacts
-        )
 
     def _complete_download(
         self,
@@ -5084,6 +5125,8 @@ class ModelCacheService:
                     self._transfer_stop(operation_id),
                     observe,
                     workers=_PARALLEL_RANGE_WORKERS,
+                    stream_gate=self._stream_gate(operation_id),
+                    on_bytes=self._streams.record_bytes,
                 )
             if not completed:
                 self._checkpoint_artifact(
@@ -5523,6 +5566,10 @@ class ModelCacheService:
                         ):
                             self._hf_cooldown_until = until
                 response.close()
+                if source_is_huggingface:
+                    self._streams.throttled(
+                        retry_after, "Hugging Face answered 429 (rate limited)"
+                    )
                 raise ModelCacheStorageError(
                     "model_cache.rate_limited",
                     "artifact provider rate limited this download; it will resume automatically",
@@ -5570,10 +5617,20 @@ class ModelCacheService:
                 current_url = redirected_url
                 continue
             if status_code not in {200, 206}:
+                retry_after = (
+                    _retry_after_seconds(response.headers, now=self._clock())
+                    if status_code >= 500
+                    else None
+                )
                 response.close()
+                if status_code >= 500 and source_is_huggingface:
+                    self._streams.throttled(
+                        retry_after, f"Hugging Face answered {status_code}"
+                    )
                 raise ModelCacheStorageError(
                     "model_cache.source_unavailable",
                     f"cache source request failed with status {status_code}",
+                    retry_after_seconds=retry_after,
                 )
             return response
         raise ModelCacheStorageError(
@@ -7146,6 +7203,7 @@ class ModelCacheService:
         requested = self._max_parallel_downloads if limit is None else limit
         if not 1 <= requested <= _MAX_PARALLEL_DOWNLOADS:
             raise ValueError("cache worker batch limit is invalid")
+        self._streams.tick()
         self._reconcile_pending_cancellations()
         self._resume_after_credential_change()
         # Removal steps use the same Controller model-cache worker boundary,
