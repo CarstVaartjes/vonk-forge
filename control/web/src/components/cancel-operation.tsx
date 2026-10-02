@@ -11,16 +11,24 @@ import {useToast} from "./toast";
 export function CancelOperation({what, consequence, command, cancel}: {what: string; consequence: string; command?: string; cancel(requestKey: string): Promise<unknown>}) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [requested, setRequested] = useState(false);
   const [requestKey] = useState(() => crypto.randomUUID());
   const toast = useToast();
   async function confirm() {
     setBusy(true);
-    try { await cancel(requestKey); toast.success(`Cancelled the ${what}.`); }
+    try {
+      const result = await cancel(requestKey);
+      // Accepting the request is not the same as the work having stopped: the
+      // owner observes the operation and unmounts this control at its terminal state.
+      const state = result && typeof result === "object" ? (result as {state?: unknown}).state : undefined;
+      if (state === "cancelled") toast.success(`Cancelled the ${what}.`);
+      else { setRequested(true); toast.info(`Cancellation requested for the ${what}. It is cancelling until it stops.`); }
+    }
     catch (value) { toast.error(safeErrorText(value instanceof Error ? value.message : "Cancellation failed", 256)); }
     finally { setBusy(false); setConfirming(false); }
   }
   return <>
-    <button type="button" className="button secondary" onClick={() => setConfirming(true)}>Cancel {what}</button>
+    <button type="button" className="button secondary" disabled={requested} onClick={() => setConfirming(true)}>{requested ? `Cancelling ${what}…` : `Cancel ${what}`}</button>
     {confirming && <ConfirmDialog title={`Cancel this ${what}?`} consequence={consequence} confirmLabel={`Confirm cancel ${what}`} command={command} busy={busy} onConfirm={() => void confirm()} onCancel={() => setConfirming(false)}/>}
   </>;
 }
