@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
@@ -66,9 +67,26 @@ class LibraryAssessment:
         self._budget = budget_seconds
 
     def __call__(
-        self, recipes: Sequence[LibraryRecipeProjection]
+        self,
+        recipes: Sequence[LibraryRecipeProjection],
+        *,
+        budget_seconds: float | None = None,
     ) -> list[LibraryRecipeProjection]:
-        deadline = time.monotonic() + self._budget
+        """Assess in order until the budget ends, then mark the rest unavailable.
+
+        The budget is a hard bound on this call: the assessment runs on its own
+        thread and an assessment still running at the deadline is discarded, so
+        no single slow read can hold the response. Recipes not finished in time
+        say so in their own assessment instead of failing the listing.
+        """
+
+        budget = (
+            self._budget
+            if budget_seconds is None
+            else min(self._budget, budget_seconds)
+        )
+        deadline = time.monotonic() + budget
+        exceeded = f"Assessment exceeded its {budget:g}-second read budget; narrow the library filters and retry."
         try:
             with self._sessions() as session:
                 nodes = tuple(
@@ -93,17 +111,31 @@ class LibraryAssessment:
                 )
                 for item in recipes
             ]
-        result = []
-        for recipe in recipes:
-            if time.monotonic() >= deadline:
-                assessment = unassessed(
-                    self._clock,
-                    f"Assessment exceeded its {self._budget:g}-second read budget; narrow the library filters and retry.",
-                )
-            else:
-                assessment = self._assess(recipe, nodes, deadline)
-            result.append(recipe.model_copy(update={"assessment": assessment}))
-        return result
+        assessments: list[RecipeReadiness | None] = [None] * len(recipes)
+        stop = threading.Event()
+
+        def assess_in_order() -> None:
+            for index, recipe in enumerate(recipes):
+                if stop.is_set() or time.monotonic() >= deadline:
+                    return
+                assessments[index] = self._assess(recipe, nodes, deadline)
+
+        worker = threading.Thread(
+            target=assess_in_order, name="library-assessment", daemon=True
+        )
+        worker.start()
+        worker.join(timeout=max(0.0, deadline - time.monotonic()))
+        stop.set()
+        return [
+            recipe.model_copy(
+                update={
+                    "assessment": assessment
+                    if assessment is not None
+                    else unassessed(self._clock, exceeded)
+                }
+            )
+            for recipe, assessment in zip(recipes, list(assessments), strict=True)
+        ]
 
     def _cache(
         self, recipe: LibraryRecipeProjection

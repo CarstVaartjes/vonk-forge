@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Literal, cast
@@ -50,10 +51,10 @@ from .library_contract import (
     RecipeLibraryResponse,
     _utc,
 )
+from .library_image_presence import ImageKey, ImagePresenceIndex
 from .model_cache_contract import DIGEST_PATTERN, UUID_PATTERN
 from .models import (
     CatalogDocumentRevision,
-    InstallationNode,
     ModelCacheOperation,
     ModelCacheSet,
     RecipeBuild,
@@ -64,7 +65,6 @@ from .models import (
     RuntimeImageAuthorization,
 )
 from .request_fault import RequestFault
-from .runtime_image_preparation import RuntimeImagePreparationError
 
 
 class LibraryProjectionError(RuntimeError):
@@ -85,6 +85,8 @@ class LibrarySelectorAmbiguous(ValueError):
 
 
 _LIBRARY_ORDER = "catalog"
+_ACTIVE_RUN_STATES = ("planned", "starting", "running", "stopping")
+_RUN_STATES = (*_ACTIVE_RUN_STATES, "stopped", "failed", "lost")
 _LOCAL_STATE_PRIORITY = {
     "unknown": 0,
     "not_cached": 0,
@@ -336,10 +338,11 @@ class LibraryProjection:
         telemetry_delayed_seconds: int = 20,
         local_state: Callable[[], Mapping[str, Mapping[str, object]]] | None = None,
         runtime_archive_available: Callable[[str, int], bool] | None = None,
-        assessment: Callable[
-            [Sequence[LibraryRecipeProjection]], list[LibraryRecipeProjection]
-        ]
-        | None = None,
+        assessment: Callable[..., list[LibraryRecipeProjection]] | None = None,
+        request_budget_seconds: float = 8.0,
+        image_budget_seconds: float = 2.0,
+        image_present_ttl_seconds: float = 0.0,
+        image_absent_ttl_seconds: float = 0.0,
     ) -> None:
         if any(
             type(value) is not int or value <= 0
@@ -361,14 +364,28 @@ class LibraryProjection:
             telemetry_delayed_seconds=telemetry_delayed_seconds,
         )
         self._local_state = local_state or self._database_local_state
-        self._runtime_archive_available = runtime_archive_available
+        self._request_budget = request_budget_seconds
+        self._image_budget = image_budget_seconds
+        self._image_presence = (
+            ImagePresenceIndex(
+                runtime_archive_available,
+                present_ttl_seconds=image_present_ttl_seconds,
+                absent_ttl_seconds=image_absent_ttl_seconds,
+            )
+            if runtime_archive_available is not None
+            else None
+        )
         self._assessment = assessment
 
     def _assessed(
-        self, recipes: Sequence[LibraryRecipeProjection]
+        self, recipes: Sequence[LibraryRecipeProjection], *, deadline: float
     ) -> list[LibraryRecipeProjection]:
+        """Assess within what is left of this request's budget."""
+
         if self._assessment is not None:
-            return self._assessment(recipes)
+            return self._assessment(
+                recipes, budget_seconds=max(0.0, deadline - time.monotonic())
+            )
         return [
             item.model_copy(
                 update={
@@ -460,14 +477,14 @@ class LibraryProjection:
                 current["preparation"] = dict(preparation)
 
     @staticmethod
-    def _cache_progress(operation: ModelCacheOperation) -> dict[str, object]:
-        progress = operation.progress
-        if not isinstance(progress, Mapping):
-            raise LibraryProjectionError("persisted cache progress is not a mapping")
-        measurement = progress.get("measurement", progress)
-        if not isinstance(measurement, Mapping):
-            raise LibraryProjectionError("persisted cache measurement is not a mapping")
-        state = operation.state
+    def _cache_progress(
+        operation_id: str,
+        state: str,
+        *,
+        phase: object,
+        completed: object,
+        total: object,
+    ) -> dict[str, object]:
         projected_state = {
             "queued": "queued",
             "running": "running",
@@ -478,17 +495,12 @@ class LibraryProjection:
         }.get(state)
         if projected_state is None:
             raise LibraryProjectionError("persisted cache operation state is invalid")
-        completed = measurement.get(
-            "completed_bytes", progress.get("downloaded_bytes", 0)
-        )
-        total = measurement.get("total_bytes", progress.get("expected_bytes"))
         if type(completed) is not int or completed < 0:
             raise LibraryProjectionError("persisted cache progress bytes are invalid")
         if total is not None and (type(total) is not int or total < 0):
             raise LibraryProjectionError("persisted cache progress total is invalid")
-        phase = measurement.get("phase")
         return {
-            "operation_id": operation.id,
+            "operation_id": operation_id,
             "state": projected_state,
             "phase": phase if isinstance(phase, str) else None,
             "completed_bytes": completed,
@@ -501,29 +513,91 @@ class LibraryProjection:
         This is deliberately a projection query, not a per-document callback.  A
         local revision remains visible even when the active catalog pointer has
         moved on; the immutable catalog row supplies its canonical document.
-        """
-        with self._sessions() as session:
-            cache_sets = list(session.scalars(select(ModelCacheSet)))
-            cache_operations = list(session.scalars(select(ModelCacheOperation)))
-            revisions = list(session.scalars(select(CatalogDocumentRevision)))
-            builds = list(session.scalars(select(RecipeBuild)))
-            installations = list(session.scalars(select(RecipeInstallation)))
-            installation_nodes = list(session.scalars(select(InstallationNode)))
-            runs = list(session.scalars(select(RecipeRun)))
-            run_nodes = list(session.scalars(select(RunNode)))
-            runtime_authorizations = list(
-                session.scalars(
-                    select(RuntimeImageAuthorization).where(
-                        RuntimeImageAuthorization.state == "authorized"
-                    )
-                )
-            )
 
-        revision_digests = {
-            revision.id: revision.content_digest for revision in revisions
-        }
+        Every table is read by the few columns the projection uses.  The JSON
+        documents (compiled plans, artifact manifests, per-artifact progress)
+        are large and grow with the catalog and the operation history; none of
+        them is transferred or decoded here.
+        """
+        operation_progress = ModelCacheOperation.progress
+        operation_payload = ModelCacheOperation.payload
+        with self._sessions() as session:
+            cache_sets = session.execute(
+                select(
+                    ModelCacheSet.artifact_set_sha256,
+                    ModelCacheSet.model_content_sha256,
+                    ModelCacheSet.recipe_revision_sha256,
+                    ModelCacheSet.state,
+                )
+            ).all()
+            cache_operations = session.execute(
+                select(
+                    ModelCacheOperation.id,
+                    ModelCacheOperation.state,
+                    ModelCacheOperation.artifact_set_sha256,
+                    operation_payload["model_content_sha256"].as_json(),
+                    operation_payload["recipe_revision_sha256"].as_json(),
+                    operation_progress[("measurement", "phase")].as_json(),
+                    operation_progress[("measurement", "completed_bytes")].as_json(),
+                    operation_progress[("measurement", "total_bytes")].as_json(),
+                    operation_progress["downloaded_bytes"].as_json(),
+                    operation_progress["expected_bytes"].as_json(),
+                ).where(ModelCacheOperation.kind.in_(("download", "repair")))
+            ).all()
+            revisions = session.execute(
+                select(
+                    CatalogDocumentRevision.id,
+                    CatalogDocumentRevision.content_digest,
+                    and_(
+                        CatalogDocumentRevision.state == "active",
+                        active_head_revision(),
+                    ),
+                ).where(CatalogDocumentRevision.kind == "recipe")
+            ).all()
+            builds = session.execute(
+                select(
+                    RecipeBuild.recipe_revision_id,
+                    RecipeBuild.state,
+                    RecipeBuild.oci_layout_sha256,
+                    RecipeBuild.image_bytes,
+                )
+            ).all()
+            installations = session.execute(
+                select(
+                    RecipeInstallation.id,
+                    RecipeInstallation.recipe_revision_id,
+                    RecipeInstallation.state,
+                )
+            ).all()
+            invalid_run = session.scalar(
+                select(RecipeRun.id).where(RecipeRun.state.not_in(_RUN_STATES)).limit(1)
+            )
+            runs = session.execute(
+                select(
+                    RecipeRun.id,
+                    RecipeRun.installation_id,
+                    RecipeRun.plan["model_content_sha256"].as_json(),
+                ).where(RecipeRun.state.in_(_ACTIVE_RUN_STATES))
+            ).all()
+            run_nodes = session.execute(
+                select(RunNode.run_id, RunNode.node_id).where(
+                    RunNode.state == "running"
+                )
+            ).all()
+            runtime_authorizations = session.execute(
+                select(
+                    RuntimeImageAuthorization.original_content_digest,
+                    RuntimeImageAuthorization.oci_archive_sha256,
+                    RuntimeImageAuthorization.image_bytes,
+                ).where(RuntimeImageAuthorization.state == "authorized")
+            ).all()
+        if invalid_run is not None:
+            raise LibraryProjectionError("persisted recipe run state is invalid")
+
+        revision_digests = {revision_id: digest for revision_id, digest, _ in revisions}
+        head_digests = {digest for _, digest, is_head in revisions if is_head}
         result: dict[str, dict[str, object]] = {}
-        for cache_set in cache_sets:
+        for _set_id, model_digest, recipe_digest, set_state in cache_sets:
             controller = _controller_state(
                 {
                     "cached": "cached",
@@ -533,48 +607,46 @@ class LibraryProjection:
                     "needs-repair": "failed",
                     "failed": "failed",
                 },
-                cache_set.state,
+                set_state,
                 "persisted cache set state is invalid",
             )
-            self._merge_local(
-                result,
-                cache_set.model_content_sha256,
-                controller=controller,
-            )
-            self._merge_local(
-                result,
-                cache_set.recipe_revision_sha256,
-                controller=controller,
-            )
-        cache_sets_by_id = {
-            cache_set.artifact_set_sha256: cache_set for cache_set in cache_sets
-        }
-        for operation in cache_operations:
-            if operation.kind not in {"download", "repair"}:
-                continue
-            payload = operation.payload
-            if not isinstance(payload, Mapping):
-                raise LibraryProjectionError("persisted cache payload is not a mapping")
-            digest_values = {
-                payload.get("model_content_sha256"),
-                payload.get("recipe_revision_sha256"),
-            }
-            if operation.artifact_set_sha256:
-                cache_set = cache_sets_by_id.get(operation.artifact_set_sha256)
+            self._merge_local(result, model_digest, controller=controller)
+            self._merge_local(result, recipe_digest, controller=controller)
+        cache_sets_by_id = {row[0]: row for row in cache_sets}
+        for (
+            operation_id,
+            state,
+            artifact_set_sha256,
+            payload_model_digest,
+            payload_recipe_digest,
+            phase,
+            measured_completed,
+            measured_total,
+            downloaded_bytes,
+            expected_bytes,
+        ) in cache_operations:
+            digest_values = {payload_model_digest, payload_recipe_digest}
+            if artifact_set_sha256:
+                cache_set = cache_sets_by_id.get(artifact_set_sha256)
                 if cache_set is not None:
                     digest_values.update(
-                        digest
-                        for digest in (
-                            cache_set.model_content_sha256,
-                            cache_set.recipe_revision_sha256,
-                        )
-                        if digest is not None
+                        digest for digest in cache_set[1:3] if digest is not None
                     )
-            preparation = self._cache_progress(operation)
+            preparation = self._cache_progress(
+                operation_id,
+                state,
+                phase=phase,
+                completed=(
+                    measured_completed
+                    if measured_completed is not None
+                    else (downloaded_bytes if downloaded_bytes is not None else 0)
+                ),
+                total=measured_total if measured_total is not None else expected_bytes,
+            )
             controller = (
                 "preparing"
-                if operation.state in {"queued", "running", "partial"}
-                else ("cached" if operation.state == "succeeded" else "failed")
+                if state in {"queued", "running", "partial"}
+                else ("cached" if state == "succeeded" else "failed")
             )
             for digest in digest_values:
                 if digest is not None and not isinstance(digest, str):
@@ -585,7 +657,7 @@ class LibraryProjection:
                     controller=controller,
                     preparation=preparation,
                 )
-        for build in builds:
+        for build_revision_id, build_state, _layout, _bytes in builds:
             controller = _controller_state(
                 {
                     "planned": "preparing",
@@ -593,15 +665,20 @@ class LibraryProjection:
                     "succeeded": "cached",
                     "failed": "failed",
                 },
-                build.state,
+                build_state,
                 "persisted recipe build state is invalid",
             )
             self._merge_local(
                 result,
-                revision_digests.get(build.recipe_revision_id),
+                revision_digests.get(build_revision_id),
                 controller=controller,
             )
-        for installation in installations:
+        installation_revision: dict[str, str] = {}
+        for (
+            installation_id,
+            installation_revision_id,
+            installation_state,
+        ) in installations:
             controller = _controller_state(
                 {
                     "planned": "preparing",
@@ -611,129 +688,107 @@ class LibraryProjection:
                     "failed": "failed",
                     "uninstalled": "unknown",
                 },
-                installation.state,
+                installation_state,
                 "persisted installation state is invalid",
             )
+            installation_revision[installation_id] = installation_revision_id
             self._merge_local(
                 result,
-                revision_digests.get(installation.recipe_revision_id),
+                revision_digests.get(installation_revision_id),
                 controller=controller,
             )
-        running_nodes_by_installation: dict[str, list[str]] = {}
-        for node in installation_nodes:
-            if node.state == "installed":
-                running_nodes_by_installation.setdefault(
-                    node.installation_id, []
-                ).append(node.node_id)
-        installations_by_id = {
-            installation.id: installation for installation in installations
-        }
-        for run in runs:
-            if run.state not in {
-                "planned",
-                "starting",
-                "running",
-                "stopping",
-                "stopped",
-                "failed",
-                "lost",
-            }:
-                raise LibraryProjectionError("persisted recipe run state is invalid")
-            if run.state in {"planned", "starting", "running", "stopping"}:
-                installation = installations_by_id.get(run.installation_id)
-                plan = run.plan
-                if not isinstance(plan, Mapping):
-                    raise LibraryProjectionError(
-                        "persisted recipe run plan is not a mapping"
-                    )
-                model_digest = plan.get("model_content_sha256")
-                if model_digest is not None and not isinstance(model_digest, str):
-                    raise LibraryProjectionError(
-                        "persisted recipe run model digest is invalid"
-                    )
-                run_nodes_for_run = [
-                    node
-                    for node in run_nodes
-                    if node.run_id == run.id and node.state == "running"
-                ]
-                nodes = [node.node_id for node in run_nodes_for_run]
-                if model_digest is not None:
-                    self._merge_local(
-                        result,
-                        model_digest,
-                        controller="cached",
-                        running_on=nodes,
-                    )
+        nodes_by_run: dict[str, list[str]] = {}
+        for run_id, node_id in run_nodes:
+            nodes_by_run.setdefault(run_id, []).append(node_id)
+        for run_id, installation_id, model_digest in runs:
+            if model_digest is not None and not isinstance(model_digest, str):
+                raise LibraryProjectionError(
+                    "persisted recipe run model digest is invalid"
+                )
+            nodes = nodes_by_run.get(run_id, [])
+            if model_digest is not None:
                 self._merge_local(
                     result,
-                    revision_digests.get(installation.recipe_revision_id)
-                    if installation is not None
-                    else None,
+                    model_digest,
                     controller="cached",
                     running_on=nodes,
                 )
-        if self._runtime_archive_available is not None:
-            available_recipe_digests: set[str] = set()
-            # A stored image that cannot be read is not an absent one: it is
-            # named, per recipe, instead of failing the whole Library or
-            # reading as a cache miss that a download would never repair.
-            damaged: dict[str, str] = {}
-
-            def archive_available(digest: str | None, archive: str, size: int) -> bool:
-                assert self._runtime_archive_available is not None
-                try:
-                    return self._runtime_archive_available(archive, size)
-                except RuntimeImagePreparationError as error:
-                    if digest is not None:
-                        damaged[digest] = f"image unreadable: {error.code}"[:64]
-                    return False
-
-            for build in builds:
-                digest = revision_digests.get(build.recipe_revision_id)
-                if (
-                    build.state == "succeeded"
-                    and isinstance(build.oci_layout_sha256, str)
-                    and type(build.image_bytes) is int
-                    and archive_available(
-                        digest, build.oci_layout_sha256, build.image_bytes
-                    )
-                    and digest is not None
-                ):
-                    available_recipe_digests.add(digest)
-            for authorization in runtime_authorizations:
-                if (
-                    isinstance(authorization.oci_archive_sha256, str)
-                    and type(authorization.image_bytes) is int
-                    and archive_available(
-                        authorization.original_content_digest,
-                        authorization.oci_archive_sha256,
-                        authorization.image_bytes,
-                    )
-                ):
-                    available_recipe_digests.add(authorization.original_content_digest)
-            for revision in revisions:
-                if revision.kind != "recipe":
-                    continue
-                local = result.get(revision.content_digest)
-                if revision.content_digest in damaged and (
-                    revision.content_digest not in available_recipe_digests
-                ):
-                    local = result.setdefault(
-                        revision.content_digest,
-                        {"controller": "unknown", "running_on": []},
-                    )
-                    local["controller"] = "failed"
-                    local["preparation"] = {
-                        "state": "failed",
-                        "phase": damaged[revision.content_digest],
-                    }
-                elif (
-                    local is not None
-                    and local.get("controller") == "cached"
-                    and revision.content_digest not in available_recipe_digests
-                ):
-                    local["controller"] = "not_cached"
+            installed_revision_id = installation_revision.get(installation_id)
+            self._merge_local(
+                result,
+                revision_digests.get(installed_revision_id)
+                if installed_revision_id is not None
+                else None,
+                controller="cached",
+                running_on=nodes,
+            )
+        if self._image_presence is not None:
+            self._apply_image_presence(
+                result,
+                head_digests=head_digests,
+                builds=[
+                    (revision_digests.get(revision_id), layout, size)
+                    for revision_id, state, layout, size in builds
+                    if state == "succeeded"
+                ],
+                authorizations=runtime_authorizations,
+            )
         return result
+
+    def _apply_image_presence(
+        self,
+        result: dict[str, dict[str, object]],
+        *,
+        head_digests: set[str],
+        builds: Sequence[tuple[str | None, object, object]],
+        authorizations: Sequence[tuple[str, object, object]],
+    ) -> None:
+        """Demote a cached recipe whose stored image is gone; name what is not known.
+
+        Only the images of the recipes the Library lists are asked about, once
+        each, within the image budget. A stored image that cannot be read is not
+        an absent one: it is named, per recipe, instead of failing the whole
+        Library or reading as a cache miss that a download would never repair.
+        An image whose answer is not yet in is reported as ``unknown`` rather
+        than as stored or absent.
+        """
+        assert self._image_presence is not None
+        claims: list[tuple[str, ImageKey]] = []
+        for digest, layout, size in builds:
+            if digest in head_digests and isinstance(layout, str) and type(size) is int:
+                claims.append((digest, (layout, size)))
+        for digest, layout, size in authorizations:
+            if digest in head_digests and isinstance(layout, str) and type(size) is int:
+                claims.append((digest, (layout, size)))
+        presence = self._image_presence.lookup(
+            {key for _, key in claims}, budget_seconds=self._image_budget
+        )
+        available: set[str] = set()
+        unreadable: dict[str, str] = {}
+        unknown: set[str] = set()
+        for digest, key in claims:
+            answer = presence[key]
+            if answer.state == "present":
+                available.add(digest)
+            elif answer.state == "unreadable":
+                unreadable[digest] = f"image unreadable: {answer.code}"[:64]
+            elif answer.state == "unknown":
+                unknown.add(digest)
+        for digest in head_digests:
+            if digest in available:
+                continue
+            local = result.get(digest)
+            if digest in unreadable:
+                local = result.setdefault(
+                    digest, {"controller": "unknown", "running_on": []}
+                )
+                local["controller"] = "failed"
+                local["preparation"] = {
+                    "state": "failed",
+                    "phase": unreadable[digest],
+                }
+            elif local is not None and local.get("controller") == "cached":
+                local["controller"] = "unknown" if digest in unknown else "not_cached"
 
     def _library_release(self) -> LibraryRelease | None:
         with self._sessions() as session:
@@ -1275,6 +1330,7 @@ class LibraryProjection:
             raise RequestFault("recipe library sort is invalid")
         if not assess and (ready is not None or fits_fleet is not None):
             raise RequestFault("readiness filters require assessment")
+        deadline = time.monotonic() + self._request_budget
         snapshot = self._local_state_snapshot()
         model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
         models = [_canonical_model(row) for row in model_rows]
@@ -1374,7 +1430,7 @@ class LibraryProjection:
             value is not None for value in readiness_filters.values()
         )
         if filtering_assessment:
-            filtered = self._assessed(filtered)
+            filtered = self._assessed(filtered, deadline=deadline)
             for item in filtered:
                 for name, expected in readiness_filters.items():
                     if expected is None:
@@ -1470,7 +1526,7 @@ class LibraryProjection:
             ]
         candidates = filtered[:limit]
         if assess and not filtering_assessment:
-            candidates = self._assessed(candidates)
+            candidates = self._assessed(candidates, deadline=deadline)
         response = RecipeLibraryResponse(
             generated_at=_utc(self._clock()),
             library=self._library_release(),
@@ -1533,6 +1589,7 @@ class LibraryProjection:
         return lambda item: (item.selector.casefold(), item.identity.content_sha256, "")
 
     def recipe_detail(self, selector: str) -> RecipeDetailResponse:
+        deadline = time.monotonic() + self._request_budget
         snapshot = self._local_state_snapshot()
         model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
         models = [_canonical_model(row) for row in model_rows]
@@ -1550,7 +1607,7 @@ class LibraryProjection:
             lambda item: (item.identity.publisher, item.identity.slug),
         )
         assert isinstance(entry, LibraryRecipeProjection)
-        entry = self._assessed([entry])[0]
+        entry = self._assessed([entry], deadline=deadline)[0]
         recipe_row = next(
             row
             for row in recipe_rows
@@ -1579,7 +1636,7 @@ class LibraryProjection:
                 ),
             )
             for item in sorted(
-                self._assessed(siblings),
+                self._assessed(siblings, deadline=deadline),
                 key=lambda item: (
                     item.node_count,
                     item.engine,
