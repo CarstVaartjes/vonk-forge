@@ -7,7 +7,12 @@ check for the two that can be proven from the syntax tree:
   access, HTTP, process execution, subprocess work, child completion, or retry
   sleep); and
 * at most one artifact lock is held at a time, it is acquired nonblockingly,
-  and it is never acquired inside a SQL transaction.
+  and it is never acquired inside a SQL transaction; and
+* a SQL transaction never reaches a route publication. Activating a LiteLLM
+  route bundle and awaiting the supervisor acknowledgement can take minutes, so
+  the owner-locked transaction must end before it. The call is found by name
+  (``_ROUTE_PUBLICATION_TAILS``) and through the functions of the same module
+  that reach one, so a helper cannot hide the effect from the gate.
 
 A transaction scope is a ``with`` block whose context expression opens a
 session or a transaction on a session/engine. An *artifact lock* is a local
@@ -51,6 +56,7 @@ SQL_TRANSACTION_SPANS_EXTERNAL_WORK = "sql_transaction_spans_external_work"
 SQL_TRANSACTION_SPANS_ARTIFACT_LOCK = "sql_transaction_spans_artifact_lock"
 BLOCKING_ARTIFACT_LOCK = "blocking_artifact_lock"
 NESTED_ARTIFACT_LOCK = "nested_artifact_lock"
+SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION = "sql_transaction_spans_route_publication"
 
 KINDS = frozenset(
     {
@@ -58,6 +64,7 @@ KINDS = frozenset(
         SQL_TRANSACTION_SPANS_ARTIFACT_LOCK,
         BLOCKING_ARTIFACT_LOCK,
         NESTED_ARTIFACT_LOCK,
+        SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION,
     }
 )
 
@@ -73,6 +80,25 @@ _SESSION_FACTORY_TAILS = frozenset(
     }
 )
 _TRANSACTION_TAILS = frozenset({"begin", "begin_nested"})
+# Context managers that open the owner-locked route publication transaction.
+_ROUTE_TRANSACTION_TAILS = frozenset(
+    {"publication_transaction", "route_publication_transaction"}
+)
+# Calls that activate a route bundle or wait for the supervisor to acknowledge
+# it. Same-module functions that reach one are found by ``_route_effect_chains``.
+_ROUTE_PUBLICATION_TAILS = frozenset(
+    {
+        "publish_recipe",
+        "publish_empty",
+        "_publish",
+        "_publish_empty",
+        "_withdrawal_effect",
+        "_publish_withdrawal_in_session",
+        "withdraw_run_in_session",
+        "_require_supervisor_ack",
+        "_route_withdrawer",
+    }
+)
 
 # Names that reach managed storage, the network, a process, or a wait. The
 # list is deliberately explicit: a new helper that performs external work has
@@ -215,6 +241,15 @@ DEFAULT_REASONS = {
         "lands with the reservation and bounded-retry protocol in its own "
         "package rather than as a flag change here."
     ),
+    SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION: (
+        "Reviewed deferral: a stop or recovery withdrawal publishes the route "
+        "bundle and awaits the supervisor acknowledgement inside the same "
+        "owner-locked transaction as its own state change, because the route "
+        "must be gone before the stop is dispatched. It moves to the claim, "
+        "effect, conditional-completion protocol that RecipeRouteService "
+        "already uses for publication and maintenance, with the dispatch "
+        "ordered after the withdrawal, in its own package."
+    ),
     NESTED_ARTIFACT_LOCK: (
         "Reviewed deferral: two artifact locks are held at once. Removing the "
         "outer one changes which writer wins the contested resource, so the "
@@ -245,13 +280,15 @@ def _tail(name: str) -> str:
 def _transaction_context(expr: ast.expr) -> str | None:
     """Return the call that opens a SQL transaction, or ``None``."""
 
+    if isinstance(expr, ast.IfExp):
+        return _transaction_context(expr.body) or _transaction_context(expr.orelse)
     if not isinstance(expr, ast.Call):
         return None
     callee = _dotted_name(expr.func)
     if callee is None:
         return None
     tail = _tail(callee)
-    if tail in _SESSION_FACTORY_TAILS:
+    if tail in _SESSION_FACTORY_TAILS or tail in _ROUTE_TRANSACTION_TAILS:
         return callee
     if tail in _TRANSACTION_TAILS:
         receiver = callee[: -len(tail) - 1] if "." in callee else ""
@@ -352,6 +389,22 @@ def _exclusive_create_descriptors(body: Sequence[ast.stmt]) -> set[str]:
     return created
 
 
+def _transaction_names(body: Sequence[ast.stmt]) -> set[str]:
+    """Names bound to an expression that opens a SQL transaction."""
+
+    names: set[str] = set()
+    for statement in body:
+        for child in ast.walk(statement):
+            if (
+                isinstance(child, ast.Assign)
+                and len(child.targets) == 1
+                and isinstance(child.targets[0], ast.Name)
+                and _transaction_context(child.value) is not None
+            ):
+                names.add(child.targets[0].id)
+    return names
+
+
 def _flock_descriptor_name(call: ast.Call) -> str | None:
     """The plain name whose descriptor a ``flock`` call locks, if any."""
 
@@ -385,6 +438,53 @@ def _external_call_name(call: ast.Call) -> str | None:
     return None
 
 
+def _own_calls(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[str]:
+    """Tails of the calls a function makes itself, not those of nested defs."""
+
+    pending: list[ast.AST] = list(function.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        if isinstance(node, ast.Call):
+            name = _dotted_name(node.func)
+            if name is not None:
+                yield _tail(name)
+        pending.extend(ast.iter_child_nodes(node))
+
+
+def _route_effect_chains(tree: ast.AST) -> dict[str, str]:
+    """Map each function of a module that reaches a route publication to its chain.
+
+    A function reaches one when it calls a publication directly or calls a
+    function of the same module that does. Calls are matched by name, which
+    over-approximates across classes; an over-reported site is a baseline
+    entry to review, an unreported one is a silent transaction hazard.
+    """
+
+    functions: dict[str, list[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.setdefault(node.name, []).extend(_own_calls(node))
+    chains: dict[str, str] = {}
+    changed = True
+    while changed:
+        changed = False
+        for name, calls in functions.items():
+            if name in chains:
+                continue
+            for call in calls:
+                if call in _ROUTE_PUBLICATION_TAILS:
+                    chains[name] = f"{name} -> {call}"
+                    changed = True
+                    break
+                if call in chains and call != name:
+                    chains[name] = f"{name} -> {chains[call]}"
+                    changed = True
+                    break
+    return chains
+
+
 @dataclass(frozen=True)
 class Site:
     """One provable coordination violation."""
@@ -415,15 +515,21 @@ class _FunctionScanner:
     """One pass over a single function body, innermost owner wins."""
 
     def __init__(
-        self, path: str, function: str, statements: Sequence[ast.stmt]
+        self,
+        path: str,
+        function: str,
+        statements: Sequence[ast.stmt],
+        route_chains: dict[str, str],
     ) -> None:
         self._path = path
         self._function = function
+        self._route_chains = route_chains
         self._transaction_depth = 0
         self._held_locks: list[str] = []
         self._sites: list[Site] = []
         self._seen: set[tuple[str, int, str]] = set()
         self._private_descriptors = _exclusive_create_descriptors(statements)
+        self._transaction_names = _transaction_names(statements)
 
     def _report(self, line: int, kind: str, detail: str) -> None:
         key = (kind, line, detail)
@@ -477,7 +583,7 @@ class _FunctionScanner:
         # inside the held lock. Only a lock acquired from inside an already-open
         # transaction body is the forbidden SQL-to-filesystem edge.
         transaction = any(
-            _transaction_context(item.context_expr) is not None for item in node.items
+            self._opens_transaction(item.context_expr) for item in node.items
         )
         locks: list[tuple[int, str, bool]] = []
         for item in node.items:
@@ -514,6 +620,12 @@ class _FunctionScanner:
         if transaction:
             self._transaction_depth -= 1
         del self._held_locks[len(self._held_locks) - len(locks) :]
+
+    def _opens_transaction(self, expr: ast.expr) -> bool:
+        if _transaction_context(expr) is not None:
+            return True
+        # ``transaction = factory.begin()`` followed by ``with transaction``.
+        return isinstance(expr, ast.Name) and expr.id in self._transaction_names
 
     def _flock_blocks(self, flock: ast.Call) -> bool:
         """Whether a blocking flock can actually contend.
@@ -558,23 +670,44 @@ class _FunctionScanner:
                     SQL_TRANSACTION_SPANS_EXTERNAL_WORK,
                     f"external call {name}",
                 )
+            callee = _dotted_name(call.func)
+            if callee is not None:
+                tail = _tail(callee)
+                if tail in _ROUTE_PUBLICATION_TAILS:
+                    self._report(
+                        call.lineno,
+                        SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION,
+                        f"route publication call {callee}",
+                    )
+                elif tail in self._route_chains:
+                    self._report(
+                        call.lineno,
+                        SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION,
+                        f"{callee} reaches a route publication: "
+                        f"{self._route_chains[tail]}",
+                    )
 
 
 def _function_sites(
-    path: str, function: ast.FunctionDef | ast.AsyncFunctionDef
+    path: str,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    route_chains: dict[str, str],
 ) -> list[Site]:
-    return _FunctionScanner(path, function.name, function.body).run(function)
+    return _FunctionScanner(path, function.name, function.body, route_chains).run(
+        function
+    )
 
 
 def scan_source(source: str, *, path: str) -> list[Site]:
     """Return every provable coordination violation in one module's source."""
 
     tree = ast.parse(source)
+    route_chains = _route_effect_chains(tree)
 
     def walk(node: ast.AST) -> Iterator[Site]:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                yield from _function_sites(path, child)
+                yield from _function_sites(path, child, route_chains)
             elif isinstance(child, ast.Lambda):
                 continue
             else:

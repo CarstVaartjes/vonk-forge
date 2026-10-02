@@ -47,6 +47,7 @@ from vonk_control.recipe_routes import (
     RecipeRouteError,
     RecipeRouteNotReady,
     RecipeRouteService,
+    RecipeRouteSuperseded,
 )
 from vonk_control.route_runtime import (
     AtomicRouteBundlePublisher,
@@ -1674,8 +1675,19 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
     base, _, _, run_id = setup(tmp_path / "database", engine=postgres_engine)
     root = tmp_path / "live"
     services = [atomic_service(base, root, lambda: NOW) for _ in range(2)]
+
+    def publish(service: RecipeRouteService) -> LiteLlmGeneration | None:
+        try:
+            return service.publish_run(run_id)
+        except RecipeRouteSuperseded:
+            # The loser of the race is replaced by the newer claim; the
+            # worker simply retries it, so it is not a failure.
+            return None
+
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda service: service.publish_run(run_id), services))
+        published = list(pool.map(publish, services))
+    results = [result for result in published if result is not None]
+    assert results
     with base.sessions() as session:
         owner = _publication_owner(session)
         publication = _publication(session, owner.authority_id)

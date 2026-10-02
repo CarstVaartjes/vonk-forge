@@ -302,6 +302,20 @@ them only under current authorization. Cancellation or removal racing the final
 update wins through its fence. Late bytes never recreate a removed logical
 entry or alter an already bound plan.
 
+LiteLLM route publication follows the same shape. A short owner-locked
+transaction claims the next publication (a claim row beside the active
+publication, never touching it) and commits; the bundle activation and the
+supervisor acknowledgement, which can take minutes, run with no transaction
+open; a new short transaction then records the result only if the claim is still
+current and the owner generation has not moved. A newer claim or a competing
+lifecycle publication supersedes the one in flight, which records nothing and is
+retried, never counted as a failed attempt. Withdrawals record their intent with
+the claim, so a superseded withdrawal is never lost. A crash between effect and
+completion is recovered by the maintenance pass, which adopts the exact live
+marker instead of activating again. The stop and distributed-recovery
+withdrawals still publish inside their own transaction; the coordination
+baseline lists them as reviewed deferrals.
+
 ```mermaid
 flowchart TD
     intent[SQL: claim current intent and reserve resources] --> commit[Commit SQL transaction]
