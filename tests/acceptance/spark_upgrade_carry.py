@@ -528,10 +528,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         phase_results = run_result.get("phase_results")
         if not isinstance(phase_results, list):
             raise LifecycleError("the editorial successor run receipt is invalid")
-        self._successor_identity = (
-            self._canary_phase_identity(phase_results, "installation_id"),
-            self._canary_phase_identity(phase_results, "run_id"),
-        )
+        self._successor_identity = self._serving_identity(phase_results)
 
     def _require_published(self) -> None:
         state = self._route_state()
