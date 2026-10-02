@@ -45,13 +45,13 @@ test("a load names the reviewed effects, and a changed plan is refused with the 
   loadProfile.mockRejectedValueOnce(new ApiError(409, "The profile plan changed since it was reviewed"));
   const api = apiFor({previewProfile, loadProfile});
   render(<ToastProvider><LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/></ToastProvider>);
-  await user.click(await screen.findByRole("button", {name: "Load profile"}));
+  await user.click(await screen.findByRole("button", {name: "Apply profile"}));
 
   expect(loadProfile).toHaveBeenCalledWith(2, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/), reviewed_effects_digest: "e".repeat(64)});
   await vi.waitFor(() => expect(previewProfile).toHaveBeenCalledTimes(2));
   await act(async () => { await Promise.resolve(); });
 
-  await user.click(await screen.findByRole("button", {name: "Load profile"}));
+  await user.click(await screen.findByRole("button", {name: "Apply profile"}));
   expect(loadProfile).toHaveBeenLastCalledWith(2, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/), reviewed_effects_digest: "f".repeat(64)});
 });
 
