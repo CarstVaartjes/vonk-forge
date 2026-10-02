@@ -17,7 +17,7 @@ from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import artifact_reference_scan
 from vonk_control.artifact_lifecycle import ArtifactLifecycleError
@@ -2223,7 +2223,11 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
     assert waiting.state == "queued"
     assert waiting.failure is not None
     assert waiting.failure["retryable"] is True
-    assert waiting.failure["code"] == "operationalerror"
+    # A lock the download held for an instant is a named wait, never the raw
+    # database error class and message.
+    assert waiting.failure["code"] == "recipe_image.database_busy"
+    assert "OperationalError" not in str(waiting.failure["detail"])
+    assert "could not obtain lock" not in str(waiting.failure["detail"])
     with sessions() as session:
         stored_waiting = session.get(Job, queued.id)
         assert stored_waiting is not None
@@ -2231,7 +2235,8 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         assert stored_waiting.state == "queued"
         retry_state = stored_waiting.payload["retry"]
         assert isinstance(retry_state, Mapping)
-        assert retry_state["automatic_attempts"] == 1
+        # A dependency wait does not spend the automatic retry budget.
+        assert retry_state["automatic_attempts"] == 0
         retry_after_at = stored_waiting.payload["retry_after_at"]
         assert isinstance(retry_after_at, str)
         retry_at = datetime.fromisoformat(retry_after_at)
@@ -2300,6 +2305,35 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         assert stored_recovered is not None
         assert stored_recovered.request_id == request_id
         assert stored_recovered.current_attempt == 2
+
+
+def _lock_refused() -> OperationalError:
+    origin = Exception(
+        'could not obtain lock on row in relation "model_cache_operations"'
+    )
+    origin.sqlstate = "55P03"  # type: ignore[attr-defined]
+    return OperationalError("SELECT 1", {}, origin)
+
+
+def test_a_refused_lock_is_a_named_wait_wherever_a_model_call_raises_it() -> None:
+    from vonk_control import recipe_image_availability as module
+
+    busy = _lock_refused()
+    assert module._failure_code(busy) == module.DATABASE_BUSY_CODE
+    assert module._failure_detail(busy) == module.DATABASE_BUSY_DETAIL
+    assert module.DATABASE_BUSY_CODE in module._DEPENDENCY_WAIT_CODES
+
+    wrapped = module._model_queue_error(busy, "queueing the model download failed")
+    assert wrapped.code == module.DATABASE_BUSY_CODE
+    assert wrapped.retryable is True
+    assert "could not obtain lock" not in wrapped.detail
+
+    other = module._model_queue_error(
+        RuntimeError("the hub refused the token"), "queueing the model download failed"
+    )
+    # Any other failure keeps its own cause in the reason.
+    assert other.code == "recipe_image.model_cache_unavailable"
+    assert "the hub refused the token" in other.detail
 
 
 def test_newer_preparation_intent_cancels_the_older_queued_preparation(
