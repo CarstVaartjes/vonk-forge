@@ -12,8 +12,13 @@ Operators prepare a NAS upgrade by rerunning the same stable installer from the
 directory containing the existing bundle:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/nas | sh
+curl -fsSL https://install.vonkforge.ai/nas | sudo sh
 ```
+
+Until the first stable release exists, a development promotion also writes the
+unqualified `/nas`, `/spark` and `/vonkctl` endpoints (bound to the dev channel)
+so those URLs do not 404. The stable promotion replaces them, and a later dev
+promotion never touches them once `artifacts/stable/current.manifest` exists.
 
 They then transfer the refreshed three-entry directory and redeploy the existing
 Compose project through approved host access. Prefer the configured headless CLI

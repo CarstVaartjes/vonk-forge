@@ -29,8 +29,8 @@ NAS address. On a small lab network, equivalent host-file entries can be used.
 
 ```sh
 cd vonk-forge
-docker compose pull
-docker compose up -d --wait --remove-orphans
+sudo docker compose pull
+sudo docker compose up -d --wait --remove-orphans
 ```
 
 Import `secrets/step-ca/root-certificate` into the trust store used by your

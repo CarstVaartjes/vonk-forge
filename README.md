@@ -91,6 +91,22 @@ vonk-forge/
 └── secrets/
 ```
 
+Until the first stable release is published, the unqualified `/nas`, `/spark`
+and `/vonkctl` URLs serve the newest accepted development release; once a
+stable release exists they serve stable. To choose a channel explicitly, use
+`https://install.vonkforge.ai/dev/nas` (or `/dev/spark`, `/dev/vonkctl`).
+
+To upgrade an existing install, rerun the installer as root from the directory
+that contains `vonk-forge/`, because the bundle files belong to root. Put `sudo`
+on the `sh` side of the pipe (`sudo curl ... | sh` does not work):
+
+```bash
+curl -fsSL https://install.vonkforge.ai/nas | sudo sh
+```
+
+`.env` is readable only by root, so on the host run `docker compose` with
+`sudo`.
+
 The `/nas` path in the public installer URL is historical; the generated
 project is not NAS-specific. Keep it on this laptop for a lab, or move the
 complete directory to a NAS or local server for an always-on controller.
@@ -101,9 +117,9 @@ With a shell on that host:
 
 ```bash
 cd vonk-forge
-docker compose pull
-docker compose up -d --wait --remove-orphans
-docker compose ps
+sudo docker compose pull
+sudo docker compose up -d --wait --remove-orphans
+sudo docker compose ps
 ```
 
 In a NAS or server UI, select the same directory as one Compose project and

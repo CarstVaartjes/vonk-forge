@@ -17,6 +17,8 @@ Then run one command as your normal user:
 curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
+Until the first stable release is published, the unqualified `/nas`, `/spark` and `/vonkctl` URLs serve the newest accepted development release; once a stable release exists they serve stable. To choose a channel explicitly, use `https://install.vonkforge.ai/dev/nas` (or `/dev/spark`, `/dev/vonkctl`).
+
 The command downloads a verified native setup program, asks for the selected
 mode and its inputs through the terminal, generates internal credentials and
 the local CA locally, and creates exactly:
@@ -76,9 +78,9 @@ equivalent is:
 
 ```sh
 cd vonk-forge
-docker compose pull
-docker compose up -d --wait --remove-orphans
-docker compose ps
+sudo docker compose pull
+sudo docker compose up -d --wait --remove-orphans
+sudo docker compose ps
 ```
 
 For Secure remote, complete the runbook's
@@ -97,11 +99,12 @@ A/B agent supervisor.
 
 ## Upgrade
 
-Run the same workstation command from the directory that already contains
-`vonk-forge/`:
+Run the same command from the directory that already contains `vonk-forge/`.
+The existing bundle files belong to root, so put `sudo` on the `sh` side of the
+pipe (`sudo curl ... | sh` does not work):
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/nas | sh
+curl -fsSL https://install.vonkforge.ai/nas | sudo sh
 ```
 
 Upgrade mode preserves `secrets/`, site identity, and the values of current
