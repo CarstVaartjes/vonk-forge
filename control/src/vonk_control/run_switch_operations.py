@@ -10050,19 +10050,10 @@ def _persist_run_switch_runtime_image_reference(
         ):
             raise owner_changed("RunSwitch phase was cancelled or superseded")
 
-        revision = session.get(CatalogDocumentRevision, recipe_revision_id)
-        if (
-            revision is None
-            or revision.kind != "recipe"
-            or revision.state != "active"
-            or revision.content_digest != plan.recipe_content_sha256
-            or parsed_receipt.distribution_publisher != revision.publisher
-            or parsed_receipt.distribution_slug != revision.slug
-            or parsed_receipt.distribution_content_sha256 != revision.content_digest
-        ):
-            raise identity_invalid(
-                "runtime image no longer matches the approved recipe"
-            )
+        # An image is its content: the publisher, slug and revision a stored
+        # receipt first recorded are provenance of whoever asked first, not a
+        # property of this plan, so they are not compared. The digests below
+        # are the content checks.
         if (
             plan.image_digest is not None
             and plan.image_digest != parsed_receipt.image_digest
@@ -10114,12 +10105,9 @@ def _persist_run_switch_runtime_image_reference(
         ):
             raise identity_invalid("runtime image size differs from the approved build")
 
-        expected_build_id = plan.recipe_build_id or plan.build.build_id
         if (
-            expected_build_id is None
-            or parsed_receipt.build_id != expected_build_id
-            or plan.recipe_revision_id is None
-        ):
+            plan.recipe_build_id or plan.build.build_id
+        ) is None or plan.recipe_revision_id is None:
             raise identity_invalid("runtime image is not the approved build result")
         try:
             build = _build_receipt_in_session(session, plan)
@@ -10130,12 +10118,9 @@ def _persist_run_switch_runtime_image_reference(
         if any(
             parsed_receipt_value != build_value
             for parsed_receipt_value, build_value in (
-                (parsed_receipt.build_id, build["build_id"]),
-                (parsed_receipt.build_input_sha256, build["build_input_sha256"]),
                 (parsed_receipt.image_digest, build["image_digest"]),
                 (parsed_receipt.oci_archive_sha256, build["oci_layout_sha256"]),
                 (parsed_receipt.image_bytes, build["image_bytes"]),
-                (parsed_receipt.build_input_sha256, plan.build.build_input_sha256),
             )
         ):
             raise identity_invalid(

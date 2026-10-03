@@ -143,6 +143,15 @@ def _old_receipt(
         "runtime_adapter_sha256": adapter.digest,
     }
     RuntimeImageReceipt.model_validate(current)
+    if kind == "sibling":
+        # A valid receipt another recipe's download left for the same image.
+        return {
+            **current,
+            "distribution_slug": "sibling-recipe",
+            "distribution_content_sha256": "c" * 64,
+            "build_id": "sibling-build",
+            "build_input_sha256": "d" * 64,
+        }
     if kind == "retired-fields":
         # Schema 2 before recipe contract 2.0 dropped these two fields.
         return {
@@ -198,8 +207,9 @@ def _background_image_switch(
         (storage.root / f"{layout_digest}.receipt.json").write_text(
             json.dumps(document)
         )
-        with pytest.raises(RuntimeImagePreparationError):
-            storage.read_receipt(layout_digest)
+        if old_receipt != "sibling":
+            with pytest.raises(RuntimeImagePreparationError):
+                storage.read_receipt(layout_digest)
     pending_failures = list(failures or ())
     pending_copy_failures = list(copy_failures or ())
     inspections: list[str] = []
@@ -499,6 +509,35 @@ def test_preparation_longer_than_the_preflight_window_replaces_an_old_receipt(
     # The old document was treated as absent and replaced by a current one.
     receipt = switch.storage.read_receipt(switch.layout_digest)
     assert receipt.oci_archive_sha256 == switch.layout_digest
+
+
+@pytest.mark.parametrize("node_count", [1, 2])
+def test_a_sibling_recipes_receipt_for_the_same_image_does_not_block_the_load(
+    tmp_path: Path, node_count: int
+) -> None:
+    """An image is its content: whoever recorded it first does not matter.
+
+    Another recipe published this image first, so the stored receipt names its
+    publisher, slug, build and input. Publishing the image for this recipe's
+    load used to fail with "runtime image no longer matches the approved
+    recipe" (the hardware sweep's phi-4 installs).
+    """
+
+    switch = _background_image_switch(
+        tmp_path, node_count=node_count, old_receipt="sibling"
+    )
+    try:
+        _drive_until(switch, _past_image)
+    finally:
+        switch.worker.composite.close()
+    view = switch.view()
+    assert view.state != "failed", view.status_reason
+    assert view.progress.subphase == "runtime-plan", (view.state, view.status_reason)
+    # The stored receipt keeps its content; the load answered with its own build.
+    stored = switch.storage.read_receipt(switch.layout_digest)
+    assert stored.distribution_slug == "sibling-recipe"
+    intent = view.result.runtime_image_reference_intent
+    assert intent is not None and intent.build_id != "sibling-build"
 
 
 def test_a_replan_after_publication_republishes_the_image_reference(
