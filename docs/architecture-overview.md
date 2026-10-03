@@ -127,9 +127,14 @@ Image preparation writes managed filesystem receipts, and an image is
 identified by its content: its archive and image digests and size, accepted once
 at ingress. Any recipe revision with the same executable build inputs reuses it,
 so admission needs only the managed receipt with a complete stored image and no
-per-revision permission. SQL `RuntimeImageAuthorization` rows remain only as an
-index of which archive a revision uses, for retention and the library; nothing
-reads them as a gate. `RecipeBuild`, `Job`, and agent-operation rows retain
+per-revision permission. Nothing records which revision may use an image: the
+images a recipe can run are the succeeded builds of its recipe document (an
+editorial successor with the same inputs has no build row of its own), found by
+`vonk_control.revision_images`, and retention, the library and removal read
+that, the installations and runs, and the digests live operation payloads name.
+The retired `runtime_image_authorizations` table is not defined, read or written;
+an upgraded database keeps it with its rows, and startup only releases its
+foreign keys. `RecipeBuild`, `Job`, and agent-operation rows retain
 request and output identities, coordination, and reported results; they do not
 independently prove that an image is available.
 

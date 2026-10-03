@@ -14,7 +14,6 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.execution_plan_service import _build_package
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -31,11 +30,6 @@ from vonk_control.models import (
     ModelCacheSet,
     NodeInventorySnapshot,
     RecipeBuild,
-    RuntimeImageAuthorization,
-)
-from vonk_control.recipe_runtime_specs import (
-    compile_runtime_spec,
-    resolve_recipe_entities,
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
@@ -263,37 +257,9 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
         recipe_revision_id=recipe.identity.recipe_revision_id
     )
     paths = _publish_model_fixture(cache, sessions, manifest)
-    with sessions.begin() as session:
+    with sessions() as session:
         build = session.get(RecipeBuild, build_id)
         assert build is not None
-        resolved = resolve_recipe_entities(
-            session, recipe.document.model_dump(mode="json")
-        )
-        runtime = compile_runtime_spec(
-            recipe.document,
-            resolved_entities=resolved,
-            role="entrypoint",
-            rank=0,
-            package_handle=_build_package(build),
-        )
-        identity = runtime["identity"]
-        assert isinstance(identity, dict)
-        # Seed already-authorized image metadata over the stored fixture image.
-        # Authorization issuance and image storage have their own tests.
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=recipe.identity.recipe_revision_id,
-                original_content_digest=recipe.identity.content_sha256,
-                effective_execution_key=identity["execution_sha256"],
-                image_digest=build.image_digest,
-                local_image_config_id="sha256:" + "4" * 64,
-                oci_archive_sha256=build.oci_layout_sha256,
-                image_bytes=build.image_bytes,
-                build_id=build.id,
-                authorized_at=NOW,
-                state="authorized",
-            )
-        )
     ready = projection.recipe_library().recipes[0].assessment
     assert ready is not None
     assert ready.readiness.state == "ready", ready.readiness.model_dump(mode="json")

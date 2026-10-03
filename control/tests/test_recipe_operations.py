@@ -1070,10 +1070,6 @@ def test_fresh_alembic_head_postgres_runs_canonical_recipe_lifecycle(
             "catalog_document_revisions",
             ("id",),
         ),
-        ("runtime_image_authorizations", ("recipe_revision_id",)): (
-            "catalog_document_revisions",
-            ("id",),
-        ),
         ("recipe_installations", ("mapping_id",)): ("cluster_mappings", ("id",)),
         ("recipe_installations", ("recipe_build_id",)): ("recipe_builds", ("id",)),
         ("installation_nodes", ("installation_id",)): (

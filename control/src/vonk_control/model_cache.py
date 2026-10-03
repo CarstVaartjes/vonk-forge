@@ -117,7 +117,6 @@ from .models import (
     ModelCacheSetArtifact,
     RecipeInstallation,
     RecipeRun,
-    RuntimeImageAuthorization,
 )
 from .operation_blockers import (
     OperationBlocker,
@@ -126,6 +125,7 @@ from .operation_blockers import (
     read_blockers,
 )
 from .operation_contract import AvailabilityOperationFailure
+from .revision_images import revision_images
 from .runtime_init import RuntimeSecretError, read_runtime_secret
 from .storage_demands import NAS_MODELS, StorageDemands
 from .strict_json import read_stored_model, serialize_json_value
@@ -1828,35 +1828,20 @@ class ModelCacheService:
                 return "", None
 
             def verified_image(revision_id: str) -> Mapping[str, object] | None:
-                # SQL owns the authorization decision; managed storage owns
-                # whether the authorized archive is present. The authorization
+                # SQL names the images the recipe's builds produced; managed
+                # storage owns whether an archive is present. The build row
                 # carries the archive identity, so no receipt row joins them.
-                authorizations = session.scalars(
-                    select(RuntimeImageAuthorization)
-                    .where(
-                        RuntimeImageAuthorization.recipe_revision_id == revision_id,
-                        RuntimeImageAuthorization.state == "authorized",
-                    )
-                    .order_by(
-                        RuntimeImageAuthorization.authorized_at.desc(),
-                        RuntimeImageAuthorization.id.desc(),
-                    )
-                )
                 if self._runtime_archive_available is None:
                     return None
-                for authorization in authorizations:
-                    archive = authorization.oci_archive_sha256
-                    size = authorization.image_bytes
-                    if not isinstance(archive, str) or type(size) is not int:
-                        raise ModelCacheStorageError(
-                            "model_cache.runtime_receipt_invalid",
-                            "verified runtime image authorization lacks its archive identity",
-                        )
-                    if self._runtime_archive_available(archive, size):
+                images = revision_images(session, [revision_id], same_source=True)
+                for image in images.get(revision_id, ()):
+                    if self._runtime_archive_available(
+                        image.archive_sha256, image.image_bytes
+                    ):
                         return {
-                            "archive_sha256": archive,
-                            "image_bytes": size,
-                            "image_digest": authorization.image_digest,
+                            "archive_sha256": image.archive_sha256,
+                            "image_bytes": image.image_bytes,
+                            "image_digest": image.image_digest,
                         }
                 return None
 

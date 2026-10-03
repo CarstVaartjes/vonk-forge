@@ -26,7 +26,6 @@ from vonk_control.models import (
     Job,
     RecipeBuild,
     ResourceReservation,
-    RuntimeImageAuthorization,
 )
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
@@ -272,13 +271,6 @@ def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_deat
         }
         assert build is not None and build.state == "failed"
         assert build.image_digest is None and build.oci_layout_sha256 is None
-        assert not tuple(
-            session.scalars(
-                select(RuntimeImageAuthorization).where(
-                    RuntimeImageAuthorization.build_id == plan.build_id
-                )
-            )
-        )
     assert _active_claims(sessions, plan.build_id) == claim_ids
 
     restarted = run("reconcile")
@@ -319,13 +311,6 @@ def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_deat
         build = session.get(RecipeBuild, plan.build_id)
         assert build is not None and build.state == "failed"
         assert build.image_digest is None and build.oci_layout_sha256 is None
-        assert not tuple(
-            session.scalars(
-                select(RuntimeImageAuthorization).where(
-                    RuntimeImageAuthorization.build_id == plan.build_id
-                )
-            )
-        )
     # Re-enter through a fresh worker after the late result. It must discover
     # the same pending cleanup rather than release or duplicate it.
     restarted_after_result = run("reconcile")
@@ -362,13 +347,6 @@ def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_deat
         build = session.get(RecipeBuild, plan.build_id)
         assert build is not None and build.state == "building"
         assert build.image_digest is None and build.oci_layout_sha256 is None
-        assert not tuple(
-            session.scalars(
-                select(RuntimeImageAuthorization).where(
-                    RuntimeImageAuthorization.build_id == plan.build_id
-                )
-            )
-        )
         assert (
             session.scalar(
                 select(func.count(Job.id)).where(Job.kind == "recipe.build.cleanup.v1")

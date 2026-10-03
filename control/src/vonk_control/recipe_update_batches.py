@@ -23,7 +23,7 @@ from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from .auth import MUTATION_ROLES
 from .catalog_queries import active_head_revision
 from .logging import redact_text
-from .models import CatalogDocumentRevision, Job, RuntimeImageAuthorization, User
+from .models import CatalogDocumentRevision, Job, User
 from .operation_api import (
     OperationListPage,
     OperationProvider,
@@ -43,6 +43,7 @@ from .recipe_update_contract import (
     UpdateState,
     read_update_document,
 )
+from .revision_images import revision_images
 from .runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
@@ -158,24 +159,10 @@ class RecipeUpdateBatches:
             return None if existing is None else self._matching(existing, actor, scope)
 
     def _cached_revisions(self) -> list[str]:
-        # SQL owns identity and authorization; only managed bytes prove cache
-        # presence. Historical successful Jobs do not participate in selection.
+        # SQL names each head's images (the builds of its recipe); only managed
+        # bytes prove cache presence. Historical successful Jobs do not
+        # participate in selection.
         with self.sessions() as session:
-            authorized = list(
-                session.scalars(
-                    select(RuntimeImageAuthorization).where(
-                        RuntimeImageAuthorization.state == "authorized"
-                    )
-                )
-            )
-            revisions = {
-                row.id: row
-                for row in session.scalars(
-                    select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.kind == "recipe"
-                    )
-                )
-            }
             heads = {
                 (row.publisher, row.slug): row.id
                 for row in session.scalars(
@@ -186,31 +173,23 @@ class RecipeUpdateBatches:
                     )
                 )
             }
+            images = revision_images(session, set(heads.values()), same_source=True)
         cached: dict[tuple[str, str], str] = {}
-        for authorization in authorized:
-            revision = revisions.get(authorization.recipe_revision_id)
-            if revision is None or revision.state != "active":
-                continue
-            try:
-                receipt = self.owner._storage.read_receipt(
-                    authorization.oci_archive_sha256
-                )
-                self.owner._storage.existing_archive(
-                    receipt.oci_archive_sha256, receipt.image_bytes
-                )
-            except RuntimeImagePreparationError as error:
-                if error.code == "runtime_image.cache_missing" or isinstance(
-                    error.__cause__, FileNotFoundError
-                ):
-                    continue
-                raise
-            logical = (revision.publisher, revision.slug)
-            if logical not in heads:
-                raise _error(
-                    "recipe_update.scope_invalid",
-                    "a cached recipe has no current accepted revision",
-                )
-            cached[logical] = heads[logical]
+        for logical, head_id in heads.items():
+            for image in images.get(head_id, ()):
+                try:
+                    receipt = self.owner._storage.read_receipt(image.archive_sha256)
+                    self.owner._storage.existing_archive(
+                        receipt.oci_archive_sha256, receipt.image_bytes
+                    )
+                except RuntimeImagePreparationError as error:
+                    if error.code == "runtime_image.cache_missing" or isinstance(
+                        error.__cause__, FileNotFoundError
+                    ):
+                        continue
+                    raise
+                cached[logical] = head_id
+                break
         return [cached[logical] for logical in sorted(cached)]
 
     def start(

@@ -20,23 +20,25 @@ import threading
 import time
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_control.auth import TokenCodec
 from vonk_control.library_assessment import LibraryAssessment
 from vonk_control.library_image_presence import ImagePresenceIndex
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
+    CatalogDocumentHead,
     CatalogDocumentRevision,
+    ModelCacheSet,
     RecipeBuild,
-    RuntimeImageAuthorization,
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from .runtime_image_fixtures import place_test_image
+from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_library_assessment import (  # noqa: F401 - the shared fixture
     assessed_library,
 )
 from .test_library_canonical_projection import _insert_canonical_rows
+from .test_recipe_image_availability import _recipe_projection
 from .test_recipe_operations import NOW
 
 # Generous: the guarded behavior is "does not wait for the blocked read", which
@@ -52,8 +54,8 @@ def _hex(value: str) -> str:
 def _seed_recipes_with_images(fixture, *, recipes: int, history: int) -> int:
     """Give ``recipes`` current recipes one stored image each, plus old revisions.
 
-    Every old revision of a recipe is authorized for the same image, the way a
-    catalog refresh leaves them. Returns the number of distinct stored images.
+    The old revisions of a recipe have no build of their own, the way a catalog
+    refresh leaves them. Returns the number of distinct stored images.
     """
 
     projection, sessions, _, _, _, _, _, build_id, _, storage = fixture
@@ -97,7 +99,6 @@ def _seed_recipes_with_images(fixture, *, recipes: int, history: int) -> int:
             )
             session.add(image_build)
             session.flush()
-            owners = [(revision.id, revision.content_digest)]
             for old in range(history):
                 older = json.loads(json.dumps(revision.document))
                 older["metadata"]["description"] += f" (revision {old})"
@@ -118,22 +119,6 @@ def _seed_recipes_with_images(fixture, *, recipes: int, history: int) -> int:
                 )
                 session.add(owner)
                 session.flush()
-                owners.append((owner.id, owner.content_digest))
-            for number, (owner_id, owner_digest) in enumerate(owners):
-                session.add(
-                    RuntimeImageAuthorization(
-                        recipe_revision_id=owner_id,
-                        original_content_digest=owner_digest,
-                        effective_execution_key=_hex(f"key-{index}-{number}"),
-                        image_digest=image_build.image_digest,
-                        local_image_config_id="sha256:" + "4" * 64,
-                        oci_archive_sha256=address,
-                        image_bytes=size,
-                        build_id=image_build.id,
-                        authorized_at=NOW,
-                        state="authorized",
-                    )
-                )
     return recipes
 
 
@@ -410,3 +395,94 @@ def test_queued_download_progress_is_projected_on_postgres(tmp_path, postgres_en
         sessions, tmp_path / "model-cache", reserve_bytes=0, clock=lambda: NOW
     )
     _check_queued_download_projection(sessions, tmp_path, cache)
+
+
+def _library(sessions, storage) -> LibraryProjection:
+    return LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"b" * 32).cursor_codec(),
+        clock=lambda: NOW,
+        runtime_archive_available=storage.build_archive_available,
+    )
+
+
+def test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored(
+    assessed_library,  # noqa: F811
+):
+    """The image is the recipe's: a successor has no build row and no grant."""
+
+    _, sessions, _, _, _, _, _, _, _, storage = assessed_library
+    _seed_recipes_with_images(assessed_library, recipes=1, history=0)
+    with sessions.begin() as session:
+        built = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.slug.like("recipe-%"),
+            )
+        )
+        assert built is not None
+        # The recipes are built from one source bundle; a successor with the
+        # same source reuses the build.
+        projection = _recipe_projection(RecipeDefinition.model_validate(built.document))
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == built.id)
+            .values(projected=projection)
+        )
+        for build in session.scalars(
+            select(RecipeBuild).where(RecipeBuild.recipe_revision_id == built.id)
+        ):
+            build.source_bundle_sha256 = "b" * 64
+        document = json.loads(json.dumps(built.document))
+        document["metadata"]["description"] += " (editorial successor)"
+        document = RecipeDefinition.model_validate(document).model_dump(mode="json")
+        successor = CatalogDocumentRevision(
+            document_id=built.document_id,
+            kind="recipe",
+            publisher=built.publisher,
+            slug=built.slug,
+            revision_number=built.revision_number + 1,
+            schema_version=2,
+            state="active",
+            document=document,
+            content_digest=document_sha256(document),
+            projected=projection,
+            created_by="test",
+            created_at=NOW,
+        )
+        session.add(successor)
+        session.flush()
+        head = session.scalar(
+            select(CatalogDocumentHead).where(
+                CatalogDocumentHead.slug == built.slug,
+                CatalogDocumentHead.kind == "recipe",
+            )
+        )
+        assert head is not None
+        head.active_revision_id = successor.id
+        session.add(
+            ModelCacheSet(
+                artifact_set_sha256=_hex("successor-set"),
+                schema_version=2,
+                model_content_sha256=_hex("successor-model"),
+                recipe_revision_sha256=successor.content_digest,
+                manifest={},
+                expected_bytes=1,
+                verified_bytes=1,
+                state="cached",
+                created_at=NOW,
+                updated_at=NOW,
+                verified_at=NOW,
+                last_accessed_at=NOW,
+            )
+        )
+        slug = successor.slug
+
+    def controller() -> str:
+        page = _library(sessions, storage).recipe_library(assess=False, limit=100)
+        (item,) = [item for item in page.recipes if item.identity.slug == slug]
+        return item.local.controller
+
+    assert controller() == "cached"
+    remove_test_image(storage, _hex("image-0"))
+    assert controller() == "not_cached"

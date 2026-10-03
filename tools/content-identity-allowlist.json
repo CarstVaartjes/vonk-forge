@@ -16,13 +16,6 @@
       "reason": "Garbage-collection keep-guard: an active job's image reference must match its owner plan, and a mismatch defers removal (fails closed for deletion) instead of widening or deleting anything."
     },
     {
-      "path": "control/src/vonk_control/artifact_reference_scan.py",
-      "function": "runtime_image_reference_findings",
-      "kind": "provenance_comparison",
-      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision.id",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
-    },
-    {
       "path": "control/src/vonk_control/attempt_residues.py",
       "function": "superseded_plan_ids",
       "kind": "provenance_comparison",
@@ -129,20 +122,6 @@
     },
     {
       "path": "control/src/vonk_control/catalog_revision_collection.py",
-      "function": "CatalogRevisionCollector._delete_dead_rows",
-      "kind": "provenance_comparison",
-      "expression": "RuntimeImageAuthorization.build_id == RecipeBuild.id",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
-    },
-    {
-      "path": "control/src/vonk_control/catalog_revision_collection.py",
-      "function": "CatalogRevisionCollector._delete_dead_rows",
-      "kind": "provenance_comparison",
-      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision.id",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
-    },
-    {
-      "path": "control/src/vonk_control/catalog_revision_collection.py",
       "function": "CatalogRevisionCollector._remove",
       "kind": "provenance_comparison",
       "expression": "RecipeBuild.recipe_revision_id == revision.id",
@@ -178,13 +157,6 @@
     },
     {
       "path": "control/src/vonk_control/catalog_revision_collection.py",
-      "function": "CatalogRevisionCollector._require_no_remaining_reference",
-      "kind": "provenance_comparison",
-      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision.id",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
-    },
-    {
-      "path": "control/src/vonk_control/catalog_revision_collection.py",
       "function": "CatalogRevisionCollector._require_unused",
       "kind": "provenance_comparison",
       "expression": "RecipeBuild.recipe_revision_id == revision.id",
@@ -201,22 +173,8 @@
       "path": "control/src/vonk_control/catalog_revision_collection.py",
       "function": "CatalogRevisionCollector._require_unused",
       "kind": "provenance_comparison",
-      "expression": "RuntimeImageAuthorization.recipe_revision_id != revision.id",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
-    },
-    {
-      "path": "control/src/vonk_control/catalog_revision_collection.py",
-      "function": "CatalogRevisionCollector._require_unused",
-      "kind": "provenance_comparison",
       "expression": "model.recipe_revision_id == revision.id",
       "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
-    },
-    {
-      "path": "control/src/vonk_control/catalog_revision_collection.py",
-      "function": "CatalogRevisionCollector._require_unused",
-      "kind": "provenance_filter",
-      "expression": "RuntimeImageAuthorization.build_id.in_(builds)",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
     },
     {
       "path": "control/src/vonk_control/catalog_service.py",
@@ -357,13 +315,6 @@
       "kind": "provenance_comparison",
       "expression": "assignment.recipe_id == recipe_id",
       "reason": "Finds the loaded assignment of a recipe on a roster and whether it runs the newest revision; the revision is the recipe version shown in the update notice."
-    },
-    {
-      "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "FleetProfileService._reserve_saved_profile_references",
-      "kind": "provenance_comparison",
-      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision.id",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
     },
     {
       "path": "control/src/vonk_control/fleet_profiles.py",
@@ -511,13 +462,6 @@
       "kind": "provenance_comparison",
       "expression": "(selection.model.publisher, selection.model.slug, selection.model.content_sha256) in selected_keys",
       "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
-    },
-    {
-      "path": "control/src/vonk_control/model_cache.py",
-      "function": "ModelCacheService.resolve_latest_cached.verified_image",
-      "kind": "provenance_comparison",
-      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision_id",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
     },
     {
       "path": "control/src/vonk_control/prebuilt_images.py",
@@ -696,20 +640,6 @@
     },
     {
       "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._recipe_removal_selection_in_session",
-      "kind": "provenance_comparison",
-      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision_id",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._start_request",
-      "kind": "provenance_comparison",
-      "expression": "RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
       "function": "RecipeImageAvailabilityService._start_request",
       "kind": "provenance_comparison",
       "expression": "current_revision_id != recipe_revision_id",
@@ -870,6 +800,20 @@
       "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
     },
     {
+      "path": "control/src/vonk_control/revision_images.py",
+      "function": "revision_images",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == RecipeBuild.recipe_revision_id",
+      "reason": "Joins a recipe's build rows to their revision to find the recipe document they belong to: the images a recipe can run are the builds of its document (an editorial successor reuses its predecessor's build by content), not the builds that name one revision id."
+    },
+    {
+      "path": "control/src/vonk_control/revision_images.py",
+      "function": "revisions_running_archives",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == RecipeBuild.recipe_revision_id",
+      "reason": "Joins a recipe's build rows to their revision to find the recipe document they belong to: the images a recipe can run are the builds of its document (an editorial successor reuses its predecessor's build by content), not the builds that name one revision id."
+    },
+    {
       "path": "control/src/vonk_control/run_admission.py",
       "function": "RunAdmissionService._accept_run_locked_in_session",
       "kind": "provenance_comparison",
@@ -996,13 +940,6 @@
       "reason": "Fencing of an image publication intent: only the operation attempt and claim that wrote the intent may complete it; ownership, not content."
     },
     {
-      "path": "control/src/vonk_control/runtime_image_preparation.py",
-      "function": "record_runtime_image_reference",
-      "kind": "provenance_comparison",
-      "expression": "RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
-    },
-    {
       "path": "control/src/vonk_control/unused_storage_collection.py",
       "function": "_Evidence.read",
       "kind": "provenance_comparison",
@@ -1022,13 +959,6 @@
       "kind": "provenance_filter",
       "expression": "RecipeBuild.recipe_revision_id.in_(pointed_ids)",
       "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
-    },
-    {
-      "path": "control/src/vonk_control/unused_storage_collection.py",
-      "function": "_Evidence.read",
-      "kind": "provenance_filter",
-      "expression": "RuntimeImageAuthorization.recipe_revision_id.in_(pointed_ids)",
-      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
     },
     {
       "path": "control/src/vonk_control/unused_storage_collection.py",

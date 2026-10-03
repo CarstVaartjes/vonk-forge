@@ -89,7 +89,6 @@ from .models import (
     Job,
     ModelCacheOperation,
     RecipeBuild,
-    RuntimeImageAuthorization,
 )
 from .operation_blockers import (
     OperationBlocker,
@@ -129,6 +128,7 @@ from .recipe_image_removal_contract import (
 )
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import UPDATE_KIND, RecipeUpdateResponse
+from .revision_images import revision_archives, revision_images
 from .runtime_image_preparation import (
     OCIImageTransport,
     RuntimeImagePreparationError,
@@ -137,7 +137,6 @@ from .runtime_image_preparation import (
     RuntimeImageStorage,
     prepare_runtime_image,
     read_runtime_image_reference_intent,
-    record_runtime_image_reference,
 )
 from .strict_json import read_stored_model, serialize_json_value
 
@@ -786,23 +785,14 @@ class RecipeImageAvailabilityService:
                 "selected canonical recipe revision is invalid",
             ) from error
 
-        authorizations = tuple(
-            session.scalars(
-                select(RuntimeImageAuthorization)
-                .where(RuntimeImageAuthorization.recipe_revision_id == revision_id)
-                .order_by(
-                    RuntimeImageAuthorization.oci_archive_sha256,
-                    RuntimeImageAuthorization.id,
-                )
-            )
-        )
+        # The images the recipe's builds produced are the ones its removal
+        # selects; the reference scan keeps whatever another owner still uses.
         image_sizes: dict[str, int] = {}
-        for authorization in authorizations:
+        for image in revision_images(session, [revision_id]).get(revision_id, ()):
             archive = _digest(
-                authorization.oci_archive_sha256,
-                field="runtime image archive digest",
+                image.archive_sha256, field="runtime image archive digest"
             )
-            image_sizes.setdefault(archive, authorization.image_bytes)
+            image_sizes.setdefault(archive, image.image_bytes)
 
         model_scope: ModelCacheRemovalScope | None = None
         if with_model:
@@ -3518,13 +3508,7 @@ class RecipeImageAvailabilityService:
                 if existing is not None:
                     return self._matching_request(existing, actor=actor, intent=intent)
                 current_archives = tuple(
-                    session.scalars(
-                        select(RuntimeImageAuthorization.oci_archive_sha256).where(
-                            RuntimeImageAuthorization.recipe_revision_id
-                            == recipe_revision_id,
-                            RuntimeImageAuthorization.state == "authorized",
-                        )
-                    )
+                    revision_archives(session, [recipe_revision_id])
                 )
                 try:
                     require_reference_open(
@@ -4580,7 +4564,7 @@ class RecipeImageAvailabilityService:
                     # bytes may remain reusable, but stale work cannot accept
                     # a current authorization or operation result.
                     with self._removal_lock:
-                        self._persist_receipt(claim, payload, receipt)
+                        self._persist_receipt(claim, receipt)
             with self._sessions() as session:
                 latest = session.get(Job, operation_id)
                 if latest is not None and isinstance(latest.payload, Mapping):
@@ -4979,15 +4963,8 @@ class RecipeImageAvailabilityService:
     def _persist_receipt(
         self,
         claim: RecipeImageAvailabilityClaim,
-        payload: Mapping[str, object],
         receipt: RuntimeImageReceipt,
     ) -> None:
-        execution_key = payload.get("effective_execution_key")
-        if not isinstance(execution_key, str):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.identity_invalid",
-                "effective execution identity is missing",
-            )
         with self._sessions.begin() as session:
             operation = self._require_claim(session, claim)
             operation_payload = dict(operation.payload)
@@ -4997,13 +4974,16 @@ class RecipeImageAvailabilityService:
                 and reference is None
             ):
                 raise _AvailabilityClaimLost()
-            record_runtime_image_reference(
-                session,
-                recipe_revision_id=str(payload["recipe_revision_id"]),
-                effective_execution_key=execution_key,
-                receipt=receipt,
-                recorded_at=self._clock(),
-            )
+            try:
+                require_reference_open(
+                    session,
+                    (ArtifactIdentity("runtime-image", receipt.oci_archive_sha256),),
+                    now=self._clock(),
+                )
+            except ArtifactLifecycleError as error:
+                raise RuntimeImagePreparationError(
+                    error.code, error.detail, retryable=error.retryable
+                ) from error
             operation.payload = dict(operation.payload) | {
                 "image_result": receipt.to_mapping()
             }

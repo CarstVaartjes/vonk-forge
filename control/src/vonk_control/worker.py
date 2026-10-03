@@ -666,7 +666,6 @@ if __name__ == "__main__":
     model_cache.resume_operations()
     runtime_image_transport = OciLayoutImageTransport()
     prepare_runtime_image_receipt = make_runtime_image_receipt_preparer(
-        sessions,
         runtime_image_storage,
         runtime_image_transport,
         clock=clock,
