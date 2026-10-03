@@ -38,6 +38,7 @@ from .catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
 )
+from .content_identity import reusable_build
 from .disk_reservations import outstanding_disk_reservation_bytes
 from .inventory_repository import InventoryRepository, InventorySnapshotView
 from .memory_reservations import memory_reservations, memory_reserve_floor
@@ -730,8 +731,11 @@ class RecipeBuildService:
                     or report.source_bundle_sha256 != source_sha256
                 ):
                     continue
-                if candidate.build_input_sha256 != resolution.build_input_for_builder(
-                    builder_digest
+                if not reusable_build(
+                    resolution,
+                    build_input_sha256=candidate.build_input_sha256,
+                    source_bundle_sha256=source_sha256,
+                    recorded_builder_binary_digest=builder_digest,
                 ):
                     continue
                 assert candidate.image_digest is not None

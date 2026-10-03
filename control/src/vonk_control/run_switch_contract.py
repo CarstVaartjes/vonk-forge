@@ -920,8 +920,6 @@ class RunSwitchRuntimeImageResult(_RunSwitchPhaseBase):
             raise ValueError(
                 "runtime image phase identity differs from canonical receipt"
             )
-        if self.build_id is not None and self.runtime_image.build_id != self.build_id:
-            raise ValueError("runtime image phase build identity differs from receipt")
         return self
 
 

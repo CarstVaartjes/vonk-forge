@@ -152,6 +152,14 @@ def _old_receipt(
             "build_id": "sibling-build",
             "build_input_sha256": "d" * 64,
         }
+    if kind == "other-adapter":
+        # The same image bytes, prepared first by another runtime adapter.
+        return {
+            **current,
+            "distribution_publisher": "another-publisher",
+            "runtime_adapter": "another-adapter",
+            "runtime_adapter_sha256": "e" * 64,
+        }
     if kind == "retired-fields":
         # Schema 2 before recipe contract 2.0 dropped these two fields.
         return {
@@ -207,7 +215,7 @@ def _background_image_switch(
         (storage.root / f"{layout_digest}.receipt.json").write_text(
             json.dumps(document)
         )
-        if old_receipt != "sibling":
+        if old_receipt not in {"sibling", "other-adapter"}:
             with pytest.raises(RuntimeImagePreparationError):
                 storage.read_receipt(layout_digest)
     pending_failures = list(failures or ())
@@ -512,8 +520,9 @@ def test_preparation_longer_than_the_preflight_window_replaces_an_old_receipt(
 
 
 @pytest.mark.parametrize("node_count", [1, 2])
+@pytest.mark.parametrize("provenance", ["sibling", "other-adapter"])
 def test_a_sibling_recipes_receipt_for_the_same_image_does_not_block_the_load(
-    tmp_path: Path, node_count: int
+    tmp_path: Path, node_count: int, provenance: str
 ) -> None:
     """An image is its content: whoever recorded it first does not matter.
 
@@ -524,7 +533,7 @@ def test_a_sibling_recipes_receipt_for_the_same_image_does_not_block_the_load(
     """
 
     switch = _background_image_switch(
-        tmp_path, node_count=node_count, old_receipt="sibling"
+        tmp_path, node_count=node_count, old_receipt=provenance
     )
     try:
         _drive_until(switch, _past_image)
@@ -535,7 +544,9 @@ def test_a_sibling_recipes_receipt_for_the_same_image_does_not_block_the_load(
     assert view.progress.subphase == "runtime-plan", (view.state, view.status_reason)
     # The stored receipt keeps its content; the load answered with its own build.
     stored = switch.storage.read_receipt(switch.layout_digest)
-    assert stored.distribution_slug == "sibling-recipe"
+    assert stored.distribution_publisher != "vonk-forge" or (
+        stored.distribution_slug == "sibling-recipe"
+    )
     intent = view.result.runtime_image_reference_intent
     assert intent is not None and intent.build_id != "sibling-build"
 

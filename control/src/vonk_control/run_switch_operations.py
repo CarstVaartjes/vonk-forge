@@ -54,6 +54,7 @@ from .cluster_mappings import (
     mapping_option_choices,
     validate_mapping_parameters,
 )
+from .content_identity import ImageContent, differing_image_fields, same_image
 from .disk_reservations import (
     models_stored_on_node,
     outstanding_disk_reservation_bytes,
@@ -2024,7 +2025,6 @@ class RecipeLifecyclePhaseExecutor:
             or installation.model_content_sha256 != plan.model_content_sha256
             or installation.mapping_id != mapping_id
             or installation.mapping_generation != plan.mapping.mapping_generation
-            or installation.recipe_build_id != plan.recipe_build_id
             or installation.image_digest != plan.image_digest
             or (
                 install_plan_digest is not None
@@ -3758,7 +3758,6 @@ class RunSwitchOperationService:
                                 "image_digest",
                                 "oci_layout_sha256",
                                 "image_bytes",
-                                "build_id",
                             )
                         },
                     )
@@ -3768,7 +3767,6 @@ class RunSwitchOperationService:
                     build is None
                     or not installation_matches_runtime_image(
                         installation,
-                        build_id=build.id,
                         image_digest=build.image_digest,
                         oci_layout_sha256=build.oci_layout_sha256,
                         image_bytes=build.image_bytes,
@@ -7202,9 +7200,7 @@ class RunSwitchOperationService:
                         )
                     )
                     if not any(
-                        isinstance(item, Mapping)
-                        and item.get("build_id") == receipt["build_id"]
-                        and item.get("image_digest") == receipt["image_digest"]
+                        isinstance(item, Mapping) and same_image(item, receipt)
                         for item in results
                     ):
                         results.append(_phase_result(receipt, phase=phase))
@@ -7718,9 +7714,7 @@ class RunSwitchOperationService:
                         )
                     )
                     if not any(
-                        isinstance(item, Mapping)
-                        and item.get("build_id") == receipt["build_id"]
-                        and item.get("image_digest") == receipt["image_digest"]
+                        isinstance(item, Mapping) and same_image(item, receipt)
                         for item in results
                     ):
                         results.append(_phase_result(receipt, phase=phase))
@@ -9616,17 +9610,22 @@ def _validate_artifact_execution(
                     "image_digest": image_digest,
                     "oci_layout_sha256": layout_digest,
                     "image_bytes": receipt.image_bytes,
-                    "build_id": receipt.build_id,
                     "architecture": receipt.architecture,
                     "runtime_interface": receipt.runtime_interface,
                 },
             )
-        if plan.image_digest is not None and image_digest != plan.image_digest:
+        differing = differing_image_fields(
+            ImageContent(
+                image_digest=plan.image_digest,
+                archive_sha256=plan.build.oci_layout_sha256,
+            ),
+            receipt,
+        )
+        if "image_digest" in differing:
             raise RunSwitchOperationConflict(
                 "run-switch.runtime-image-preparation-digest-mismatch"
             )
-        expected_layout = plan.build.oci_layout_sha256
-        if expected_layout is not None and layout_digest != expected_layout:
+        if "archive_sha256" in differing:
             raise RunSwitchOperationConflict(
                 "run-switch.runtime-image-preparation-layout-mismatch"
             )
@@ -9762,6 +9761,12 @@ def _validate_artifact_execution(
             raise RunSwitchOperationConflict(
                 "run-switch.transfer-byte-evidence-invalid"
             )
+
+
+def _stated_bytes(value: object) -> int | None:
+    """A recorded size, or ``None`` when the plan does not state one."""
+
+    return value if type(value) is int and value > 0 else None
 
 
 def _string_or_none(value: object) -> str | None:
@@ -10050,60 +10055,37 @@ def _persist_run_switch_runtime_image_reference(
         ):
             raise owner_changed("RunSwitch phase was cancelled or superseded")
 
-        # An image is its content: the publisher, slug and revision a stored
-        # receipt first recorded are provenance of whoever asked first, not a
-        # property of this plan, so they are not compared. The digests below
-        # are the content checks.
-        if (
-            plan.image_digest is not None
-            and plan.image_digest != parsed_receipt.image_digest
-        ):
-            raise identity_invalid(
-                "runtime image differs from the approved image digest"
-            )
-        if (
-            plan.runtime_storage.image_digest is not None
-            and plan.runtime_storage.image_digest != parsed_receipt.image_digest
-        ):
-            raise identity_invalid(
-                "runtime image differs from the approved platform digest"
-            )
+        # An image is its content: the publisher, slug, revision and build a
+        # stored receipt first recorded are provenance of whoever asked first,
+        # not a property of this plan, so they are not compared.
         expected_layout = (
             plan.runtime_storage.oci_layout_sha256 or plan.build.oci_layout_sha256
         )
-        if (
-            expected_layout is not None
-            and expected_layout != parsed_receipt.oci_archive_sha256
+        for label, approved in (
+            ("image", ImageContent(image_digest=plan.image_digest)),
+            (
+                "platform",
+                ImageContent(
+                    image_digest=plan.runtime_storage.image_digest,
+                    archive_sha256=expected_layout,
+                    image_bytes=_stated_bytes(plan.runtime_storage.image_bytes),
+                ),
+            ),
+            (
+                "build",
+                ImageContent(
+                    image_digest=plan.build.image_digest,
+                    archive_sha256=plan.build.oci_layout_sha256,
+                    image_bytes=_stated_bytes(plan.build.image_bytes),
+                ),
+            ),
         ):
-            raise identity_invalid(
-                "runtime image archive differs from the approved plan"
-            )
-        if (
-            plan.runtime_storage.image_bytes is not None
-            and plan.runtime_storage.image_bytes > 0
-            and plan.runtime_storage.image_bytes != parsed_receipt.image_bytes
-        ):
-            raise identity_invalid("runtime image size differs from the approved plan")
-        if (
-            plan.build.image_digest is not None
-            and plan.build.image_digest != parsed_receipt.image_digest
-        ):
-            raise identity_invalid(
-                "runtime image differs from the approved build digest"
-            )
-        if (
-            plan.build.oci_layout_sha256 is not None
-            and plan.build.oci_layout_sha256 != parsed_receipt.oci_archive_sha256
-        ):
-            raise identity_invalid(
-                "runtime image differs from the approved build archive"
-            )
-        if (
-            plan.build.image_bytes is not None
-            and plan.build.image_bytes > 0
-            and plan.build.image_bytes != parsed_receipt.image_bytes
-        ):
-            raise identity_invalid("runtime image size differs from the approved build")
+            differing = differing_image_fields(approved, parsed_receipt)
+            if differing:
+                raise identity_invalid(
+                    f"runtime image differs from the approved {label}: "
+                    + ", ".join(differing)
+                )
 
         if (
             plan.recipe_build_id or plan.build.build_id
@@ -10115,16 +10097,11 @@ def _persist_run_switch_runtime_image_reference(
             raise identity_invalid(
                 "approved recipe build is no longer available"
             ) from error
-        if any(
-            parsed_receipt_value != build_value
-            for parsed_receipt_value, build_value in (
-                (parsed_receipt.image_digest, build["image_digest"]),
-                (parsed_receipt.oci_archive_sha256, build["oci_layout_sha256"]),
-                (parsed_receipt.image_bytes, build["image_bytes"]),
-            )
-        ):
+        differing = differing_image_fields(build, parsed_receipt)
+        if differing:
             raise identity_invalid(
-                "runtime image receipt differs from the approved build"
+                "runtime image receipt differs from the approved build: "
+                + ", ".join(differing)
             )
 
         if profile_application_id is not None:
@@ -10141,7 +10118,6 @@ def _persist_run_switch_runtime_image_reference(
                         "image_digest": parsed_receipt.image_digest,
                         "oci_layout_sha256": parsed_receipt.oci_archive_sha256,
                         "image_bytes": parsed_receipt.image_bytes,
-                        "build_id": parsed_receipt.build_id,
                         "architecture": parsed_receipt.architecture,
                         "runtime_interface": parsed_receipt.runtime_interface,
                     },

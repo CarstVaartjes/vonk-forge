@@ -22,6 +22,7 @@ from .artifact_lifecycle import (
     ArtifactLifecycleError,
     lock_reference_gates,
 )
+from .content_identity import ImageContent, differing_image_fields
 from .fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfilePreview,
@@ -904,6 +905,28 @@ def _run_switch_plan(payload: Mapping[str, object]) -> RunSwitchPlan:
         ) from error
 
 
+def _stated(value: int | None) -> int | None:
+    return value if value else None
+
+
+def _approved_images(plan: RunSwitchPlan) -> tuple[ImageContent, ...]:
+    """What the plan approved about the image, per source. Unstated is absent."""
+
+    return (
+        ImageContent(image_digest=plan.image_digest),
+        ImageContent(
+            image_digest=plan.runtime_storage.image_digest,
+            archive_sha256=plan.runtime_storage.oci_layout_sha256,
+            image_bytes=_stated(plan.runtime_storage.image_bytes),
+        ),
+        ImageContent(
+            image_digest=plan.build.image_digest,
+            archive_sha256=plan.build.oci_layout_sha256,
+            image_bytes=_stated(plan.build.image_bytes),
+        ),
+    )
+
+
 def _run_switch_runtime_image_intent(
     operation: Job, plan: RunSwitchPlan
 ) -> RunSwitchRuntimeImageReferenceIntent | None:
@@ -952,34 +975,11 @@ def _run_switch_runtime_image_intent(
         and phase.kind == "prepare"
         and phase.subphase == "runtime-image"
         and intent.item_index == 0
-        and (plan.image_digest is None or plan.image_digest == intent.image_digest)
-        and (
-            plan.runtime_storage.image_digest is None
-            or plan.runtime_storage.image_digest == intent.image_digest
-        )
-        and (
-            plan.runtime_storage.oci_layout_sha256 is None
-            or plan.runtime_storage.oci_layout_sha256 == intent.archive_sha256
-        )
-        and (
-            plan.runtime_storage.image_bytes is None
-            or plan.runtime_storage.image_bytes == 0
-            or plan.runtime_storage.image_bytes == intent.image_bytes
-        )
         and intent.build_id == expected_build_id
         and intent.build_input_sha256 == plan.build.build_input_sha256
-        and (
-            plan.build.image_digest is None
-            or plan.build.image_digest == intent.image_digest
-        )
-        and (
-            plan.build.oci_layout_sha256 is None
-            or plan.build.oci_layout_sha256 == intent.archive_sha256
-        )
-        and (
-            plan.build.image_bytes is None
-            or plan.build.image_bytes == 0
-            or plan.build.image_bytes == intent.image_bytes
+        and not any(
+            differing_image_fields(approved, intent)
+            for approved in _approved_images(plan)
         )
     )
     if not valid:

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
+from .content_identity import same_image
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from .models import InstallationNode, RecipeInstallation, ResourceReservation
 from .profile_capacity import reservation_visible
@@ -125,8 +126,7 @@ def outstanding_disk_reservation_bytes(
                     and plan.mapping_id == installation.mapping_id
                     and plan.mapping_generation == installation.mapping_generation
                     and plan.recipe_revision_id == installation.recipe_revision_id
-                    and plan.image_digest == installation.image_digest
-                    and plan.recipe_build_id == installation.recipe_build_id
+                    and same_image(plan, installation)
                 ):
                     materialized = owned.required_download_bytes
         total += reservation.amount_bytes - materialized

@@ -25,6 +25,7 @@ from vonk_agent_protocol import (
 
 from .agent_jobs import AgentJobService
 from .bounded_json import sequence
+from .content_identity import ImageContent, same_image
 from .distribution import DistributionService
 from .distribution_assignment import NodeDistributionAssignment
 from .logging import redact_text
@@ -924,9 +925,15 @@ class DurableDistributionPhaseExecutor:
             if (
                 build is None
                 or build.state != "succeeded"
-                or build.image_digest != image_digest
-                or build.oci_layout_sha256 != layout_digest
-                or build.image_bytes != image_bytes
+                or build.image_bytes is None
+                or not same_image(
+                    build,
+                    ImageContent(
+                        image_digest=image_digest,
+                        archive_sha256=layout_digest,
+                        image_bytes=image_bytes,
+                    ),
+                )
             ):
                 raise RuntimeError("OCI build authority changed")
         return RuntimeImagePull(
@@ -1004,10 +1011,13 @@ class DurableDistributionPhaseExecutor:
                 and image.get(node_id) is not None
                 and image[node_id].state == "ready"
                 and getattr(image[node_id], "verified_at", None) is not None
-                and image[node_id].verified_sha256
-                == preparation.runtime_image.oci_layout_sha256
-                and image[node_id].imported_image_digest
-                == preparation.runtime_image.image_digest
+                and same_image(
+                    ImageContent(
+                        image_digest=image[node_id].imported_image_digest,
+                        archive_sha256=image[node_id].verified_sha256,
+                    ),
+                    preparation.runtime_image,
+                )
             )
         )
 

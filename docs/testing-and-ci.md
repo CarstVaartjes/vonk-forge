@@ -307,6 +307,24 @@ cannot silently opt out. Separately, a blocking `flock` on a descriptor from an
 `O_EXCL` create is provably private and cannot contend, so it is not reported;
 a blocking `flock` on a shared file still is.
 
+Provenance is never compared as identity. `control/tests/content_identity_boundaries.py`,
+run over `control/src` by `test_content_identity_boundaries.py`, flags every
+comparison (`==`, `!=`, `in`, a query `.where(...)`, `.in_()` or `.filter_by()`)
+that touches a provenance field: `build_id`, `recipe_revision_id`, `recipe_id`,
+`distribution_publisher`, `distribution_slug`, `distribution_content_sha256`,
+`runtime_adapter*`, a slug beside the rest of a catalog identity, and the
+builder binary inside a build-input comparison. Sameness of an image, a model
+file or a build is decided in `vonk_control/content_identity.py`, which the scan
+does not read. Anywhere else a site must be named in
+`tools/content-identity-allowlist.json` with a written reason (a security edge,
+or ownership, cancellation, retention or navigation by id). Entries are keyed on
+file, function and expression, never a line number, an unlisted site fails, and
+an entry whose site is gone fails as stale. `test_content_identity_gates.py`
+shows the other half: one image presented through different provenance passes
+review, install plan, install, start and the profile checks. Comparisons of a
+literal (`is None`, `== "vllm"`) are existence and selector checks and are not
+sites.
+
 There is no separate ESLint or Prettier configuration. TypeScript formatting
 follows the surrounding files, and `npm run build` is the type gate.
 

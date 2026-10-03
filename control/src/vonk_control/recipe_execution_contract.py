@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.compiled_execution_plan import COMPILED_PLAN_STORAGE_CONTEXT
 from vonk_agent_protocol.inventory import MemoryPool
 
+from .content_identity import ImageContent, same_image
 from .library_contract import Digest, ImageDigest, NodeId, Text64, UuidId
 from .strict_json import StrictJSONModel
 from .validation_detail import validation_error_detail
@@ -236,45 +237,36 @@ def installation_plan_document(
 def installation_matches_runtime_image(
     installation: RecipeInstallation,
     *,
-    build_id: str | None,
     image_digest: str | None,
     oci_layout_sha256: str | None,
     image_bytes: int | None,
 ) -> bool:
     """Whether the stored execution plan uses this exact immutable image.
 
-    A build row can acquire a different result after repair. Its ID and the
-    installation's state cannot establish that existing compiled ranks use
-    the newly selected image or archive.
+    A build row can acquire a different result after repair, and the same
+    bytes can be recorded under another build, recipe or receipt. The image is
+    its content, so the build that produced or first recorded it, and the
+    installation's state, cannot establish that existing compiled ranks use the
+    newly selected image or archive.
     """
-    if (
-        image_digest is None
-        or oci_layout_sha256 is None
-        or image_bytes is None
-        or installation.recipe_build_id != build_id
-        or installation.image_digest != image_digest
-    ):
+    if image_digest is None or oci_layout_sha256 is None or image_bytes is None:
         return False
     plan = parse_stored_installation_plan(installation.plan)
-    expected = {
-        "build_id": build_id,
-        "image_digest": image_digest,
-        "oci_layout_sha256": oci_layout_sha256,
-        "image_bytes": image_bytes,
-    }
+    expected = ImageContent(
+        image_digest=image_digest,
+        archive_sha256=oci_layout_sha256,
+        image_bytes=image_bytes,
+    )
     return (
-        plan.mapping_id == installation.mapping_id
+        same_image(installation, expected)
+        and plan.mapping_id == installation.mapping_id
         and plan.mapping_generation == installation.mapping_generation
         and plan.recipe_revision_id == installation.recipe_revision_id
         and plan.plan_digest == installation.plan_digest
-        and plan.recipe_build_id == build_id
-        and plan.image_digest == image_digest
+        and same_image(plan, expected)
         and bool(plan.compiled_execution_plans)
         and all(
-            all(
-                getattr(compiled.runtime_image, name) == value
-                for name, value in expected.items()
-            )
+            same_image(compiled.runtime_image, expected)
             for compiled in plan.compiled_execution_plans.values()
         )
     )
