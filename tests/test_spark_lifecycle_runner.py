@@ -407,7 +407,9 @@ def test_canary_catalog_import_hands_the_exact_fixture_to_the_controller(
     payload = json.loads(input_text)
     assert payload["request_key"] == "request-key"
     assert payload["index"].encode() == fixture.index_bytes
-    assert base64.b64decode(payload["package"]) == fixture.package_bytes
+    assert [base64.b64decode(value) for value in payload["packages"]] == [
+        fixture.package_bytes
+    ]
 
 
 def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> None:
@@ -450,7 +452,7 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
             cursors=TokenCodec(b"s" * 32).cursor_codec(),
             source_bundles=SourceBundleStore(tmp_path / "bundles"),
         ),
-        reader=program.FixtureReader(index, archive),
+        reader=program.FixtureReader(index, {digest: archive}),
         clock=clock,
     )
 

@@ -3826,7 +3826,7 @@ m["_validate_canary_cleanup_preview"](
 )
 m["_validate_canary_cleanup_application"](
     value["application"],
-    installation_id=value["installation_id"],
+    installation_ids=[value["installation_id"]],
     run_id=value["run_id"],
 )
 
@@ -3834,7 +3834,7 @@ def rejected(changed):
     try:
         m["_validate_canary_cleanup_application"](
             changed,
-            installation_id=value["installation_id"],
+            installation_ids=[value["installation_id"]],
             run_id=value["run_id"],
         )
     except m["LifecycleError"]:

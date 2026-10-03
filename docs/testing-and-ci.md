@@ -409,6 +409,12 @@ release's published `control/openapi.json` and refuses to send a request that
 Controller's contract does not accept, naming the field (`ControllerContract`).
 Send only fields that are set; never serialise an unset optional field as null.
 
+A new lane phase can start in `OBSERVED_PHASES` (`tests/acceptance/spark_upgrade_carry.py`)
+when the platform change it needs is not in a promoted release yet: it runs and
+reports in the lane's report and as a warning annotation, but its failure does
+not stop promotion. Making it gating is deleting its name from that set, a
+lane change that needs its own green `lane-proof`.
+
 If a change needs a longer check, run it locally and attach its bounded report
 to the pull request. Use `workflow_dispatch` only when hosted evidence itself
 is required.

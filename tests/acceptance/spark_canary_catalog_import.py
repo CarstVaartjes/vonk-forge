@@ -9,8 +9,9 @@ import the release reader feeds.  The verified archive is kept in the
 Controller's digest-addressed package cache so the recorded package handle
 points at durable state.
 
-Input (stdin, JSON): ``request_key``, ``index`` (UTF-8 text) and ``package``
-(base64).  Output (stdout, JSON): the managed catalog sync view.
+Input (stdin, JSON): ``request_key``, ``index`` (UTF-8 text) and ``packages``
+(base64, one per Recipe of the index).  Output (stdout, JSON): the managed
+catalog sync view.
 """
 
 from __future__ import annotations
@@ -61,34 +62,37 @@ def _cache_package(cache_root: Path, archive: bytes, digest: str) -> Path:
 
 
 class FixtureReader:
-    """The one-recipe snapshot of the producer's canary index."""
+    """The snapshot of the producer's canary index: one Recipe, or siblings."""
 
-    def __init__(self, index: dict[str, Any], archive_path: Path) -> None:
-        recipes = index["recipes"]
-        if len(recipes) != 1:
-            raise ValueError("canary index must contain exactly one recipe")
-        entry = recipes[0]
-        document = entry["document"]
-        identity, metadata = document["identity"], document["metadata"]
+    def __init__(self, index: dict[str, Any], archives: dict[str, Path]) -> None:
         commit = str(index["source_commit"])
-        digest = str(entry["content_sha256"])
-        self._package_sha256 = str(entry["package"]["sha256"])
-        self._archive_path = archive_path
-        self._item = RecipeLibraryItem(
-            library_commit=commit,
-            source_path=str(entry["source_path"]),
-            publisher=str(identity["publisher"]),
-            slug=str(identity["slug"]),
-            title=str(metadata["title"]),
-            description=str(metadata["description"]),
-            tags=tuple(str(tag) for tag in metadata.get("tags", [])),
-            content_sha256=digest,
-            uri=f"vonk://catalog/{identity['publisher']}/{identity['slug']}@sha256:{digest}",
-            document=dict(document),
-        )
+        self._archives: dict[str, tuple[str, Path]] = {}
+        items = []
+        for entry in index["recipes"]:
+            document = entry["document"]
+            identity, metadata = document["identity"], document["metadata"]
+            digest = str(entry["content_sha256"])
+            item = RecipeLibraryItem(
+                library_commit=commit,
+                source_path=str(entry["source_path"]),
+                publisher=str(identity["publisher"]),
+                slug=str(identity["slug"]),
+                title=str(metadata["title"]),
+                description=str(metadata["description"]),
+                tags=tuple(str(tag) for tag in metadata.get("tags", [])),
+                content_sha256=digest,
+                uri=f"vonk://catalog/{identity['publisher']}/{identity['slug']}@sha256:{digest}",
+                document=dict(document),
+            )
+            self._archives[item.uri] = (
+                str(entry["package"]["sha256"]),
+                archives[str(entry["package"]["sha256"])],
+            )
+            items.append(item)
+        self._items = {item.uri: item for item in items}
         self.snapshot = RecipeLibrarySnapshot(
             commit=commit,
-            items=(self._item,),
+            items=tuple(items),
             repository=str(index["repository"]),
             catalog_entities=tuple(
                 dict(value["document"]) for value in index["catalog_entities"]
@@ -99,31 +103,38 @@ class FixtureReader:
         return self.snapshot
 
     def fetch(self, uri: str) -> RecipeLibraryItem:
-        if uri != self._item.uri:
+        item = self._items.get(uri)
+        if item is None:
             raise KeyError(uri)
+        package_sha256, archive_path = self._archives[uri]
         return load_recipe_package(
-            self._archive_path,
-            package_sha256=self._package_sha256,
-            publisher=self._item.publisher,
-            slug=self._item.slug,
-            recipe_content_sha256=self._item.content_sha256,
-            library_commit=self._item.library_commit,
-            source_path=self._item.source_path,
+            archive_path,
+            package_sha256=package_sha256,
+            publisher=item.publisher,
+            slug=item.slug,
+            recipe_content_sha256=item.content_sha256,
+            library_commit=item.library_commit,
+            source_path=item.source_path,
         )
 
 
 def main() -> None:
     payload = json.loads(sys.stdin.read())
     index = json.loads(payload["index"])
-    archive = base64.b64decode(payload["package"], validate=True)
-    package_sha256 = str(index["recipes"][0]["package"]["sha256"])
-    if hashlib.sha256(archive).hexdigest() != package_sha256:
+    archives = [base64.b64decode(value, validate=True) for value in payload["packages"]]
+    expected = sorted(str(entry["package"]["sha256"]) for entry in index["recipes"])
+    if sorted(hashlib.sha256(archive).hexdigest() for archive in archives) != expected:
         raise SystemExit("canary package bytes do not match the index")
     settings = Settings.from_env_and_secrets()
-    archive_path = _cache_package(
-        settings.state_path / "recipe-library-packages", archive, package_sha256
-    )
-    reader = FixtureReader(index, archive_path)
+    archive_paths = {
+        hashlib.sha256(archive).hexdigest(): _cache_package(
+            settings.state_path / "recipe-library-packages",
+            archive,
+            hashlib.sha256(archive).hexdigest(),
+        )
+        for archive in archives
+    }
+    reader = FixtureReader(index, archive_paths)
     sessions = session_factory(build_engine(settings.database_url))
 
     def clock() -> datetime:
