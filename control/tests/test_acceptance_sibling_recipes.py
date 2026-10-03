@@ -38,13 +38,14 @@ importer = runpy.run_path("tests/acceptance/spark_canary_catalog_import.py")
 canary = lifecycle["_canonical_canary_fixture"](Path(sys.argv[1]))
 one, two = lifecycle["_sibling_recipes"](canary)
 
-# Different Recipes: another slug, another revision content, another model alias.
+# Different Recipes: another slug and another revision content.
 assert one.slug != two.slug and {one.slug, two.slug}.isdisjoint({canary.slug})
 assert one.recipe_content_sha256 != two.recipe_content_sha256
 for sibling in (one, two):
-    assert sibling.recipe["interfaces"][0]["model_aliases"] == [sibling.slug]
 # One image: everything that builds and runs it is the canary's.
-for part in ("execution", "runtime", "models", "topology"):
+# The canary service answers only to its own model name, so the interfaces
+# (model aliases) are the canary's too; the route alias is the assignment name.
+for part in ("execution", "runtime", "models", "topology", "interfaces"):
     assert one.recipe[part] == two.recipe[part] == canary.recipe[part], part
 
 work = Path(tempfile.mkdtemp())

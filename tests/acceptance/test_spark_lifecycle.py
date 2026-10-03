@@ -539,7 +539,9 @@ def _sibling_recipes(
 ) -> tuple[CanonicalCanaryFixture, CanonicalCanaryFixture]:
     """Two different Recipes that build one and the same image.
 
-    Each sibling is the canary under its own slug, title and model alias; the
+    Each sibling is the canary under its own slug and title. The route alias
+    is the assignment's name (the slug); the recipe's model alias is the model
+    the canary service answers to, so it stays the canary's. The
     build context, the base image and the Model are the canary's, so both
     Recipes name the image the canary builds. Both arrive in one catalog commit,
     as two Recipes of one producer library do.
@@ -550,8 +552,6 @@ def _sibling_recipes(
             slug = f"{recipe['identity']['slug']}-{name}"  # type: ignore[index]
             recipe["identity"]["slug"] = slug  # type: ignore[index]
             recipe["metadata"]["title"] = f"{recipe['metadata']['title']} ({name})"  # type: ignore[index]
-            for interface in recipe["interfaces"]:  # type: ignore[attr-defined]
-                interface["model_aliases"] = [slug]
 
         return rename
 
