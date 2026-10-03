@@ -354,6 +354,7 @@ class RecordingArtifactExecutor:
         self.child_transfer = child_transfer
         self.calls: list[str] = []
         self.children: dict[str, SimpleNamespace] = {}
+        self.abandoned: list[str] = []
 
     def execute(
         self,
@@ -403,6 +404,17 @@ class RecordingArtifactExecutor:
 
     def get(self, operation_id: str):
         return self.children.get(operation_id)
+
+    def abandon(self, _session, operation_id: str, _now, *, reason: str) -> bool:
+        """Mirror the durable executor: only a parked child is closed."""
+
+        child = self.children.get(operation_id)
+        if child is None or child.state != "waiting-for-operator":
+            return False
+        child.state = "cancelled"
+        child.reason = reason
+        self.abandoned.append(operation_id)
+        return True
 
 
 class SynchronousPhaseExecutor:
@@ -4361,6 +4373,56 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
         installed = session.get(RecipeInstallation, plan.installation_id)
         assert installed is not None
         assert installed.state == "installed"
+
+
+def test_cancel_closes_a_transfer_parked_for_an_operator_instead_of_waiting(tmp_path):
+    """Live regression: cancelling a profile load deadlocked on a parked copy.
+
+    The transfer child waited for an operator and offered no resume, so the
+    cancellation waited for it forever. Nothing is running, so the cancelled
+    order closes the idempotent child and finishes; copied bytes stay.
+    """
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    executor = RecordingArtifactExecutor(child_transfer=True)
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    service.tick()
+    child_id = _child_operation_id(service.get(operation.operation_id))
+    executor.children[child_id].state = "waiting-for-operator"
+    for _ in range(3):
+        service.tick()
+    assert service.get(operation.operation_id).state == "waiting"
+
+    service.cancel(
+        operation.operation_id,
+        actor="admin",
+        request_key=str(uuid.uuid4()),
+        reason="Stop preparation",
+    )
+    for _ in range(3):
+        service.tick()
+
+    assert service.get(operation.operation_id).state == "cancelled"
+    assert executor.abandoned == [child_id]
 
 
 def test_succeeded_child_with_invalid_receipt_fails_without_reissue(tmp_path):
