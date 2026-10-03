@@ -2310,6 +2310,57 @@ def test_distribution_interrupted_twice_by_agent_restart_resumes_without_operato
     assert job_state(sessions, operation.parent_job_id).state == "succeeded"
 
 
+@pytest.mark.parametrize("progresses", [False, True])
+def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
+    service, progresses: bool
+) -> None:
+    """A crash loop keeps its request but is throttled and named, never silent.
+
+    A transfer that copies new bytes between restarts is healthy recovery and
+    keeps the ordinary short backoff.
+    """
+
+    jobs, sessions, clock = service
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+    )
+    delays: list[float] = []
+    reasons: list[str] = []
+    for attempt_number in range(1, 8):
+        claim = _claim_until_due(jobs, sessions, clock, operation.id, rounds=12)
+        assert claim is not None
+        assert fenced_attempt(sessions, claim).attempt == attempt_number
+        if progresses or attempt_number == 1:
+            jobs.heartbeat(
+                claim,
+                {
+                    "phase": "copying",
+                    "completed_bytes": 100 * attempt_number,
+                    "completed_items": 1,
+                },
+                30,
+            )
+        clock.advance(seconds=45)
+        assert jobs.record_late_result(_restart_interrupted_result(claim, kind))
+        with sessions() as session:
+            stored = session.get(AgentOperation, operation.id)
+            delays.append(
+                (stored.retry_due_at.replace(tzinfo=UTC) - clock.now).total_seconds()
+            )
+            reasons.append(stored.status_reason)
+
+    assert all("retry scheduled at" in reason for reason in reasons)
+    if progresses:
+        assert max(delays) <= 90
+        assert not any("without copying new bytes" in reason for reason in reasons)
+    else:
+        assert "without copying new bytes" not in reasons[1]
+        assert "agent restarted 3 times in a row" in reasons[3]
+        assert delays[3] >= 30 and delays[4] >= 60 and delays[5] >= 120
+        assert max(delays) <= 600 * 5 // 4
+
+
 def test_distribution_parked_with_a_stale_retry_authorisation_resumes_itself(
     service,
 ) -> None:

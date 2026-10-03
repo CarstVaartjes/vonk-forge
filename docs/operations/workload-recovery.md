@@ -36,7 +36,11 @@ The Controller schedules a bounded retry of an interrupted content-addressed
 transfer or read-only preflight. It retains the exact operation, payload and
 progress, and issues a fresh attempt under current authorization. Finished cache
 objects are reused and partial files resume at their retained offset. A pending
-retry remains visible as pending work, with a reason and next retry time.
+retry remains visible as pending work, with a reason and next retry time. When a
+transfer's agent restarts three times in a row without copying any new bytes, the
+retry rate relaxes (30 seconds doubling to 10 minutes) and the reason says the
+agent is restarting repeatedly; the request stays authorised and a transfer that
+progresses between restarts is never slowed.
 
 Safe retries of current intent retain a bounded retry rate without a lifetime
 attempt ceiling. A delayed preflight, runtime, cancellation, or route observation

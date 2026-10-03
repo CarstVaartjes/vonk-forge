@@ -17,7 +17,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 from sqlalchemy import Boolean, and_, or_, select, update
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, object_session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
 from vonk_agent_protocol import (
@@ -291,6 +291,57 @@ def _parked_retry_evidence(
     except (TypeError, ValueError):
         return False
     return _safe_retry_failure(operation.kind, attempt.state, result)
+
+
+#: Consecutive interrupted transfer attempts that copied no new bytes before
+#: the retry rate is relaxed. A transfer that progresses between restarts is
+#: healthy recovery and is never slowed; one that dies without progress is a
+#: crash loop, which a faster retry cannot help.
+_STALLED_INTERRUPTION_LIMIT = 3
+_STALLED_RETRY_BASE_SECONDS = 30
+_STALLED_RETRY_MAX_SECONDS = 600
+_INTERRUPTION_CODES = frozenset(
+    {"agent_restart_interrupted", "operation_outcome_uncertain"}
+)
+
+
+def _completed_bytes(attempt: AgentOperationAttempt | None) -> int:
+    value = None if attempt is None else (attempt.progress or {}).get("completed_bytes")
+    return value if type(value) is int else 0
+
+
+def _stalled_interruptions(operation: StoredOperation) -> int:
+    """Count trailing transfer attempts that ended interrupted without progress."""
+
+    session = object_session(operation)
+    if (
+        session is None
+        or operation.kind != AgentOperation.ARTIFACT_DISTRIBUTION.value
+        or operation.current_attempt < 1
+    ):
+        return 0
+    attempts = list(
+        session.scalars(
+            select(AgentOperationAttempt)
+            .where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt <= operation.current_attempt,
+            )
+            .order_by(AgentOperationAttempt.attempt.desc())
+            .limit(_STALLED_RETRY_MAX_SECONDS // _STALLED_RETRY_BASE_SECONDS + 2)
+        )
+    )
+    stalled = 0
+    for index, attempt in enumerate(attempts):
+        result = attempt.result
+        interrupted = attempt.state in {"expired", "waiting-for-operator"} and (
+            result is None or result.get("error_code") in _INTERRUPTION_CODES
+        )
+        previous = attempts[index + 1] if index + 1 < len(attempts) else None
+        if not interrupted or _completed_bytes(attempt) > _completed_bytes(previous):
+            break
+        stalled += 1
+    return stalled
 
 
 #: An ambiguous agent-package install can leave durable apt/dpkg recovery in
@@ -3554,6 +3605,19 @@ class AgentJobService:
             raise ValueError(
                 "operation cannot be reissued without effect reconciliation"
             )
+        stalled = _stalled_interruptions(operation)
+        crash_loop = stalled >= _STALLED_INTERRUPTION_LIMIT
+        if crash_loop:
+            # Rate, not intent, is what a crash loop bounds: slow down to a
+            # cap while the request stays authorised, and say why.
+            retry_after_seconds = max(
+                retry_after_seconds or 0,
+                min(
+                    _STALLED_RETRY_BASE_SECONDS
+                    * 2 ** (stalled - _STALLED_INTERRUPTION_LIMIT),
+                    _STALLED_RETRY_MAX_SECONDS,
+                ),
+            )
         retry_after = (
             None
             if retry_after_seconds is None
@@ -3577,6 +3641,12 @@ class AgentJobService:
         schedule_reason = (
             f"exact {operation.kind} interrupted; retry scheduled at {due.isoformat()}"
         )
+        if crash_loop:
+            schedule_reason = (
+                f"agent restarted {stalled} times in a row during "
+                f"{operation.kind} without copying new bytes; inspect the "
+                f"Spark's agent journal; retry scheduled at {due.isoformat()}"
+            )
         operation.status_reason = (
             f"{previous_reason}; {schedule_reason}"
             if isinstance(previous_reason, str)
