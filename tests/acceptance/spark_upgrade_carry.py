@@ -43,6 +43,7 @@ from cluster_profiles.serving_execution import (
     evaluate_http_response,
 )
 from scripts.development_slice_client import SliceError, require_object
+from tests.acceptance.controller_contract import ControllerContract
 from tests.acceptance.runtime import (
     AcceptanceError,
     assert_compose_services_healthy,
@@ -99,6 +100,8 @@ class ReleaseInput:
     overlay: Path
     version: str
     package_version: str
+    # The request contract this release's Controller publishes with its source.
+    contract: ControllerContract
 
 
 @dataclass
@@ -179,6 +182,21 @@ def resolve_release(
         f"{source_sha}/deploy/compose/Caddyfile",
         caddy,
     )
+    openapi = directory / "openapi.json"
+    _fetch(
+        "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
+        f"{source_sha}/control/openapi.json",
+        openapi,
+    )
+    try:
+        contract = ControllerContract(
+            json.loads(openapi.read_text(encoding="utf-8")),
+            label=f"the Controller of release {generation[:12]}",
+        )
+    except (TypeError, ValueError) as error:
+        raise LifecycleError(
+            f"release {generation} publishes no usable Controller contract: {error}"
+        ) from error
     return ReleaseInput(
         generation=generation,
         source_sha=source_sha,
@@ -188,6 +206,7 @@ def resolve_release(
         overlay=overlay,
         version=str(document.get("version")),
         package_version=str(package.get("package_version")),
+        contract=contract,
     )
 
 
@@ -256,13 +275,22 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             )
         return application
 
-    def _acceptance_caddyfile(self) -> str | None:
-        current = (
+    def _current_release(self) -> ReleaseInput:
+        return (
             self.candidate
             if self.controller_generation == self.candidate.generation
             else self.baseline
         )
-        return current.caddyfile
+
+    def _acceptance_caddyfile(self) -> str | None:
+        return self._current_release().caddyfile
+
+    def _controller_request_guard(self):
+        # The harness is newer than both Controllers it drives: every request
+        # must be one the Controller in front of it accepts (#1086).
+        return lambda method, path, body: self._current_release().contract.check(
+            method, path, body
+        )
 
     def _release_environment(self, release: ReleaseInput) -> dict[str, str]:
         assert self.temporary_root is not None
@@ -408,7 +436,9 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             ) from error
         self._assert_running_publication_images()
         browser = LocalBrowserController(
-            hostname=self.control_hostname, port=self._local_browser_port()
+            hostname=self.control_hostname,
+            port=self._local_browser_port(),
+            request_guard=self._controller_request_guard(),
         )
         password = self._read_secret("admin-password")
         control = browser.login(password, timeout=30)

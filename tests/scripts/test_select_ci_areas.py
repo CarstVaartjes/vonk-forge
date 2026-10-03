@@ -161,3 +161,33 @@ def test_unrelated_change_selects_neither_installed_system_proof() -> None:
     selected = _module().select(["scripts/select-ci-areas"], "pull_request")
     assert selected["nas_install"] is False
     assert selected["agent_package"] is False
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/acceptance/spark_upgrade_carry.py",
+        "tests/acceptance/test_spark_lifecycle.py",
+        "tests/acceptance/recipe-library-revision.txt",
+        ".github/workflows/spark-upgrade-acceptance.yml",
+        ".github/actions/prepare-control-wheel/action.yml",
+        "scripts/render-accepted-compose-overlay",
+    ],
+)
+def test_lane_code_needs_a_proof_run_on_the_pull_request(path: str) -> None:
+    module = _module()
+    assert module.lane_selected([path], "pull_request") is True
+    # A release run executes the lane itself; only a pull request carries a proof.
+    assert module.lane_selected([path], "push") is False
+    assert module.lane_selected([path], "merge_group") is False
+
+
+def test_product_code_and_other_workflows_do_not_need_a_lane_proof() -> None:
+    assert not _module().lane_selected(
+        [
+            "control/src/vonk_control/api.py",
+            "docs/operator.md",
+            ".github/workflows/ci.yml",
+        ],
+        "pull_request",
+    )

@@ -30,6 +30,7 @@ def _valid(**overrides: str):
         "compose": "true",
         "nas-install": "true",
         "agent-package": "true",
+        "lane": "false",
     }
     results = {
         "lint": "success",
@@ -45,6 +46,7 @@ def _valid(**overrides: str):
         "compose": "success",
         "nas-install": "success",
         "agent-package": "success",
+        "lane-proof": "skipped",
         "supply-chain": "success",
     }
     selected.update({key: value for key, value in overrides.items() if key in selected})
@@ -74,6 +76,7 @@ def test_docs_only_change_allows_unselected_jobs_to_skip() -> None:
         "compose",
         "nas-install",
         "agent-package",
+        "lane-proof",
     ):
         results[job] = "skipped"
     assert _module().verify("success", selected, results) == []
@@ -130,3 +133,25 @@ def test_installed_system_proofs_block_the_gate_when_selected(job, result) -> No
     selected, results = _valid()
     results[job] = result
     assert any(job in error for error in _module().verify("success", selected, results))
+
+
+@pytest.mark.parametrize("result", ["skipped", "failure", "cancelled", None])
+def test_a_lane_change_needs_a_green_lane_run_on_its_head(result) -> None:
+    selected, results = _valid()
+    selected["lane"] = "true"
+    results["lane-proof"] = "success"
+    assert _module().verify("success", selected, results) == []
+    results["lane-proof"] = result
+    assert any(
+        "lane-proof" in error
+        for error in _module().verify("success", selected, results)
+    )
+
+
+def test_an_unrelated_change_does_not_wait_for_the_lane() -> None:
+    selected, results = _valid()
+    results["lane-proof"] = "success"
+    assert any(
+        "lane-proof" in error
+        for error in _module().verify("success", selected, results)
+    )
