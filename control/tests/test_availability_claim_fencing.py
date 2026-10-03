@@ -8,9 +8,8 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.models import Base, Job, RuntimeImageAuthorization, User
+from vonk_control.models import Base, Job, User
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityClaim
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
@@ -164,7 +163,6 @@ def test_expired_callback_preserves_the_new_claim(claimed_image, monkeypatch, bo
         row = session.get(Job, parent.id)
         assert row is not None
         assert (row.state, row.current_attempt, row.payload, row.result) == expected
-        assert session.scalar(select(RuntimeImageAuthorization)) is None
     if boundary in {"progress", "receipt", "model_progress"}:
         # Verified unassociated bytes can be adopted by the current executor;
         # the stale attempt cannot grant current-revision authorization itself.
@@ -209,8 +207,8 @@ def test_expired_callback_preserves_the_new_claim(claimed_image, monkeypatch, bo
             )
             assert transferred_reference.attempt == replacement.execution_attempt
             assert transferred_reference.claim_owner == replacement.claim_owner
-        with sessions() as session:
-            assert session.scalar(select(RuntimeImageAuthorization)) is not None
+        # The current executor finished: the operation names the image it kept.
+        assert service.get(parent.id).result is not None
 
 
 def test_delayed_claim_cannot_execute_when_the_worker_name_is_reused(claimed_image):
@@ -300,7 +298,6 @@ def test_cancelled_image_owner_recovers_after_publication_process_dies(claimed_i
         assert row.state == "cancelled"
         assert row.payload.get("claim_owner") is None
         assert "image_reference_intent" not in row.payload
-        assert session.scalar(select(RuntimeImageAuthorization)) is None
 
     with pytest.raises(RuntimeImagePreparationError) as stale:
         service._persist_provisional_image_reference(claim, receipt=receipt)
@@ -336,6 +333,5 @@ def test_contended_progress_releases_the_artifact_worker(claimed_image, monkeypa
         row = session.get(Job, parent.id)
         assert row is not None
         assert row.state == "running"
-        assert session.scalar(select(RuntimeImageAuthorization)) is None
     service.run_claim(claim)
     assert service.get(parent.id).state == "succeeded"

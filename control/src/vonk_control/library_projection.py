@@ -62,9 +62,9 @@ from .models import (
     RecipeLibrarySyncRun,
     RecipeRun,
     RunNode,
-    RuntimeImageAuthorization,
 )
 from .request_fault import RequestFault
+from .revision_images import revision_images
 
 
 class LibraryProjectionError(RuntimeError):
@@ -584,13 +584,29 @@ class LibraryProjection:
                     RunNode.state == "running"
                 )
             ).all()
-            runtime_authorizations = session.execute(
-                select(
-                    RuntimeImageAuthorization.original_content_digest,
-                    RuntimeImageAuthorization.oci_archive_sha256,
-                    RuntimeImageAuthorization.image_bytes,
-                ).where(RuntimeImageAuthorization.state == "authorized")
-            ).all()
+            # A head that reuses a predecessor's build by content has no build
+            # row of its own: it runs the images its recipe's builds of the
+            # same source produced.
+            built = {
+                revision_id
+                for revision_id, state, _, _ in builds
+                if state == "succeeded"
+            }
+            digest_of = {revision_id: digest for revision_id, digest, _ in revisions}
+            inherited_images = revision_images(
+                session,
+                {
+                    revision_id
+                    for revision_id, _, is_head in revisions
+                    if is_head and revision_id not in built
+                },
+                same_source=True,
+            )
+            inherited_claims = [
+                (digest_of[revision_id], image.archive_sha256, image.image_bytes)
+                for revision_id, images in inherited_images.items()
+                for image in images
+            ]
         if invalid_run is not None:
             raise LibraryProjectionError("persisted recipe run state is invalid")
 
@@ -731,7 +747,7 @@ class LibraryProjection:
                     for revision_id, state, layout, size in builds
                     if state == "succeeded"
                 ],
-                authorizations=runtime_authorizations,
+                inherited=inherited_claims,
             )
         return result
 
@@ -741,7 +757,7 @@ class LibraryProjection:
         *,
         head_digests: set[str],
         builds: Sequence[tuple[str | None, object, object]],
-        authorizations: Sequence[tuple[str, object, object]],
+        inherited: Sequence[tuple[str, object, object]],
     ) -> None:
         """Demote a cached recipe whose stored image is gone; name what is not known.
 
@@ -757,7 +773,7 @@ class LibraryProjection:
         for digest, layout, size in builds:
             if digest in head_digests and isinstance(layout, str) and type(size) is int:
                 claims.append((digest, (layout, size)))
-        for digest, layout, size in authorizations:
+        for digest, layout, size in inherited:
             if digest in head_digests and isinstance(layout, str) and type(size) is int:
                 claims.append((digest, (layout, size)))
         presence = self._image_presence.lookup(

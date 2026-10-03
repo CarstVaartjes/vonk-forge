@@ -1282,7 +1282,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
     runtime_image_transport = OciLayoutImageTransport()
     prepare_runtime_image_receipt = make_runtime_image_receipt_preparer(
-        sessions,
         runtime_image_storage,
         runtime_image_transport,
         clock=clock,

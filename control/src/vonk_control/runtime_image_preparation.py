@@ -26,19 +26,12 @@ from pathlib import Path
 from typing import Annotated, Literal, Protocol
 
 from pydantic import Field, ValidationError
-from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.wire_model import Digest, WireModel
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
-from .artifact_lifecycle import (
-    ArtifactIdentity,
-    ArtifactLifecycleError,
-    require_reference_open,
-)
 from .content_identity import ImageContent, differing_image_fields, same_image
-from .models import CatalogDocumentRevision, RecipeBuild, RuntimeImageAuthorization
+from .models import RecipeBuild
 from .oci_image_store import (
     DAMAGED_MANIFEST_CODES,
     IMAGE_CACHE_DIRECTORY,
@@ -391,74 +384,6 @@ def _log_rejected_receipt(path: Path, rejection: _ReceiptDocumentRejected) -> No
         rejection.code,
         rejection.detail[:_MAX_RECEIPT_REJECTION_DETAIL],
     )
-
-
-def prefixed_image_digest(value: str | None) -> str | None:
-    """Return a ``sha256:``-prefixed image digest.
-
-    The managed-storage receipt stores image digests without the algorithm
-    prefix, while Controller SQL stores them with it. One normalization keeps a
-    storage observation comparable to a durable authorization without
-    duplicating either spelling at every call site.
-    """
-
-    if value is None:
-        return None
-    return value if value.startswith("sha256:") else f"sha256:{value}"
-
-
-def record_runtime_image_reference(
-    session: Session,
-    *,
-    recipe_revision_id: str,
-    effective_execution_key: str,
-    receipt: RuntimeImageReceipt,
-    recorded_at: datetime,
-) -> None:
-    """Index which verified archive a revision runs, for retention and the library.
-
-    The image was accepted at ingress and its receipt lives in managed storage.
-    This row only tells garbage collection and the library which archive a
-    revision uses. Nothing reads it as a permission: an image is identified by
-    its content and any revision whose build input matches may run it.
-    """
-
-    try:
-        require_reference_open(
-            session,
-            (ArtifactIdentity("runtime-image", receipt.oci_archive_sha256),),
-            now=recorded_at,
-        )
-    except ArtifactLifecycleError as error:
-        raise RuntimeImagePreparationError(
-            error.code, error.detail, retryable=error.retryable
-        ) from error
-    known = session.scalar(
-        select(RuntimeImageAuthorization.id).where(
-            RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id,
-            RuntimeImageAuthorization.effective_execution_key
-            == effective_execution_key,
-            RuntimeImageAuthorization.oci_archive_sha256 == receipt.oci_archive_sha256,
-        )
-    )
-    if known is None:
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=recipe_revision_id,
-                original_content_digest=receipt.distribution_content_sha256,
-                effective_execution_key=effective_execution_key,
-                image_digest=prefixed_image_digest(receipt.image_digest),
-                local_image_config_id=prefixed_image_digest(
-                    receipt.local_image_config_id
-                ),
-                oci_archive_sha256=receipt.oci_archive_sha256,
-                image_bytes=receipt.image_bytes,
-                build_id=receipt.build_id,
-                authorized_at=recorded_at,
-                state="authorized",
-            )
-        )
-        session.flush()
 
 
 class RuntimeImageStorage(Protocol):
@@ -1050,21 +975,20 @@ class RuntimeImagePreparer(Protocol):
         *,
         before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
     ) -> RuntimeImageReceipt:
-        """Prepare and authorize a receipt, with optional owner fencing."""
+        """Prepare a verified receipt, with optional owner fencing."""
         ...
 
 
 def make_runtime_image_receipt_preparer(
-    sessions: sessionmaker[Session],
     storage: RuntimeImageStorage,
     transport: OCIImageTransport,
     *,
     clock: Callable[[], datetime],
 ) -> RuntimeImagePreparer:
-    """Build the production callback that prepares and authorizes an image.
+    """Build the production callback that prepares an image.
 
     API and worker composition share this callback so recovery and build
-    execution use the same receipt persistence boundary.
+    execution prepare an image the same way.
     """
 
     def prepare(
@@ -1077,13 +1001,6 @@ def make_runtime_image_receipt_preparer(
         runtime = runtime_spec.get("runtime")
         if not isinstance(runtime, Mapping):
             raise TypeError("compiled runtime projection is unavailable")
-        identity = runtime_spec.get("identity")
-        effective_execution_key = (
-            identity.get("execution_sha256") if isinstance(identity, Mapping) else None
-        )
-        if not isinstance(effective_execution_key, str):
-            raise TypeError("compiled runtime execution identity is unavailable")
-
         if build is None:
             raise ValueError("source build receipt is unavailable")
         build_receipt = {
@@ -1095,26 +1012,6 @@ def make_runtime_image_receipt_preparer(
             "image_bytes": build.image_bytes,
         }
 
-        recipe_digest = _recipe_digest(document)
-
-        def write_receipt(receipt: RuntimeImageReceipt) -> None:
-            with sessions.begin() as session:
-                revision = session.scalar(
-                    select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                        CatalogDocumentRevision.content_digest == recipe_digest,
-                    )
-                )
-                if revision is not None:
-                    record_runtime_image_reference(
-                        session,
-                        recipe_revision_id=revision.id,
-                        effective_execution_key=effective_execution_key,
-                        receipt=receipt,
-                        recorded_at=clock(),
-                    )
-
         return prepare_runtime_image(
             document,
             runtime=runtime,
@@ -1122,7 +1019,6 @@ def make_runtime_image_receipt_preparer(
             transport=transport,
             build_receipt=build_receipt,
             now=clock(),
-            receipt_writer=write_receipt,
             before_publish=before_publish,
         )
 
@@ -1596,7 +1492,6 @@ __all__ = [
     "RuntimeInterfaceLabel",
     "prepare_runtime_image",
     "read_runtime_image_reference_intent",
-    "record_runtime_image_reference",
     "runtime_image_expectations",
     "stored_runtime_image_resolver",
 ]

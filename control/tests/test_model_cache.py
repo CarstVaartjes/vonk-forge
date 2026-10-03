@@ -58,7 +58,6 @@ from vonk_control.models import (
     ModelCacheSet,
     ModelCacheSetArtifact,
     RecipeBuild,
-    RuntimeImageAuthorization,
 )
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_control.worker import Worker
@@ -924,25 +923,12 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         state="succeeded",
         policy_report={},
         plan={},
-        image_digest="sha256:" + "4" * 64,
-        oci_layout_sha256="5" * 64,
+        image_digest="sha256:" + "6" * 64,
+        oci_layout_sha256="8" * 64,
         image_bytes=17,
         error=None,
         created_at=NOW,
         updated_at=NOW,
-    )
-    authorization = RuntimeImageAuthorization(
-        id="00000000-0000-0000-0000-000000000108",
-        recipe_revision_id=old_revision.id,
-        original_content_digest=old_digest,
-        effective_execution_key=old_revision.execution_key,
-        image_digest="sha256:" + "6" * 64,
-        local_image_config_id="sha256:" + "7" * 64,
-        oci_archive_sha256="8" * 64,
-        image_bytes=17,
-        build_id=build.id,
-        authorized_at=NOW,
-        state="authorized",
     )
     with sessions.begin() as session:
         session.add_all(
@@ -955,7 +941,6 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
                 new_revision,
                 AgentNode(node_id="resolver-builder", state="active"),
                 build,
-                authorization,
             ]
         )
 
@@ -1009,11 +994,9 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     model_object = service.root / "objects" / artifact.sha256[:2] / artifact.sha256
     model_object.parent.mkdir(parents=True)
     model_object.write_bytes(b"one")
-    image_object = (
-        service.root.parent / "runtime-images" / authorization.oci_archive_sha256
-    )
-    assert authorization.image_bytes is not None
-    image_object.write_bytes(b"x" * authorization.image_bytes)
+    image_object = service.root.parent / "runtime-images" / build.oci_layout_sha256
+    assert build.image_bytes is not None
+    image_object.write_bytes(b"x" * build.image_bytes)
     with sessions.begin() as session:
         session.add(model_cache)
     _write_object_receipt(service, artifact.sha256, 3)
@@ -1088,7 +1071,7 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     assert missing_image_bytes["recipe"]["recipe_revision_id"] == new_revision.id
     assert missing_image_bytes["recipe"]["cached"] is False
     assert "recipe-not-cached" in missing_image_bytes["blockers"]
-    image_object.write_bytes(b"x" * authorization.image_bytes)
+    image_object.write_bytes(b"x" * build.image_bytes)
 
     with sessions.begin() as session:
         session.delete(model_cache)
@@ -1101,7 +1084,7 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     assert image_only["resources"]["additional_disk_bytes"] is None
 
     with sessions.begin() as session:
-        session.delete(authorization)
+        session.delete(build)
     missing = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
     )

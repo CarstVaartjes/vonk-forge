@@ -39,8 +39,8 @@ from .models import (
     ModelCacheSetArtifact,
     RecipeInstallation,
     RecipeRun,
-    RuntimeImageAuthorization,
 )
+from .revision_images import revision_archives, revisions_running_archives
 from .run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchPlan,
@@ -555,24 +555,22 @@ def runtime_image_reference_findings(
                         "saved-profile recipe selector has no readable active revision; removal was deferred",
                         retryable=True,
                     )
-                for authorization in session.scalars(
-                    select(RuntimeImageAuthorization).where(
-                        RuntimeImageAuthorization.recipe_revision_id == revision.id,
-                        RuntimeImageAuthorization.state == "authorized",
-                        RuntimeImageAuthorization.oci_archive_sha256.in_(selected),
-                    )
-                ):
-                    findings[authorization.oci_archive_sha256].add(
+                # Every verified image the recipe's builds produced is one the
+                # saved selector can resolve to; unknown means keep.
+                for archive in sorted(revision_archives(session, [revision.id])):
+                    if archive not in selected:
+                        continue
+                    findings[archive].add(
                         _finding(
                             "runtime-image",
-                            authorization.oci_archive_sha256,
+                            archive,
                             owner_kind="fleet-profile",
                             owner_id=profile.id,
                             state="saved",
                             classification="saved-reference",
                             detail=(
-                                "saved profile assignment resolves to this "
-                                "authorized active recipe image"
+                                "saved profile assignment resolves to a recipe "
+                                "that built this image"
                             ),
                             reason=f"saved profile {profile.id}",
                         )
@@ -745,16 +743,7 @@ def runtime_image_reference_findings(
 
     from .recipe_image_availability import OPERATION_KIND
 
-    image_revisions = {
-        digest: set(
-            session.scalars(
-                select(RuntimeImageAuthorization.recipe_revision_id).where(
-                    RuntimeImageAuthorization.oci_archive_sha256 == digest
-                )
-            )
-        )
-        for digest in selected
-    }
+    image_revisions = revisions_running_archives(session, selected)
 
     for operation in session.scalars(
         select(Job)

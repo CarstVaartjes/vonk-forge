@@ -15,20 +15,20 @@ A revision is **kept** while anything still points at it:
   ``lost`` or otherwise active (a ``failed`` run holds nothing and counts as
   stopped), a build of it is in flight, or a recipe job still names one of its
   runs;
-* it was superseded, or an installation, run, build, mapping or image
-  authorization of it was last touched, less than a grace period ago;
+* it was superseded, or an installation, run, build or mapping of it was last
+  touched, less than a grace period ago;
 * a live or recently finished operation names it: a Job, agent operation,
   profile application (and the selected one always), model-cache operation or
   recipe job payload is searched for its id, so a reference kept in JSON is
   found without knowing which contract wrote it;
-* an image authorization of another revision was built from it or names its
-  content (an editorial successor reusing the image receipt);
+* a build of it is the newest image its recipe's head would run (an editorial
+  successor that reuses the image by content has no build of its own);
 * a kept recipe revision still pins it as its model, by binding or because a
   head or candidate recipe document names its digest.
 
 Everything else is removed together with the dead rows only it owned: its
-uninstalled installations, stopped runs, mappings, finished builds, image
-authorizations and model bindings. Audit history of those is not kept.
+uninstalled installations, stopped runs, mappings, finished builds and model
+bindings. Audit history of those is not kept.
 
 A source bundle (archive bytes stored in PostgreSQL) is removed once no
 remaining revision, build or live payload names its digest and it is older than
@@ -82,9 +82,9 @@ from .models import (
     RecipeRun,
     RecipeSourceBundle,
     RunNode,
-    RuntimeImageAuthorization,
     SourceBundleArchive,
 )
+from .revision_images import revision_images
 
 _LOGGER = logging.getLogger(__name__)
 GRACE = timedelta(hours=24)
@@ -298,7 +298,14 @@ class CatalogRevisionCollector:
             session, RecipeBuild.id, RecipeBuild.recipe_revision_id == revision.id
         )
         self._require_unused(
-            session, revision, installations, runs, builds, live, cutoff
+            session,
+            revision,
+            installations,
+            runs,
+            builds,
+            live,
+            cutoff,
+            heads=tuple(value for value in (head or ()) if value is not None),
         )
         self._delete_dead_rows(session, revision, installations, runs, now)
         self._require_no_remaining_reference(session, revision)
@@ -324,6 +331,8 @@ class CatalogRevisionCollector:
         builds: list[str],
         live: frozenset[str],
         cutoff: datetime,
+        *,
+        heads: tuple[str, ...] = (),
     ) -> None:
         """Raise ``_Kept`` when anything live or recent still names the revision."""
 
@@ -368,7 +377,6 @@ class CatalogRevisionCollector:
             (RecipeInstallation, RecipeInstallation.updated_at),
             (RecipeBuild, RecipeBuild.updated_at),
             (ClusterMapping, ClusterMapping.updated_at),
-            (RuntimeImageAuthorization, RuntimeImageAuthorization.authorized_at),
         )
         for model, stamp in recent:
             if session.scalar(
@@ -386,22 +394,18 @@ class CatalogRevisionCollector:
             )
         ):
             raise _Kept("recent")
-        # An editorial successor reuses an image receipt through the original
-        # revision, which must stay resolvable while that authorization lives.
-        reuse = [
-            RuntimeImageAuthorization.original_content_digest == revision.content_digest
-        ]
-        if builds:
-            reuse.append(RuntimeImageAuthorization.build_id.in_(builds))
-        if session.scalar(
-            select(
-                exists().where(
-                    RuntimeImageAuthorization.recipe_revision_id != revision.id,
-                    or_(*reuse),
-                )
-            )
-        ):
-            raise _Kept("image reuse")
+        # An editorial successor runs its predecessor's build by content, with
+        # no build row of its own. The newest build of the recipe is the image
+        # the head would run, so the revision that built it stays until the
+        # head has built a newer one (unknown means keep).
+        if builds and heads:
+            in_use = {
+                images[0].build_id
+                for images in revision_images(session, heads).values()
+                if images
+            }
+            if in_use.intersection(builds):
+                raise _Kept("image reuse")
 
     @staticmethod
     def _delete_dead_rows(
@@ -431,11 +435,6 @@ class CatalogRevisionCollector:
                     RecipeInstallation.id.in_(installations)
                 )
             )
-        session.execute(
-            delete(RuntimeImageAuthorization).where(
-                RuntimeImageAuthorization.recipe_revision_id == revision.id
-            )
-        )
         # A build or mapping another installation still uses stays, and keeps
         # the revision through the remaining-reference check below.
         session.execute(
@@ -443,7 +442,6 @@ class CatalogRevisionCollector:
                 RecipeBuild.recipe_revision_id == revision.id,
                 RecipeBuild.state.in_(_FINISHED_BUILDS),
                 ~exists().where(RecipeInstallation.recipe_build_id == RecipeBuild.id),
-                ~exists().where(RuntimeImageAuthorization.build_id == RecipeBuild.id),
             )
         )
         unused_mappings = [
@@ -479,10 +477,6 @@ class CatalogRevisionCollector:
             ("installation", RecipeInstallation.recipe_revision_id == revision.id),
             ("mapping", ClusterMapping.recipe_revision_id == revision.id),
             ("build", RecipeBuild.recipe_revision_id == revision.id),
-            (
-                "authorization",
-                RuntimeImageAuthorization.recipe_revision_id == revision.id,
-            ),
         ):
             if session.scalar(select(exists().where(reference))):
                 raise _Kept(name)

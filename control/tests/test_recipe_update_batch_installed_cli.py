@@ -28,7 +28,6 @@ from vonk_control.recipe_update_contract import RecipeUpdateResponse
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     prepare_runtime_image,
-    record_runtime_image_reference,
 )
 from vonk_control.strict_json import ControllerAPIRoute
 from vonk_forge_contracts import RecipeDefinition
@@ -132,13 +131,6 @@ def test_installed_update_survives_cli_and_worker_death_with_frozen_cache_scope(
             revision.document_id = str(uuid.uuid4())
             _add_head(session, revision)
             assert revision.execution_key is not None
-            record_runtime_image_reference(
-                session,
-                recipe_revision_id=revision_id,
-                effective_execution_key=revision.execution_key,
-                receipt=receipt,
-                recorded_at=now[0],
-            )
 
     def authority(
         recipe_revision_id: str, *, force: bool = False
@@ -243,9 +235,7 @@ def test_installed_update_survives_cli_and_worker_death_with_frozen_cache_scope(
     replacement_id = str(uuid.uuid4())
     recipes[replacement_id] = replacement
     replacement_archive = _archive_variant(7)
-    replacement_receipt = _prepared_build(
-        storage, replacement_id, replacement, replacement_archive
-    )
+    _prepared_build(storage, replacement_id, replacement, replacement_archive)
     with sessions.begin() as session:
         revision = _add_revision(
             session, replacement_id, replacement, archive=replacement_archive
@@ -253,13 +243,6 @@ def test_installed_update_survives_cli_and_worker_death_with_frozen_cache_scope(
         revision.document_id = str(uuid.uuid4())
         _add_head(session, revision)
         assert revision.execution_key is not None
-        record_runtime_image_reference(
-            session,
-            recipe_revision_id=replacement_id,
-            effective_execution_key=revision.execution_key,
-            receipt=replacement_receipt,
-            recorded_at=now[0],
-        )
     changed_scope = fresh_service()._updates._cached_revisions()
     assert set(changed_scope) == (set(initial_scope) - {initial_scope[0]}) | {
         replacement_id

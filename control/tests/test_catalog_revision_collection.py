@@ -22,6 +22,7 @@ from vonk_control.catalog_revision_collection import (
     INTERVAL,
     CatalogRevisionCollector,
 )
+from vonk_control.db import verify_schema_is_current
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -41,7 +42,6 @@ from vonk_control.models import (
     RecipeRun,
     RecipeSourceBundle,
     RunNode,
-    RuntimeImageAuthorization,
     SourceBundleArchive,
 )
 from vonk_control.source_bundles import (
@@ -274,8 +274,16 @@ class Catalog:
                 )
             )
 
-    def build(self, revision_id: str, *, state: str = "succeeded") -> str:
+    def build(
+        self,
+        revision_id: str,
+        *,
+        state: str = "succeeded",
+        updated: datetime = OLD,
+        archive: str | None = None,
+    ) -> str:
         build_id = str(uuid.uuid4())
+        built = state == "succeeded"
         with self.sessions.begin() as session:
             session.add(
                 RecipeBuild(
@@ -287,30 +295,18 @@ class Catalog:
                     state=state,
                     policy_report={},
                     plan={},
-                    created_at=OLD,
-                    updated_at=OLD,
+                    image_digest="sha256:" + _digest(f"image/{build_id}")
+                    if built
+                    else None,
+                    oci_layout_sha256=(archive or _digest(f"archive/{build_id}"))
+                    if built
+                    else None,
+                    image_bytes=1 if built else None,
+                    created_at=updated,
+                    updated_at=updated,
                 )
             )
         return build_id
-
-    def authorize(
-        self, revision_id: str, *, build_id: str, original_digest: str
-    ) -> None:
-        with self.sessions.begin() as session:
-            session.add(
-                RuntimeImageAuthorization(
-                    recipe_revision_id=revision_id,
-                    original_content_digest=original_digest,
-                    effective_execution_key="e" * 64,
-                    image_digest="sha256:" + "a" * 64,
-                    local_image_config_id="sha256:" + "b" * 64,
-                    oci_archive_sha256="d" * 64,
-                    image_bytes=1,
-                    build_id=build_id,
-                    authorized_at=OLD,
-                    state="authorized",
-                )
-            )
 
 
 @pytest.fixture
@@ -545,40 +541,44 @@ def test_the_selected_profile_application_keeps_the_revision_it_loaded(
     assert catalog.exists(old)
 
 
-def test_an_image_authorization_reusing_the_original_keeps_it(
+def test_a_head_that_runs_the_originals_build_keeps_the_original(
     catalog: Catalog,
 ) -> None:
-    """Catches removing the original while the head reuses its image receipt."""
+    """Catches removing the original while the head reuses its image by content.
+
+    An editorial successor with the same executable inputs has no build row of
+    its own; it runs the original's. Nothing records that: the head's recipe
+    document names the images it can run.
+    """
 
     original, head = _refresh(catalog, "glm")
-    build = catalog.build(original)
-    catalog.authorize(head, build_id=build, original_digest=_digest("glm/1"))
+    catalog.build(original)
 
     catalog.collector().collect()
 
     assert catalog.exists(original)
     assert catalog.count(RecipeBuild) == 1
 
-    with catalog.sessions.begin() as session:
-        session.execute(delete(RuntimeImageAuthorization))
+    # The head builds an image of its own: the original's is no longer the one
+    # the head would run, so the revision and its build go together.
+    catalog.build(head, updated=OLD + timedelta(hours=1))
     catalog.collector().collect()
 
     assert not catalog.exists(original)
-    assert catalog.count(RecipeBuild) == 0
+    assert catalog.count(RecipeBuild) == 1
 
 
-def test_an_authorization_naming_the_original_digest_keeps_it_without_a_shared_build(
-    catalog: Catalog,
-) -> None:
-    """Catches relying on build rows alone to protect an editorial original."""
+def test_a_build_of_another_recipe_never_keeps_a_revision(catalog: Catalog) -> None:
+    """Catches keeping a revision because some other recipe built an image."""
 
-    original, head = _refresh(catalog, "glm")
-    own_build = catalog.build(head)
-    catalog.authorize(head, build_id=own_build, original_digest=_digest("glm/1"))
+    original, _head = _refresh(catalog, "glm")
+    other_original, _other_head = _refresh(catalog, "qwen")
+    catalog.build(other_original)
 
     catalog.collector().collect()
 
-    assert catalog.exists(original)
+    assert not catalog.exists(original)
+    assert catalog.exists(other_original)
 
 
 def test_a_workload_that_only_just_moved_keeps_its_revision_through_the_grace_period(
@@ -608,15 +608,16 @@ def test_an_unfinished_build_keeps_its_revision_and_a_finished_one_goes(
     """Catches deleting a revision under a build that is still running."""
 
     building, _ = _refresh(catalog, "building")
-    finished, _ = _refresh(catalog, "finished")
+    finished, finished_head = _refresh(catalog, "finished")
     catalog.build(building, state="building")
     catalog.build(finished)
+    catalog.build(finished_head, updated=OLD + timedelta(hours=1))
 
     catalog.collector().collect()
 
     assert catalog.exists(building)
     assert not catalog.exists(finished)
-    assert catalog.count(RecipeBuild) == 1
+    assert catalog.count(RecipeBuild) == 2
 
 
 def test_a_model_revision_follows_the_recipe_revisions_that_pin_it(
@@ -759,6 +760,8 @@ def test_removal_succeeds_on_postgres_with_its_real_constraints(
     kept, _ = _refresh(catalog, "kept")
     catalog.workload(kept)
     catalog.build(old)
+    # The head has built an image of its own, so the original's is not reused.
+    catalog.build(head, updated=OLD + timedelta(hours=1))
     with catalog.sessions.begin() as session:
         _row(session, RecipeRun, run).state = "stopped"
         _row(session, RecipeInstallation, installation).state = "uninstalled"
@@ -770,4 +773,54 @@ def test_removal_succeeds_on_postgres_with_its_real_constraints(
     assert catalog.exists(kept)
     assert result.revisions == 1
     for model in (RecipeInstallation, RecipeRun, ClusterMapping, RecipeBuild):
-        assert catalog.count(model) == (1 if model is not RecipeBuild else 0)
+        assert catalog.count(model) == 1
+
+
+def test_a_retained_image_authorization_row_never_blocks_collection_on_postgres(
+    postgres_engine: Engine,
+) -> None:
+    """Catches a retired table whose RESTRICT keys refuse the revision delete.
+
+    Controllers before the image-identity change wrote ``runtime_image_authorizations``
+    rows naming a revision and a build. The table is no longer defined, read or
+    written, and an upgraded database keeps it with its rows; startup releases its
+    keys so the rows can neither block nor be needed by the collector.
+    """
+
+    Base.metadata.create_all(postgres_engine)
+    catalog = Catalog(postgres_engine)
+    old, head = _refresh(catalog, "glm")
+    build = catalog.build(old)
+    catalog.build(head, updated=OLD + timedelta(hours=1))
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE runtime_image_authorizations ("
+                "id VARCHAR(36) PRIMARY KEY, "
+                "recipe_revision_id VARCHAR(36) NOT NULL, "
+                "build_id VARCHAR(36) NOT NULL, "
+                "CONSTRAINT fk_runtime_image_authorizations_recipe_revision "
+                "FOREIGN KEY (recipe_revision_id) "
+                "REFERENCES catalog_document_revisions (id) ON DELETE RESTRICT, "
+                "CONSTRAINT fk_runtime_image_authorizations_build "
+                "FOREIGN KEY (build_id) REFERENCES recipe_builds (id) "
+                "ON DELETE RESTRICT)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO runtime_image_authorizations "
+                "VALUES ('retained', :revision, :build)"
+            ),
+            {"revision": old, "build": build},
+        )
+        verify_schema_is_current(connection)
+
+    catalog.collector().collect()
+
+    assert not catalog.exists(old)
+    with postgres_engine.connect() as connection:
+        retained = connection.execute(
+            text("SELECT count(*) FROM runtime_image_authorizations")
+        ).scalar_one()
+    assert retained == 1

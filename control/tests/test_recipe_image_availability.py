@@ -20,7 +20,6 @@ from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import artifact_reference_scan
-from vonk_control import recipe_image_availability as availability_module
 from vonk_control.artifact_lifecycle import ArtifactLifecycleError
 from vonk_control.artifact_reference_scan import (
     runtime_image_reference_findings,
@@ -49,7 +48,6 @@ from vonk_control.models import (
     ModelCacheOperation,
     ModelCacheSet,
     RecipeBuild,
-    RuntimeImageAuthorization,
     User,
 )
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
@@ -838,10 +836,9 @@ def test_database_integrity_failure_names_the_violated_constraint(
 ) -> None:
     """A database failure must not be reported as SQLAlchemy's own slug.
 
-    The availability worker records the verified archive through
-    ``record_runtime_image_reference``, which inserts into
-    ``runtime_image_authorizations`` and flushes. When the database refuses
-    that write the raw ``sqlalchemy.exc.IntegrityError`` reaches ``_fail``.
+    The availability worker records the verified archive in the operation's
+    payload (``_persist_receipt``) and flushes. When the database refuses that
+    write the raw ``sqlalchemy.exc.IntegrityError`` reaches ``_fail``.
     That exception carries ``code = "gkpj"`` -- SQLAlchemy's documentation slug
     -- and ``detail = []``, the empty ``StatementError.detail`` list, so a
     reporter that trusts those attributes stores ``{"code": "gkpj",
@@ -913,10 +910,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
     # list and the ``gkpj`` slug that used to win.
     def receipt_writer(*_args: object, **_kwargs: object) -> None:
         refusal = sqlite3.IntegrityError(
-            "UNIQUE constraint failed: runtime_image_authorizations."
-            "recipe_revision_id, runtime_image_authorizations."
-            "effective_execution_key, runtime_image_authorizations."
-            "oci_archive_sha256"
+            "UNIQUE constraint failed: jobs.request_id, jobs.kind"
         )
         error = IntegrityError(None, None, refusal)
         assert error.code == "gkpj"
@@ -934,9 +928,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
         builder=builder,
         clock=lambda: datetime.now(UTC),
     )
-    monkeypatch.setattr(
-        availability_module, "record_runtime_image_reference", receipt_writer
-    )
+    monkeypatch.setattr(service, "_persist_receipt", receipt_writer)
     queued = service.start(
         "revision-integrity-failure",
         actor="operator",
@@ -952,7 +944,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
     assert isinstance(detail, str)
     assert detail != "[]"
     assert "UNIQUE constraint failed" in detail
-    assert "runtime_image_authorizations" in detail
+    assert "jobs.request_id" in detail
     excerpt = failure["log_excerpt"]
     assert isinstance(excerpt, str) and "UNIQUE constraint failed" in excerpt
     view = _view_document(failed)
@@ -964,7 +956,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
     code, evidence_detail = failure_code(failure)
     assert code == "integrityerror"
     assert evidence_detail is not None and evidence_detail != "[]"
-    assert "runtime_image_authorizations" in evidence_detail
+    assert "jobs.request_id" in evidence_detail
 
 
 def test_model_cache_error_coerces_a_non_string_detail() -> None:
@@ -1135,7 +1127,6 @@ def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
     with sessions() as session:
         build = session.get(RecipeBuild, "00000000-0000-4000-8000-000000000901")
         assert build is not None and build.state == "building"
-        assert session.scalars(select(RuntimeImageAuthorization)).all() == []
 
 
 def test_recipe_removal_reference_scan_enforces_accumulated_owner_budget(
@@ -1202,19 +1193,6 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
     with sessions.begin() as session:
         revision = _add_revision(session, "rev-retry-removal", recipe)
         _add_head(session, revision)
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=revision.id,
-                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
-                effective_execution_key=revision.execution_key,
-                image_digest=receipt.image_digest,
-                local_image_config_id=receipt.local_image_config_id,
-                oci_archive_sha256=receipt.oci_archive_sha256,
-                image_bytes=receipt.image_bytes,
-                build_id=receipt.build_id,
-                authorized_at=now[0],
-            )
-        )
     storage = FilesystemRuntimeImageStorage(tmp_path / "managed-retry")
     place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
     receipt_path = storage.root / f"{ARCHIVE_SHA}.receipt.json"
@@ -1332,8 +1310,13 @@ def _empty_recipe_removal_owner(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
-        _add_head(session, _add_revision(session, "revision-image", image_recipe))
-        _add_head(session, _add_revision(session, "revision-job", job_recipe))
+        _add_head(
+            session,
+            _add_revision(session, "revision-image", image_recipe, built=False),
+        )
+        _add_head(
+            session, _add_revision(session, "revision-job", job_recipe, built=False)
+        )
     storage = FilesystemRuntimeImageStorage(tmp_path / "cache")
     service = _service(
         sessions,
@@ -1366,12 +1349,12 @@ def test_recipe_removal_request_key_rejects_changed_intent(
 ) -> None:
     """A successful remove key must not authorize a different later intent.
 
-    The disposable database contains two catalog recipes and no cache
-    authorizations or managed artifacts, so this owner-boundary regression
+    The disposable database contains two catalog recipes and no builds or
+    managed artifacts, so this owner-boundary regression
     cannot remove real or test artifact bytes.
     """
 
-    sessions, storage, service, original_selector = _empty_recipe_removal_owner(
+    _sessions, storage, service, original_selector = _empty_recipe_removal_owner(
         tmp_path
     )
     request_id = "00000000-0000-4000-8000-000000000016"
@@ -1387,8 +1370,6 @@ def test_recipe_removal_request_key_rejects_changed_intent(
     original = service.get_operator_request(request_id, actor="operator")
     assert isinstance(original, dict)
     assert original["state"] == "succeeded"
-    with sessions() as session:
-        assert session.scalars(select(RuntimeImageAuthorization)).all() == []
     assert not any(path.is_file() for path in storage.root.rglob("*"))
 
     with pytest.raises(RecipeImageAvailabilityError) as refused:
@@ -1450,19 +1431,6 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
     with sessions.begin() as session:
         revision = _add_revision(session, "revision-active-review", recipe)
         _add_head(session, revision)
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=revision.id,
-                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
-                effective_execution_key=revision.execution_key,
-                image_digest=receipt.image_digest,
-                local_image_config_id=receipt.local_image_config_id,
-                oci_archive_sha256=receipt.oci_archive_sha256,
-                image_bytes=receipt.image_bytes,
-                build_id=receipt.build_id,
-                authorized_at=now,
-            )
-        )
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "review-managed")
     place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
@@ -1539,19 +1507,6 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
     with sessions.begin() as session:
         revision = _add_revision(session, "revision-removal-pre-effect", recipe)
         _add_head(session, revision)
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=revision.id,
-                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
-                effective_execution_key=revision.execution_key,
-                image_digest=receipt.image_digest,
-                local_image_config_id=receipt.local_image_config_id,
-                oci_archive_sha256=receipt.oci_archive_sha256,
-                image_bytes=receipt.image_bytes,
-                build_id=receipt.build_id,
-                authorized_at=now,
-            )
-        )
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
     receipt_file = storage.root / f"{ARCHIVE_SHA}.receipt.json"
@@ -1627,19 +1582,6 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
     with sessions.begin() as session:
         revision = _add_revision(session, "rev-removal-death", recipe)
         _add_head(session, revision)
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=revision.id,
-                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
-                effective_execution_key=revision.execution_key,
-                image_digest=receipt.image_digest,
-                local_image_config_id=receipt.local_image_config_id,
-                oci_archive_sha256=receipt.oci_archive_sha256,
-                image_bytes=receipt.image_bytes,
-                build_id=receipt.build_id,
-                authorized_at=now,
-            )
-        )
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
     receipt_file = storage.root / f"{ARCHIVE_SHA}.receipt.json"
@@ -1721,19 +1663,6 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
     with sessions.begin() as session:
         revision = _add_revision(session, "rev-removal-finalize", recipe)
         _add_head(session, revision)
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=revision.id,
-                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
-                effective_execution_key=revision.execution_key,
-                image_digest=receipt.image_digest,
-                local_image_config_id=receipt.local_image_config_id,
-                oci_archive_sha256=receipt.oci_archive_sha256,
-                image_bytes=receipt.image_bytes,
-                build_id=receipt.build_id,
-                authorized_at=now[0],
-            )
-        )
     storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
     place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
     (storage.root / f"{ARCHIVE_SHA}.receipt.json").write_text(
@@ -3141,7 +3070,6 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
     retained = storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE))
     assert retained.is_file()
     with sessions() as session:
-        assert session.scalar(select(RuntimeImageAuthorization)) is None
         row = session.get(Job, operation.id)
         assert row is not None and row.state == "cancelled"
         assert "image_result" not in row.payload
@@ -3157,7 +3085,9 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
-        revision = _add_revision(session, "cancel-reference-revision", recipe)
+        revision = _add_revision(
+            session, "cancel-reference-revision", recipe, built=False
+        )
         revision_id = revision.id
         session.add(User(subject="operator", role="operator"))
     now = datetime.now(UTC)

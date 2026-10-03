@@ -19,7 +19,6 @@ from vonk_control.models import (
     Base,
     CatalogDocumentHead,
     Job,
-    RuntimeImageAuthorization,
 )
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
 from vonk_control.recipe_image_removal_contract import (
@@ -74,19 +73,6 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
     with sessions.begin() as session:
         revision = _add_revision(session, revision_id, recipe)
         _add_head(session, revision)
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=revision.id,
-                original_content_digest=recipe_digest,
-                effective_execution_key=revision.execution_key,
-                image_digest=receipt.image_digest,
-                local_image_config_id=receipt.local_image_config_id,
-                oci_archive_sha256=receipt.oci_archive_sha256,
-                image_bytes=receipt.image_bytes,
-                build_id=receipt.build_id,
-                authorized_at=now,
-            )
-        )
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "managed-artifacts")
     place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))

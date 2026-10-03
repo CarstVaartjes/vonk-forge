@@ -25,7 +25,6 @@ from vonk_control.models import (
     NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
-    RuntimeImageAuthorization,
 )
 from vonk_control.recipe_builds import (
     RecipeBuildResolution,
@@ -254,12 +253,14 @@ def test_prepared_successor_installs_the_original_verified_build(tmp_path, chang
         assert argv[argv.index("--max-model-len") + 1] == "16384"
 
 
-def test_editorial_successor_installs_and_starts_with_no_image_grant(tmp_path):
+def test_editorial_successor_installs_and_starts_without_any_record_of_the_image(
+    tmp_path,
+):
     """An image is its content: a successor revision runs its predecessor's build.
 
     The recipe's image is already on the Sparks, so no phase prepares it for
-    the successor, and nothing records any per-revision grant. Review, install
-    plan, install and start must still go through.
+    the successor, and nothing records that the successor may use it. Review,
+    install plan, install and start must still go through.
     """
 
     fixture = _prepared_successor(tmp_path, change="editorial")
@@ -275,8 +276,6 @@ def test_editorial_successor_installs_and_starts_with_no_image_grant(tmp_path):
         build_id,
         builds,
     ) = fixture
-    with sessions.begin() as session:
-        session.query(RuntimeImageAuthorization).delete()
     queue = RecordingQueue()
     service = RecipeOperationService(
         sessions,
@@ -304,7 +303,6 @@ def test_editorial_successor_installs_and_starts_with_no_image_grant(tmp_path):
         assert installed is not None
         assert installed.recipe_revision_id == successor.id
         assert installed.recipe_build_id == receipt.build_id
-        assert session.query(RuntimeImageAuthorization).count() == 0
     with sessions.begin() as session:
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
             snapshot.host_memory_total_bytes = 10**12

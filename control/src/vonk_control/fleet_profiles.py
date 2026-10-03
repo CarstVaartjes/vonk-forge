@@ -116,7 +116,6 @@ from .models import (
     RecipeRun,
     ResourceReservation,
     RunNode,
-    RuntimeImageAuthorization,
     User,
 )
 from .operation_blockers import (
@@ -148,6 +147,7 @@ from .recipe_runtime_specs import (
 )
 from .recipe_update_notice import RecipeUpdateNotice, recipe_update_notice
 from .recovery_policy import RecoveryPolicy
+from .revision_images import revision_archives
 from .run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchAssessment,
@@ -8331,14 +8331,7 @@ class FleetProfileService:
                         )
                     )
                 )
-                runtime_images.update(
-                    session.scalars(
-                        select(RuntimeImageAuthorization.oci_archive_sha256).where(
-                            RuntimeImageAuthorization.recipe_revision_id == revision.id,
-                            RuntimeImageAuthorization.state == "authorized",
-                        )
-                    )
-                )
+                runtime_images.update(revision_archives(session, [revision.id]))
             if model_sets:
                 require_model_sets_open(session, sorted(model_sets), now=now)
             if runtime_images:

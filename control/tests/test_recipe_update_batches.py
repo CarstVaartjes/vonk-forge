@@ -29,7 +29,6 @@ from vonk_control.recipe_update_contract import RecipeUpdateResponse
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     prepare_runtime_image,
-    record_runtime_image_reference,
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -344,7 +343,7 @@ def test_one_admission_failure_does_not_suppress_other_children(update_env):
 def test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope(
     update_env,
 ):
-    sessions, recipes, now, fresh = update_env
+    sessions, recipes, _now, fresh = update_env
     service = fresh()
     empty_key = str(uuid.uuid4())
     empty = service.update(
@@ -383,13 +382,6 @@ def test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope
                     "oci_layout_sha256": archive_sha256,
                     "image_bytes": len(archive),
                 },
-            )
-            record_runtime_image_reference(
-                session,
-                recipe_revision_id=revision_id,
-                effective_execution_key=revision.execution_key,
-                receipt=receipt,
-                recorded_at=now[0],
             )
             receipts.append(receipt)
             expected.append(revision_id)

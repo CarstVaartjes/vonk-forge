@@ -1056,7 +1056,7 @@ def test_receipt_a_profile_points_to_is_kept_and_a_merely_offered_one_is_not(
     nothing to free)."""
 
     head = world.revision("glm", 1, head="active")
-    world.authorize(head, build_id=world.build(head), original_digest="0" * 64)
+    world.build(head, archive=AN_IMAGE)
     path = _receipt(tmp_path, AN_IMAGE)
 
     _profile(world, "vonk-forge/glm")
@@ -1075,12 +1075,14 @@ def test_receipt_a_profile_points_to_is_kept_and_a_merely_offered_one_is_not(
 def test_receipt_of_a_superseded_revision_goes_but_a_shared_one_stays(
     world: Catalog, tmp_path: Path
 ) -> None:
-    """The image an editorial successor reuses is the head's, so it stays."""
+    """The image an editorial successor reuses is the head's, so it stays.
+
+    The head has no build row of its own: it runs the build its predecessor made.
+    """
 
     old = world.revision("glm", 1)
-    head = world.revision("glm", 2, head="active")
-    world.authorize(old, build_id=world.build(old), original_digest="0" * 64)
-    world.authorize(head, build_id=world.build(head), original_digest="1" * 64)
+    world.revision("glm", 2, head="active")
+    world.build(old, archive=AN_IMAGE)
     shared = _receipt(tmp_path, AN_IMAGE)
     _profile(world, "vonk-forge/glm")
 

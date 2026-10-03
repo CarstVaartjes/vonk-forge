@@ -255,6 +255,41 @@ def test_postgres_reconciliation_preserves_unknown_table_and_column_data(
         assert nullable is True
 
 
+def test_postgres_reconciliation_releases_the_keys_of_a_retired_table(
+    postgres_engine,
+) -> None:
+    """A retired table keeps its rows but its RESTRICT keys cannot block deletes.
+
+    ``runtime_image_authorizations`` recorded who first used an image and is no
+    longer read or written. An upgraded database still has it, with keys to the
+    revision and build rows a collector deletes.
+    """
+
+    _upgrade(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE runtime_image_authorizations ("
+                "id VARCHAR(36) PRIMARY KEY, "
+                "recipe_revision_id VARCHAR(36) NOT NULL, "
+                "build_id VARCHAR(36) NOT NULL, "
+                "CONSTRAINT fk_runtime_image_authorizations_recipe_revision "
+                "FOREIGN KEY (recipe_revision_id) "
+                "REFERENCES catalog_document_revisions (id) ON DELETE RESTRICT, "
+                "CONSTRAINT fk_runtime_image_authorizations_build "
+                "FOREIGN KEY (build_id) REFERENCES recipe_builds (id) "
+                "ON DELETE RESTRICT)"
+            )
+        )
+        assert inspect(connection).get_foreign_keys("runtime_image_authorizations")
+    with postgres_engine.begin() as connection:
+        verify_schema_is_current(connection)
+    with postgres_engine.connect() as connection:
+        inspector = inspect(connection)
+        assert "runtime_image_authorizations" in inspector.get_table_names()
+        assert inspector.get_foreign_keys("runtime_image_authorizations") == []
+
+
 def test_schema_reconciliation_preserves_unexpected_column(
     tmp_path: Path,
 ) -> None:
@@ -273,16 +308,12 @@ def test_schema_reconciliation_preserves_unexpected_column(
             verify_schema_is_current(connection)
         with engine.begin() as connection:
             connection.execute(
-                text(
-                    "ALTER TABLE runtime_image_authorizations "
-                    "ADD COLUMN receipt_id VARCHAR(36)"
-                )
+                text("ALTER TABLE recipe_builds ADD COLUMN receipt_id VARCHAR(36)")
             )
         with engine.begin() as connection:
             verify_schema_is_current(connection)
         assert "receipt_id" in {
-            column["name"]
-            for column in inspect(engine).get_columns("runtime_image_authorizations")
+            column["name"] for column in inspect(engine).get_columns("recipe_builds")
         }
     finally:
         engine.dispose()
@@ -300,18 +331,13 @@ def test_postgres_schema_reconciliation_relaxes_retired_required_receipt_column(
     _upgrade(postgres_engine.url.render_as_string(hide_password=False))
     with postgres_engine.begin() as connection:
         connection.execute(
-            text(
-                "ALTER TABLE runtime_image_authorizations "
-                "ADD COLUMN receipt_id VARCHAR(36) NOT NULL"
-            )
+            text("ALTER TABLE recipe_builds ADD COLUMN receipt_id VARCHAR(36) NOT NULL")
         )
     with postgres_engine.begin() as connection:
         verify_schema_is_current(connection)
     receipt_column = next(
         column
-        for column in inspect(postgres_engine).get_columns(
-            "runtime_image_authorizations"
-        )
+        for column in inspect(postgres_engine).get_columns("recipe_builds")
         if column["name"] == "receipt_id"
     )
     assert receipt_column["nullable"] is True

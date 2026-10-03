@@ -167,6 +167,19 @@ _TOLERATED_SCHEMA_DIFFERENCES = frozenset(
 )
 _REPLACED_CONSTRAINT_NAMES = frozenset({"uq_control_process_heartbeats_kind"})
 
+# A table the model retired is kept with its rows (schema reconciliation never
+# drops data), but its foreign keys must not outlive it: a ``RESTRICT`` key
+# would refuse the deletion of the revision or build a retained row names. Only
+# the keys are dropped; nothing reads or writes the table any more.
+_RETIRED_TABLE_FOREIGN_KEYS = {
+    "runtime_image_authorizations": frozenset(
+        {
+            "fk_runtime_image_authorizations_recipe_revision",
+            "fk_runtime_image_authorizations_build",
+        }
+    )
+}
+
 
 def _schema_difference_key(difference: tuple[object, ...]) -> tuple[str, str | None]:
     """Identify one autogenerate difference for the reviewed-tolerance check."""
@@ -433,6 +446,33 @@ def _repair_check_constraints(connection: Connection) -> None:
                         name,
                         deferred_error,
                     )
+
+
+def _release_retired_table_foreign_keys(connection: Connection, ops: Any) -> None:
+    """Drop the foreign keys of retired tables so their old rows never block."""
+
+    if connection.dialect.name != "postgresql":
+        return
+    from sqlalchemy import inspect
+
+    inspector = inspect(connection)
+    live_tables = set(inspector.get_table_names())
+    for table_name, names in sorted(_RETIRED_TABLE_FOREIGN_KEYS.items()):
+        if table_name not in live_tables:
+            continue
+        live = {key["name"] for key in inspector.get_foreign_keys(table_name)}
+        for name in sorted(names & live):
+            try:
+                with connection.begin_nested():
+                    ops.drop_constraint(name, table_name, type_="foreignkey")
+                _LOGGER.info("Dropped retired foreign key %s.%s", table_name, name)
+            except SQLAlchemyError as error:
+                _LOGGER.warning(
+                    "Could not drop retired foreign key %s.%s: %s",
+                    table_name,
+                    name,
+                    error,
+                )
 
 
 def reconcile_schema(connection: Connection) -> None:
@@ -859,6 +899,8 @@ def reconcile_schema(connection: Connection) -> None:
                 _LOGGER.warning(
                     "Could not drop obsolete index %s: %s", index.name, error
                 )
+
+    _release_retired_table_foreign_keys(connection, ops)
 
     remaining = _check_constraint_differences(connection)
     if remaining:

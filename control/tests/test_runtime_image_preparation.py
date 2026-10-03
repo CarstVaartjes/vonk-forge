@@ -17,8 +17,8 @@ from vonk_control.models import (
     Base,
     CatalogDocumentRevision,
     RecipeBuild,
-    RuntimeImageAuthorization,
 )
+from vonk_control.revision_images import revision_images
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
@@ -28,7 +28,6 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImageReceipt,
     _parse_runtime_image_receipt,
     prepare_runtime_image,
-    record_runtime_image_reference,
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -576,18 +575,13 @@ def test_source_build_uses_same_normalized_receipt_and_preserves_provenance(
                 updated_at=datetime.now(UTC),
             )
         )
-        for _ in range(2):
-            record_runtime_image_reference(
-                session,
-                recipe_revision_id="revision-source",
-                effective_execution_key="e" * 64,
-                receipt=receipt,
-                recorded_at=datetime.now(UTC),
-            )
         session.commit()
-        (row,) = session.query(RuntimeImageAuthorization).all()
-        assert row.build_id == "build-7"
-        assert row.image_digest == BUILT_IMAGE_DIGEST
+        # The image the recipe can run is derived from its build row; no
+        # per-revision record of the receipt exists.
+        (image,) = revision_images(session, ["revision-source"])["revision-source"]
+        assert image.build_id == "build-7"
+        assert image.image_digest == BUILT_IMAGE_DIGEST
+        assert image.archive_sha256 == ARCHIVE_DIGEST
 
 
 def test_publication_callback_and_commit_share_the_exact_archive_lock(

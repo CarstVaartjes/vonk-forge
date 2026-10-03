@@ -26,7 +26,6 @@ from vonk_control.models import (
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
-    RuntimeImageAuthorization,
 )
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
 from vonk_control.recipe_image_removal_contract import (
@@ -129,20 +128,6 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     with sessions.begin() as session:
         revision = _add_revision(session, revision_id, recipe)
         _add_head(session, revision)
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=revision.id,
-                original_content_digest=revision.content_digest,
-                effective_execution_key=revision.execution_key,
-                image_digest=receipt.image_digest,
-                local_image_config_id=receipt.local_image_config_id,
-                oci_archive_sha256=receipt.oci_archive_sha256,
-                image_bytes=receipt.image_bytes,
-                build_id=receipt.build_id,
-                authorized_at=now[0],
-                state="authorized",
-            )
-        )
 
     image_root = tmp_path / "runtime-images"
     image_storage = FilesystemRuntimeImageStorage(image_root)
@@ -374,20 +359,6 @@ def test_postgres_recipe_review_recovers_from_failed_profile_scan(
     with sessions.begin() as session:
         revision = _add_revision(session, revision_id, recipe)
         _add_head(session, revision)
-        session.add(
-            RuntimeImageAuthorization(
-                recipe_revision_id=revision.id,
-                original_content_digest=revision.content_digest,
-                effective_execution_key=revision.execution_key,
-                image_digest=receipt.image_digest,
-                local_image_config_id=receipt.local_image_config_id,
-                oci_archive_sha256=receipt.oci_archive_sha256,
-                image_bytes=receipt.image_bytes,
-                build_id=receipt.build_id,
-                authorized_at=datetime.now(UTC),
-                state="authorized",
-            )
-        )
 
     image_root = tmp_path / "review-runtime-images"
     storage = FilesystemRuntimeImageStorage(image_root)

@@ -34,7 +34,6 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
-    RuntimeImageAuthorization,
 )
 from vonk_control.recipe_builds import (
     RecipeBuildPlan,
@@ -49,6 +48,7 @@ from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_image_availability_api import install_recipe_operator_routes
+from vonk_control.revision_images import revision_images
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -245,14 +245,10 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
         assert completed.result["oci_archive_sha256"] == archive_digest
         assert operations.build_calls == 0
         with sessions() as session:
-            authorization = session.scalar(
-                select(RuntimeImageAuthorization).where(
-                    RuntimeImageAuthorization.recipe_revision_id == revision.id,
-                    RuntimeImageAuthorization.oci_archive_sha256 == archive_digest,
-                )
-            )
-            assert authorization is not None
-            assert authorization.state == "authorized"
+            # The recipe's images are derived from its builds: nothing records
+            # that the revision may use this archive.
+            images = revision_images(session, [revision.id])[revision.id]
+            assert [image.archive_sha256 for image in images] == [archive_digest]
     finally:
         production.close()
 
@@ -1924,13 +1920,12 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     model_child = require_mapping(completed.result["model_child"], "model child")
     assert model_child["state"] == "succeeded"
     with sessions() as session:
-        authorization = session.scalar(select(RuntimeImageAuthorization))
-        assert authorization is not None
-        assert (
-            completed.result["oci_archive_sha256"] == authorization.oci_archive_sha256
-        )
         persisted = session.get(Job, parent.id)
         assert persisted is not None
+        images = revision_images(session, [persisted.authority_revision])
+        assert completed.result["oci_archive_sha256"] in {
+            image.archive_sha256 for image in images[persisted.authority_revision]
+        }
         assert "failure" not in persisted.payload
         assert "retry_after_at" not in persisted.payload
         assert persisted.result == completed.result

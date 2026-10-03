@@ -103,7 +103,6 @@ from .models import (
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
-    RuntimeImageAuthorization,
 )
 from .oci_image_store import (
     DAMAGED_MANIFEST_CODES,
@@ -111,6 +110,7 @@ from .oci_image_store import (
     OciImageStoreError,
 )
 from .recipe_action_plans import UninstallPlan
+from .revision_images import revision_archives
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
@@ -307,13 +307,9 @@ class _Evidence:
             pinned=pinned,
             pointed_digests=frozenset(row.content_digest for row in pointed),
             pointed_models=bound | pinned,
-            pointed_archives=frozenset(
-                session.scalars(
-                    select(RuntimeImageAuthorization.oci_archive_sha256).where(
-                        RuntimeImageAuthorization.recipe_revision_id.in_(pointed_ids)
-                    )
-                )
-            )
+            # What a pointed recipe can run is every image its document built,
+            # including a predecessor's build that a successor reuses.
+            pointed_archives=revision_archives(session, pointed_ids)
             | frozenset(
                 value
                 for value in session.scalars(
@@ -340,13 +336,6 @@ class _Evidence:
                     select(ArtifactDistributionAssignment.oci_archive_sha256)
                     .where(ArtifactDistributionAssignment.updated_at > cutoff)
                     .distinct()
-                )
-            )
-            | frozenset(
-                session.scalars(
-                    select(RuntimeImageAuthorization.oci_archive_sha256).where(
-                        RuntimeImageAuthorization.authorized_at > cutoff
-                    )
                 )
             )
             | frozenset(
