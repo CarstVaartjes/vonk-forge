@@ -227,14 +227,40 @@ def _safe_retry_failure(kind: str, state: str, result: Mapping[str, object]) -> 
     )
 
 
+def _retry_authorized_for_current_attempt(operation: StoredOperation) -> bool:
+    """Whether a retry is already authorised for the operation's current attempt.
+
+    Authorisation is keyed by attempt.  A disposition written for an earlier
+    attempt has been consumed by the claim that issued the later one, so it
+    never authorises, schedules, or hides the current attempt's recovery.
+    """
+    return (
+        operation.retry_disposition == _RETRY_DISPOSITION
+        and operation.retry_disposition_attempt == operation.current_attempt
+    )
+
+
+def _retry_not_authorized_for_current_attempt() -> ColumnElement[bool]:
+    """SQL form of the negation of :func:`_retry_authorized_for_current_attempt`.
+
+    Written NULL-safe: a row without a disposition, or one whose attempt column
+    is NULL, is simply not authorised.
+    """
+    return or_(
+        StoredOperation.retry_disposition.is_(None),
+        StoredOperation.retry_disposition != _RETRY_DISPOSITION,
+        StoredOperation.retry_disposition_attempt.is_(None),
+        StoredOperation.retry_disposition_attempt != StoredOperation.current_attempt,
+    )
+
+
 def _parked_retry_evidence(
     operation: StoredOperation, attempt: AgentOperationAttempt, now: datetime
 ) -> bool:
     """Prove that a parked current-schema attempt still owns safe recovery."""
     if (
         operation.state != "waiting-for-operator"
-        or operation.retry_disposition is not None
-        or operation.retry_disposition_attempt is not None
+        or _retry_authorized_for_current_attempt(operation)
         or operation.retry_due_at is not None
         or operation.current_attempt < 1
         or operation.current_attempt != attempt.attempt
@@ -2381,7 +2407,7 @@ class AgentJobService:
                         StoredOperation.node_id == node_id,
                         StoredOperation.state == "waiting-for-operator",
                         StoredOperation.kind.in_(_RESTART_REISSUE_OPERATIONS),
-                        StoredOperation.retry_disposition.is_(None),
+                        _retry_not_authorized_for_current_attempt(),
                         StoredOperation.retry_due_at.is_(None),
                         Job.state.in_({"queued", "running", "waiting-for-operator"}),
                         *(condition.expression for condition in predicate.common),
@@ -2844,6 +2870,12 @@ class AgentJobService:
             operation.current_attempt += 1
             operation.state = "running"
             operation.retry_due_at = None
+            if operation.kind in _RESTART_REISSUE_OPERATIONS:
+                # This claim consumes the retry authorisation the previous
+                # attempt carried. Leaving it on the running row made the
+                # parked attempt that follows look like it still had one.
+                operation.retry_disposition = None
+                operation.retry_disposition_attempt = None
             # A live attempt has no interrupted reason: keeping the previous
             # one would describe work that is running again.
             operation.status_reason = None
@@ -3683,6 +3715,15 @@ class AgentJobService:
                     operation.status_reason = _lease_expiry_reason(
                         operation, attempt, node, now
                     )
+                    operation.retry_disposition = None
+                    operation.retry_disposition_attempt = None
+                    operation.retry_due_at = None
+                    if operation.kind in _RESTART_REISSUE_OPERATIONS:
+                        # An interrupted exact-resume order reconciles its own
+                        # effect on the next attempt: schedule it here, as the
+                        # claim and sweep paths do, instead of waiting for an
+                        # operator.
+                        self._schedule_safe_retry(operation, now)
                     operation.updated_at = now
                     if parent.state in {"queued", "running"}:
                         self._aggregate_parent(session, operation.parent_job_id)

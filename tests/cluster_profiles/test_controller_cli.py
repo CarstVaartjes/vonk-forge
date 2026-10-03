@@ -859,6 +859,57 @@ def test_fleet_resume_requires_owner_advertised_action_and_posts_explicit_intent
     ]
 
 
+def test_a_successful_fleet_resume_prints_its_outcome_and_exits_zero(capsys) -> None:
+    job_id = "11111111-1111-4111-8111-111111111111"
+    client = FakeClient(
+        {
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "state": "waiting-for-operator",
+                "recovery": {"actions": ["inspect", "resume"]},
+            },
+            ("POST", f"/api/jobs/{job_id}/resume"): {"id": job_id, "state": "queued"},
+        }
+    )
+
+    status = cli.main(("fleet", "resume", job_id, "--yes"), control_client=client)
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert f"Resumed job {job_id}; it is now queued." in captured.out
+    assert f"vonkctl fleet progress {job_id} --follow" in captured.out
+    assert "no fleet presentation" not in captured.out + captured.err
+
+
+def test_every_fleet_subcommand_has_a_presentation() -> None:
+    """A command that succeeds must never fail while printing its receipt."""
+
+    def choices(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
+        (subparsers,) = (
+            action
+            for action in parser._actions
+            if isinstance(action, argparse._SubParsersAction)
+        )
+        return dict(subparsers.choices)
+
+    fleet = choices(cli._parser())["fleet"]
+    # Enrollment receipts are presented by the shape of their `delivery`.
+    actions = set(choices(fleet)) - {"enroll", "re-enroll", "enrollment"}
+    assert {"resume", "rename", "progress", "upgrade", "remove"} <= actions
+    missing = []
+    for action in sorted(actions):
+        try:
+            with redirect_stdout(StringIO()):
+                render_payload({"id": "x", "state": "queued"}, "fleet", action=action)
+        except ValueError as error:
+            if "no fleet presentation" in str(error):
+                missing.append(action)
+        except (KeyError, TypeError):
+            # The probe payload is minimal; only a missing presentation matters.
+            continue
+    assert missing == []
+
+
 def test_fleet_resume_rejects_a_receipt_for_another_job() -> None:
     job_id = "11111111-1111-4111-8111-111111111111"
     other_job_id = "22222222-2222-4222-8222-222222222222"
