@@ -2631,7 +2631,11 @@ fn controller_denial_diagnostic(error: &ClientError) -> String {
 fn distribution_failure_result(error: &ClientError) -> ExecutionResult {
     let mut body = json!({
         "reason": "Controller distribution could not be verified and retained",
-        "failure_kind": if error.retryable() {
+        "failure_kind": if error.retryable()
+            // A grant that merely ran out of time is renewed by the next
+            // attempt's claim; it is a wait, not a denial of authority.
+            || error.code() == Some("distribution.expired")
+        {
             "temporary-dependency"
         } else if matches!(error.status(), Some(401 | 403)) {
             "invalid-authority"
@@ -4456,6 +4460,39 @@ mod tests {
         let diagnostic = result.body["diagnostic"].as_str().unwrap();
         assert!(diagnostic.contains("http_status=401"));
         assert!(diagnostic.contains("request_id=req-401"));
+    }
+
+    #[test]
+    fn an_expired_distribution_grant_is_a_wait_not_a_denial_of_authority() {
+        let expired = ClientError::Controller(Box::new(ControllerError {
+            operation: "controller.request /agent/distribution/manifests".to_owned(),
+            endpoint: "/agent/distribution/manifests".to_owned(),
+            status: 403,
+            code: "distribution.expired".to_owned(),
+            request_id: None,
+            decision: "exit",
+            retry_after_seconds: None,
+            summary: None,
+        }));
+        let revoked = ClientError::Controller(Box::new(ControllerError {
+            operation: "controller.request /agent/distribution/manifests".to_owned(),
+            endpoint: "/agent/distribution/manifests".to_owned(),
+            status: 403,
+            code: "distribution.wrong_node".to_owned(),
+            request_id: None,
+            decision: "exit",
+            retry_after_seconds: None,
+            summary: None,
+        }));
+
+        assert_eq!(
+            distribution_failure_result(&expired).body["failure_kind"],
+            "temporary-dependency"
+        );
+        assert_eq!(
+            distribution_failure_result(&revoked).body["failure_kind"],
+            "invalid-authority"
+        );
     }
 
     #[tokio::test]

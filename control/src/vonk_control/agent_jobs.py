@@ -175,6 +175,16 @@ _AGGREGATE_FINAL_STATES = frozenset(
     {"cancelled", "compensated", "failed", "succeeded", "waiting-for-operator"}
 )
 _CONCLUDED_OUTCOMES = _AGGREGATE_FINAL_STATES - {"waiting-for-operator"}
+#: Idempotent, content-addressed transfers and read-only checks. When their job
+#: has already ended, a sibling's parked retry can never be claimed; abandoning
+#: it loses nothing (finished objects and partial files stay in the cache).
+_ABANDONABLE_OPERATIONS = frozenset(
+    {
+        AgentOperation.ARTIFACT_DISTRIBUTION.value,
+        AgentOperation.RUNTIME_PREFLIGHT.value,
+    }
+)
+_ENDED_PARENT_STATES = _CONCLUDED_OUTCOMES | {"expired"}
 _RETRY_DISPOSITION = "retry"
 _DATABASE_REPOLL_SECONDS = 0.25
 _SUPERSEDED_CANCELLATION_SECONDS = 660
@@ -291,6 +301,59 @@ def _parked_retry_evidence(
     except (TypeError, ValueError):
         return False
     return _safe_retry_failure(operation.kind, attempt.state, result)
+
+
+def _abandon_operation(operation: StoredOperation, job_id: str, now: datetime) -> None:
+    """Close a parked idempotent operation whose job has already ended.
+
+    Left parked it would advertise a retry that the ended job can never grant
+    a claim for, and no operator action applies to it.
+    """
+
+    operation.state = "cancelled"
+    operation.retry_disposition = None
+    operation.retry_disposition_attempt = None
+    operation.retry_due_at = None
+    operation.status_reason = (
+        f"job {job_id} ended without this operation; its retry was abandoned"
+    )[:512]
+    operation.updated_at = now
+
+
+_GRANT_LIFETIME = timedelta(hours=1)
+
+
+def _renew_distribution_grant(
+    session: Session,
+    operation: StoredOperation,
+    now: datetime,
+    *,
+    live_only: bool = False,
+) -> None:
+    """Extend the exact node/plan grant of a currently authorised transfer.
+
+    The grant bounds how long an unattended registration may serve bytes; the
+    claim (or a heartbeat of the fenced attempt) is the proof that its
+    operation is still authorised. A grant that merely ran out of time is
+    therefore renewed by the next attempt, while a revoked one stays revoked.
+    Renewal is sparse. ``live_only`` (heartbeats) never revives a grant that
+    already lapsed.
+    """
+
+    states = {"active"} if live_only else {"active", "expired"}
+    conditions = [
+        ArtifactDistributionAssignment.node_id == operation.node_id,
+        ArtifactDistributionAssignment.plan_digest == operation.authority_revision,
+        ArtifactDistributionAssignment.state.in_(states),
+        ArtifactDistributionAssignment.expires_at < now + timedelta(minutes=30),
+    ]
+    if live_only:
+        conditions.append(ArtifactDistributionAssignment.expires_at > now)
+    session.execute(
+        update(ArtifactDistributionAssignment)
+        .where(*conditions)
+        .values(state="active", expires_at=now + _GRANT_LIFETIME, updated_at=now)
+    )
 
 
 #: Consecutive interrupted transfer attempts that copied no new bytes before
@@ -2943,6 +3006,11 @@ class AgentJobService:
                 progress=resumable_progress,
             )
             session.add(attempt)
+            if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
+                # Every attempt is issued with a fresh grant, as the first one
+                # was: a retry that waited out the grant's hour (a parked
+                # operation, a backoff) must not be refused by its own plan.
+                _renew_distribution_grant(session, operation, now)
             self._note_malformed_cancel_flag(session, operation)
             return AgentClaim.model_validate(
                 {
@@ -3471,19 +3539,7 @@ class AgentJobService:
                 # Only the authenticated, currently fenced operation may
                 # renew its exact node/plan, before that grant expires. Keep
                 # renewals sparse and never resurrect revoked/expired access.
-                session.execute(
-                    update(ArtifactDistributionAssignment)
-                    .where(
-                        ArtifactDistributionAssignment.node_id == operation.node_id,
-                        ArtifactDistributionAssignment.plan_digest
-                        == operation.authority_revision,
-                        ArtifactDistributionAssignment.state == "active",
-                        ArtifactDistributionAssignment.expires_at > now,
-                        ArtifactDistributionAssignment.expires_at
-                        < now + timedelta(minutes=30),
-                    )
-                    .values(expires_at=now + timedelta(hours=1), updated_at=now)
-                )
+                _renew_distribution_grant(session, operation, now, live_only=True)
             return AgentDirective(
                 fence=message.fence,
                 deadline=deadline,
@@ -3788,7 +3844,10 @@ class AgentJobService:
                     operation.retry_disposition = None
                     operation.retry_disposition_attempt = None
                     operation.retry_due_at = None
-                    if operation.kind in _RESTART_REISSUE_OPERATIONS:
+                    if parent.state in _ENDED_PARENT_STATES:
+                        if operation.kind in _ABANDONABLE_OPERATIONS:
+                            _abandon_operation(operation, parent.id, now)
+                    elif operation.kind in _RESTART_REISSUE_OPERATIONS:
                         # An interrupted exact-resume order reconciles its own
                         # effect on the next attempt: schedule it here, as the
                         # claim and sweep paths do, instead of waiting for an
@@ -4326,6 +4385,15 @@ class AgentJobService:
         if state == "succeeded":
             job.status_reason = None
             return
+        if state == "failed":
+            # A failed job grants no further claims, so a sibling still parked
+            # for retry would wait forever behind a retry that cannot run.
+            for operation in operations:
+                if (
+                    operation.state == "waiting-for-operator"
+                    and operation.kind in _ABANDONABLE_OPERATIONS
+                ):
+                    _abandon_operation(operation, job.id, job.updated_at)
         for operation in operations:
             if operation.state != state:
                 continue
