@@ -26,6 +26,7 @@ import hashlib
 import itertools
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -55,6 +56,7 @@ from tests.acceptance.test_spark_lifecycle import (
     REPOSITORY_ROOT,
     SHA256,
     SOURCE_SHA,
+    CanonicalCanaryFixture,
     LifecycleError,
     LocalBrowserController,
     SparkLifecycle,
@@ -62,6 +64,9 @@ from tests.acceptance.test_spark_lifecycle import (
     _canonical,
     _editorial_successor,
     _run_spark_bootstrap,
+    _sibling_recipes,
+    _validate_canary_cleanup_application,
+    _validate_canary_cleanup_preview,
 )
 
 PROBE_INTERVAL_SECONDS = 3.0
@@ -74,6 +79,11 @@ BASELINE_SERVING_SECONDS = 30
 # workload may miss at most this many probes, never two in a row.
 TOLERATED_PROBE_FAILURES = 1
 OVERLAY_VARIABLE = "VONK_ACCEPTANCE_COMPOSE_OVERLAY"
+# Phases that report but do not gate promotion. A new phase starts here while
+# the platform change it needs may not be in a promoted release yet: the pull
+# request's proof run judges it against the promoted release, and a failure is
+# a warning and a line in the report. Making it gating is deleting its name.
+OBSERVED_PHASES: frozenset[str] = frozenset({"sibling-recipes"})
 
 
 @dataclass
@@ -108,6 +118,8 @@ class ReleaseInput:
 class CarryEvidence:
     phases: list[dict[str, object]] = field(default_factory=list)
     probes: list[ProbeResult] = field(default_factory=list)
+    # What the observed phases saw, whether they passed or not.
+    observed: list[dict[str, object]] = field(default_factory=list)
 
 
 def _fetch(url: str, destination: Path) -> None:
@@ -344,6 +356,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         )
         node_id = str(identity["node_id"])
         canary = self._run_synthetic_canary(node_id, carry=self._carry)
+        self._run_scenario("sibling-recipes", lambda: self._sibling_recipes(node_id))
         return {
             "baseline": {
                 "generation": self.baseline.generation,
@@ -355,6 +368,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             },
             "canary": canary,
             "phases": self.evidence.phases,
+            "observed": self.evidence.observed,
             "probe_summary": self._probe_summary(),
         }
 
@@ -392,6 +406,48 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         self.evidence.phases.append(
             {"phase": name, "seconds": round(time.monotonic() - started, 1)}
         )
+
+    def _run_scenario(self, name: str, action) -> None:
+        """Run a phase after the carry: gating, or only observed.
+
+        An observed phase that fails is recorded and warned about, and the lane
+        goes on; the lane's own teardown removes whatever it left on the Spark.
+        """
+        started = time.monotonic()
+        with self._lock:
+            self._phase = name
+        try:
+            result = action()
+        except Exception as error:
+            if name not in OBSERVED_PHASES:
+                if isinstance(
+                    error,
+                    (
+                        LifecycleError,
+                        AcceptanceError,
+                        SliceError,
+                        ServingExecutionError,
+                    ),
+                ):
+                    raise self._failure(name, str(error)) from error
+                raise
+            reason = f"{type(error).__name__}: {error}"[-1500:]
+            print(
+                f"::warning title=Observed upgrade-carry phase {name} failed::"
+                + reason.replace("\n", " ")[:400],
+                flush=True,
+            )
+            self.evidence.observed.append(
+                {"phase": name, "status": "failed", "error": reason}
+            )
+            return
+        seconds = round(time.monotonic() - started, 1)
+        if name in OBSERVED_PHASES:
+            self.evidence.observed.append(
+                {"phase": name, "status": "passed", "seconds": seconds, **result}
+            )
+        else:
+            self.evidence.phases.append({"phase": name, "seconds": seconds})
 
     def _hold(self, name: str, seconds: float) -> None:
         self._run_phase(name, lambda: time.sleep(seconds))
@@ -559,6 +615,200 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         if not isinstance(phase_results, list):
             raise LifecycleError("the editorial successor run receipt is invalid")
         self._successor_identity = self._serving_identity(phase_results)
+
+    # -- sibling recipes ---------------------------------------------------
+
+    def _sibling_recipes(self, node_id: str) -> dict[str, object]:
+        """Two different Recipes that build one image install and serve in turn.
+
+        The second Recipe finds the image already recorded by the first and
+        must take it as its own by content (#1090 refused it at install). The
+        Spark runs one of them at a time; the profile switches from one to the
+        other, so the second install happens with the first still installed.
+        """
+
+        assert self.control is not None
+        one, two = _sibling_recipes(self.synthetic_canary_fixture)
+        sync = self._import_canary_catalog(
+            one,
+            self._canary_request_key(one, node_id, "sibling-sync"),
+            companions=(two,),
+        )
+        if (
+            sync.get("state") != "current"
+            or sync.get("commit") != one.source_commit
+            or sync.get("problems") != []
+        ):
+            raise LifecycleError(
+                "sibling recipe catalog sync is incomplete: "
+                + json.dumps(sync, sort_keys=True, default=str)[:1024]
+            )
+        served = [self._serve_sibling(sibling, node_id) for sibling in (one, two)]
+        digests = {str(item["image_digest"]) for item in served}
+        if len(digests) != 1:
+            raise LifecycleError(
+                "the sibling recipes did not build one image, so the phase proves "
+                f"nothing: {sorted(digests)}"
+            )
+        installations = [str(item["installation_id"]) for item in served]
+        if len(set(installations)) != 2:
+            raise LifecycleError("the sibling recipes share one installation")
+        self._remove_siblings(two, node_id, installations, str(served[-1]["run_id"]))
+        return {"image_digest": digests.pop(), "siblings": served}
+
+    def _serve_sibling(
+        self, fixture: CanonicalCanaryFixture, node_id: str
+    ) -> dict[str, object]:
+        """Download, install and start one Recipe, then route and infer."""
+
+        assert self.control is not None and self.browser is not None
+        selector = f"{fixture.publisher}/{fixture.slug}"
+        _, detail_payload = self.control.request("GET", f"/api/recipe/{selector}")
+        identity = require_object(
+            require_object(detail_payload, "sibling recipe detail").get("identity"),
+            "sibling recipe identity",
+        )
+        revision_id = identity.get("recipe_revision_id")
+        if identity.get("content_sha256") != fixture.recipe_content_sha256 or not (
+            isinstance(revision_id, str)
+        ):
+            raise LifecycleError(f"sibling recipe {selector} is not the synced one")
+        download = self._await_recipe_download(
+            self._request_recipe_download(
+                selector,
+                request_key=self._canary_request_key(
+                    fixture, node_id, "sibling-download"
+                ),
+            ),
+            fixture=fixture,
+            recipe_revision_id=revision_id,
+        )
+        if download.get("state") != "succeeded":
+            raise LifecycleError(f"the download of {selector} did not succeed")
+        self._save_sibling_profile(
+            policy="keep-cached",
+            assignments=[
+                {
+                    "recipe_selector": selector,
+                    "spark_ids": [node_id],
+                    "assignment_name": fixture.slug,
+                    "desired_state": "running",
+                }
+            ],
+        )
+        _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
+        preview = require_object(preview_payload, "sibling profile preview")
+        if preview.get("allowed") is not True:
+            raise LifecycleError(
+                f"the profile preview for {selector} is not admitted: "
+                + self._preview_diagnostic(preview)
+            )
+        application = self._await_profile_application(
+            require_object(
+                self._load_canary_profile(
+                    preview,
+                    request_key=self._canary_request_key(
+                        fixture, node_id, "sibling-load"
+                    ),
+                ),
+                "sibling profile application",
+            ),
+            label=f"sibling profile load of {selector}",
+            node_id=node_id,
+        )
+        progress = require_object(application.get("progress"), "sibling progress")
+        run_result = self._profile_run_switch_result(
+            require_object(progress.get("step_results"), "sibling step results")
+        )
+        phase_results = run_result.get("phase_results")
+        if not isinstance(phase_results, list):
+            raise LifecycleError(f"the run receipt of {selector} is invalid")
+        installation_id, run_id = self._serving_identity(phase_results)
+        # Both Recipes' downloads name their image; the siblings share one.
+        download_result = require_object(download.get("result"), "download result")
+        image_digest = str(download_result.get("image_digest"))
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest) is None:
+            raise LifecycleError(f"the download of {selector} names no image")
+        self._await_canary_endpoint(fixture.slug, published=True)
+        inference = self.browser.bearer(
+            self._read_secret("litellm-master-key"), timeout=30
+        )
+        self._run_canonical_inference(inference, fixture.serving_check, fixture.slug)
+        return {
+            "slug": fixture.slug,
+            "installation_id": installation_id,
+            "run_id": run_id,
+            "image_digest": image_digest,
+        }
+
+    def _save_sibling_profile(
+        self, *, policy: str, assignments: list[dict[str, object]]
+    ) -> None:
+        assert self.control is not None
+        _, definition = self.control.request("GET", "/api/profile/1/definition")
+        revision = require_object(definition, "profile definition").get("revision")
+        if type(revision) is not int:
+            raise LifecycleError("the profile revision is invalid")
+        self.control.request(
+            "PUT",
+            "/api/profile/1",
+            {
+                "name": "Acceptance synthetic canary",
+                "description": "Disposable whole-fleet lifecycle canary",
+                "installation_policy": policy,
+                "labels": {"purpose": "acceptance"},
+                "favorite": False,
+                "expected_revision": revision,
+                "assignments": assignments,
+            },
+        )
+
+    def _remove_siblings(
+        self,
+        last: CanonicalCanaryFixture,
+        node_id: str,
+        installations: list[str],
+        run_id: str,
+    ) -> None:
+        """Remove what the siblings installed and prove both are gone."""
+
+        assert self.control is not None
+        self._save_sibling_profile(policy="exact", assignments=[])
+        _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
+        preview = require_object(preview_payload, "sibling cleanup preview")
+        try:
+            _validate_canary_cleanup_preview(preview, node_id=node_id)
+        except LifecycleError as error:
+            raise LifecycleError(
+                "sibling cleanup preview is not admitted: "
+                + self._preview_diagnostic(preview)
+            ) from error
+        application = self._await_profile_application(
+            require_object(
+                self._load_canary_profile(
+                    preview,
+                    request_key=self._canary_request_key(
+                        last, node_id, "sibling-cleanup"
+                    ),
+                ),
+                "sibling cleanup application",
+            ),
+            label="sibling profile cleanup",
+            node_id=node_id,
+        )
+        _validate_canary_cleanup_application(
+            application, installation_ids=installations, run_id=run_id
+        )
+        self._await_canary_endpoint(last.slug, published=False)
+        nodes = self._fleet_snapshot().get("nodes")
+        for node in nodes if isinstance(nodes, list) else []:
+            left = [
+                value.get("installation_id")
+                for value in (node.get("installed") or [])
+                if isinstance(node, dict) and isinstance(value, dict)
+            ]
+            if set(left) & set(installations):
+                raise LifecycleError("sibling cleanup left an installation present")
 
     def _require_published(self) -> None:
         state = self._route_state()
@@ -785,6 +1035,7 @@ def main() -> int:
         {"schema_version": 1, "status": "passed", "proof": proof},
     )
     print(json.dumps(proof["probe_summary"], sort_keys=True))
+    print("observed phases: " + json.dumps(proof["observed"], sort_keys=True))
     return 0
 
 

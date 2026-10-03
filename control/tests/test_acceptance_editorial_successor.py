@@ -60,7 +60,10 @@ catalog = CatalogService(
 for number, fixture in enumerate((first, successor), start=1):
     package = work / f"{number}.tar.gz"
     package.write_bytes(fixture.package_bytes)
-    reader = importer["FixtureReader"](json.loads(fixture.index_bytes), package)
+    reader = importer["FixtureReader"](
+        json.loads(fixture.index_bytes),
+        {json.loads(fixture.index_bytes)["recipes"][0]["package"]["sha256"]: package},
+    )
     view = ManagedRecipeCatalogSyncService(
         sessions, catalog=catalog, reader=reader, clock=clock
     ).sync(

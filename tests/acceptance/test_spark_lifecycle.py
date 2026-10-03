@@ -455,22 +455,21 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
     )
 
 
-def _editorial_successor(fixture: CanonicalCanaryFixture) -> CanonicalCanaryFixture:
-    """The same Recipe with a reworded description: a new revision, the same image.
+def _rebuilt_recipe_entry(
+    fixture: CanonicalCanaryFixture, edit: Callable[[dict[str, object]], None]
+) -> tuple[dict[str, object], bytes]:
+    """The fixture's index entry and package, rebuilt around an edited Recipe.
 
-    Only editorial text changes, so the executable inputs, the build context
-    and the model stay identical. The package and index are rebuilt around the
-    new Recipe document exactly as a producer would publish them.
+    The package is repacked exactly as a producer would publish it: the edited
+    recipe.json, the manifest that names its digest and size, and every other
+    member (the build context, the Model document) untouched.
     """
 
     from vonk_forge_contracts import document_sha256
 
-    index = json.loads(fixture.index_bytes)
-    entry = index["recipes"][0]
-    recipe = copy.deepcopy(entry["document"])
-    recipe["metadata"]["description"] = (
-        f"{recipe['metadata']['description']} Editorially revised."
-    )
+    entry = copy.deepcopy(json.loads(fixture.index_bytes)["recipes"][0])
+    recipe = entry["document"]
+    edit(recipe)
     digest = document_sha256(recipe)
     recipe_bytes = json.dumps(recipe, sort_keys=True, indent=2).encode() + b"\n"
     with tarfile.open(fileobj=io.BytesIO(fixture.package_bytes), mode="r:gz") as source:
@@ -499,7 +498,6 @@ def _editorial_successor(fixture: CanonicalCanaryFixture) -> CanonicalCanaryFixt
             member.size = len(payload)
             target.addfile(member, io.BytesIO(payload) if member.isfile() else None)
     package_bytes = archive.getvalue()
-    entry["document"] = recipe
     entry["content_sha256"] = digest
     entry["package"] = {
         **entry["package"],
@@ -507,14 +505,76 @@ def _editorial_successor(fixture: CanonicalCanaryFixture) -> CanonicalCanaryFixt
         "recipe_content_sha256": digest,
         "sha256": hashlib.sha256(package_bytes).hexdigest(),
     }
+    return entry, package_bytes
+
+
+def _editorial_successor(fixture: CanonicalCanaryFixture) -> CanonicalCanaryFixture:
+    """The same Recipe with a reworded description: a new revision, the same image.
+
+    Only editorial text changes, so the executable inputs, the build context
+    and the model stay identical. The package and index are rebuilt around the
+    new Recipe document exactly as a producer would publish them.
+    """
+
+    def reword(recipe: dict[str, object]) -> None:
+        metadata = recipe["metadata"]
+        metadata["description"] = f"{metadata['description']} Editorially revised."  # type: ignore[index]
+
+    entry, package_bytes = _rebuilt_recipe_entry(fixture, reword)
+    index = json.loads(fixture.index_bytes)
+    index["recipes"] = [entry]
+    digest = str(entry["content_sha256"])
     index["source_commit"] = hashlib.sha1(digest.encode()).hexdigest()
     return fixture._replace(
         index_bytes=json.dumps(index, sort_keys=True).encode(),
         package_bytes=package_bytes,
         source_commit=index["source_commit"],
         recipe_content_sha256=digest,
-        recipe=recipe,
+        recipe=entry["document"],  # type: ignore[arg-type]
     )
+
+
+def _sibling_recipes(
+    fixture: CanonicalCanaryFixture,
+) -> tuple[CanonicalCanaryFixture, CanonicalCanaryFixture]:
+    """Two different Recipes that build one and the same image.
+
+    Each sibling is the canary under its own slug, title and model alias; the
+    build context, the base image and the Model are the canary's, so both
+    Recipes name the image the canary builds. Both arrive in one catalog commit,
+    as two Recipes of one producer library do.
+    """
+
+    def sibling(name: str) -> Callable[[dict[str, object]], None]:
+        def rename(recipe: dict[str, object]) -> None:
+            slug = f"{recipe['identity']['slug']}-{name}"  # type: ignore[index]
+            recipe["identity"]["slug"] = slug  # type: ignore[index]
+            recipe["metadata"]["title"] = f"{recipe['metadata']['title']} ({name})"  # type: ignore[index]
+            for interface in recipe["interfaces"]:  # type: ignore[attr-defined]
+                interface["model_aliases"] = [slug]
+
+        return rename
+
+    built = [_rebuilt_recipe_entry(fixture, sibling(name)) for name in ("one", "two")]
+    index = json.loads(fixture.index_bytes)
+    index["recipes"] = [entry for entry, _ in built]
+    commit = hashlib.sha1(
+        "".join(str(entry["content_sha256"]) for entry, _ in built).encode()
+    ).hexdigest()
+    index["source_commit"] = commit
+    index_bytes = json.dumps(index, sort_keys=True).encode()
+    siblings = tuple(
+        fixture._replace(
+            index_bytes=index_bytes,
+            package_bytes=package_bytes,
+            source_commit=commit,
+            slug=str(entry["document"]["identity"]["slug"]),  # type: ignore[index]
+            recipe_content_sha256=str(entry["content_sha256"]),
+            recipe=entry["document"],  # type: ignore[arg-type]
+        )
+        for entry, package_bytes in built
+    )
+    return siblings[0], siblings[1]
 
 
 class ObservedLifecycle(Protocol):
@@ -761,8 +821,44 @@ def _validate_canary_cleanup_preview(
         raise LifecycleError("synthetic canary cleanup preview is not admitted")
 
 
+def _installations_removed(
+    receipts: Sequence[object], installation_ids: Sequence[str]
+) -> bool:
+    """Whether every named installation has an uninstall and a verified removal.
+
+    A canary that was replaced, or two Recipes that ran in turn, leave several
+    installations; each one needs its own receipts.
+    """
+
+    from vonk_control.run_switch_contract import (
+        RunSwitchCleanupVerifyResult,
+        RunSwitchUninstallResult,
+    )
+
+    return all(
+        any(
+            isinstance(receipt, RunSwitchUninstallResult)
+            and receipt.installation_id == installation_id
+            for receipt in receipts
+        )
+        and any(
+            isinstance(receipt, RunSwitchCleanupVerifyResult)
+            and receipt.installation_id == installation_id
+            and receipt.final_verified is True
+            and receipt.removed is True
+            and receipt.active_runs == 0
+            and receipt.installation_state in {None, "uninstalled"}
+            for receipt in receipts
+        )
+        for installation_id in installation_ids
+    )
+
+
 def _validate_canary_cleanup_application(
-    application: dict[str, object], *, installation_id: str, run_id: str
+    application: dict[str, object],
+    *,
+    installation_ids: Sequence[str],
+    run_id: str,
 ) -> None:
     """Require terminal cleanup receipts from the profile application."""
 
@@ -770,11 +866,7 @@ def _validate_canary_cleanup_application(
         FleetProfileApplicationView,
         FleetProfileSwitchChildResult,
     )
-    from vonk_control.run_switch_contract import (
-        RunSwitchCleanupVerifyResult,
-        RunSwitchStopResult,
-        RunSwitchUninstallResult,
-    )
+    from vonk_control.run_switch_contract import RunSwitchStopResult
 
     try:
         typed = FleetProfileApplicationView.model_validate_json(_canonical(application))
@@ -827,21 +919,7 @@ def _validate_canary_cleanup_application(
         and isinstance(child.result, FleetProfileSwitchChildResult)
         for receipt in child.result.run_switch.phase_results
     ]
-    uninstalled = any(
-        isinstance(receipt, RunSwitchUninstallResult)
-        and receipt.installation_id == installation_id
-        for receipt in cleanup_results
-    )
-    verified = any(
-        isinstance(receipt, RunSwitchCleanupVerifyResult)
-        and receipt.installation_id == installation_id
-        and receipt.final_verified is True
-        and receipt.removed is True
-        and receipt.active_runs == 0
-        and receipt.installation_state in {None, "uninstalled"}
-        for receipt in cleanup_results
-    )
-    if not uninstalled or not verified:
+    if not _installations_removed(cleanup_results, installation_ids):
         raise LifecycleError("synthetic canary removal receipt is incomplete")
 
 
@@ -2129,13 +2207,19 @@ class SparkLifecycle:
         }
 
     def _import_canary_catalog(
-        self, fixture: CanonicalCanaryFixture, request_key: str
+        self,
+        fixture: CanonicalCanaryFixture,
+        request_key: str,
+        *,
+        companions: Sequence[CanonicalCanaryFixture] = (),
     ) -> dict[str, object]:
         """Apply the producer fixture through the Controller's catalog sync.
 
         Production Controllers only read signed recipe releases, so the
         fixture's exact index and package bytes are handed to the running
         control-api container, which imports them with its own sync service.
+        ``companions`` are further Recipes of the same index, whose packages
+        travel with it.
         """
         assert self.bundle is not None
         result = self._run_command(
@@ -2156,7 +2240,10 @@ class SparkLifecycle:
                 {
                     "request_key": request_key,
                     "index": fixture.index_bytes.decode("utf-8"),
-                    "package": base64.b64encode(fixture.package_bytes).decode("ascii"),
+                    "packages": [
+                        base64.b64encode(value.package_bytes).decode("ascii")
+                        for value in (fixture, *companions)
+                    ],
                 }
             ),
         )
@@ -2522,7 +2609,7 @@ class SparkLifecycle:
             )
             _validate_canary_cleanup_application(
                 cleanup_application,
-                installation_id=installation_id,
+                installation_ids=[installation_id],
                 run_id=run_id,
             )
             completed.append("stopped")

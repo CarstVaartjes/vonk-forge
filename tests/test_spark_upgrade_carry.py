@@ -133,3 +133,63 @@ def test_a_load_that_replaces_the_workload_names_the_run_that_now_serves():
     assert lane._serving_identity(results) == (installation, new_run)
     with pytest.raises(LifecycleError):
         lane._serving_identity([results[0], results[1]])
+
+
+def _scenario_lane() -> carry.UpgradeCarryLifecycle:
+    import threading
+
+    lane = _lane([])
+    lane._lock = threading.Lock()
+    lane._phase = "baseline-install"
+    return lane
+
+
+def _failing() -> dict[str, object]:
+    raise LifecycleError("the second install was refused")
+
+
+def test_an_observed_phase_that_fails_is_reported_and_does_not_fail_the_lane(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(carry, "OBSERVED_PHASES", frozenset({"new-phase"}))
+    lane = _scenario_lane()
+    lane._run_scenario("new-phase", _failing)
+    assert lane.evidence.observed == [
+        {
+            "phase": "new-phase",
+            "status": "failed",
+            "error": "LifecycleError: the second install was refused",
+        }
+    ]
+    assert "::warning title=Observed upgrade-carry phase new-phase failed" in (
+        capsys.readouterr().out
+    )
+
+
+def test_an_observed_phase_that_crashes_on_a_surprise_is_still_only_observed(
+    monkeypatch,
+):
+    monkeypatch.setattr(carry, "OBSERVED_PHASES", frozenset({"new-phase"}))
+    lane = _scenario_lane()
+    lane._run_scenario("new-phase", lambda: {}["missing"])
+    assert lane.evidence.observed[0]["status"] == "failed"
+
+
+def test_a_phase_taken_out_of_the_observed_set_gates_the_lane(monkeypatch):
+    # Promoting a phase to gating is deleting its name from OBSERVED_PHASES.
+    monkeypatch.setattr(carry, "OBSERVED_PHASES", frozenset())
+    lane = _scenario_lane()
+    with pytest.raises(LifecycleError, match="phase new-phase"):
+        lane._run_scenario("new-phase", _failing)
+    assert lane.evidence.observed == []
+
+
+def test_an_observed_phase_that_passes_leaves_its_evidence_in_the_report(
+    monkeypatch,
+):
+    monkeypatch.setattr(carry, "OBSERVED_PHASES", frozenset({"new-phase"}))
+    lane = _scenario_lane()
+    lane._run_scenario("new-phase", lambda: {"image_digest": "sha256:" + "a" * 64})
+    (record,) = lane.evidence.observed
+    assert record["status"] == "passed"
+    assert str(record["image_digest"]).startswith("sha256:")
