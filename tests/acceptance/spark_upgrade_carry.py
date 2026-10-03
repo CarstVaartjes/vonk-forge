@@ -82,8 +82,9 @@ OVERLAY_VARIABLE = "VONK_ACCEPTANCE_COMPOSE_OVERLAY"
 # Phases that report but do not gate promotion. A new phase starts here while
 # the platform change it needs may not be in a promoted release yet: the pull
 # request's proof run judges it against the promoted release, and a failure is
-# a warning and a line in the report. Making it gating is deleting its name.
-OBSERVED_PHASES: frozenset[str] = frozenset({"sibling-recipes"})
+# a warning and a line in the report. Making it gating is deleting its name
+# (sibling-recipes was observed until a hardware run showed it pass, and gates now).
+OBSERVED_PHASES: frozenset[str] = frozenset()
 
 
 @dataclass
