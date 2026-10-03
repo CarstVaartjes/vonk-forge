@@ -169,16 +169,10 @@ _REPLACED_CONSTRAINT_NAMES = frozenset({"uq_control_process_heartbeats_kind"})
 
 # A table the model retired is kept with its rows (schema reconciliation never
 # drops data), but its foreign keys must not outlive it: a ``RESTRICT`` key
-# would refuse the deletion of the revision or build a retained row names. Only
-# the keys are dropped; nothing reads or writes the table any more.
-_RETIRED_TABLE_FOREIGN_KEYS = {
-    "runtime_image_authorizations": frozenset(
-        {
-            "fk_runtime_image_authorizations_recipe_revision",
-            "fk_runtime_image_authorizations_build",
-        }
-    )
-}
+# would refuse the deletion of the revision or build a retained row names. Every
+# key on a retired table is dropped, whatever it was named; nothing reads or
+# writes the table any more.
+_RETIRED_TABLES = frozenset({"runtime_image_authorizations"})
 
 
 def _schema_difference_key(difference: tuple[object, ...]) -> tuple[str, str | None]:
@@ -457,11 +451,11 @@ def _release_retired_table_foreign_keys(connection: Connection, ops: Any) -> Non
 
     inspector = inspect(connection)
     live_tables = set(inspector.get_table_names())
-    for table_name, names in sorted(_RETIRED_TABLE_FOREIGN_KEYS.items()):
-        if table_name not in live_tables:
-            continue
-        live = {key["name"] for key in inspector.get_foreign_keys(table_name)}
-        for name in sorted(names & live):
+    for table_name in sorted(_RETIRED_TABLES & live_tables):
+        for key in inspector.get_foreign_keys(table_name):
+            name = key["name"]
+            if not name:
+                continue
             try:
                 with connection.begin_nested():
                     ops.drop_constraint(name, table_name, type_="foreignkey")
