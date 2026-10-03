@@ -617,6 +617,75 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
     assert view.result["reason"] == "digest mismatch"
 
 
+@pytest.mark.parametrize("running", [False, True])
+def test_abandon_closes_only_a_parked_distribution_child(
+    agent_system,  # noqa: F811
+    running: bool,
+) -> None:
+    _client, services, _tokens, clock = agent_system
+    distribution = DistributionService(
+        MemoryObjectSource(), clock=clock, sessions=services.sessions
+    )
+    executor = DurableDistributionPhaseExecutor(
+        services.sessions, services.operations, distribution, clock=clock
+    )
+    with services.sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        node.workload_intent_ordinal = 1
+        child = Job(
+            id=str(uuid4()),
+            request_id=str(uuid4()),
+            kind="artifact-distribution",
+            state="queued",
+            actor="test",
+            authority_revision="f" * 64,
+            targets=[NODE_A],
+            payload_digest="0" * 64,
+            payload={
+                "workload_intent_ordinal": 1,
+                "cached_nodes": [],
+                "target_totals": {NODE_A: 26},
+            },
+            result=None,
+            created_at=clock.now,
+            updated_at=clock.now,
+        )
+        session.add(child)
+        session.flush()
+        services.operations.enqueue_in_session(
+            session,
+            child.id,
+            NODE_A,
+            "artifact.distribution.v1",
+            "f" * 64,
+            ArtifactDistributionPayload(plan_digest="f" * 64).model_dump(mode="json"),
+            operation_id=str(uuid4()),
+        )
+        operation = (
+            session.query(AgentOperation).filter_by(parent_job_id=child.id).one()
+        )
+        operation.state = "running" if running else "waiting-for-operator"
+        operation.current_attempt = 1
+        child.state = "waiting-for-operator"
+        child_id, operation_id = child.id, operation.id
+
+    with services.sessions.begin() as session:
+        closed = executor.abandon(session, child_id, clock.now, reason="cancelled")
+    assert closed is not running
+    with services.sessions() as session:
+        assert session.get(AgentOperation, operation_id).state == (
+            "running" if running else "cancelled"
+        )
+        assert session.get(Job, child_id).state == (
+            "waiting-for-operator" if running else "cancelled"
+        )
+    if not running:
+        assert executor.get(child_id).state == "cancelled"
+    with services.sessions.begin() as session:
+        assert not executor.abandon(session, str(uuid4()), clock.now, reason="x")
+
+
 @pytest.mark.parametrize(
     ("failure_kind", "retried"),
     [("temporary-dependency", True), ("integrity-failure", False)],

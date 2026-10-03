@@ -2213,6 +2213,16 @@ class RecipeLifecyclePhaseExecutor:
             result={"final_verified": False, **evidence}, waiting=True
         )
 
+    def abandon(
+        self, session: Session, operation_id: str, now: datetime, *, reason: str
+    ) -> bool:
+        """Close a parked idempotent artifact child; lifecycle children never are."""
+
+        abandon = getattr(self._artifact_executor, "abandon", None)
+        return bool(
+            callable(abandon) and abandon(session, operation_id, now, reason=reason)
+        )
+
     def get(self, operation_id: str) -> Any:
         """Resolve an artifact child first, then an existing recipe child."""
 
@@ -7032,6 +7042,25 @@ class RunSwitchOperationService:
                     ):
                         _complete_cancellation(job, current, now)
                         return True
+            if child.state == "waiting-for-operator" and checkpoint_cancellation:
+                # A cancelled order needs no operator for an idempotent
+                # transfer: nothing is running, so close its parked operations
+                # (copied bytes stay on the Spark) and finish the cancellation
+                # instead of waiting for an owner that has nothing to resume.
+                with self._sessions.begin() as session:
+                    job = checkpoint_job(session)
+                    if job is None:
+                        return False
+                    current = _read_progress(job.result)
+                    if (
+                        _checkpoint_matches(
+                            job, current, phase_index, item_index, child_id
+                        )
+                        and current.get("cancellation")
+                        and self._abandon_idempotent_child(session, child_id, now)
+                    ):
+                        _complete_cancellation(job, current, now)
+                        return True
             if child.state not in _TERMINAL_STATES or child.state != "succeeded":
                 established = _established_start_effect(
                     self._lifecycle, plan.phases[phase_index], child
@@ -8010,6 +8039,24 @@ class RunSwitchOperationService:
                 cause or "expired",
             )
         return True
+
+    def _abandon_idempotent_child(
+        self, session: Session, operation_id: str, now: datetime
+    ) -> bool:
+        """Ask the phase executor to close a parked idempotent child, if it can."""
+
+        abandon = getattr(self._phase_executor, "abandon", None)
+        if not callable(abandon):
+            return False
+        return bool(
+            abandon(
+                session,
+                operation_id,
+                now,
+                reason="Cancelled with its Run/Switch order; copied bytes remain "
+                "on the Spark for reuse",
+            )
+        )
 
     def _get_child_operation(self, operation_id: str) -> Any:
         getter = getattr(self._phase_executor, "get", None)

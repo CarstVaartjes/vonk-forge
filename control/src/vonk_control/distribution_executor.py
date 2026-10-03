@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import TypeAdapter
@@ -23,7 +23,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .agent_jobs import AgentJobService
+from .agent_jobs import AgentJobService, abandon_idempotent_job_in_session
 from .bounded_json import sequence
 from .content_identity import ImageContent, same_image
 from .distribution import DistributionService
@@ -343,6 +343,20 @@ class DurableDistributionPhaseExecutor:
                 phase=phase,
             ),
         )
+
+    def abandon(
+        self, session: Session, operation_id: str, now: datetime, *, reason: str
+    ) -> bool:
+        """Close a parked distribution child its owner cancelled.
+
+        Idempotent and content-addressed: finished objects and partial files
+        stay on the Spark for the next transfer.
+        """
+
+        child = session.get(Job, operation_id)
+        if child is None or child.kind != "artifact-distribution":
+            return False
+        return abandon_idempotent_job_in_session(session, child.id, now, reason=reason)
 
     def get(self, operation_id: str) -> Any:
         with self._sessions() as session:

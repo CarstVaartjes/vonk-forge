@@ -320,6 +320,48 @@ def _abandon_operation(operation: StoredOperation, job_id: str, now: datetime) -
     operation.updated_at = now
 
 
+def abandon_idempotent_job_in_session(
+    session: Session, job_id: str, now: datetime, *, reason: str
+) -> bool:
+    """Close a job of idempotent operations that its owner no longer wants.
+
+    Parked and not-yet-issued operations are cancelled, then the job. Whatever
+    the transfers already left on the Spark (finished objects, partial files)
+    stays for the next request to reuse. Returns ``False``, changing nothing,
+    when the job holds another kind of operation or one that is still running:
+    that one reports its own outcome.
+    """
+
+    job = session.scalar(select(Job).where(Job.id == job_id).with_for_update(of=Job))
+    if job is None:
+        return False
+    operations = tuple(
+        session.scalars(
+            select(StoredOperation)
+            .where(StoredOperation.parent_job_id == job_id)
+            .with_for_update(of=StoredOperation)
+        )
+    )
+    if not operations or any(
+        operation.kind not in _ABANDONABLE_OPERATIONS or operation.state == "running"
+        for operation in operations
+    ):
+        return False
+    for operation in operations:
+        if operation.state in {"queued", "waiting-for-operator"}:
+            operation.state = "cancelled"
+            operation.retry_disposition = None
+            operation.retry_disposition_attempt = None
+            operation.retry_due_at = None
+            operation.status_reason = reason[:512]
+            operation.updated_at = now
+    if job.state not in _ENDED_PARENT_STATES:
+        job.state = "cancelled"
+        job.status_reason = reason[:1024]
+        job.updated_at = now
+    return True
+
+
 _GRANT_LIFETIME = timedelta(hours=1)
 
 
