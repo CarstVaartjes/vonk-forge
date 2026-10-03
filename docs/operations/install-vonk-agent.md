@@ -55,8 +55,10 @@ at most one additional minute for an in-flight idle claim. This keeps builder
 and workload admission current without restarting the agent. A failed report
 does not advance the refresh deadline; normal bounded retries still apply.
 The systemd unit uses `Type=notify` and a watchdog. The agent reports readiness
-after local state recovery, then refreshes its watchdog only after a completed
-control-loop step or a handled retry. Startup inventory failures such as a late
+after local state recovery, then refreshes its watchdog after a completed
+control-loop step or a handled retry, and on every accepted lease renewal while
+an operation runs, so a transfer longer than the watchdog period is not
+restarted while it makes progress. Startup inventory failures such as a late
 Podman/NVIDIA/CDI runtime stay in-process with bounded exponential backoff.
 Low free space on the state database filesystem is reported in systemd status
 and authenticated inventory. The agent holds a 64 MiB reserve file when at

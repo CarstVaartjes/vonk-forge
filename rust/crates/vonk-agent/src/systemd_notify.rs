@@ -23,6 +23,10 @@ pub fn progress(status: &str) {
     notify(&progress_payload(status, watchdog_enabled()));
 }
 
+/// Feed the service watchdog. The control loop calls this between steps, and a
+/// running operation calls it on every accepted lease renewal: the unit's
+/// `WatchdogSec` is shorter than a large model copy, so the loop alone cannot
+/// keep a healthy agent alive through one.
 pub fn watchdog() {
     if watchdog_enabled() {
         notify("WATCHDOG=1");

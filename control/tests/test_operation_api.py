@@ -809,14 +809,6 @@ def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
     jobs.wait_for_operator(first, "operator must inspect the effect")
 
     services.resume_job(job_id)
-
-    resumed = _claim_parked(jobs)
-    assert resumed is not None
-    assert fenced_operation(sessions, resumed).id == operation.id
-    assert (
-        fenced_attempt(sessions, resumed).attempt
-        == fenced_attempt(sessions, first).attempt + 1
-    )
     with sessions() as session:
         stored_job = session.get(Job, job_id)
         stored_operation = session.get(AgentOperation, operation.id)
@@ -827,6 +819,19 @@ def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
             stored_operation.retry_disposition_attempt
             == fenced_attempt(sessions, first).attempt
         )
+
+    resumed = _claim_parked(jobs)
+    assert resumed is not None
+    assert fenced_operation(sessions, resumed).id == operation.id
+    assert (
+        fenced_attempt(sessions, resumed).attempt
+        == fenced_attempt(sessions, first).attempt + 1
+    )
+    with sessions() as session:
+        stored_operation = session.get(AgentOperation, operation.id)
+        # The claim consumed the authorisation the operator granted.
+        assert stored_operation is not None
+        assert stored_operation.retry_disposition is None
 
 
 @pytest.mark.parametrize(

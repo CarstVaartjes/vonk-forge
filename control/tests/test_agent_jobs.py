@@ -2230,6 +2230,207 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
     assert job_state(sessions, operation.parent_job_id).state == "succeeded"
 
 
+_RESTART_INTERRUPTED = {
+    "error_code": "agent_restart_interrupted",
+    "failure_kind": "uncertain-effect",
+    "reason": "agent restarted with an operation in progress",
+    "uncertain": True,
+}
+
+
+def _restart_interrupted_result(claim, operation_kind: str):
+    from vonk_agent_protocol import AgentResult
+
+    return AgentResult.model_validate_json(
+        json.dumps(
+            {
+                "fence": claim.fence,
+                "state": "waiting-for-operator",
+                "result": {**_RESTART_INTERRUPTED, "operation": operation_kind},
+            }
+        )
+    )
+
+
+def _claim_until_due(jobs, sessions, clock, operation_id: str, *, rounds: int = 4):
+    """Poll as the agent does, advancing to each scheduled retry time."""
+    for _ in range(rounds):
+        claim = claim_agent(jobs, NODE_A, "serial-a")
+        if claim is not None:
+            return claim
+        with sessions() as session:
+            stored = session.get(AgentOperation, operation_id)
+            if stored.retry_due_at is None:
+                return None
+            clock.now = max(clock.now, stored.retry_due_at.replace(tzinfo=UTC))
+    return None
+
+
+def test_distribution_interrupted_twice_by_agent_restart_resumes_without_operator(
+    service,
+) -> None:
+    """Live regression: a second restart parked the transfer behind an operator.
+
+    The first interruption scheduled a retry. The claim that issued attempt 2
+    left that retry authorisation on the row, so when attempt 2's agent
+    restarted past its lease, the late restart receipt parked the order with an
+    authorisation for the wrong attempt: neither the claim predicate nor the
+    recovery scan could ever pick it up.
+    """
+
+    jobs, sessions, clock = service
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.heartbeat(
+        claim, {"phase": "copying", "completed_bytes": 100, "completed_items": 1}, 30
+    )
+    clock.advance(seconds=45)
+    assert jobs.record_late_result(_restart_interrupted_result(claim, kind))
+    claim = _claim_until_due(jobs, sessions, clock, operation.id)
+    assert claim is not None and fenced_attempt(sessions, claim).attempt == 2
+    resumed_progress = fenced_attempt(sessions, claim).progress
+    assert resumed_progress is not None and resumed_progress["completed_bytes"] == 100
+
+    clock.advance(seconds=45)
+    assert jobs.record_late_result(_restart_interrupted_result(claim, kind))
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored.retry_due_at is not None
+        assert "retry scheduled at" in stored.status_reason
+    assert job_state(sessions, operation.parent_job_id).state == "queued"
+
+    third = _claim_until_due(jobs, sessions, clock, operation.id)
+    assert third is not None and fenced_attempt(sessions, third).attempt == 3
+    assert third.payload == claim.payload
+    jobs.succeed(third, {"downloaded_bytes": 100})
+    assert job_state(sessions, operation.parent_job_id).state == "succeeded"
+
+
+@pytest.mark.parametrize("progresses", [False, True])
+def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
+    service, progresses: bool
+) -> None:
+    """A crash loop keeps its request but is throttled and named, never silent.
+
+    A transfer that copies new bytes between restarts is healthy recovery and
+    keeps the ordinary short backoff.
+    """
+
+    jobs, sessions, clock = service
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+    )
+    delays: list[float] = []
+    reasons: list[str] = []
+    for attempt_number in range(1, 8):
+        claim = _claim_until_due(jobs, sessions, clock, operation.id, rounds=12)
+        assert claim is not None
+        assert fenced_attempt(sessions, claim).attempt == attempt_number
+        if progresses or attempt_number == 1:
+            jobs.heartbeat(
+                claim,
+                {
+                    "phase": "copying",
+                    "completed_bytes": 100 * attempt_number,
+                    "completed_items": 1,
+                },
+                30,
+            )
+        clock.advance(seconds=45)
+        assert jobs.record_late_result(_restart_interrupted_result(claim, kind))
+        with sessions() as session:
+            stored = session.get(AgentOperation, operation.id)
+            delays.append(
+                (stored.retry_due_at.replace(tzinfo=UTC) - clock.now).total_seconds()
+            )
+            reasons.append(stored.status_reason)
+
+    assert all("retry scheduled at" in reason for reason in reasons)
+    if progresses:
+        assert max(delays) <= 90
+        assert not any("without copying new bytes" in reason for reason in reasons)
+    else:
+        assert "without copying new bytes" not in reasons[1]
+        assert "agent restarted 3 times in a row" in reasons[3]
+        assert delays[3] >= 30 and delays[4] >= 60 and delays[5] >= 120
+        assert max(delays) <= 600 * 5 // 4
+
+
+def test_distribution_parked_with_a_stale_retry_authorisation_resumes_itself(
+    service,
+) -> None:
+    """A Controller upgrade heals operations already parked in the stuck shape.
+
+    No migration: the row is written exactly as the earlier release left it, an
+    authorisation for attempt 1 on an expired attempt 2 with no retry time.
+    """
+
+    jobs, sessions, clock = service
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    clock.advance(seconds=45)
+    with sessions.begin() as session:
+        stored = session.get(AgentOperation, operation.id)
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        stored.current_attempt = 2
+        attempt.attempt = 2
+        attempt.state = "expired"
+        attempt.result = {**_RESTART_INTERRUPTED, "operation": kind}
+        stored.state = "waiting-for-operator"
+        stored.retry_disposition = "retry"
+        stored.retry_disposition_attempt = 1
+        stored.retry_due_at = None
+        stored.status_reason = "attempt 2 lease expired; the effect is unobserved"
+        session.get(Job, stored.parent_job_id).state = "waiting-for-operator"
+
+    resumed = _claim_until_due(jobs, sessions, clock, operation.id)
+    assert resumed is not None and fenced_attempt(sessions, resumed).attempt == 3
+    assert fenced_operation(sessions, resumed).id == operation.id
+
+
+def test_non_idempotent_operation_interrupted_by_restart_still_waits_for_operator(
+    service,
+) -> None:
+    """A user job's side effects cannot be proved undone, so it is never replayed."""
+
+    jobs, sessions, clock = service
+    vector = json.loads(
+        (
+            Path(__file__).parents[2]
+            / "agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ).read_text()
+    )
+    kind = vector["operation"]
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, vector["payload"]
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    clock.advance(seconds=45)
+    jobs.record_late_result(_restart_interrupted_result(claim, kind))
+    for _ in range(3):
+        assert claim_agent(jobs, NODE_A, "serial-a") is None
+        clock.advance(seconds=3600)
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored.retry_due_at is None
+        assert stored.retry_disposition is None
+        assert stored.current_attempt == 1
+
+
 def test_transient_distribution_failure_recovers_after_repeated_faults_and_restart(
     service,
 ) -> None:

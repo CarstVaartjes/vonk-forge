@@ -55,6 +55,11 @@ const HEARTBEAT_RETRY_FLOOR: Duration = Duration::from_millis(50);
 struct HeartbeatSchedule {
     interval: Duration,
     retry_interval: Duration,
+    /// Called after each accepted renewal: proof the process is alive and the
+    /// Controller still holds this attempt. Production feeds the systemd
+    /// watchdog, which an operation longer than its period would otherwise
+    /// starve (see [`crate::systemd_notify::watchdog`]).
+    renewed: fn(),
 }
 const JOB_CANCEL_EXIT_CODE: u32 = 130;
 const JOB_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
@@ -3013,6 +3018,7 @@ struct RunOncePolicy<'a> {
     runtime_identity: Option<&'a AgentRuntimeIdentity>,
     heartbeat_interval: Duration,
     heartbeat_retry_interval: Duration,
+    lease_renewed: fn(),
 }
 
 pub async fn run_once<C: LoopClient, E: Executor>(
@@ -3033,6 +3039,7 @@ pub async fn run_once<C: LoopClient, E: Executor>(
             runtime_identity,
             heartbeat_interval: HEARTBEAT_INTERVAL,
             heartbeat_retry_interval: HEARTBEAT_RETRY_INTERVAL,
+            lease_renewed: crate::systemd_notify::watchdog,
         },
         || Ok(()),
     )
@@ -3063,6 +3070,7 @@ where
             runtime_identity,
             heartbeat_interval: HEARTBEAT_INTERVAL,
             heartbeat_retry_interval: HEARTBEAT_RETRY_INTERVAL,
+            lease_renewed: crate::systemd_notify::watchdog,
         },
         on_claim_accepted,
     )
@@ -3152,6 +3160,7 @@ where
                 HeartbeatSchedule {
                     interval: policy.heartbeat_interval,
                     retry_interval: policy.heartbeat_retry_interval,
+                    renewed: policy.lease_renewed,
                 },
             );
             let heartbeat_task = tokio::spawn(async move {
@@ -3595,6 +3604,7 @@ async fn run_heartbeats<C: LoopClient>(
         delay = schedule.interval;
         state.apply_heartbeat(&progress, &directive)?;
         lease_deadline.send_replace(directive.deadline);
+        (schedule.renewed)();
         deadline = directive.deadline;
         cancellation_observed |= directive.cancel_requested;
         if directive.cancel_requested {
@@ -5380,6 +5390,7 @@ mod tests {
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(10),
                 heartbeat_retry_interval: Duration::from_millis(1),
+                lease_renewed: crate::systemd_notify::watchdog,
             },
             || Ok(()),
         )
@@ -5398,6 +5409,54 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert!(observed_deadline.lock().unwrap().unwrap() > original.deadline);
         assert!(state.pending_results().unwrap().is_empty());
+    }
+
+    static WATCHDOG_FEEDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    fn count_watchdog_feed() {
+        WATCHDOG_FEEDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_long_execution_keeps_feeding_the_service_watchdog_through_its_renewals() {
+        // The control loop only reaches its own watchdog feed between steps, so
+        // an operation longer than the unit's watchdog period (a large model
+        // copy) was killed and restarted by systemd while it was healthy.
+        let directory = tempdir().unwrap();
+        let heartbeats = Arc::new(Mutex::new(Vec::new()));
+        let client = RecordingClient {
+            cancel_requested: false,
+            claim: Arc::new(Mutex::new(Some(claim()))),
+            fail_heartbeat: false,
+            heartbeats: heartbeats.clone(),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let executor = HeartbeatGatedExecutor {
+            heartbeats,
+            minimum: 3,
+            observed_deadline: Arc::new(Mutex::new(None)),
+        };
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+        let before = WATCHDOG_FEEDS.load(std::sync::atomic::Ordering::SeqCst);
+
+        run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &executor,
+            RunOncePolicy {
+                preflight_fingerprint: None,
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(10),
+                heartbeat_retry_interval: Duration::from_millis(1),
+                lease_renewed: count_watchdog_feed,
+            },
+            || Ok(()),
+        )
+        .await
+        .unwrap();
+
+        assert!(WATCHDOG_FEEDS.load(std::sync::atomic::Ordering::SeqCst) - before >= 3);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -5559,6 +5618,7 @@ mod tests {
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(10),
                 heartbeat_retry_interval: Duration::from_millis(1),
+                lease_renewed: crate::systemd_notify::watchdog,
             },
             || Ok(()),
         )
@@ -5580,6 +5640,7 @@ mod tests {
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(10),
                 heartbeat_retry_interval: Duration::from_millis(1),
+                lease_renewed: crate::systemd_notify::watchdog,
             },
             || Ok(()),
         )
@@ -5688,6 +5749,7 @@ mod tests {
                     runtime_identity: None,
                     heartbeat_interval: Duration::from_millis(10),
                     heartbeat_retry_interval: Duration::from_millis(1),
+                    lease_renewed: crate::systemd_notify::watchdog,
                 },
                 || Ok(()),
             )
@@ -5752,6 +5814,7 @@ mod tests {
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(10),
                 heartbeat_retry_interval: Duration::from_millis(1),
+                lease_renewed: crate::systemd_notify::watchdog,
             },
             || Ok(()),
         )
@@ -5796,6 +5859,7 @@ mod tests {
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(10),
                 heartbeat_retry_interval: Duration::from_millis(1),
+                lease_renewed: crate::systemd_notify::watchdog,
             },
             || Ok(()),
         )
@@ -5835,6 +5899,7 @@ mod tests {
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(1),
                 heartbeat_retry_interval: Duration::from_millis(1),
+                lease_renewed: crate::systemd_notify::watchdog,
             },
             || Ok(()),
         )
@@ -5884,6 +5949,7 @@ mod tests {
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(1),
                 heartbeat_retry_interval: Duration::from_millis(1),
+                lease_renewed: crate::systemd_notify::watchdog,
             },
             || Ok(()),
         )
@@ -5922,6 +5988,7 @@ mod tests {
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(800),
                 heartbeat_retry_interval: HEARTBEAT_RETRY_FLOOR,
+                lease_renewed: crate::systemd_notify::watchdog,
             },
             || Ok(()),
         );
@@ -5976,6 +6043,7 @@ mod tests {
                     runtime_identity: None,
                     heartbeat_interval: Duration::from_millis(10),
                     heartbeat_retry_interval: Duration::from_millis(1),
+                    lease_renewed: crate::systemd_notify::watchdog,
                 },
                 || Ok(()),
             )
@@ -6044,6 +6112,7 @@ mod tests {
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(5),
                 heartbeat_retry_interval: Duration::from_millis(5),
+                lease_renewed: crate::systemd_notify::watchdog,
             },
             || Ok(()),
         )
@@ -6124,6 +6193,7 @@ mod tests {
                     runtime_identity: None,
                     heartbeat_interval: Duration::from_millis(5),
                     heartbeat_retry_interval: Duration::from_millis(5),
+                    lease_renewed: crate::systemd_notify::watchdog,
                 },
                 || Ok(()),
             ),
@@ -6214,6 +6284,7 @@ mod tests {
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_secs(10),
                 heartbeat_retry_interval: Duration::from_millis(1),
+                lease_renewed: crate::systemd_notify::watchdog,
             },
             || Ok(()),
         )
@@ -6359,6 +6430,7 @@ mod tests {
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(1),
                 heartbeat_retry_interval: Duration::from_millis(1),
+                lease_renewed: crate::systemd_notify::watchdog,
             },
             || Ok(()),
         )

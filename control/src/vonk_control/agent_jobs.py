@@ -17,7 +17,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 from sqlalchemy import Boolean, and_, or_, select, update
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, object_session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
 from vonk_agent_protocol import (
@@ -227,14 +227,40 @@ def _safe_retry_failure(kind: str, state: str, result: Mapping[str, object]) -> 
     )
 
 
+def _retry_authorized_for_current_attempt(operation: StoredOperation) -> bool:
+    """Whether a retry is already authorised for the operation's current attempt.
+
+    Authorisation is keyed by attempt.  A disposition written for an earlier
+    attempt has been consumed by the claim that issued the later one, so it
+    never authorises, schedules, or hides the current attempt's recovery.
+    """
+    return (
+        operation.retry_disposition == _RETRY_DISPOSITION
+        and operation.retry_disposition_attempt == operation.current_attempt
+    )
+
+
+def _retry_not_authorized_for_current_attempt() -> ColumnElement[bool]:
+    """SQL form of the negation of :func:`_retry_authorized_for_current_attempt`.
+
+    Written NULL-safe: a row without a disposition, or one whose attempt column
+    is NULL, is simply not authorised.
+    """
+    return or_(
+        StoredOperation.retry_disposition.is_(None),
+        StoredOperation.retry_disposition != _RETRY_DISPOSITION,
+        StoredOperation.retry_disposition_attempt.is_(None),
+        StoredOperation.retry_disposition_attempt != StoredOperation.current_attempt,
+    )
+
+
 def _parked_retry_evidence(
     operation: StoredOperation, attempt: AgentOperationAttempt, now: datetime
 ) -> bool:
     """Prove that a parked current-schema attempt still owns safe recovery."""
     if (
         operation.state != "waiting-for-operator"
-        or operation.retry_disposition is not None
-        or operation.retry_disposition_attempt is not None
+        or _retry_authorized_for_current_attempt(operation)
         or operation.retry_due_at is not None
         or operation.current_attempt < 1
         or operation.current_attempt != attempt.attempt
@@ -265,6 +291,57 @@ def _parked_retry_evidence(
     except (TypeError, ValueError):
         return False
     return _safe_retry_failure(operation.kind, attempt.state, result)
+
+
+#: Consecutive interrupted transfer attempts that copied no new bytes before
+#: the retry rate is relaxed. A transfer that progresses between restarts is
+#: healthy recovery and is never slowed; one that dies without progress is a
+#: crash loop, which a faster retry cannot help.
+_STALLED_INTERRUPTION_LIMIT = 3
+_STALLED_RETRY_BASE_SECONDS = 30
+_STALLED_RETRY_MAX_SECONDS = 600
+_INTERRUPTION_CODES = frozenset(
+    {"agent_restart_interrupted", "operation_outcome_uncertain"}
+)
+
+
+def _completed_bytes(attempt: AgentOperationAttempt | None) -> int:
+    value = None if attempt is None else (attempt.progress or {}).get("completed_bytes")
+    return value if type(value) is int else 0
+
+
+def _stalled_interruptions(operation: StoredOperation) -> int:
+    """Count trailing transfer attempts that ended interrupted without progress."""
+
+    session = object_session(operation)
+    if (
+        session is None
+        or operation.kind != AgentOperation.ARTIFACT_DISTRIBUTION.value
+        or operation.current_attempt < 1
+    ):
+        return 0
+    attempts = list(
+        session.scalars(
+            select(AgentOperationAttempt)
+            .where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt <= operation.current_attempt,
+            )
+            .order_by(AgentOperationAttempt.attempt.desc())
+            .limit(_STALLED_RETRY_MAX_SECONDS // _STALLED_RETRY_BASE_SECONDS + 2)
+        )
+    )
+    stalled = 0
+    for index, attempt in enumerate(attempts):
+        result = attempt.result
+        interrupted = attempt.state in {"expired", "waiting-for-operator"} and (
+            result is None or result.get("error_code") in _INTERRUPTION_CODES
+        )
+        previous = attempts[index + 1] if index + 1 < len(attempts) else None
+        if not interrupted or _completed_bytes(attempt) > _completed_bytes(previous):
+            break
+        stalled += 1
+    return stalled
 
 
 #: An ambiguous agent-package install can leave durable apt/dpkg recovery in
@@ -2381,7 +2458,7 @@ class AgentJobService:
                         StoredOperation.node_id == node_id,
                         StoredOperation.state == "waiting-for-operator",
                         StoredOperation.kind.in_(_RESTART_REISSUE_OPERATIONS),
-                        StoredOperation.retry_disposition.is_(None),
+                        _retry_not_authorized_for_current_attempt(),
                         StoredOperation.retry_due_at.is_(None),
                         Job.state.in_({"queued", "running", "waiting-for-operator"}),
                         *(condition.expression for condition in predicate.common),
@@ -2844,6 +2921,12 @@ class AgentJobService:
             operation.current_attempt += 1
             operation.state = "running"
             operation.retry_due_at = None
+            if operation.kind in _RESTART_REISSUE_OPERATIONS:
+                # This claim consumes the retry authorisation the previous
+                # attempt carried. Leaving it on the running row made the
+                # parked attempt that follows look like it still had one.
+                operation.retry_disposition = None
+                operation.retry_disposition_attempt = None
             # A live attempt has no interrupted reason: keeping the previous
             # one would describe work that is running again.
             operation.status_reason = None
@@ -3522,6 +3605,19 @@ class AgentJobService:
             raise ValueError(
                 "operation cannot be reissued without effect reconciliation"
             )
+        stalled = _stalled_interruptions(operation)
+        crash_loop = stalled >= _STALLED_INTERRUPTION_LIMIT
+        if crash_loop:
+            # Rate, not intent, is what a crash loop bounds: slow down to a
+            # cap while the request stays authorised, and say why.
+            retry_after_seconds = max(
+                retry_after_seconds or 0,
+                min(
+                    _STALLED_RETRY_BASE_SECONDS
+                    * 2 ** (stalled - _STALLED_INTERRUPTION_LIMIT),
+                    _STALLED_RETRY_MAX_SECONDS,
+                ),
+            )
         retry_after = (
             None
             if retry_after_seconds is None
@@ -3545,6 +3641,12 @@ class AgentJobService:
         schedule_reason = (
             f"exact {operation.kind} interrupted; retry scheduled at {due.isoformat()}"
         )
+        if crash_loop:
+            schedule_reason = (
+                f"agent restarted {stalled} times in a row during "
+                f"{operation.kind} without copying new bytes; inspect the "
+                f"Spark's agent journal; retry scheduled at {due.isoformat()}"
+            )
         operation.status_reason = (
             f"{previous_reason}; {schedule_reason}"
             if isinstance(previous_reason, str)
@@ -3683,6 +3785,15 @@ class AgentJobService:
                     operation.status_reason = _lease_expiry_reason(
                         operation, attempt, node, now
                     )
+                    operation.retry_disposition = None
+                    operation.retry_disposition_attempt = None
+                    operation.retry_due_at = None
+                    if operation.kind in _RESTART_REISSUE_OPERATIONS:
+                        # An interrupted exact-resume order reconciles its own
+                        # effect on the next attempt: schedule it here, as the
+                        # claim and sweep paths do, instead of waiting for an
+                        # operator.
+                        self._schedule_safe_retry(operation, now)
                     operation.updated_at = now
                     if parent.state in {"queued", "running"}:
                         self._aggregate_parent(session, operation.parent_job_id)

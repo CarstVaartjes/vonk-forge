@@ -1774,6 +1774,17 @@ def render_payload(
             and payload.get("state") == "succeeded"
         ):
             print("All Sparks already run the current agent; nothing to upgrade.")
+        elif action == "resume":
+            # The Controller answers a resume with the job's identity and its
+            # new state only; the work itself is followed through progress.
+            job_id = payload.get("id")
+            print(
+                f"Resumed job {_text(job_id)}; it is now {_text(payload.get('state'))}."
+            )
+            _field(
+                "Next",
+                f"vonkctl fleet progress {shlex.quote(str(job_id))} --follow",
+            )
         elif action in {"remove", "upgrade"}:
             _field("Action", payload.get("action"))
             _field("State", payload.get("state"))

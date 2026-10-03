@@ -325,8 +325,14 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
                 assert stored is not None and parent_row is not None
                 assert stored.current_attempt == attempt_number
                 assert stored.retry_due_at is not None
+                # A transfer restarting without progress is throttled to a
+                # slower, still bounded rate; every other kind keeps the
+                # ordinary short backoff.
+                ceiling = 750 if kind == "artifact.distribution.v1" else 60
                 assert (
-                    clock.now < stored.retry_due_at <= clock.now + timedelta(seconds=60)
+                    clock.now
+                    < stored.retry_due_at
+                    <= clock.now + timedelta(seconds=ceiling)
                 )
                 assert parent_row.state == "queued"
                 due = stored.retry_due_at
