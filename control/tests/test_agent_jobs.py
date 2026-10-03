@@ -2361,6 +2361,148 @@ def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
         assert max(delays) <= 600 * 5 // 4
 
 
+def _registered_distribution_grant(sessions, clock):
+    source = MemoryObjectSource()
+    model_digest = source.put(b"weights")
+    image_digest = source.put(b"image")
+    assignment = NodeDistributionAssignment.parse(
+        {
+            "assignment_id": str(uuid.uuid4()),
+            "plan_digest": COMMIT,
+            "generation": 1,
+            "node_id": NODE_A,
+            "expires_at": (clock.now + timedelta(hours=1)).isoformat(),
+            "model_artifact_set_sha256": "b" * 64,
+            "objects": [
+                {
+                    "name": "weights",
+                    "sha256": model_digest,
+                    "bytes": 7,
+                    "kind": "model",
+                }
+            ],
+            "oci_image_digest": "sha256:" + image_digest,
+            "oci_image_config_digest": "sha256:" + "9" * 64,
+            "oci_archive_sha256": image_digest,
+        }
+    )
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    source.register_runtime_image(assignment.oci_image_digest, image_digest)
+    distribution = DistributionService(source, clock=clock, sessions=sessions)
+    distribution.register(assignment)
+    return distribution
+
+
+@pytest.mark.parametrize("revoked", [False, True])
+def test_a_retried_distribution_is_issued_a_fresh_grant(service, revoked: bool) -> None:
+    """Live regression: the retry reused the first attempt's expired grant.
+
+    The grant lapses an hour after registration; a transfer parked or backing
+    off for longer was refused ``distribution.expired`` and failed terminally
+    although nothing but time had changed. A revoked grant stays revoked.
+    """
+
+    from vonk_control.distribution import DistributionError
+
+    jobs, sessions, clock = service
+    distribution = _registered_distribution_grant(sessions, clock)
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+    )
+    with sessions.begin() as session:
+        session.get(AgentCertificate, "serial-a").not_after = clock.now + timedelta(
+            hours=12
+        )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    clock.advance(seconds=45)
+    assert jobs.record_late_result(_restart_interrupted_result(claim, kind))
+    # Hours later, with the grant lapsed and its refusal already recorded.
+    clock.advance(seconds=3 * 3600)
+    with pytest.raises(DistributionError, match="expired"):
+        distribution.authorize(node_id=NODE_A, plan_digest=COMMIT)
+    if revoked:
+        distribution.revoke(plan_digest=COMMIT, node_id=NODE_A)
+
+    retry = _claim_until_due(jobs, sessions, clock, operation.id)
+    assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
+    fresh = DistributionService(distribution.source, clock=clock, sessions=sessions)
+    if revoked:
+        with pytest.raises(DistributionError, match="no longer active"):
+            fresh.authorize(node_id=NODE_A, plan_digest=COMMIT)
+    else:
+        grant = fresh.authorize(node_id=NODE_A, plan_digest=COMMIT)
+        assert grant.expires_at > clock.now + timedelta(minutes=30)
+
+
+@pytest.mark.parametrize("sibling_fails_first", [False, True])
+def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retry(
+    service, sibling_fails_first: bool
+) -> None:
+    """Live regression: one node's terminal failure stranded the other's retry.
+
+    The job failed, so the sibling's scheduled retry could never be claimed
+    (``parent-not-claimable``) and no operator action applied to it.
+    """
+
+    from vonk_agent_protocol import AgentResult
+
+    jobs, sessions, clock = service
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    job = parent(sessions, clock)
+    first = jobs.enqueue(job.id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT})
+    second = jobs.enqueue(job.id, NODE_B, kind, COMMIT, {"plan_digest": COMMIT})
+    with sessions.begin() as session:
+        for serial in ("serial-a", "serial-b"):
+            session.get(AgentCertificate, serial).not_after = clock.now + timedelta(
+                hours=4
+            )
+    claim_a = claim_agent(jobs, NODE_A, "serial-a")
+    claim_b = claim_agent(jobs, NODE_B, "serial-b")
+    assert claim_a is not None and claim_b is not None
+
+    def refuse() -> None:
+        jobs.record_result(
+            AgentResult.model_validate_json(
+                json.dumps(
+                    {
+                        "fence": claim_b.fence,
+                        "state": "failed",
+                        "result": {
+                            "status": "failed",
+                            "error_code": "artifact_distribution_failed",
+                            "reason": "Controller distribution could not be verified",
+                            "failure_kind": "invalid-authority",
+                        },
+                    }
+                )
+            )
+        )
+
+    # The second node keeps its lease; the first node's agent restarted and lost it.
+    clock.advance(seconds=25)
+    jobs.heartbeat(claim_b, None, 30)
+    clock.advance(seconds=20)
+    if sibling_fails_first:
+        # The late restart receipt of the first node arrives after the job ended.
+        refuse()
+        assert jobs.record_late_result(_restart_interrupted_result(claim_a, kind))
+    else:
+        assert jobs.record_late_result(_restart_interrupted_result(claim_a, kind))
+        refuse()
+
+    assert job_state(sessions, job.id).state == "failed"
+    with sessions() as session:
+        parked = session.get(AgentOperation, first.id)
+        assert parked.state == "cancelled"
+        assert parked.retry_due_at is None and parked.retry_disposition is None
+        assert "abandoned" in parked.status_reason
+        assert session.get(AgentOperation, second.id).state == "failed"
+
+
 def test_distribution_parked_with_a_stale_retry_authorisation_resumes_itself(
     service,
 ) -> None:
