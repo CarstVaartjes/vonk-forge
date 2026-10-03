@@ -26,6 +26,7 @@ from .compiled_execution_plan import (
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
 )
+from .content_identity import same_image, same_model_object
 from .disk_reservations import (
     models_stored_on_node,
     outstanding_disk_reservation_bytes,
@@ -580,8 +581,9 @@ class InstallAdmissionService:
                 if models_by_artifact.get(digest) in stored_models
                 or any(
                     present_item.kind == "model"
-                    and present_item.digest == digest
-                    and present_item.size_bytes == size
+                    and same_model_object(
+                        present_item, {"sha256": digest, "size_bytes": size}
+                    )
                     for present_item in present
                 )
             )
@@ -977,9 +979,8 @@ def _compiled_build_matches(
         isinstance(identity, Mapping)
         and identity.get("recipe_revision_sha256") == recipe_digest
         and isinstance(image, Mapping)
-        and image.get("image_digest") == build.image_digest
-        and image.get("oci_layout_sha256") == build.oci_layout_sha256
-        and image.get("image_bytes") == build.image_bytes
+        and build.image_bytes is not None
+        and same_image(image, build)
     )
 
 

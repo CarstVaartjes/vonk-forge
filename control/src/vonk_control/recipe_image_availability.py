@@ -71,6 +71,7 @@ from .cache_removal_review import (
 )
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
+from .content_identity import ImageContent, same_image
 from .failure_classification import is_redownload, is_security_failure
 from .model_cache import (
     ModelCacheConflict,
@@ -1423,9 +1424,11 @@ class RecipeImageAvailabilityService:
                         )
                     else:
                         receipt = self._storage.read_receipt(archive)
-                        if (
-                            receipt.oci_archive_sha256 == archive
-                            and receipt.image_bytes == expected_bytes
+                        if same_image(
+                            receipt,
+                            ImageContent(
+                                archive_sha256=archive, image_bytes=expected_bytes
+                            ),
                         ):
                             # Managed publication records only verified bytes;
                             # the exact receipt plus regular-file size is the
@@ -5055,16 +5058,7 @@ class RecipeImageAvailabilityService:
             else:
                 existing_reference = read_runtime_image_reference_intent(existing)
                 if existing_reference != reference:
-                    same_output = (
-                        existing_reference.operation_id == reference.operation_id
-                        and existing_reference.recipe_revision_id
-                        == reference.recipe_revision_id
-                        and existing_reference.oci_archive_sha256
-                        == reference.oci_archive_sha256
-                        and existing_reference.image_digest == reference.image_digest
-                        and existing_reference.image_bytes == reference.image_bytes
-                    )
-                    if not same_output:
+                    if not same_image(existing_reference, reference):
                         _LOGGER.warning(
                             "availability operation %s now publishes archive %s "
                             "instead of %s",

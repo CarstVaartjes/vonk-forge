@@ -1,0 +1,1048 @@
+{
+  "schema": 1,
+  "sites": [
+    {
+      "path": "control/src/vonk_control/artifact_reference_scan.py",
+      "function": "_run_switch_runtime_image_intent",
+      "kind": "provenance_comparison",
+      "expression": "intent.build_id == expected_build_id",
+      "reason": "Garbage-collection keep-guard: an active job's image reference must match its owner plan, and a mismatch defers removal (fails closed for deletion) instead of widening or deleting anything."
+    },
+    {
+      "path": "control/src/vonk_control/artifact_reference_scan.py",
+      "function": "_run_switch_runtime_image_intent",
+      "kind": "provenance_comparison",
+      "expression": "intent.recipe_revision_id == plan.recipe_revision_id",
+      "reason": "Garbage-collection keep-guard: an active job's image reference must match its owner plan, and a mismatch defers removal (fails closed for deletion) instead of widening or deleting anything."
+    },
+    {
+      "path": "control/src/vonk_control/artifact_reference_scan.py",
+      "function": "runtime_image_reference_findings",
+      "kind": "provenance_comparison",
+      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision.id",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/attempt_residues.py",
+      "function": "superseded_plan_ids",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == installation.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/attempt_residues.py",
+      "function": "superseded_plan_ids",
+      "kind": "provenance_filter",
+      "expression": "RecipeInstallation.recipe_revision_id.in_(same_recipe)",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/attempt_residues.py",
+      "function": "unowned_never_installed",
+      "kind": "provenance_comparison",
+      "expression": "RecipeInstallation.recipe_revision_id == recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "function": "build_recipe_image_availability.authority",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "function": "build_recipe_image_availability.builder.admission_guard",
+      "kind": "provenance_comparison",
+      "expression": "parent.payload.get('recipe_revision_id') != revision_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "function": "build_recipe_image_availability.recover_build",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == revision_id",
+      "reason": "Joins an in-flight build of the same revision that the accepted availability request already names; the consumer scan is revision-scoped, and sharing an in-flight build across revisions is not attempted."
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "function": "build_recipe_image_availability.recover_build",
+      "kind": "provenance_comparison",
+      "expression": "revision_id != resolution.recipe_revision_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "function": "build_recipe_image_availability.recover_build",
+      "kind": "provenance_comparison",
+      "expression": "str(request.build_id) != candidate.id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "function": "build_recipe_image_availability.recover_build",
+      "kind": "provenance_comparison",
+      "expression": "str(request.recipe_revision_id) != revision_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_entities.py",
+      "function": "CatalogEntityService.revise",
+      "kind": "provenance_comparison",
+      "expression": "(root.kind, root.publisher, root.slug) != (kind, publisher, slug)",
+      "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_entities.py",
+      "function": "_rederive_projection",
+      "kind": "provenance_comparison",
+      "expression": "CatalogRecipeModelReference.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._delete_dead_rows",
+      "kind": "provenance_comparison",
+      "expression": "CatalogRecipeModelReference.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._delete_dead_rows",
+      "kind": "provenance_comparison",
+      "expression": "ClusterMapping.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._delete_dead_rows",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._delete_dead_rows",
+      "kind": "provenance_comparison",
+      "expression": "RecipeInstallation.recipe_build_id == RecipeBuild.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._delete_dead_rows",
+      "kind": "provenance_comparison",
+      "expression": "RuntimeImageAuthorization.build_id == RecipeBuild.id",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._delete_dead_rows",
+      "kind": "provenance_comparison",
+      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision.id",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._remove",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._remove",
+      "kind": "provenance_comparison",
+      "expression": "RecipeInstallation.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._require_no_remaining_reference",
+      "kind": "provenance_comparison",
+      "expression": "ClusterMapping.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._require_no_remaining_reference",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._require_no_remaining_reference",
+      "kind": "provenance_comparison",
+      "expression": "RecipeInstallation.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._require_no_remaining_reference",
+      "kind": "provenance_comparison",
+      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision.id",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._require_unused",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._require_unused",
+      "kind": "provenance_comparison",
+      "expression": "RecipeInstallation.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._require_unused",
+      "kind": "provenance_comparison",
+      "expression": "RuntimeImageAuthorization.recipe_revision_id != revision.id",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._require_unused",
+      "kind": "provenance_comparison",
+      "expression": "model.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_collection.py",
+      "function": "CatalogRevisionCollector._require_unused",
+      "kind": "provenance_filter",
+      "expression": "RuntimeImageAuthorization.build_id.in_(builds)",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_service.py",
+      "function": "_get_active_recipe",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.document_id == recipe_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_service.py",
+      "function": "_get_active_recipe",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == recipe_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_sync.py",
+      "function": "ManagedRecipeCatalogSyncService._apply",
+      "kind": "provenance_comparison",
+      "expression": "(previous.publisher, previous.slug) != (item.publisher, item.slug)",
+      "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
+    },
+    {
+      "path": "control/src/vonk_control/cluster_mappings.py",
+      "function": "ClusterMappingService.materialize",
+      "kind": "provenance_comparison",
+      "expression": "plan.placement_digest != _digest(_plan_identity(plan.recipe_revision_id, plan.recipe_content_sha256, plan.topology_name, plan.generation, plan.parameters, plan.nodes))",
+      "reason": "Integrity digest of the mapping plan itself, which names the revision the mapping was planned for."
+    },
+    {
+      "path": "control/src/vonk_control/disk_reservations.py",
+      "function": "outstanding_disk_reservation_bytes",
+      "kind": "provenance_comparison",
+      "expression": "plan.recipe_revision_id == installation.recipe_revision_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery.py",
+      "function": "_recovery_authority",
+      "kind": "provenance_comparison",
+      "expression": "run_plan.get('recipe_revision_id') != installation.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery.py",
+      "function": "_singleton_recovery_authority",
+      "kind": "provenance_comparison",
+      "expression": "installation_plan.get('recipe_revision_id') != revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery.py",
+      "function": "_singleton_recovery_authority",
+      "kind": "provenance_comparison",
+      "expression": "run_plan.get('recipe_revision_id') != revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery.py",
+      "function": "_singleton_recovery_authority",
+      "kind": "provenance_comparison",
+      "expression": "str(accepted_start.recipe_revision_id) != revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery.py",
+      "function": "_validate_multi_start_payload",
+      "kind": "provenance_comparison",
+      "expression": "stored_installation.recipe_revision_id != installation.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery.py",
+      "function": "_validate_multi_start_payload",
+      "kind": "provenance_comparison",
+      "expression": "stored_run.recipe_revision_id != installation.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/distribution_executor.py",
+      "function": "CompositeDistributionPhaseExecutor._prepare_runtime_image",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._assignment_state",
+      "kind": "provenance_comparison",
+      "expression": "ClusterMapping.recipe_revision_id == assignment.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._assignment_state",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == assignment.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._assignment_state",
+      "kind": "provenance_comparison",
+      "expression": "RecipeInstallation.recipe_revision_id == assignment.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._cancel_owned_preparations",
+      "kind": "provenance_comparison",
+      "expression": "item.recipe_revision_id == revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._follow_newest_recipe_revisions",
+      "kind": "provenance_comparison",
+      "expression": "item.recipe_revision_id != accepted[item.id].recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._loaded_recipe_update",
+      "kind": "provenance_comparison",
+      "expression": "assignment.recipe_id == recipe.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._loaded_recipe_update",
+      "kind": "provenance_comparison",
+      "expression": "loaded.recipe_revision_id == newest.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._observed_assignment_state",
+      "kind": "provenance_comparison",
+      "expression": "assignment.recipe_id == recipe_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._reserve_saved_profile_references",
+      "kind": "provenance_comparison",
+      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision.id",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._validate_draft_review_identity",
+      "kind": "provenance_comparison",
+      "expression": "assignment.recipe_id != document_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._validate_draft_review_identity",
+      "kind": "provenance_comparison",
+      "expression": "assignment.recipe_revision_id != revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "RunSwitchFleetProfileAdapter._adopt_child",
+      "kind": "provenance_comparison",
+      "expression": "plan.recipe_revision_id == assignment.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_projection.py",
+      "function": "FleetProjection._installation_rows",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == RecipeInstallation.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_projection.py",
+      "function": "FleetProjection._run_rows",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == RecipeInstallation.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "function": "_job_run_authority",
+      "kind": "provenance_comparison",
+      "expression": "request.recipe_revision_id != authority.revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "function": "_load_run_authority",
+      "kind": "provenance_comparison",
+      "expression": "mapping.recipe_revision_id != installation.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "function": "_load_run_authority",
+      "kind": "provenance_comparison",
+      "expression": "stored.recipe_revision_id != installation.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "function": "_service_run_authority",
+      "kind": "provenance_comparison",
+      "expression": "start.recipe_revision_id != authority.revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "function": "_service_run_authority",
+      "kind": "provenance_comparison",
+      "expression": "stored.recipe_revision_id != authority.revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "function": "_service_stop_authority",
+      "kind": "provenance_comparison",
+      "expression": "stop.recipe_revision_id != authority.revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "function": "_validate_recovery_start_generation",
+      "kind": "provenance_comparison",
+      "expression": "start.recipe_revision_id != authority.revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/install_admission.py",
+      "function": "InstallAdmissionService._accept_install_in_session",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/install_admission.py",
+      "function": "InstallAdmissionService._accept_install_in_session",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.id == plan.recipe_build_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/library_assessment.py",
+      "function": "LibraryAssessment._cache",
+      "kind": "provenance_comparison",
+      "expression": "image.get('recipe_revision_id') != recipe.identity.recipe_revision_id",
+      "reason": "Request-response binding: the cache resolution answers for exactly the recipe revision that was asked, and an answer for another revision is refused; compares the asked identity with the answered one."
+    },
+    {
+      "path": "control/src/vonk_control/library_operational.py",
+      "function": "load_placement_operational_evidence",
+      "kind": "provenance_comparison",
+      "expression": "ClusterMapping.recipe_revision_id == recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/library_operational.py",
+      "function": "load_placement_operational_evidence",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/library_operational.py",
+      "function": "load_placement_operational_evidence",
+      "kind": "provenance_comparison",
+      "expression": "RecipeInstallation.recipe_revision_id == recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/library_projection.py",
+      "function": "LibraryProjection._recipe_projection",
+      "kind": "provenance_comparison",
+      "expression": "(key := (selection.model.publisher, selection.model.slug, selection.model.content_sha256)) in model_by_key",
+      "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
+    },
+    {
+      "path": "control/src/vonk_control/library_projection.py",
+      "function": "LibraryProjection.authoring_recipe_detail",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.document_id == recipe_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/library_projection.py",
+      "function": "LibraryProjection.recipe_library",
+      "kind": "provenance_comparison",
+      "expression": "(selection.model.publisher, selection.model.slug, selection.model.content_sha256) in selected_keys",
+      "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.resolve_latest_cached.verified_image",
+      "kind": "provenance_comparison",
+      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision_id",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/prebuilt_images.py",
+      "function": "prebuilt_failed",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/profile_capacity.py",
+      "function": "_profile_assignment",
+      "kind": "provenance_comparison",
+      "expression": "item.recipe_revision_id == recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/profile_capacity.py",
+      "function": "_profile_build_memory_claim",
+      "kind": "provenance_comparison",
+      "expression": "image.build_id != build.id",
+      "reason": "Memory-claim ownership of a profile preparation: the build, its plan and the operator-reviewed image of the accepted profile must name the same build row the claim is held for; a mismatch fails closed and releases nothing."
+    },
+    {
+      "path": "control/src/vonk_control/profile_capacity.py",
+      "function": "_profile_build_memory_claim",
+      "kind": "provenance_comparison",
+      "expression": "plan.recipe_build_id != build.id",
+      "reason": "Memory-claim ownership of a profile preparation: the build, its plan and the operator-reviewed image of the accepted profile must name the same build row the claim is held for; a mismatch fails closed and releases nothing."
+    },
+    {
+      "path": "control/src/vonk_control/profile_capacity.py",
+      "function": "profile_build_memory_claims",
+      "kind": "provenance_comparison",
+      "expression": "Job.payload['plan']['build']['build_id'].as_string() == build.id",
+      "reason": "Memory-claim ownership of a profile preparation: the build, its plan and the operator-reviewed image of the accepted profile must name the same build row the claim is held for; a mismatch fails closed and releases nothing."
+    },
+    {
+      "path": "control/src/vonk_control/profile_stop_authority.py",
+      "function": "validate_profile_stop_owner",
+      "kind": "provenance_comparison",
+      "expression": "authorization.recipe_revision_id != run_switch_plan.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_build_cancellation.py",
+      "function": "_profile_consumer",
+      "kind": "provenance_comparison",
+      "expression": "build_id != build.id",
+      "reason": "Cancellation and ownership lookup: finds the consumers and the claim of one specific build row by its id so that a cancel or a lock acts on exactly that build; unknown ownership blocks the release."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_build_cancellation.py",
+      "function": "_profile_consumer",
+      "kind": "provenance_comparison",
+      "expression": "child_plan.build.build_id != build.id",
+      "reason": "Cancellation and ownership lookup: finds the consumers and the claim of one specific build row by its id so that a cancel or a lock acts on exactly that build; unknown ownership blocks the release."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_build_cancellation.py",
+      "function": "_profile_consumer",
+      "kind": "provenance_comparison",
+      "expression": "child_plan.recipe_revision_id != assignment.recipe_revision_id",
+      "reason": "Cancellation and ownership lookup: finds the consumers and the claim of one specific build row by its id so that a cancel or a lock acts on exactly that build; unknown ownership blocks the release."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_build_cancellation.py",
+      "function": "_run_switch_consumer",
+      "kind": "provenance_comparison",
+      "expression": "plan.build.build_id != build.id",
+      "reason": "Cancellation and ownership lookup: finds the consumers and the claim of one specific build row by its id so that a cancel or a lock acts on exactly that build; unknown ownership blocks the release."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_build_cancellation.py",
+      "function": "_run_switch_consumer",
+      "kind": "provenance_comparison",
+      "expression": "plan.recipe_build_id not in (None, build.id)",
+      "reason": "Cancellation and ownership lookup: finds the consumers and the claim of one specific build row by its id so that a cancel or a lock acts on exactly that build; unknown ownership blocks the release."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_build_cancellation.py",
+      "function": "current_build_consumers",
+      "kind": "provenance_comparison",
+      "expression": "Job.payload['plan']['build']['build_id'].as_string() == build.id",
+      "reason": "Cancellation and ownership lookup: finds the consumers and the claim of one specific build row by its id so that a cancel or a lock acts on exactly that build; unknown ownership blocks the release."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_build_cancellation.py",
+      "function": "current_build_consumers",
+      "kind": "provenance_comparison",
+      "expression": "Job.payload['plan']['recipe_build_id'].as_string() == build.id",
+      "reason": "Cancellation and ownership lookup: finds the consumers and the claim of one specific build row by its id so that a cancel or a lock acts on exactly that build; unknown ownership blocks the release."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_build_cancellation.py",
+      "function": "lock_build_dependency",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.id == build_id",
+      "reason": "Cancellation and ownership lookup: finds the consumers and the claim of one specific build row by its id so that a cancel or a lock acts on exactly that build; unknown ownership blocks the release."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_build_cancellation.py",
+      "function": "lock_build_dependency",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == recipe_revision_id",
+      "reason": "Cancellation and ownership lookup: finds the consumers and the claim of one specific build row by its id so that a cancel or a lock acts on exactly that build; unknown ownership blocks the release."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService._reserve_in_session",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
+      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService._reserve_in_session",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.id == plan.build_id",
+      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService._reserve_in_session",
+      "kind": "provenance_comparison",
+      "expression": "requested_plan.build_id != plan.build_id",
+      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.persist_plan_in_session",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == plan.recipe_revision_id",
+      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.persist_plan_in_session",
+      "kind": "provenance_comparison",
+      "expression": "existing.recipe_revision_id == plan.recipe_revision_id",
+      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.prepare_plan",
+      "kind": "provenance_comparison",
+      "expression": "resolution.recipe_revision_id != revision.id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_execution_contract.py",
+      "function": "installation_matches_runtime_image",
+      "kind": "provenance_comparison",
+      "expression": "plan.recipe_revision_id == installation.recipe_revision_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._fail",
+      "kind": "provenance_comparison",
+      "expression": "dependency.get('operation_id') == settled_build_id",
+      "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._read_removal_owner",
+      "kind": "provenance_comparison",
+      "expression": "operation.authority_revision != intent.recipe_revision_id",
+      "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._read_removal_result",
+      "kind": "provenance_comparison",
+      "expression": "result.recipe_revision_id != intent.recipe_revision_id",
+      "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._recipe_removal_selection_in_session",
+      "kind": "provenance_comparison",
+      "expression": "RuntimeImageAuthorization.recipe_revision_id == revision_id",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._start_request",
+      "kind": "provenance_comparison",
+      "expression": "RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._start_request",
+      "kind": "provenance_comparison",
+      "expression": "current_revision_id != recipe_revision_id",
+      "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService.list_page",
+      "kind": "provenance_comparison",
+      "expression": "Job.authority_revision == recipe_revision_id",
+      "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._idempotent_job_in_session",
+      "kind": "provenance_comparison",
+      "expression": "(installation.mapping_id, installation.recipe_build_id) != install_identity",
+      "reason": "Request-key idempotency: a replayed install request is accepted only for the mapping and build it named the first time."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._lock_reconciliation_rows_in_session",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == installation.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._prepared_installation_id",
+      "kind": "provenance_comparison",
+      "expression": "RecipeInstallation.recipe_build_id == plan.recipe_build_id",
+      "reason": "Idempotent lookup of the installation this exact reviewed install plan (mapping, generation, build, plan digest) already created."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._profile_jobrun_stop_in_session",
+      "kind": "provenance_comparison",
+      "expression": "request.recipe_revision_id != installation.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._project_node_result",
+      "kind": "provenance_comparison",
+      "expression": "expected.build_id != owner_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._reconciliation_authority_in_session",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == installation.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._reconciliation_authority_in_session",
+      "kind": "provenance_comparison",
+      "expression": "mapping.recipe_revision_id != revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._release_cancelled_build",
+      "kind": "provenance_comparison",
+      "expression": "Job.payload['owner_id'].as_string() == build_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._retry_build_in_session",
+      "kind": "provenance_comparison",
+      "expression": "payload.get('build_id') != owner_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._stop_plan_in_session",
+      "kind": "provenance_comparison",
+      "expression": "stored_run_plan.get('recipe_revision_id') == revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._successful_build_job_in_session",
+      "kind": "provenance_comparison",
+      "expression": "Job.payload['owner_id'].as_string() == build_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._uninstall_plan_in_session",
+      "kind": "provenance_comparison",
+      "expression": "stored_installation_plan.get('recipe_revision_id') == revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.build",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.build",
+      "kind": "provenance_comparison",
+      "expression": "Job.payload['owner_id'].as_string() == plan.build_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.build",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.id == plan.build_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.build",
+      "kind": "provenance_comparison",
+      "expression": "previous_build.recipe_revision_id == plan.recipe_revision_id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_packages.py",
+      "function": "RecipePackageClient._parse_index",
+      "kind": "provenance_comparison",
+      "expression": "[(item.publisher, item.slug) for item in items] != sorted(((item.publisher, item.slug) for item in items))",
+      "reason": "Recipe package index structure (publisher and slug name documents in a release); not image identity."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_packages.py",
+      "function": "_bind_release",
+      "kind": "provenance_comparison",
+      "expression": "f'{item.publisher}/{item.slug}' not in skipped",
+      "reason": "Recipe package index structure (publisher and slug name documents in a release); not image identity."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_stop_payloads.py",
+      "function": "durable_run_stop_payloads",
+      "kind": "provenance_comparison",
+      "expression": "mapping.recipe_revision_id != installation.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_stop_payloads.py",
+      "function": "durable_run_stop_payloads",
+      "kind": "provenance_comparison",
+      "expression": "start.recipe_revision_id != installation.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_stop_payloads.py",
+      "function": "durable_run_stop_payloads",
+      "kind": "provenance_comparison",
+      "expression": "stored_run_plan.recipe_revision_id != installation.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/run_admission.py",
+      "function": "RunAdmissionService._accept_run_locked_in_session",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_contract.py",
+      "function": "RunSwitchPlan.cleanup_authority_matches_effect",
+      "kind": "provenance_comparison",
+      "expression": "authority.recipe_revision_id != self.recipe_revision_id",
+      "reason": "Signed plan self-consistency: a cleanup authority must name the same revision as the plan whose effect it cleans up."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RecipeLifecyclePhaseExecutor._bound_installation",
+      "kind": "provenance_comparison",
+      "expression": "installation.recipe_revision_id != plan.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RecipeLifecyclePhaseExecutor._execute_container_build",
+      "kind": "provenance_comparison",
+      "expression": "expected_build_id != build_id",
+      "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RecipeLifecyclePhaseExecutor._execute_container_build",
+      "kind": "provenance_comparison",
+      "expression": "parsed_plan.build_id != build_id",
+      "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RecipeLifecyclePhaseExecutor._execute_container_build",
+      "kind": "provenance_comparison",
+      "expression": "parsed_plan.recipe_revision_id != revision_id",
+      "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RecipeLifecyclePhaseExecutor._execute_container_build",
+      "kind": "provenance_comparison",
+      "expression": "persisted.recipe_revision_id != revision_id",
+      "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._latest_build",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == revision_id",
+      "reason": "First looks at this revision's own build rows; a successor revision finds the identical earlier build by executable inputs (reusable_build_id, then the preview's recorded build input), so the revision id only orders candidates and never rejects an image."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._matching_build",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == revision_id",
+      "reason": "First looks at this revision's own build rows; a successor revision finds the identical earlier build by executable inputs (reusable_build_id, then the preview's recorded build input), so the revision id only orders candidates and never rejects an image."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._matching_installation",
+      "kind": "provenance_comparison",
+      "expression": "RecipeInstallation.recipe_revision_id == revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._preview_run",
+      "kind": "provenance_comparison",
+      "expression": "installation.recipe_build_id == build_candidate.id == expected_image.build_id",
+      "reason": "Operator-reviewed image of a profile load (the _require_profile_runtime_image edge): the accepted image's reviewed build is compared with the build the preview selected, and a restored installation must be the one the review named; a change asks for a new review."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._preview_run",
+      "kind": "provenance_comparison",
+      "expression": "recipe_build_id != expected_image.build_id",
+      "reason": "Operator-reviewed image of a profile load (the _require_profile_runtime_image edge): the accepted image's reviewed build is compared with the build the preview selected, and a restored installation must be the one the review named; a change asks for a new review."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._resolve_mapping",
+      "kind": "provenance_comparison",
+      "expression": "ClusterMapping.recipe_revision_id == revision.id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._select_build",
+      "kind": "provenance_comparison",
+      "expression": "selected.recipe_revision_id == revision.id",
+      "reason": "First looks at this revision's own build rows; a successor revision finds the identical earlier build by executable inputs (reusable_build_id, then the preview's recorded build input), so the revision id only orders candidates and never rejects an image."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "_validate_artifact_execution",
+      "kind": "provenance_comparison",
+      "expression": "result.get('verified_build_id') != plan.recipe_build_id",
+      "reason": "Phase results of one Run/Switch operation must belong to the build row named in that operation's own plan (verification receipts are generated from the plan), so a result from another operation cannot complete this phase."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "_validate_artifact_execution",
+      "kind": "provenance_comparison",
+      "expression": "verification.verified_build_id != plan.recipe_build_id",
+      "reason": "Phase results of one Run/Switch operation must belong to the build row named in that operation's own plan (verification receipts are generated from the plan), so a result from another operation cannot complete this phase."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "effective_build_receipt",
+      "kind": "provenance_comparison",
+      "expression": "result.get('build_id') != expected_build_id",
+      "reason": "Phase results of one Run/Switch operation must belong to the build row named in that operation's own plan (verification receipts are generated from the plan), so a result from another operation cannot complete this phase."
+    },
+    {
+      "path": "control/src/vonk_control/runtime_image_preparation.py",
+      "function": "RuntimeImageReferenceIntent.belongs_to",
+      "kind": "provenance_comparison",
+      "expression": "self.recipe_revision_id == recipe_revision_id",
+      "reason": "Fencing of an image publication intent: only the operation attempt and claim that wrote the intent may complete it; ownership, not content."
+    },
+    {
+      "path": "control/src/vonk_control/runtime_image_preparation.py",
+      "function": "record_runtime_image_reference",
+      "kind": "provenance_comparison",
+      "expression": "RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "function": "_Evidence.read",
+      "kind": "provenance_comparison",
+      "expression": "(row.publisher.casefold(), row.slug.casefold()) in pointers",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "function": "_Evidence.read",
+      "kind": "provenance_filter",
+      "expression": "CatalogRecipeModelReference.recipe_revision_id.in_(pointed_ids)",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "function": "_Evidence.read",
+      "kind": "provenance_filter",
+      "expression": "RecipeBuild.recipe_revision_id.in_(pointed_ids)",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "function": "_Evidence.read",
+      "kind": "provenance_filter",
+      "expression": "RuntimeImageAuthorization.recipe_revision_id.in_(pointed_ids)",
+      "reason": "Reads or writes the RuntimeImageAuthorization bookkeeping table, which is a record of who recorded an image first; removed in the follow-up that deletes the table's readers and writer."
+    },
+    {
+      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "function": "_installation_kept",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == installation.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "function": "_installation_kept",
+      "kind": "provenance_comparison",
+      "expression": "newest[0] == installation.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    }
+  ]
+}

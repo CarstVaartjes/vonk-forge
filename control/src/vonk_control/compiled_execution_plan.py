@@ -38,6 +38,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from .content_identity import same_model_object
 from .strict_json import StrictJSONModel
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -168,10 +169,10 @@ class VerifiedModelObject(_StrictModel):
             raise ValueError("verified model object kind is invalid")
         if self.distribution_object.name != self.path:
             raise ValueError("verified model object name does not match its path")
-        if self.distribution_object.sha256 != self.sha256:
-            raise ValueError("verified model object digest does not match its receipt")
-        if self.distribution_object.bytes != self.bytes:
-            raise ValueError("verified model object bytes do not match its receipt")
+        if not same_model_object(self.distribution_object, self):
+            raise ValueError(
+                "verified model object digest or bytes do not match its receipt"
+            )
         if self.bytes == 0 and any(
             role.casefold() in _WEIGHT_ROLES for role in self.roles
         ):

@@ -37,6 +37,7 @@ from .artifact_lifecycle import (
     ArtifactLifecycleError,
     require_reference_open,
 )
+from .content_identity import ImageContent, differing_image_fields, same_image
 from .models import CatalogDocumentRevision, RecipeBuild, RuntimeImageAuthorization
 from .oci_image_store import (
     DAMAGED_MANIFEST_CODES,
@@ -826,16 +827,16 @@ class FilesystemRuntimeImageStorage:
             raise RuntimeImagePreparationError(
                 "runtime_image.digest_invalid", "runtime image identity is invalid"
             )
-        expected_architecture = _wire_architecture(expected_architecture)
-        expected_label = _runtime_interface_label(expected_runtime_interface)
+        expected = ImageContent(
+            image_digest=image_digest,
+            architecture=_wire_architecture(expected_architecture),
+            runtime_interface=expected_runtime_interface,
+            runtime_interface_label=_runtime_interface_label(
+                expected_runtime_interface
+            ),
+        )
         for receipt in self._iter_receipts():
-            if receipt.image_digest != image_digest:
-                continue
-            if (
-                receipt.architecture != expected_architecture
-                or receipt.runtime_interface != expected_runtime_interface
-                or receipt.runtime_interface_label != expected_label
-            ):
+            if not same_image(receipt, expected):
                 # Not a proof of the requested identity: a miss, so the
                 # caller prepares the image again.
                 continue
@@ -865,8 +866,13 @@ class FilesystemRuntimeImageStorage:
             raise RuntimeImagePreparationError(
                 "runtime_image.digest_invalid", "build input identity is invalid"
             )
-        expected_architecture = _wire_architecture(expected_architecture)
-        expected_label = _runtime_interface_label(expected_runtime_interface)
+        expected = ImageContent(
+            architecture=_wire_architecture(expected_architecture),
+            runtime_interface=expected_runtime_interface,
+            runtime_interface_label=_runtime_interface_label(
+                expected_runtime_interface
+            ),
+        )
         receipts = (
             self._iter_receipts()
             if expected_archive_sha256 is None
@@ -875,11 +881,7 @@ class FilesystemRuntimeImageStorage:
         for receipt in receipts:
             if receipt.build_input_sha256 != build_input_sha256:
                 continue
-            if (
-                receipt.architecture != expected_architecture
-                or receipt.runtime_interface != expected_runtime_interface
-                or receipt.runtime_interface_label != expected_label
-            ):
+            if differing_image_fields(receipt, expected):
                 # Not a proof of the requested identity: a miss, so the
                 # caller prepares the image again.
                 continue
@@ -1208,20 +1210,21 @@ def _prepare_from_build(
         )
     existing = storage.existing_archive(archive_sha, image_bytes)
     expected_interface_label = _runtime_interface_label(expected_interface)
+    observed = ImageContent(
+        image_digest=image_digest,
+        archive_sha256=archive_sha,
+        image_bytes=image_bytes,
+        architecture=_wire_architecture(expected_architecture),
+        runtime_interface=expected_interface,
+        runtime_interface_label=expected_interface_label,
+    )
     try:
         cached = storage.read_receipt(archive_sha)
     except RuntimeImagePreparationError:
         # Rebuild absent or invalid metadata from the verified archive and
         # current build evidence. No alternate receipt shape is accepted.
         cached = None
-    if (
-        cached is not None
-        and cached.image_digest == image_digest
-        and cached.architecture == _wire_architecture(expected_architecture)
-        and cached.runtime_interface == expected_interface
-        and cached.runtime_interface_label == expected_interface_label
-        and cached.image_bytes == image_bytes
-    ):
+    if cached is not None and same_image(cached, observed):
         answer = _with_provenance(
             cached,
             build_id=build_id,

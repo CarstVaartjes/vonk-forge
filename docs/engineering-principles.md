@@ -241,6 +241,22 @@ recipes reproducible rather than to restrict them.
   existence and length only, trusting the durable receipt. Nothing rehashes
   model weights on read, serve or after a restart. Signed release, package and
   installer verification is a separate trust boundary and stays.
+- Identity is content; provenance is never identity. A runtime image is its
+  manifest digest, OCI archive sha256, bytes and architecture, a model file is
+  its digest, and a build is reusable by `build_input_sha256` (the executable
+  inputs, without the builder binary). Which recipe, slug or revision asked
+  first, `build_id`, `distribution_publisher`, `distribution_slug`,
+  `distribution_content_sha256` and the asking runtime adapter are provenance:
+  a stored receipt keeps the first requester's, so comparing them refuses an
+  identical image the first time a sibling recipe, an editorial successor or an
+  upgraded builder reaches it. `vonk_control.content_identity` owns every
+  "same image, same model object, reusable build" decision. Fail-closed
+  comparisons are for real security edges only: ingress digest verification,
+  build source policy, agent mTLS, signed Controller-to-agent plans that bind
+  what is installed, the helper's mount and access checks, and the
+  operator-reviewed image of a profile load. A static check
+  ([testing and CI](testing-and-ci.md)) fails on any other comparison of a
+  provenance field unless the site is allowlisted with a reason.
 - Run admission enforces the recipe's declared system memory reserve alongside
   its workload demand and existing reservations. It does not impose an
   additional fixed platform reserve that prevents a fitting recipe from running.

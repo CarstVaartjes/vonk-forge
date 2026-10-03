@@ -8908,7 +8908,6 @@ class FleetProfileService:
             and (
                 installation_matches_runtime_image(
                     installation,
-                    build_id=expected_image.build_id,
                     image_digest=expected_image.image_digest,
                     oci_layout_sha256=expected_image.oci_layout_sha256,
                     image_bytes=expected_image.image_bytes,
@@ -8918,7 +8917,6 @@ class FleetProfileService:
                     build is None
                     or installation_matches_runtime_image(
                         installation,
-                        build_id=build.id,
                         image_digest=build.image_digest,
                         oci_layout_sha256=build.oci_layout_sha256,
                         image_bytes=build.image_bytes,

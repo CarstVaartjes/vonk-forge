@@ -35,6 +35,7 @@ from .admission_locking import (
     node_admission_key,
 )
 from .bounded_json import require_mapping
+from .content_identity import reusable_build
 from .models import (
     AgentNode,
     AgentOperation,
@@ -415,11 +416,13 @@ def build_recipe_image_availability(
                         policy.artifact_format != BUILD_ARTIFACT_FORMAT
                         or policy.source_bundle_sha256
                         != resolution.source_bundle_sha256
-                        or candidate.source_bundle_sha256
-                        != resolution.source_bundle_sha256
-                        or candidate.build_input_sha256
-                        != resolution.build_input_for_builder(
-                            policy.builder_binary_digest
+                        or not reusable_build(
+                            resolution,
+                            build_input_sha256=candidate.build_input_sha256,
+                            source_bundle_sha256=candidate.source_bundle_sha256,
+                            recorded_builder_binary_digest=(
+                                policy.builder_binary_digest
+                            ),
                         )
                     ):
                         continue
