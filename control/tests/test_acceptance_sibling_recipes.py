@@ -41,7 +41,6 @@ one, two = lifecycle["_sibling_recipes"](canary)
 # Different Recipes: another slug and another revision content.
 assert one.slug != two.slug and {one.slug, two.slug}.isdisjoint({canary.slug})
 assert one.recipe_content_sha256 != two.recipe_content_sha256
-for sibling in (one, two):
 # One image: everything that builds and runs it is the canary's.
 # The canary service answers only to its own model name, so the interfaces
 # (model aliases) are the canary's too; the route alias is the assignment name.
