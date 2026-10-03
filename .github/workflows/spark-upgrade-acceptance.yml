@@ -2,11 +2,13 @@ name: Spark upgrade-carry acceptance
 
 # A workload that serves on the previous promoted release must keep serving
 # while the Controller is redeployed and the Spark agent is upgraded to the
-# candidate. The release calls this for every candidate; it also runs on pull
-# requests that change the lane (candidate = current promoted release,
-# baseline = the release promoted before it) and by hand for any two
-# published generations. Without a previous promoted release it is skipped
-# with a visible notice.
+# candidate. The release calls this for every candidate. CI calls it for a pull
+# request that changes the lane's own code (the `lane-proof` job; the candidate
+# is then the current promoted release and the baseline the release promoted
+# before it), and CI gate requires it green, so harness code proves itself on
+# hardware before it can block a release. By hand it runs for any two published
+# generations. Without a previous promoted release it is skipped with a visible
+# notice.
 on:
   workflow_call:
     inputs:
@@ -14,8 +16,10 @@ on:
         type: string
         required: true
       candidate_generation:
+        description: "Candidate generation (default: the current promoted release)"
         type: string
-        required: true
+        required: false
+        default: ""
       source_ref:
         type: string
         required: true
@@ -34,12 +38,6 @@ on:
         description: "Baseline generation (default: the release promoted before the candidate)"
         type: string
         default: ""
-  pull_request:
-    branches: [main]
-    paths:
-      - .github/workflows/spark-upgrade-acceptance.yml
-      - tests/acceptance/spark_upgrade_carry.py
-      - tests/acceptance/test_spark_lifecycle.py
 
 permissions:
   actions: read

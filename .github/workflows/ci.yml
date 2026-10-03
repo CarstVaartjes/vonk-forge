@@ -45,6 +45,7 @@ jobs:
       generated: ${{ steps.areas.outputs.generated }}
       nas_install: ${{ steps.areas.outputs.nas_install }}
       agent_package: ${{ steps.areas.outputs.agent_package }}
+      lane: ${{ steps.areas.outputs.lane }}
       repository_timings: ${{ steps.timings.outputs.repository }}
       control_timings: ${{ steps.timings.outputs.control }}
     steps:
@@ -954,9 +955,26 @@ jobs:
             control/web/playwright-report
             control/web/test-results
 
+  lane-proof:
+    # Harness code that has never run on hardware has twice blocked every
+    # release (#1070, #1086). A pull request that changes the upgrade-carry
+    # lane's code proves it here: the lane runs this head's harness against the
+    # promoted release and the one before it, and CI gate requires it green.
+    name: Upgrade-carry lane on this head
+    needs: changes
+    if: needs.changes.outputs.lane == 'true'
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/spark-upgrade-acceptance.yml
+    with:
+      channel: dev
+      source_ref: ${{ github.sha }}
+    secrets: inherit
+
   ci-gate:
     name: CI gate
-    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package]
+    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -977,6 +995,7 @@ jobs:
           SELECTED_COMPOSE: ${{ needs.changes.outputs.compose }}
           SELECTED_NAS_INSTALL: ${{ needs.changes.outputs.nas_install }}
           SELECTED_AGENT_PACKAGE: ${{ needs.changes.outputs.agent_package }}
+          SELECTED_LANE: ${{ needs.changes.outputs.lane }}
           LINT_RESULT: ${{ needs.lint.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           RUST_QUALITY_RESULT: ${{ needs.rust-quality.result }}
@@ -991,6 +1010,7 @@ jobs:
           COMPOSE_RESULT: ${{ needs.compose-integration.result }}
           NAS_INSTALL_RESULT: ${{ needs.nas-install.result }}
           AGENT_PACKAGE_RESULT: ${{ needs.agent-package.result }}
+          LANE_PROOF_RESULT: ${{ needs.lane-proof.result }}
         run: |
           set -euo pipefail
           scripts/verify-ci-gate \
@@ -1003,6 +1023,7 @@ jobs:
             --selected "compose=$SELECTED_COMPOSE" \
             --selected "nas-install=$SELECTED_NAS_INSTALL" \
             --selected "agent-package=$SELECTED_AGENT_PACKAGE" \
+            --selected "lane=$SELECTED_LANE" \
             --result "lint=$LINT_RESULT" \
             --result "supply-chain=$SUPPLY_CHAIN_RESULT" \
             --result "rust-quality=$RUST_QUALITY_RESULT" \
@@ -1016,7 +1037,8 @@ jobs:
             --result "generated=$GENERATED_RESULT" \
             --result "compose=$COMPOSE_RESULT" \
             --result "nas-install=$NAS_INSTALL_RESULT" \
-            --result "agent-package=$AGENT_PACKAGE_RESULT"
+            --result "agent-package=$AGENT_PACKAGE_RESULT" \
+            --result "lane-proof=$LANE_PROOF_RESULT"
 
   main-ci-summary:
     name: Main branch CI status summary

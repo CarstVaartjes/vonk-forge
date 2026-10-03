@@ -24,6 +24,38 @@ def _matches(path: str, prefixes: tuple[str, ...], exact: tuple[str, ...] = ()) 
     return path in exact or path.startswith(prefixes)
 
 
+# Everything the Spark upgrade-carry lane executes besides the product it
+# judges. A pull request that changes any of it must carry a green lane run on
+# its own head (the `lane-proof` job), because a harness bug blocks every
+# release until it is fixed. The lane's trigger paths mirror this list; a test
+# keeps the two equal.
+LANE_PREFIXES = (
+    ".github/actions/prepare-control-wheel/",
+    "tests/acceptance/",
+)
+LANE_EXACT = (
+    ".github/workflows/spark-upgrade-acceptance.yml",
+    "scripts/build-recipe-library",
+    "scripts/development_slice_client.py",
+    "scripts/render-accepted-compose-overlay",
+    "src/cluster_profiles/serving_execution.py",
+)
+
+
+def lane_selected(paths: Iterable[str], event: str) -> bool:
+    """Whether this change needs a green upgrade-carry lane run on its head.
+
+    Only a pull request can carry a proof: a release run executes the lane
+    itself as a gate, so every other event selects nothing here.
+    """
+    if event != "pull_request":
+        return False
+    return any(
+        _matches(path.strip().removeprefix("./"), LANE_PREFIXES, LANE_EXACT)
+        for path in paths
+    )
+
+
 def select(paths: Iterable[str], event: str) -> dict[str, bool]:
     changed = tuple(
         sorted({path.strip().removeprefix("./") for path in paths if path.strip()})
@@ -156,13 +188,20 @@ def main() -> int:
     parser.add_argument("--event", required=True)
     parser.add_argument("--github-output", action="store_true")
     arguments = parser.parse_args()
-    selected = select(sys.stdin, arguments.event)
+    changed = sys.stdin.read().splitlines()
+    selected = select(changed, arguments.event)
+    lane = lane_selected(changed, arguments.event)
     if arguments.github_output:
         for area in AREAS:
             print(f"{area}={str(selected[area]).lower()}")
+        print(f"lane={str(lane).lower()}")
         print(f"any={str(any(selected.values())).lower()}")
     else:
-        print(json.dumps(selected, sort_keys=True, separators=(",", ":")))
+        print(
+            json.dumps(
+                {**selected, "lane": lane}, sort_keys=True, separators=(",", ":")
+            )
+        )
     return 0
 
 

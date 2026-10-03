@@ -50,6 +50,7 @@ from scripts.spark_lifecycle_contract import (
     recompute_publication_graphs,
     validate_lifecycle,
 )
+from tests.acceptance.controller_contract import ContractSkew
 from tests.acceptance.runtime import (
     AcceptanceError,
     _compose_rows,
@@ -850,6 +851,7 @@ class LocalBrowserController:
         *,
         hostname: str,
         port: int,
+        request_guard: Callable[[str, str, bytes | None], None] | None = None,
     ) -> None:
         if (
             not hostname
@@ -861,6 +863,8 @@ class LocalBrowserController:
             raise LifecycleError("local browser port is invalid")
         self.hostname = hostname
         self.port = port
+        # Sees every request the administrator session sends before it leaves.
+        self.request_guard = request_guard
 
     def raw_request(
         self,
@@ -957,6 +961,13 @@ class LocalBrowserController:
             request_headers: dict[str, str],
             request_timeout: float,
         ) -> tuple[int, bytes]:
+            if self.request_guard is not None:
+                try:
+                    self.request_guard(method, path, payload)
+                except ContractSkew as error:
+                    raise LifecycleError(
+                        f"the harness and the Controller disagree: {error}"
+                    ) from error
             status, _response_headers, content = self.raw_request(
                 method, path, payload, request_headers, request_timeout
             )
@@ -1409,11 +1420,22 @@ class SparkLifecycle:
         boundary = LocalBrowserController(
             hostname=self.control_hostname,
             port=self._local_browser_port(),
+            request_guard=self._controller_request_guard(),
         )
         self.browser = boundary
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)
         del password
+
+    def _controller_request_guard(
+        self,
+    ) -> Callable[[str, str, bytes | None], None] | None:
+        """Check what the harness sends against the Controller it talks to.
+
+        A lane that drives a Controller other than this source's own overrides
+        it; the fresh-install lanes run the Controller they were built from.
+        """
+        return None
 
     def _reapply_controller_site(self) -> None:
         """Set this lane's site values in the bundle the installer wrote."""

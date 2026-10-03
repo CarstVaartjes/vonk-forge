@@ -373,6 +373,24 @@ to `main` runs the required checks and the suites selected for that change. Conc
 superseded pull-request runs so a stale commit does not consume another
 complete check cycle.
 
+### Acceptance lane code proves itself on hardware
+
+The Spark upgrade-carry lane runs on every release candidate and gates its
+promotion, so a bug in the lane's own code stops every Controller release until
+it is fixed. A pull request that changes that code (`LANE_PREFIXES` and
+`LANE_EXACT` in `scripts/select-ci-areas`: `tests/acceptance/`, the lane
+workflow and the scripts it runs) therefore starts the `lane-proof` job, which
+calls the lane on the pull request's merge commit against the current promoted
+release and the one before it. `CI gate` requires it green, so the lane change
+cannot merge, and with auto-merge it merges on its own once the hardware run
+passes. A failed run is re-run from the CI run ("Re-run failed jobs") after the
+cause is understood; a push supersedes it.
+
+The lane judges two Controllers older than its own source. It reads each
+release's published `control/openapi.json` and refuses to send a request that
+Controller's contract does not accept, naming the field (`ControllerContract`).
+Send only fields that are set; never serialise an unset optional field as null.
+
 If a change needs a longer check, run it locally and attach its bounded report
 to the pull request. Use `workflow_dispatch` only when hosted evidence itself
 is required.
