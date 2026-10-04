@@ -331,3 +331,25 @@ def test_controller_gets_its_own_readable_master_key_copy(
     from vonk_control.settings import SECRETS_ROOT
 
     assert MASTER_KEY_FILE == SECRETS_ROOT / "gateway-litellm-master-key"
+
+
+def test_existing_object_store_directories_stop_new_files_being_copy_on_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A store created before the attribute was set keeps its old directories,
+    # and a directory only passes the attribute to files created after it.
+    root = tmp_path / "model-cache"
+    (root / "objects" / "ab").mkdir(parents=True)
+    (root / "partials" / "set-one").mkdir(parents=True)
+    (root / "partials" / "set-one" / "x.part").write_bytes(b"x")
+    (root / "outside-link").symlink_to(tmp_path)
+    marked: list[str] = []
+    monkeypatch.setattr(
+        runtime_init,
+        "_disable_copy_on_write",
+        lambda directory: marked.append(directory.relative_to(root).as_posix()),
+    )
+
+    runtime_init._disable_copy_on_write_below(root)
+
+    assert sorted(marked) == ["objects", "partials", "partials/set-one"]

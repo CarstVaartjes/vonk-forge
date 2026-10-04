@@ -3,22 +3,25 @@
 #
 #   sudo scripts/measure-transfer PLAN_DIGEST OBJECT_SHA256 [IPERF_HOST]
 #
-# PLAN_DIGEST and OBJECT_SHA256 name an object of at least 2 GiB in an
+# PLAN_DIGEST and OBJECT_SHA256 name an object of at least 6 GiB in an
 # assignment this Spark holds (the agent log shows both during a transfer).
 # IPERF_HOST is the NAS address running `iperf3 -s`, for the raw network
 # ceiling. Reads the agent's own configuration and identity; the object's
-# bytes go to /dev/null.
+# bytes go to /dev/null. Pair it with scripts/measure-nas-serving on the NAS
+# and read docs/runbooks/transfer-throughput.md for what each number means.
 set -euo pipefail
 
 if (($# < 2 || $# > 3)); then
-    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
     exit 64
 fi
 plan=$1
 object=$2
 iperf_host=${3:-}
 config=${VONK_AGENT_CONFIG:-/etc/vonk-forge-agent/agent.toml}
-range=$((64 * 1024 * 1024))
+mib=$((1024 * 1024))
+range=$((64 * mib))
+ranges_per_stream=4
 
 toml_value() { sed -n "s/^$1[[:space:]]*=[[:space:]]*\"\(.*\)\"[[:space:]]*$/\1/p" "$config" | head -n 1; }
 controller=$(toml_value controller_url)
@@ -37,32 +40,60 @@ umask 077
 cat "$credentials/certificate.pem" "$credentials/chain.pem" >"$work/certificate.pem"
 url="${controller%/}/agent/distribution/objects/$object?plan_digest=$plan"
 
-fetch() { # protocol-flag start end -> "MB/s seconds-to-first-byte"
-    curl -sS "$1" --cacert "$ca" --cert "$work/certificate.pem" --key "$credentials/private-key.pem" \
-        -H "Range: bytes=$2-$3" -H "If-Range: \"sha256:$object\"" -o /dev/null \
+curl_common=(-sS --http1.1 --cacert "$ca" --cert "$work/certificate.pem" --key "$credentials/private-key.pem"
+    -H "If-Range: \"sha256:$object\"")
+
+# The object's size, from a one-byte range ("Content-Range: bytes 0-0/TOTAL").
+size=$(curl "${curl_common[@]}" -H "Range: bytes=0-0" -D - -o /dev/null "$url" |
+    tr -d '\r' | sed -n 's/^[Cc]ontent-[Rr]ange: bytes 0-0\/\([0-9]*\)$/\1/p' | head -n 1)
+[[ -n $size ]] || { echo "no 206 for a one-byte range: is the object/plan right and assigned to this Spark?" >&2; exit 1; }
+echo "object $object: $((size / mib)) MiB"
+
+# Every phase reads its own part of the object, so a later phase never finds an
+# earlier one's bytes already in the NAS page cache. When the object is too
+# small for that the numbers are flattered by the cache; the script says so.
+cursor=0
+cache_warning=
+base=0
+next_base() { # bytes needed -> sets $base, the byte offset to start at
+    local need=$1
+    if ((cursor + need > size)); then
+        cursor=0
+        cache_warning=1
+    fi
+    base=$cursor
+    cursor=$((cursor + need))
+}
+
+fetch() { # start end -> "code bytes/s time_starttransfer"
+    curl "${curl_common[@]}" -H "Range: bytes=$1-$2" -o /dev/null \
         -w '%{http_code} %{speed_download} %{time_starttransfer}\n' "$url"
 }
 
-sequential() { # protocol-flag [first range index]: eight ranges in a row, like one agent stream
-    local start=$((${2:-0} * range)) rate total=0 first ok=0
-    for _ in 1 2 3 4 5 6 7 8; do
-        read -r code rate first < <(fetch "$1" "$start" $((start + range - 1)))
-        [[ $code == 206 ]] || { echo "  HTTP $code (need 206: is the object/plan right?)"; return 1; }
-        total=$(awk -v t="$total" -v r="$rate" 'BEGIN { printf "%.0f", t + r }')
-        ok=$((ok + 1))
+stream() { # start-offset: the ranges one agent object transfer reads, in a row
+    local start=$1 code
+    for ((i = 0; i < ranges_per_stream; i++)); do
+        read -r code _ _ < <(fetch "$start" $((start + range - 1)))
+        [[ $code == 206 ]] || { echo "HTTP $code" >&2; return 1; }
         start=$((start + range))
     done
-    awk -v t="$total" -v n="$ok" -v f="$first" 'BEGIN { printf "  %.0f MB/s per stream, last time to first byte %.3f s\n", t / n / 1e6, f }'
 }
 
-parallel() { # protocol-flag: four streams at once, like the agent
-    local out=$work/parallel
-    for stream in 0 1 2 3; do
-        (sequential "$1" $((stream * 8)) >"$out.$stream" 2>&1) &
+# N streams at once, wall-clock aggregate (what the Spark really gets).
+aggregate() { # streams
+    local streams=$1 begin end
+    next_base $((streams * ranges_per_stream * range))
+    begin=$(date +%s.%N)
+    for ((s = 0; s < streams; s++)); do
+        stream $((base + s * ranges_per_stream * range)) &
     done
     wait
-    cat "$out".*
+    end=$(date +%s.%N)
+    awk -v n="$streams" -v b="$((streams * ranges_per_stream * range))" -v t0="$begin" -v t1="$end" \
+        'BEGIN { s = t1 - t0; printf "  %d stream(s): %.0f MB/s aggregate, %.0f MB/s per stream (%.1f s)\n", n, b / s / 1e6, b / s / 1e6 / n, s }'
 }
+
+retrans() { nstat -az TcpRetransSegs 2>/dev/null | awk 'NR == 2 { print $2 }' || true; }
 
 if [[ -n $iperf_host ]] && command -v iperf3 >/dev/null; then
     echo "== network only (iperf3 to $iperf_host): expect about 2350 Mbit/s on 2.5 GbE"
@@ -72,13 +103,50 @@ elif [[ -n $iperf_host ]]; then
     echo "== iperf3 is not installed here; skipping the network ceiling"
 fi
 
-retrans_before=$(nstat -az TcpRetransSegs 2>/dev/null | awk 'NR == 2 { print $2 }' || true)
-echo "== Controller object, 8 x 64 MiB ranges, one stream, HTTP/1.1 (what the agent uses)"
-sequential --http1.1
-echo "== four streams at once, HTTP/1.1"
-parallel --http1.1
-echo "== one stream, HTTP/2 for comparison"
-sequential --http2
-retrans_after=$(nstat -az TcpRetransSegs 2>/dev/null | awk 'NR == 2 { print $2 }' || true)
-[[ -z $retrans_before || -z $retrans_after ]] || echo "== TCP retransmitted segments during this run: $((retrans_after - retrans_before))"
-echo "Compare with the 47 MB/s seen in #861: about 280 MB/s is the 2.5 GbE ceiling."
+echo "== per-request cost: one-byte ranges (Controller authorization + Caddy, no payload)"
+echo "   first request opens the connection (connect, TLS), the rest reuse it; times in ms"
+mapfile -t probes < <(
+    # curl reuses the connection across the URLs of one invocation.
+    args=()
+    for _ in $(seq 1 21); do args+=(-o /dev/null "$url"); done # -o applies to one URL
+    curl "${curl_common[@]}" -H "Range: bytes=0-0" \
+        -w '%{time_connect} %{time_appconnect} %{time_starttransfer}\n' "${args[@]}"
+)
+read -r connect tls first <<<"${probes[0]}"
+printf '%s\n' "${probes[@]:1}" | awk '{ print $3 * 1000 }' | sort -n >"$work/ttfb"
+awk -v c="$connect" -v t="$tls" -v f="$first" 'BEGIN { printf "  first request: connect %.1f ms, TLS done %.1f ms, first byte %.1f ms\n", c * 1000, t * 1000, f * 1000 }'
+awk '{ v[NR] = $1 } END { printf "  authorization round trip on a warm connection: median %.1f ms, worst %.1f ms (20 requests)\n", v[int((NR + 1) / 2)], v[NR] }' "$work/ttfb"
+
+echo "== range size: one stream, ranges of 1, 16 and 64 MiB (small ranges expose per-request cost)"
+for megabytes in 1 16 64; do
+    bytes=$((megabytes * mib))
+    next_base $((8 * bytes))
+    total=0
+    begin=$(date +%s.%N)
+    for ((i = 0; i < 8; i++)); do
+        read -r code _ _ < <(fetch $((base + i * bytes)) $((base + (i + 1) * bytes - 1)))
+        [[ $code == 206 ]] || { echo "  HTTP $code (need 206)"; break; }
+        total=$((total + bytes))
+    done
+    end=$(date +%s.%N)
+    awk -v m="$megabytes" -v b="$total" -v t0="$begin" -v t1="$end" 'BEGIN { printf "  %2d MiB ranges: %.0f MB/s\n", m, b / (t1 - t0) / 1e6 }'
+done
+
+before=$(retrans)
+echo "== parallel streams, 4 x 64 MiB ranges each (the agent starts at 4 and may ramp to 8)"
+for streams in 1 2 4 8; do aggregate "$streams"; done
+after=$(retrans)
+[[ -z $before || -z $after ]] || echo "== TCP retransmitted segments during the stream tests: $((after - before))"
+[[ -z $cache_warning ]] || echo "!! the object is smaller than the tests read: later phases may have been served from the NAS page cache, so they flatter the NAS"
+
+echo "== one stream, HTTP/2 for comparison (the agent uses HTTP/1.1)"
+next_base $((ranges_per_stream * range))
+begin=$(date +%s.%N)
+for ((i = 0; i < ranges_per_stream; i++)); do
+    start=$((base + i * range))
+    curl -sS --http2 --cacert "$ca" --cert "$work/certificate.pem" --key "$credentials/private-key.pem" \
+        -H "If-Range: \"sha256:$object\"" -H "Range: bytes=$start-$((start + range - 1))" -o /dev/null "$url"
+done
+end=$(date +%s.%N)
+awk -v b="$((ranges_per_stream * range))" -v t0="$begin" -v t1="$end" 'BEGIN { printf "  %.0f MB/s\n", b / (t1 - t0) / 1e6 }'
+echo "About 280 MB/s is the 2.5 GbE ceiling for the NAS uplink, shared by every Spark copying at once."

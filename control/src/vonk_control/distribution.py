@@ -545,6 +545,17 @@ class MemoryObjectSource:
 
 _AUTHORIZATION_CACHE_ENTRIES = 1024
 _AUTHORIZATION_TTL_SECONDS = 30.0
+# Where an authorized object sits is as stable as the authorization itself.
+_LOCATION_CACHE_ENTRIES = 4096
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectLocation:
+    """The stored file the edge serves for one authorized object."""
+
+    size: int
+    sha256: str
+    path: Path
 
 
 def _may_replace(
@@ -572,6 +583,14 @@ def _may_replace(
     )
 
 
+def _still_stored(location: ObjectLocation, expected_bytes: int) -> bool:
+    try:
+        metadata = os.lstat(location.path)
+    except OSError:
+        return False
+    return stat.S_ISREG(metadata.st_mode) and metadata.st_size == expected_bytes
+
+
 class DistributionService:
     """Resolves exact assignments and serves only their declared objects."""
 
@@ -596,7 +615,16 @@ class DistributionService:
         self._authorized: OrderedDict[
             tuple[str, str], tuple[NodeDistributionAssignment, float]
         ] = OrderedDict()
-        self._authorized_lock = Lock()  # guards only the dict, never I/O
+        self._authorized_lock = Lock()  # guards only the dicts, never I/O
+        # Where an authorized object sits, remembered like the authorization:
+        # a transfer asks once per 64 MiB range, and resolving the object
+        # reads the cache manifest and receipt each time. Objects are immutable
+        # and content addressed, and every hit still checks the file's type and
+        # size, so only a deletion within the window waits for it to end.
+        self._located: OrderedDict[
+            tuple[str, str, str],
+            tuple[DistributionObject, ObjectLocation, float],
+        ] = OrderedDict()
 
     def attach_sessions(self, sessions: sessionmaker[Session]) -> DistributionService:
         """Bind the service to the Controller's durable assignment store."""
@@ -860,6 +888,42 @@ class DistributionService:
                         row.updated_at = now
             raise DistributionError("distribution.expired", "assignment has expired")
         return assignment
+
+    def locate_object(
+        self, *, node_id: str, plan_digest: str, digest: str
+    ) -> tuple[NodeDistributionAssignment, DistributionObject, ObjectLocation]:
+        """Authorize one object and name its stored file for the edge to serve.
+
+        Same decision as :meth:`open_object` without keeping a file open. The
+        authorization is always re-read (itself cached per assignment); only
+        the object's storage resolution is remembered for a short time.
+        """
+        assignment = self.authorize(node_id=node_id, plan_digest=plan_digest)
+        object_spec = next(
+            (item for item in assignment.objects if item.sha256 == digest), None
+        )
+        key = (plan_digest, node_id, digest)
+        if object_spec is not None:
+            with self._authorized_lock:
+                hit = self._located.get(key)
+                if hit is not None and (
+                    monotonic() - hit[2] >= _AUTHORIZATION_TTL_SECONDS
+                    or hit[0] != object_spec
+                ):
+                    del self._located[key]
+                    hit = None
+            if hit is not None and _still_stored(hit[1], object_spec.bytes):
+                return assignment, object_spec, hit[1]
+        _assignment, object_spec, opened = self.open_object(
+            node_id=node_id, plan_digest=plan_digest, digest=digest
+        )
+        opened.stream.close()
+        location = ObjectLocation(opened.size, opened.sha256, opened.path)
+        with self._authorized_lock:
+            self._located[key] = (object_spec, location, monotonic())
+            while len(self._located) > _LOCATION_CACHE_ENTRIES:
+                self._located.popitem(last=False)
+        return assignment, object_spec, location
 
     def open_object(
         self, *, node_id: str, plan_digest: str, digest: str

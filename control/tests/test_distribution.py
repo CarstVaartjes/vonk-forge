@@ -439,3 +439,52 @@ def test_authorization_is_decided_once_per_assignment_not_per_range(
     service.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
     with pytest.raises(DistributionError):
         service.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
+
+
+def test_object_location_is_resolved_once_per_window_and_follows_the_file(
+    agent_system,
+) -> None:
+    _client, services, _tokens, clock = agent_system
+
+    class CountingSource(MemoryObjectSource):
+        opened = 0
+
+        def open_object(self, digest, expected_bytes):
+            self.opened += 1
+            if not (self.root / digest).exists():
+                raise DistributionError(
+                    "distribution.object_unavailable", "stored object is unavailable"
+                )
+            return super().open_object(digest, expected_bytes)
+
+    source = CountingSource()
+    model = source.put(b"model payload")
+    assignment = _assignment(NODE_A, model, source.put(b"config!"), source.put(b"oci"))
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    source.register_runtime_image(
+        assignment.oci_image_digest, assignment.oci_archive_sha256
+    )
+    service = DistributionService(source, clock=clock, sessions=services.sessions)
+    service.register(assignment)
+    ask = {"node_id": NODE_A, "plan_digest": assignment.plan_digest, "digest": model}
+
+    # Many range requests of one transfer resolve the stored object once.
+    for _ in range(5):
+        _assignment_value, spec, location = service.locate_object(**ask)
+    assert source.opened == 1
+    assert spec.sha256 == model and location.path == source.root / model
+
+    # A file that disappeared is looked up again, and refused, at once.
+    (source.root / model).unlink()
+    with pytest.raises(DistributionError) as caught:
+        service.locate_object(**ask)
+    assert caught.value.code == "distribution.object_unavailable"
+
+    # A revoked assignment is refused no matter what was remembered.
+    (source.root / model).write_bytes(b"model payload")
+    service.locate_object(**ask)
+    service.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
+    with pytest.raises(DistributionError):
+        service.locate_object(**ask)
