@@ -303,7 +303,13 @@ def _parked_retry_evidence(
     return _safe_retry_failure(operation.kind, attempt.state, result)
 
 
-def _abandon_operation(operation: StoredOperation, job_id: str, now: datetime) -> None:
+def _abandon_operation(
+    operation: StoredOperation,
+    job_id: str,
+    now: datetime,
+    *,
+    reason: str | None = None,
+) -> None:
     """Close a parked idempotent operation whose job has already ended.
 
     Left parked it would advertise a retry that the ended job can never grant
@@ -315,7 +321,7 @@ def _abandon_operation(operation: StoredOperation, job_id: str, now: datetime) -
     operation.retry_disposition_attempt = None
     operation.retry_due_at = None
     operation.status_reason = (
-        f"job {job_id} ended without this operation; its retry was abandoned"
+        reason or f"job {job_id} ended without this operation; its retry was abandoned"
     )[:512]
     operation.updated_at = now
 
@@ -1773,6 +1779,9 @@ class AgentJobService:
             tuple(node_admission_key(node_id) for node_id in scope),
             holder="agent-job",
         )
+        AgentJobService.abandon_superseded_idempotent_operations_in_session(
+            session, scope, ordinal, now
+        )
         parent_ids = tuple(
             session.scalars(
                 select(StoredOperation.parent_job_id)
@@ -1938,6 +1947,53 @@ class AgentJobService:
             parent.updated_at = now
 
     @staticmethod
+    def abandon_superseded_idempotent_operations_in_session(
+        session: Session, targets: Sequence[str], ordinal: int, now: datetime
+    ) -> int:
+        """Close parked idempotent transfers an older workload intent left behind.
+
+        A cancelled or superseded order has no use for a transfer that is parked
+        for an operator or waiting on a retry: nothing runs, and what it copied
+        stays on the Spark for the next request. Closing it lets the order that
+        superseded it settle instead of waiting for a receipt that cannot come.
+        """
+
+        scope = tuple(sorted(set(targets)))
+        if not scope:
+            return 0
+        acquire_admission_keys(
+            session,
+            tuple(node_admission_key(node_id) for node_id in scope),
+            holder="agent-job",
+        )
+        parked = tuple(
+            session.scalars(
+                select(StoredOperation)
+                .where(
+                    StoredOperation.node_id.in_(scope),
+                    StoredOperation.kind.in_(
+                        _ABANDONABLE_OPERATIONS & _WORKLOAD_INTENT_OPERATIONS
+                    ),
+                    StoredOperation.workload_intent_ordinal.is_not(None),
+                    StoredOperation.workload_intent_ordinal < ordinal,
+                    StoredOperation.current_attempt > 0,
+                    StoredOperation.state == "waiting-for-operator",
+                )
+                .order_by(StoredOperation.id)
+                .with_for_update(of=StoredOperation)
+            )
+        )
+        for operation in parked:
+            _abandon_operation(
+                operation,
+                operation.parent_job_id,
+                now,
+                reason="superseded by a newer workload intent; the parked transfer "
+                "was abandoned and its copied bytes remain on the Spark",
+            )
+        return len(parked)
+
+    @staticmethod
     def assess_superseded_agent_effects_in_session(
         session: Session, targets: Sequence[str], current_ordinal: int, now: datetime
     ) -> tuple[SupersededAgentEffect, ...]:
@@ -1966,6 +2022,14 @@ class AgentJobService:
         )
         pending = []
         for operation in candidates:
+            if (
+                operation.kind in _ABANDONABLE_OPERATIONS
+                and operation.state == "waiting-for-operator"
+            ):
+                # A parked idempotent transfer runs nothing a cancellation
+                # receipt could stop, and an ended job never stamped the
+                # cancellation identity this assessment otherwise requires.
+                continue
             parent = session.get(Job, operation.parent_job_id)
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(

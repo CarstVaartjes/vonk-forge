@@ -1737,6 +1737,9 @@ class RunSwitchFleetProfileAdapter:
             state.get("scope_node_ids", []),
             "profile switch child scope node IDs are invalid",
         )
+        AgentJobService.abandon_superseded_idempotent_operations_in_session(
+            session, scope_node_ids, ordinal, now
+        )
         effects = AgentJobService.assess_superseded_agent_effects_in_session(
             session, scope_node_ids, ordinal, now
         )

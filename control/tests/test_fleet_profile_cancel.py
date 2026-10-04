@@ -1481,3 +1481,154 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
     assert cancellation is not None
     assert cancellation.state == "cancelling"
     assert cancellation.pending_effects[0].operation_id == active_child_id
+
+
+@pytest.mark.parametrize("child_job_state", ["failed", "waiting-for-operator"])
+def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
+    tmp_path, child_job_state: str
+) -> None:
+    """Live regression: a profile cancel waited forever on a parked transfer.
+
+    One node's copy failed, so its child job ended; the other node's copy was
+    parked behind a scheduled retry. The older-intent assessment demanded a
+    cancellation receipt (and, for the ended job, a cancellation identity the
+    job never received) from a transfer that runs nothing, so the profile
+    cancel never completed. Parked idempotent transfers are closed instead.
+    """
+
+    import uuid
+
+    from vonk_control.models import AgentOperationAttempt
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    now = [lifecycle._clock()]
+    clock = lambda: now[0]
+    lifecycle._clock = clock
+    executor = RecordingArtifactExecutor(child_transfer=True)
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=clock,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+        artifact_phase_executor=executor,
+        memory_floor_bytes=50,
+    )
+    service = build_production_fleet_profile_service(
+        sessions, clock=clock, run_switch_operations=run_switch
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Parked distribution",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "parked-distribution",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    application = service.load(profile.number, request_key=_uuid(980), actor="admin")
+    for _ in range(6):
+        service.tick()
+        run_switch.tick()
+        if executor.children:
+            break
+    assert executor.children, "the order never issued its transfer"
+
+    # The production shape: a distribution child job with one failed node
+    # operation and one parked behind a scheduled retry.
+    with sessions.begin() as session:
+        first_node = session.get(AgentNode, nodes[0])
+        assert first_node is not None
+        ordinal = first_node.workload_intent_ordinal
+        child = Job(
+            id=str(uuid.uuid4()),
+            request_id=str(uuid.uuid4()),
+            kind="artifact-distribution",
+            state=child_job_state,
+            actor="admin",
+            authority_revision="f" * 64,
+            targets=list(nodes),
+            payload_digest="0" * 64,
+            payload={"plan_digest": "f" * 64, "workload_intent_ordinal": ordinal},
+            result=None,
+            created_at=now[0],
+            updated_at=now[0],
+        )
+        session.add(child)
+        session.flush()
+        for index, node_id in enumerate(nodes):
+            operation = AgentOperation(
+                id=str(uuid.uuid4()),
+                parent_job_id=child.id,
+                node_id=node_id,
+                kind="artifact.distribution.v1",
+                state="failed" if index == 0 else "waiting-for-operator",
+                payload={"plan_digest": "f" * 64},
+                payload_digest="0" * 64,
+                authority_revision="f" * 64,
+                workload_intent_ordinal=ordinal,
+                current_attempt=3,
+                created_at=now[0],
+                updated_at=now[0],
+                **(
+                    {}
+                    if index == 0
+                    else {
+                        "retry_disposition": "retry",
+                        "retry_disposition_attempt": 3,
+                        "retry_due_at": now[0] + timedelta(seconds=30),
+                    }
+                ),
+            )
+            session.add(operation)
+            session.flush()
+            session.add(
+                AgentOperationAttempt(
+                    operation_id=operation.id,
+                    attempt=3,
+                    fence=str(uuid.uuid4()),
+                    lease_deadline=now[0],
+                    agent_certificate_serial="serial-0",
+                    state="failed" if index == 0 else "expired",
+                    result={},
+                )
+            )
+        parked_id = child.id
+
+    service.cancel(
+        application.id,
+        profile_number=profile.number,
+        request_key=_uuid(986),
+        actor="admin",
+    )
+    for _ in range(10):
+        now[0] += timedelta(seconds=70)
+        service.tick()
+        run_switch.tick()
+
+    settled = service.application(application.id)
+    assert settled.state == "cancelled", settled.status_reason
+    with sessions() as session:
+        states = {
+            row.node_id: row.state
+            for row in session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == parked_id)
+            )
+        }
+    assert states == {nodes[0]: "failed", nodes[1]: "cancelled"}
