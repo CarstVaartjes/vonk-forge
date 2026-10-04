@@ -612,8 +612,10 @@ class InstallAdmissionService:
                 blockers.append(
                     AdmissionReason(
                         "install.insufficient_disk",
-                        f"Installation would leave {free_after} bytes, below the required {floor}-byte floor."
-                        + (f" Disk is {holders}." if holders else ""),
+                        (
+                            f"Installation would leave {free_after} bytes, below the required {floor}-byte floor."
+                            + (f" Disk is {holders}." if holders else "")
+                        )[:512],
                     )
                 )
             plans.append(

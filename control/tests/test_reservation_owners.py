@@ -327,7 +327,7 @@ def test_an_install_with_nothing_issued_is_judged_only_after_the_settling_grace(
 def test_the_insufficient_disk_blocker_names_who_holds_the_bytes(
     tmp_path: Path,
 ) -> None:
-    sessions, service, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     later = NOW + timedelta(seconds=1)
     _record_disk(sessions, nodes[0], at=later, free=2_000)
     service._clock = lambda: later
@@ -362,3 +362,11 @@ def test_the_insufficient_disk_blocker_names_who_holds_the_bytes(
     )
     assert "reserved by missing profile application" in blocker.detail
     assert "1900 bytes" in blocker.detail
+    install = service.preview_install(mapping_id, build_id)
+    reason = next(
+        reason
+        for reason in install.nodes[0].blockers
+        if reason.code == "install.insufficient_disk"
+    )
+    assert "reserved by missing profile application" in reason.detail
+    assert len(reason.detail) <= 512
