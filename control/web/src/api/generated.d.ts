@@ -1377,6 +1377,10 @@ export interface components {
             missing_nas_bytes?: number | null;
             /** Missing Spark Bytes */
             missing_spark_bytes?: number | null;
+            /** Missing Spark Bytes By Node */
+            missing_spark_bytes_by_node?: {
+                [key: string]: number;
+            } | null;
             /**
              * Nas Coverage
              * @enum {string}
@@ -7319,6 +7323,10 @@ export interface components {
             image_digest: string | null;
             /** Missing Image Distribution Bytes */
             missing_image_distribution_bytes?: number | null;
+            /** Missing Image Distribution Bytes By Node */
+            missing_image_distribution_bytes_by_node?: {
+                [key: string]: number;
+            } | null;
             /** Missing Nas Bytes */
             missing_nas_bytes?: number | null;
             /** Missing Spark Bytes */

@@ -1204,6 +1204,21 @@
             ],
             "title": "Missing Spark Bytes"
           },
+          "missing_spark_bytes_by_node": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Spark Bytes By Node"
+          },
           "nas_coverage": {
             "enum": [
               "complete",
@@ -20107,6 +20122,21 @@
               }
             ],
             "title": "Missing Image Distribution Bytes"
+          },
+          "missing_image_distribution_bytes_by_node": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Image Distribution Bytes By Node"
           },
           "missing_nas_bytes": {
             "anyOf": [

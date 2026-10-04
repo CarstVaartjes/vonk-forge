@@ -342,6 +342,8 @@ class ArtifactInspection:
     freshness: tuple[FreshnessEvidence, ...] = ()
     blockers: tuple[RunSwitchReason, ...] = ()
     warnings: tuple[RunSwitchReason, ...] = ()
+    # Node-keyed breakdown of ``missing_spark_bytes`` (never total / N).
+    missing_spark_bytes_by_node: Mapping[str, int] | None = None
     # A cache provider may expose the authoritative full manifest identity.
     # The Controller must never infer it from whichever files happen to be
     # present on one target.
@@ -540,7 +542,16 @@ def _digest(value: object) -> str:
 
 
 _PLAN_VOLATILE_KEYS = frozenset(
-    {"generated_at", "invocation", "plan_digest", "age_seconds", "verified_at"}
+    {
+        "generated_at",
+        "invocation",
+        "plan_digest",
+        "age_seconds",
+        "verified_at",
+        # Node-keyed breakdowns of byte totals that are already bound.
+        "missing_spark_bytes_by_node",
+        "missing_image_distribution_bytes_by_node",
+    }
 )
 
 
@@ -859,9 +870,11 @@ class DatabaseRunSwitchArtifactInspector:
         ]
         reused = 0
         missing_spark = 0
+        missing_by_node: dict[str, int] = {}
         reclaimable = 0
         reclaimable_digests: set[str] = set()
         for node_id in node_ids:
+            missing_by_node[node_id] = 0
             rows = tuple(
                 session.scalars(
                     select(NodeArtifact).where(NodeArtifact.node_id == node_id)
@@ -878,6 +891,7 @@ class DatabaseRunSwitchArtifactInspector:
                     reused += size
                 else:
                     missing_spark += size
+                    missing_by_node[node_id] += size
             if retention == "reclaim-unreferenced":
                 for row in rows:
                     if (
@@ -907,6 +921,7 @@ class DatabaseRunSwitchArtifactInspector:
             copied_bytes=missing_spark,
             missing_nas_bytes=missing_nas_bytes,
             missing_spark_bytes=missing_spark,
+            missing_spark_bytes_by_node=missing_by_node,
             reclaimable_bytes=reclaimable,
             nas_coverage="complete" if missing_nas_bytes == 0 else "partial",
             spark_coverage="complete" if missing_spark == 0 else "partial",
@@ -4749,6 +4764,7 @@ class RunSwitchOperationService:
         )
         runtime_reused = 0
         runtime_missing = 0
+        runtime_missing_by_node: dict[str, int] = {}
         runtime_reclaimable = 0
         runtime_reclaimable_digests: set[str] = set()
         runtime_raw_digest = (
@@ -4773,6 +4789,8 @@ class RunSwitchOperationService:
                     runtime_reused += image_bytes
                 else:
                     runtime_missing += image_bytes
+                    runtime_missing_by_node[node.node_id] = image_bytes
+                runtime_missing_by_node.setdefault(node.node_id, 0)
                 if (
                     artifact is not None
                     and artifact.state == "verified"
@@ -4808,6 +4826,9 @@ class RunSwitchOperationService:
             missing_spark_bytes=(runtime_missing if image_bytes is not None else None),
             missing_image_distribution_bytes=(
                 runtime_missing if image_bytes is not None else None
+            ),
+            missing_image_distribution_bytes_by_node=(
+                runtime_missing_by_node if image_bytes is not None else None
             ),
             nas_coverage=(
                 "partial"
@@ -4948,7 +4969,7 @@ class RunSwitchOperationService:
         if primary_model_digest is None:
             return None
         model_digests = tuple(inspection.artifact_digests)
-        model_expected = _per_target_bytes(inspection.required_bytes, len(group.nodes))
+        model_expected = inspection.artifact_set_bytes
         if model_expected is None or model_expected < 1:
             # The shared preparation contract requires the exact model set
             # size.  Keep this unknown rather than manufacturing a byte count.
@@ -4959,8 +4980,7 @@ class RunSwitchOperationService:
         artifact_set_bytes = inspection.artifact_set_bytes or model_expected
         if artifact_set_bytes != model_expected:
             return None
-        target_count = len(group.nodes)
-        model_missing = _per_target_bytes(inspection.missing_spark_bytes, target_count)
+        model_missing_by_node = inspection.missing_spark_bytes_by_node
         model_controller_expected = model_expected
         model_controller_verified = (
             model_controller_expected
@@ -4994,6 +5014,12 @@ class RunSwitchOperationService:
         )
         model_targets: list[TargetAssetState] = []
         for node in group.nodes:
+            model_missing = _node_missing_bytes(
+                model_missing_by_node,
+                node.node_id,
+                inspection.missing_spark_bytes,
+                len(group.nodes),
+            )
             target_ready = model_expected is not None and model_missing == 0
             model_targets.append(
                 TargetAssetState(
@@ -5001,14 +5027,14 @@ class RunSwitchOperationService:
                     state="ready" if target_ready else "unknown",
                     expected_bytes=model_expected,
                     present_bytes=(
-                        model_expected - (model_missing or 0)
-                        if model_expected is not None and model_missing is not None
+                        max(0, model_expected - model_missing)
+                        if model_missing is not None
                         else 0
                     ),
+                    # Unknown per-node evidence means "treat as missing"; the
+                    # distribution step then copies or verifies it.
                     missing_bytes=(
-                        model_missing
-                        if model_expected is not None and model_missing is not None
-                        else None
+                        model_missing if model_missing is not None else model_expected
                     ),
                     verified_sha256=artifact_set_digest if target_ready else None,
                     verified_at=now if target_ready else None,
@@ -5114,48 +5140,38 @@ class RunSwitchOperationService:
                 )
             ),
         )
-        runtime_targets = [
-            TargetAssetState(
-                node_id=node.node_id,
-                state="ready"
-                if runtime_storage.missing_image_distribution_bytes == 0
-                else "unknown",
-                expected_bytes=image_bytes,
-                present_bytes=(
-                    image_bytes
-                    if runtime_storage.missing_image_distribution_bytes == 0
-                    else max(
-                        0,
-                        image_bytes
-                        - _required_per_target_bytes(
-                            runtime_storage.missing_image_distribution_bytes,
-                            target_count,
-                        ),
-                    )
-                ),
-                missing_bytes=_per_target_bytes(
-                    runtime_storage.missing_image_distribution_bytes,
-                    target_count,
-                ),
-                verified_sha256=layout_digest
-                if runtime_storage.missing_image_distribution_bytes == 0
-                else None,
-                verified_at=now
-                if runtime_storage.missing_image_distribution_bytes == 0
-                else None,
-                imported_image_digest=(
-                    image_digest
-                    if runtime_storage.missing_image_distribution_bytes == 0
-                    else None
-                ),
-                reason=(
-                    None
-                    if runtime_storage.missing_image_distribution_bytes == 0
-                    else "The exact OCI image is not imported on this Spark."
-                ),
+        runtime_targets = []
+        for node in group.nodes:
+            image_missing = _node_missing_bytes(
+                runtime_storage.missing_image_distribution_bytes_by_node,
+                node.node_id,
+                runtime_storage.missing_image_distribution_bytes,
+                len(group.nodes),
             )
-            for node in group.nodes
-        ]
+            image_ready = image_missing == 0
+            runtime_targets.append(
+                TargetAssetState(
+                    node_id=node.node_id,
+                    state="ready" if image_ready else "unknown",
+                    expected_bytes=image_bytes,
+                    present_bytes=(
+                        max(0, image_bytes - image_missing)
+                        if image_missing is not None
+                        else 0
+                    ),
+                    missing_bytes=(
+                        image_missing if image_missing is not None else image_bytes
+                    ),
+                    verified_sha256=layout_digest if image_ready else None,
+                    verified_at=now if image_ready else None,
+                    imported_image_digest=image_digest if image_ready else None,
+                    reason=(
+                        None
+                        if image_ready
+                        else "The exact OCI image is not imported on this Spark."
+                    ),
+                )
+            )
         runtime = RuntimeImagePreparation(
             image_digest=image_digest,
             oci_layout_sha256=layout_digest,
@@ -6029,6 +6045,7 @@ class RunSwitchOperationService:
                 copied_bytes=inspection.copied_bytes,
                 missing_nas_bytes=inspection.missing_nas_bytes,
                 missing_spark_bytes=inspection.missing_spark_bytes,
+                missing_spark_bytes_by_node=inspection.missing_spark_bytes_by_node,
                 reclaimable_bytes=inspection.reclaimable_bytes,
                 nas_coverage=inspection.nas_coverage,
                 spark_coverage=inspection.spark_coverage,
@@ -6080,6 +6097,11 @@ class RunSwitchOperationService:
             copied_bytes=inspection.copied_bytes,
             missing_nas_bytes=inspection.missing_nas_bytes,
             missing_spark_bytes=inspection.missing_spark_bytes,
+            missing_spark_bytes_by_node=(
+                dict(inspection.missing_spark_bytes_by_node)
+                if inspection.missing_spark_bytes_by_node is not None
+                else None
+            ),
             reclaimable_bytes=inspection.reclaimable_bytes,
             reclaimed_bytes=(
                 inspection.reclaimable_bytes
@@ -8526,14 +8548,26 @@ def _planned_transfer_bytes(
         if model_download_bytes is not None and target_bytes is not None
         else None
     )
-    model_each = _per_target_bytes(model_bytes, len(node_ids))
-    image_each = _per_target_bytes(image_bytes, len(node_ids))
-    each = (
-        model_each + image_each
-        if model_each is not None and image_each is not None
-        else None
-    )
-    return total, {node_id: each for node_id in node_ids}
+    per_node: dict[str, int | None] = {}
+    for node_id in node_ids:
+        model_each = _node_missing_bytes(
+            plan.storage.missing_spark_bytes_by_node,
+            node_id,
+            model_bytes,
+            len(node_ids),
+        )
+        image_each = _node_missing_bytes(
+            plan.runtime_storage.missing_image_distribution_bytes_by_node,
+            node_id,
+            image_bytes,
+            len(node_ids),
+        )
+        per_node[node_id] = (
+            model_each + image_each
+            if model_each is not None and image_each is not None
+            else None
+        )
+    return total, per_node
 
 
 def _plan_target_node_ids(plan: RunSwitchPlan) -> tuple[str, ...]:
@@ -9876,19 +9910,28 @@ def _normalise_architecture(value: str) -> str:
     }.get(value.lower(), value.lower())
 
 
-def _per_target_bytes(value: int | None, target_count: int) -> int | None:
-    if value is None or target_count < 1 or value % target_count != 0:
-        return None
-    return value // target_count
+def _node_missing_bytes(
+    by_node: Mapping[str, int] | None,
+    node_id: str,
+    total: int | None,
+    target_count: int,
+) -> int | None:
+    """Bytes missing on ONE node, from per-node evidence only.
 
+    ``total`` is a sum over targets and is never divided: presence is uneven
+    in general (one Spark may already hold the model or image).  Without
+    per-node evidence only a zero total (all present) or a single target
+    (the total is that node's) is exact; otherwise return None, which callers
+    treat as "missing here" so distribution copies or verifies it.
+    """
 
-def _required_per_target_bytes(value: int | None, target_count: int) -> int:
-    """Per-target bytes for arithmetic, failing closed when it is not exact."""
-
-    per_target = _per_target_bytes(value, target_count)
-    if per_target is None:
-        raise RunSwitchOperationConflict("run-switch.per-target-byte-evidence-invalid")
-    return per_target
+    if by_node is not None and node_id in by_node:
+        return by_node[node_id]
+    if total == 0:
+        return 0
+    if total is not None and target_count == 1:
+        return total
+    return None
 
 
 def _required_string(value: object) -> str:

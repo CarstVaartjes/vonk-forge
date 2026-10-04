@@ -26,6 +26,7 @@ from .artifact_output_file import ArtifactOutputFile
 from .artifact_output_limits import ArtifactOutputLimits
 from .artifact_slot_contract import ArtifactSlotContract
 from .artifact_storage_impact import ArtifactStorageImpact
+from .artifact_storage_impact_missing_spark_bytes_by_node_type_0 import ArtifactStorageImpactMissingSparkBytesByNodeType0
 from .artifact_storage_impact_nas_coverage import ArtifactStorageImpactNasCoverage
 from .artifact_storage_impact_retention import ArtifactStorageImpactRetention
 from .artifact_storage_impact_running_coverage import ArtifactStorageImpactRunningCoverage
@@ -518,6 +519,7 @@ from .runtime_image_identity import RuntimeImageIdentity
 from .runtime_image_preparation import RuntimeImagePreparation
 from .runtime_image_receipt import RuntimeImageReceipt
 from .runtime_image_storage_impact import RuntimeImageStorageImpact
+from .runtime_image_storage_impact_missing_image_distribution_bytes_by_node_type_0 import RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0
 from .runtime_image_storage_impact_nas_coverage import RuntimeImageStorageImpactNasCoverage
 from .runtime_image_storage_impact_running_coverage import RuntimeImageStorageImpactRunningCoverage
 from .runtime_image_storage_impact_spark_coverage import RuntimeImageStorageImpactSparkCoverage
@@ -565,6 +567,7 @@ __all__ = (
     "ArtifactOutputLimits",
     "ArtifactSlotContract",
     "ArtifactStorageImpact",
+    "ArtifactStorageImpactMissingSparkBytesByNodeType0",
     "ArtifactStorageImpactNasCoverage",
     "ArtifactStorageImpactRetention",
     "ArtifactStorageImpactRunningCoverage",
@@ -1057,6 +1060,7 @@ __all__ = (
     "RuntimeImagePreparation",
     "RuntimeImageReceipt",
     "RuntimeImageStorageImpact",
+    "RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0",
     "RuntimeImageStorageImpactNasCoverage",
     "RuntimeImageStorageImpactRunningCoverage",
     "RuntimeImageStorageImpactSparkCoverage",
