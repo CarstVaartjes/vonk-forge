@@ -711,7 +711,9 @@ def test_published_distributed_sglang_preserves_authored_launch_and_rank() -> No
     assert entry_argv[entry_argv.index("--nnodes") + 1] == "2"
     assert entry_argv[entry_argv.index("--node-rank") + 1] == "0"
     assert worker_argv[worker_argv.index("--node-rank") + 1] == "1"
-    assert entry_argv[-4:] == ["--host", "0.0.0.0", "--port", "30000"]
+    # A host-networked two-Spark rank serves on the firewall-authorised port,
+    # not the engine's own default declared by the recipe.
+    assert entry_argv[-4:] == ["--host", "0.0.0.0", "--port", "8888"]
     assert _argv(entrypoint) != _argv(worker)
     assert _security(entrypoint)["network_mode"] == "none"
     assert _security(entrypoint)["gpu"] is True
