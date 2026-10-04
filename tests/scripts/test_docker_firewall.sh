@@ -56,6 +56,20 @@ for invalid in \
         exit 1
     fi
 done
+# The refusal must name the refused argument and what the node authorises, so
+# an operator can read the cause from the helper journal.
+refusal=$($helper --config "$config" check-fabric-run \
+    192.168.100.10 192.168.100.10 29500 8000 2>&1 || true)
+case "$refusal" in
+    *"host endpoint port 8000 is not authorized"*"authorized host endpoint ports: 8888"*) ;;
+    *) echo "host endpoint refusal does not name the port: $refusal" >&2; exit 1 ;;
+esac
+refusal=$($helper --config "$config" check-fabric-run \
+    192.168.100.10 192.168.100.10 29501 8888 2>&1 || true)
+case "$refusal" in
+    *"rendezvous port 29501 is not authorized"*"29500"*) ;;
+    *) echo "rendezvous refusal does not name the port: $refusal" >&2; exit 1 ;;
+esac
 $helper --config "$config" apply
 $helper --config "$config" check
 test "$($iptables -S DOCKER-USER | sed -n '/^-A DOCKER-USER /{p;q;}')" = \

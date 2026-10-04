@@ -21,6 +21,7 @@ from vonk_forge_contracts.resolver import (
     validate_recipe_models,
 )
 
+from ..platform_ports import rebind_port_argument, serving_port
 from ..runtime_writable_paths import (
     RUNTIME_REQUIREMENT_DECLARATION,
     RuntimeWritablePath,
@@ -465,8 +466,11 @@ def compile_canonical_harness(
     if interface.adapter == "openai":
         if "--host" not in command:
             command.extend(("--host", "0.0.0.0"))
+        port = serving_port(interface.port, node_count=topology.node_count)
         if "--port" not in command:
-            command.extend(("--port", str(interface.port)))
+            command.extend(("--port", str(port)))
+        else:
+            command = rebind_port_argument(command, interface.port, port)
     else:
         if "--output-dir" not in command:
             command.extend(("--output-dir", "/outputs"))

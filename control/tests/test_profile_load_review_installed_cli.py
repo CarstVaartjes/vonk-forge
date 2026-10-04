@@ -125,7 +125,7 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
     fit = review["assessments"][0]["assessment"]["fit_current"]
     assert fit["allowed"] is False
     assert any(
-        "Port 8000 is already reserved" in reason["detail"]
+        "Port 8888 is already reserved" in reason["detail"]
         for node in fit["nodes"]
         for reason in node["blockers"]
     )
@@ -167,7 +167,7 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
     assert "Current capacity: blocked" in visible
     assert "Capacity after stops: fits" in visible
     assert f"{nodes[0]} capacity blocker" in visible
-    assert "Port 8000 is already reserved" in visible
+    assert "Port 8888 is already reserved" in visible
     assert "Available in limiting pool:" in visible
     assert "profile.interruption_expected" in visible
     assert "workloads may be unavailable until final starts complete" in visible

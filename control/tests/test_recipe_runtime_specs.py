@@ -168,6 +168,46 @@ def test_distributed_tensorfold_keeps_an_option_the_recipe_already_sets() -> Non
     assert command.count("--tp") == 1
 
 
+@pytest.mark.parametrize("rank", [0, 1])
+def test_a_two_spark_engine_is_compiled_to_serve_on_the_firewall_authorised_port(
+    rank: int,
+) -> None:
+    # The declared port is the engine's own default; a host-networked rank has
+    # no Docker publication to map it, and the Spark firewall refuses any other
+    # host endpoint port at launch.
+    recipe = _distributed_sglang_recipe()
+    _json_object(_json_array(recipe["interfaces"])[0])["port"] = 30000
+    role = "entrypoint" if rank == 0 else "worker"
+    spec = _compile(recipe, role=role, rank=rank)
+
+    command = _json_array(_json_object(spec["runtime"])["entrypoint"])
+    assert _option_value(command, "--port") == "8888"
+    assert _json_object(spec["endpoint"])["port"] == 8888
+
+
+def test_a_two_spark_engine_command_that_names_the_declared_port_is_moved_too() -> None:
+    recipe = _distributed_sglang_recipe()
+    _json_object(_json_array(recipe["interfaces"])[0])["port"] = 30000
+    _json_array(_json_object(recipe["runtime"])["arguments"]).append(
+        {"name": "port", "value": 30000}
+    )
+    spec = _compile(recipe)
+
+    command = _json_array(_json_object(spec["runtime"])["entrypoint"])
+    assert command.count("--port") == 1
+    assert _option_value(command, "--port") == "8888"
+
+
+def test_a_single_spark_engine_keeps_the_declared_port() -> None:
+    recipe = _recipe()
+    _json_object(_json_array(recipe["interfaces"])[0])["port"] = 30000
+    spec = _compile(recipe)
+
+    command = _json_array(_json_object(spec["runtime"])["entrypoint"])
+    assert _option_value(command, "--port") == "30000"
+    assert _json_object(spec["endpoint"])["port"] == 30000
+
+
 def test_single_node_tensorfold_gets_no_rendezvous_options() -> None:
     recipe = _recipe(engine="tensorfold", entrypoint=["/opt/vonk/bin/tensorfold-serve"])
     command = _json_array(_json_object(_compile(recipe)["runtime"])["entrypoint"])

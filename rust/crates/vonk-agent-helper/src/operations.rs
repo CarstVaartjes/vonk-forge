@@ -115,7 +115,11 @@ pub enum OperationError {
     #[error("native fabric is unavailable or ambiguous")]
     RuntimeFabricUnavailable,
     #[error("native fabric firewall rejected the placement")]
-    RuntimeFabricFirewallRejected,
+    RuntimeFabricFirewallRejected {
+        /// Which request argument the firewall refused and why, or why the
+        /// check could not run. Names only values from the signed plan.
+        reason: String,
+    },
     #[error("one-shot runtime could not be stopped safely")]
     StopUncertain,
     #[error("installation runtime reconciliation is busy")]
@@ -153,7 +157,7 @@ impl OperationError {
             Self::RuntimeProcessExited { .. } => "helper.runtime_process_exited",
             Self::RuntimeRunMissing => "helper.runtime_run_missing",
             Self::RuntimeFabricUnavailable => "helper.runtime_fabric_unavailable",
-            Self::RuntimeFabricFirewallRejected => "helper.runtime_fabric_firewall_rejected",
+            Self::RuntimeFabricFirewallRejected { .. } => "helper.runtime_fabric_firewall_rejected",
             Self::StopUncertain => "helper.stop_uncertain",
             Self::InstallationReconciliationBusy => "helper.installation_reconciliation_busy",
             Self::InstallationReconciliationStorageUnavailable => {
@@ -189,7 +193,9 @@ impl OperationError {
             Self::RuntimeProcessExited { .. } => "runtime process exited",
             Self::RuntimeRunMissing => "exact runtime container is absent",
             Self::RuntimeFabricUnavailable => "native fabric is unavailable or ambiguous",
-            Self::RuntimeFabricFirewallRejected => "native fabric firewall rejected the placement",
+            Self::RuntimeFabricFirewallRejected { .. } => {
+                "native fabric firewall rejected the placement"
+            }
             Self::StopUncertain => "one-shot runtime could not be stopped safely",
             Self::InstallationReconciliationBusy => "installation runtime reconciliation is busy",
             Self::InstallationReconciliationStorageUnavailable => {
@@ -2390,6 +2396,22 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let Some(fabric) = &run.native_fabric else {
             return Ok(());
         };
+        let host_endpoint = run
+            .host_endpoint_port
+            .map_or_else(|| "none".to_owned(), |port| port.to_string());
+        let request = format!(
+            "check-fabric-run local={} master={} rendezvous={} endpoint={host_endpoint}",
+            fabric.local, fabric.master, fabric.port
+        );
+        let rejected = |reason: String| {
+            // The journal keeps the same reason the operation reports, so the
+            // refused argument is attributable without the Controller.
+            eprintln!(
+                "vonk-agent-helper: run {} native fabric firewall rejected: {reason}",
+                run.run_id
+            );
+            OperationError::RuntimeFabricFirewallRejected { reason }
+        };
         let output = self
             .runner
             .run_with_timeout(
@@ -2401,14 +2423,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     fabric.local.to_string(),
                     fabric.master.to_string(),
                     fabric.port.to_string(),
-                    run.host_endpoint_port
-                        .map_or_else(|| "none".to_owned(), |port| port.to_string()),
+                    host_endpoint,
                 ],
                 Duration::from_secs(10),
             )
-            .map_err(|_| OperationError::RuntimeFabricFirewallRejected)?;
+            .map_err(|error| rejected(format!("{request}: firewall check did not run: {error}")))?;
         if !output.success {
-            return Err(OperationError::RuntimeFabricFirewallRejected);
+            return Err(rejected(firewall_rejection_reason(&request, &output)));
         }
         let interface = std::str::from_utf8(&output.stdout)
             .ok()
@@ -4430,6 +4451,37 @@ fn parse_numeric_user(value: &str) -> Result<(u32, Option<u32>), OperationError>
     Ok((uid, gid))
 }
 
+/// The firewall's own refusal text, bounded, with the request it refused.
+///
+/// The firewall states which argument or rule failed on stderr. The request is
+/// named here as well so the reason stays attributable if an older firewall
+/// binary words its refusal without the offending value.
+fn firewall_rejection_reason(request: &str, output: &CommandOutput) -> String {
+    const LIMIT: usize = 512;
+    let text = String::from_utf8_lossy(&output.stderr);
+    let text = text
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(LIMIT)
+        .collect::<String>();
+    let status = output.exit_code.map_or_else(
+        || "no exit status".to_owned(),
+        |code| format!("exit {code}"),
+    );
+    if text.is_empty() {
+        format!("{request}: firewall refused without a reason ({status})")
+    } else {
+        format!("{request}: {text} ({status})")
+    }
+}
+
 fn parse_publication(value: &str) -> Option<(std::net::Ipv4Addr, u16, u16)> {
     let (address, ports) = if let Some(value) = value.strip_prefix('[') {
         let (address, ports) = value.split_once("]:")?;
@@ -6214,6 +6266,98 @@ mod tests {
             .unwrap();
         fabric[device] = "/dev/infiniband:/dev/infiniband".to_owned();
         assert!(validate_docker_run(&fabric, &roots, None).is_err());
+    }
+
+    #[test]
+    fn a_firewall_refusal_names_the_refused_argument_and_rule() {
+        // Wrong implementation: every nonzero exit, timeout and missing binary
+        // collapsed into the bare rejection code, so the refused argument and
+        // rule had to be rediscovered on the Spark.
+        enum Behavior {
+            Refuses,
+            DoesNotRun,
+        }
+        struct FirewallRunner(Behavior);
+        impl CommandRunner for FirewallRunner {
+            fn run(
+                &self,
+                executable: &Path,
+                _arguments: &[String],
+            ) -> Result<CommandOutput, String> {
+                assert_eq!(executable, Path::new(super::DOCKER_FIREWALL));
+                match self.0 {
+                    Behavior::Refuses => Ok(CommandOutput {
+                        success: false,
+                        stdout: Vec::new(),
+                        stderr: b"vonk-forge-docker-firewall: host endpoint port 8000 is not \
+                                  authorized (authorized host endpoint ports: 8888)\n"
+                            .to_vec(),
+                        exit_code: Some(1),
+                    }),
+                    Behavior::DoesNotRun => Err("command timed out".to_owned()),
+                }
+            }
+        }
+        let reason_of = |behavior| {
+            let (temp, roots) = runtime_fixture();
+            let model = artifact_path(&roots, 'a');
+            fs::create_dir_all(&model).unwrap();
+            let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+            let network = arguments.iter().position(|value| value == "none").unwrap();
+            arguments[network] = "host".to_owned();
+            let image = arguments
+                .iter()
+                .position(|value| value.starts_with("localhost/vonk/"))
+                .unwrap();
+            arguments.splice(
+                image..image,
+                [
+                    "--device",
+                    "nvidia.com/gpu=all",
+                    "--device",
+                    "/dev/infiniband:/dev/infiniband",
+                    "--ulimit",
+                    "memlock=-1:-1",
+                    "--ulimit",
+                    "stack=67108864:67108864",
+                    "--env",
+                    "VONK_MASTER_PORT=29500",
+                    "--env",
+                    "VONK_RANK=0",
+                    "--env",
+                    "VONK_WORLD_SIZE=2",
+                    "--env",
+                    "VONK_LOCAL_ADDR=192.168.100.10",
+                    "--env",
+                    "VONK_MASTER_ADDR=192.168.100.10",
+                    "--env",
+                    "VONK_LISTEN_PORT=8000",
+                ]
+                .map(str::to_owned),
+            );
+            let executor =
+                OperationExecutor::new(roots.clone(), &[0; 32], FirewallRunner(behavior), None)
+                    .unwrap();
+            let mut run = validate_docker_run(&arguments, &roots, None).unwrap();
+            let error = executor
+                .bind_native_fabric(&mut run, &temp.path().join("sysfs"))
+                .unwrap_err();
+            let OperationError::RuntimeFabricFirewallRejected { reason } = error else {
+                panic!("a firewall refusal must keep its own error");
+            };
+            reason
+        };
+
+        let refused = reason_of(Behavior::Refuses);
+        assert!(refused.contains("endpoint=8000"), "{refused}");
+        assert!(
+            refused.contains("host endpoint port 8000 is not authorized"),
+            "{refused}"
+        );
+        assert!(refused.contains("exit 1"), "{refused}");
+        let unavailable = reason_of(Behavior::DoesNotRun);
+        assert!(unavailable.contains("did not run"), "{unavailable}");
+        assert!(unavailable.contains("command timed out"), "{unavailable}");
     }
 
     #[test]

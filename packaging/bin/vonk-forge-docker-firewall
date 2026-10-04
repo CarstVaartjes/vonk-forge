@@ -159,21 +159,26 @@ fi
     || fail "host endpoint ports are not canonical"
 
 if [ "$action" = check-fabric-run ]; then
-    [ "$requested_local" = "$node_fabric_ip" ] || fail "runtime fabric address is not authorized"
-    [ "$requested_rendezvous" = "$rendezvous_port" ] || fail "runtime rendezvous port is not authorized"
+    [ "$requested_local" = "$node_fabric_ip" ] \
+        || fail "runtime fabric address $requested_local is not authorized (node fabric address: $node_fabric_ip)"
+    [ "$requested_rendezvous" = "$rendezvous_port" ] \
+        || fail "runtime rendezvous port $requested_rendezvous is not authorized (authorized rendezvous port: $rendezvous_port)"
     if [ "$requested_master" = "$node_fabric_ip" ]; then
         [ "$requested_host_port" != none ] || fail "rendezvous owner endpoint is missing"
     else
-        [ "$requested_master" = "$peer_fabric_ip" ] || fail "runtime master is not the authorized fabric peer"
-        [ "$requested_host_port" = none ] || fail "worker cannot publish a host endpoint"
+        [ "$requested_master" = "$peer_fabric_ip" ] \
+            || fail "runtime master $requested_master is not the authorized fabric peer (peer fabric address: $peer_fabric_ip)"
+        [ "$requested_host_port" = none ] \
+            || fail "worker cannot publish host endpoint port $requested_host_port"
     fi
 fi
 
 if [ "$action" = check-host-port ] || { [ "$action" = check-fabric-run ] && [ "$requested_host_port" != none ]; }; then
-    valid_port "$requested_host_port" || fail "requested host endpoint port is invalid"
+    valid_port "$requested_host_port" \
+        || fail "requested host endpoint port $requested_host_port is invalid"
     case ",$host_endpoint_ports," in
         *,$requested_host_port,*) ;;
-        *) fail "host endpoint port is not authorized" ;;
+        *) fail "host endpoint port $requested_host_port is not authorized (authorized host endpoint ports: ${host_endpoint_ports:-none})" ;;
     esac
 fi
 

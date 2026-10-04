@@ -3254,7 +3254,16 @@ fn runtime_helper_code(error: &crate::host_runtime::HostRuntimeError) -> String 
 }
 
 fn runtime_failure(reason: &str, error: &crate::host_runtime::HostRuntimeError) -> ExecutionResult {
-    let mut result = failed_owned(format!("{reason}: {}", error.preflight_code()));
+    let mut result = failed_owned(match error.diagnostic() {
+        // A refusal that names its own cause (for example which argument the
+        // Spark firewall rejected) belongs in the text an operator reads first,
+        // not only in the attached diagnostic logs. A container's own output
+        // stays in the logs: it is evidence, not the reason.
+        Some(detail) if !detail.is_empty() && error.process_logs().is_none() => {
+            format!("{reason}: {}: {detail}", error.preflight_code())
+        }
+        _ => format!("{reason}: {}", error.preflight_code()),
+    });
     if let Some((limit, observed)) = error.refusal_bound() {
         // Bounded integers only: the refusing rule and the measured bound. The
         // offending argument itself never crosses this boundary.
@@ -5237,6 +5246,34 @@ mod tests {
                 "container runtime could not start the workload: helper_request_document_invalid"
             ),
             "the failure reason must name the agent-built request, got {reason}"
+        );
+    }
+
+    #[test]
+    fn a_firewall_refusal_names_its_cause_in_the_start_failure_text() {
+        // Wrong implementation: the helper's diagnostic travelled only as
+        // attached logs, so the failure text read `helper_runtime_fabric_
+        // firewall_rejected` and nothing said which argument was refused.
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+            code: "runtime_fabric_firewall_rejected".to_owned(),
+            diagnostic: Some(
+                "check-fabric-run endpoint=8000: vonk-forge-docker-firewall: host endpoint \
+                 port 8000 is not authorized (authorized host endpoint ports: 8888)"
+                    .to_owned(),
+            ),
+            process_logs: None,
+        };
+        let failed =
+            super::runtime_failure("container runtime could not start the workload", &error);
+        let result = super::normalize_execution_result(&start_claim, failed);
+        let reason = result.body["reason"].as_str().unwrap_or_default();
+        assert!(
+            reason.contains("helper_runtime_fabric_firewall_rejected")
+                && reason.contains("host endpoint port 8000 is not authorized")
+                && reason.contains("authorized host endpoint ports: 8888"),
+            "{reason}"
         );
     }
 
