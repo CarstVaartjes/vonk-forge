@@ -13,6 +13,13 @@ superseded, possibly by a crash), the record is a residue:
   reconcile/cleanup path owns it, and the fleet view reports it
   (``install.partial``) instead of a silent wait.
 
+Separately, a *reservation* (disk, port, memory) is bookkeeping and not an
+effect: when its owner is dead (a cancelled or failed profile application, a
+stopped run, an installation with no operation issued for it, a build nothing
+runs, or an owner that no longer exists) it is released by owner state, see
+``reservation_owners``. The installation row and the files it wrote stay for
+the cleanup path; what is on the Spark is what its next inventory reports.
+
 Ownership is decided conservatively and without owner columns: a record is
 owned while any active operation targets one of its Sparks (or, for a grant,
 names its plan).
@@ -38,13 +45,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Collection
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from .agent_jobs import release_owned_reservations_in_session
 from .logging import log_event
 from .models import (
     ArtifactDistributionAssignment,
@@ -52,12 +58,10 @@ from .models import (
     InstallationNode,
     Job,
     RecipeInstallation,
-    ResourceReservation,
 )
+from .reservation_owners import ADOPTION_WINDOW, release_dead_owner_reservations
 
 _LOGGER = logging.getLogger(__name__)
-# How long an unowned plan waits for the next attempt to adopt it.
-ADOPTION_WINDOW = timedelta(minutes=15)
 _ACTIVE_JOB_STATES = ("queued", "running", "waiting", "waiting-for-operator")
 # Operations that may own an installation plan or a distribution grant.
 _OWNER_JOB_KINDS = (
@@ -203,7 +207,7 @@ class AttemptResidueReconciler:
         """Release every current residue; True when anything was released."""
 
         released = self._never_installed_plans()
-        released = self._stale_installation_claims() or released
+        released = self._dead_owner_claims() or released
         return self._ownerless_grants() or released
 
     def _owned_scope(self, session: Session) -> tuple[set[str], set[str]]:
@@ -282,29 +286,30 @@ class AttemptResidueReconciler:
                 return False
         return True
 
-    def _stale_installation_claims(self) -> bool:
-        """Release installation-owned claims whose installation is gone."""
+    def _dead_owner_claims(self) -> bool:
+        """Release disk, port and memory claims whose owner can no longer use them.
+
+        Whichever path ended the owner (a state written directly, a crash, a
+        cancel) this sweep finds the claim by its owner's state. It never waits
+        for a row another transaction holds, and a fault here only defers it to
+        the next tick.
+        """
 
         now = self._clock()
-        released: list[str] = []
-        with self._sessions.begin() as session:
-            owners = set(
-                session.scalars(
-                    select(ResourceReservation.owner_id).where(
-                        ResourceReservation.owner_kind == "installation",
-                        ResourceReservation.state == "active",
-                    )
-                )
+        try:
+            with self._sessions.begin() as session:
+                released = release_dead_owner_reservations(session, now)
+        except SQLAlchemyError as error:
+            self._log("reservation", "sweep", "refused", error)
+            return False
+        for owner in released:
+            self._log(
+                "reservation",
+                owner.owner_id,
+                "released",
+                owner=owner.describe(),
+                owner_kind=owner.kind,
             )
-            for owner_id in sorted(owners):
-                installation = session.get(RecipeInstallation, owner_id)
-                if installation is None or installation.state == "uninstalled":
-                    release_owned_reservations_in_session(
-                        session, "installation", owner_id, now
-                    )
-                    released.append(owner_id)
-        for owner_id in released:
-            self._log("installation-claim", owner_id, "released")
         return bool(released)
 
     def _ownerless_grants(self) -> bool:
