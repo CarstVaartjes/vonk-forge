@@ -25,11 +25,11 @@ download or use.
 The `vonk_forge_contracts` package in the recipe repository is the single
 source of truth for Model and Recipe documents; the Controller consumes the
 exact commit pinned in `control/pyproject.toml`. The library's release version
-is the contract version (`v2.0.0`), so new or changed models and recipes never
+is the contract version (`v2.2.0`), so new or changed models and recipes never
 need a vonk-forge change: the recipe repository updates the existing release
 for the current contract in place and records when its recipes last changed
 (`updated_at` in `catalog-index.json`). An additive contract change (a new
-optional field) is published as a new minor release (`v2.1.0`); a breaking one
+optional field) is published as a new minor release (for example `v2.3.0`); a breaking one
 as a new major release (`v3.0.0`) that needs a coordinated vonk-forge release.
 
 The Controller reads published documents tolerantly, ignoring fields a newer

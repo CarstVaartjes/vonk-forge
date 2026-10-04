@@ -60,3 +60,23 @@ file's exact content hash.
 See GitHub's [release lookup](https://docs.github.com/en/rest/releases/releases)
 and [release asset download](https://docs.github.com/en/rest/releases/assets)
 API documentation for the public endpoints used by this provider.
+
+## Files Hugging Face hosts only as parts
+
+Hugging Face caps a file at 50 GB, so a larger file may exist there only as
+`name.part00`, `name.part01`, ... A canonical `ModelFile` (contract 2.2.0) lists
+those `parts` (path, SHA-256, size) while its own SHA-256 and size describe the
+whole joined file. The cache fetches each part from the same repository and
+revision with the ordinary resumable transfer and appends it, in order, to one
+retained temporary file. The part's size and SHA-256 are verified, and the whole
+file's SHA-256 is computed, in that single append pass; the part is then deleted.
+The finished file must match the declared whole digest before it is renamed into
+the object store, so a part is never a cache object and nothing is re-hashed
+afterwards. The retained temporary file is the only checkpoint: after a restart
+it is cut back to the last whole part and its prefix is read once to recover the
+digest state. A part or assembly that fails its digest is discarded and
+retried like any other integrity failure. Admission needs the file plus its
+largest part as free disk (ranged part transfers reserve up to twice a part and
+fall back to a sequential stream on a tight disk). Cache objects are keyed by
+whole-file digest, so a file already cached from another model (published whole
+or split) is shared and its parts are not downloaded.

@@ -77,7 +77,9 @@ def test_the_reviewed_service_alias_is_refused_naming_its_field(slug: str) -> No
     definition = json.loads(
         (ROOT / "qualification" / "recipes" / f"{slug}.json").read_text("utf-8")
     )
-    alias = definition["service_recipes"]["alias"]
+    # The library has since made its reviewed aliases valid; the sweep's
+    # historical failure is the capitalized spelling, so refuse that form.
+    alias = definition["service_recipes"]["alias"].upper()
     document = {
         "name": "sweep",
         "expected_revision": 3,

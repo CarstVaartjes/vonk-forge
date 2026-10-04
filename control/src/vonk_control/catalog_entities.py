@@ -561,7 +561,7 @@ def _revision(
 ) -> CatalogDocumentRevision:
     artifact_key = download = installed = None
     if isinstance(parsed, ModelDefinition):
-        files = [item.model_dump(mode="json") for item in parsed.files]
+        files = _model_artifact_files(parsed)
         artifact_key = _digest(
             {"files": files, "format": parsed.format.model_dump(mode="json")}
         )
@@ -733,12 +733,22 @@ def build_policy_projection(recipe: RecipeDefinition) -> dict[str, object]:
     }
 
 
+def _model_artifact_files(parsed: ModelDefinition) -> list[dict[str, object]]:
+    """The model's files as installed bytes.
+
+    A source that ships a file split into parts is a transport detail: the same
+    bytes are the same artifact, so the parts never enter an artifact key.
+    """
+
+    return [item.model_dump(mode="json", exclude={"parts"}) for item in parsed.files]
+
+
 def _execution_projection(parsed: ModelDefinition | RecipeDefinition) -> object:
     if isinstance(parsed, ModelDefinition):
         return {
             "artifact_key": _digest(
                 {
-                    "files": [item.model_dump(mode="json") for item in parsed.files],
+                    "files": _model_artifact_files(parsed),
                     "format": parsed.format.model_dump(mode="json"),
                 }
             )

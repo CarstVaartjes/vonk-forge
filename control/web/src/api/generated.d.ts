@@ -4339,14 +4339,38 @@ export interface components {
         /**
          * ModelFile
          * @description One entry in the complete immutable model file manifest.
+         *
+         *     ``sha256`` and ``size_bytes`` always describe the whole installed file.
+         *     When the source publishes the file only as split parts, ``parts`` lists
+         *     them in joining order (byte concatenation yields the file). Omitted means
+         *     the source publishes the file whole, so the same bytes have the same
+         *     identity whether the source splits them or not.
          */
         ModelFile: {
             /** Id */
             id: string;
+            /** Parts */
+            parts?: components["schemas"]["ModelFilePart"][] | null;
             /** Path */
             path: string;
             /** Roles */
             roles: string[];
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /**
+         * ModelFilePart
+         * @description One published piece of a file the source can only host split.
+         *
+         *     A part is a transport detail: it exists only at the source (for example a
+         *     Hugging Face repository that caps files at 50 GB publishes
+         *     ``model.safetensors.part00``). It is never installed.
+         */
+        ModelFilePart: {
+            /** Path */
+            path: string;
             /** Sha256 */
             sha256: string;
             /** Size Bytes */

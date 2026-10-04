@@ -10413,7 +10413,7 @@
       },
       "ModelFile": {
         "additionalProperties": false,
-        "description": "One entry in the complete immutable model file manifest.",
+        "description": "One entry in the complete immutable model file manifest.\n\n``sha256`` and ``size_bytes`` always describe the whole installed file.\nWhen the source publishes the file only as split parts, ``parts`` lists\nthem in joining order (byte concatenation yields the file). Omitted means\nthe source publishes the file whole, so the same bytes have the same\nidentity whether the source splits them or not.",
         "properties": {
           "id": {
             "maxLength": 64,
@@ -10421,6 +10421,22 @@
             "pattern": "^[a-z][a-z0-9_-]{0,63}$",
             "title": "Id",
             "type": "string"
+          },
+          "parts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ModelFilePart"
+                },
+                "maxItems": 1024,
+                "minItems": 2,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parts"
           },
           "path": {
             "maxLength": 512,
@@ -10457,6 +10473,35 @@
           "roles"
         ],
         "title": "ModelFile",
+        "type": "object"
+      },
+      "ModelFilePart": {
+        "additionalProperties": false,
+        "description": "One published piece of a file the source can only host split.\n\nA part is a transport detail: it exists only at the source (for example a\nHugging Face repository that caps files at 50 GB publishes\n``model.safetensors.part00``). It is never installed.",
+        "properties": {
+          "path": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "minimum": 1.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "size_bytes"
+        ],
+        "title": "ModelFilePart",
         "type": "object"
       },
       "ModelFormat": {
