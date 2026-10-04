@@ -51,6 +51,9 @@ def profile_switch_child_request_key(
     )
 
 
+#: The most warnings one profile view carries.
+MAX_PROFILE_WARNINGS = 128
+
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -420,7 +423,7 @@ class FleetProfileView(_StrictModel):
     status: str = "draft"
     loaded_revision: int | None = Field(default=None, ge=1)
     cache_summary: dict[str, object] = Field(default_factory=dict)
-    warnings: list[str] = Field(default_factory=list, max_length=128)
+    warnings: list[str] = Field(default_factory=list, max_length=MAX_PROFILE_WARNINGS)
     next_actions: list[str] = Field(default_factory=list, max_length=32)
     profile_digest: Digest
     created_by: Annotated[str, StringConstraints(min_length=1, max_length=200)]

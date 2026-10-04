@@ -786,16 +786,54 @@ def test_a_missing_option_choice_is_saved_as_the_recipe_default() -> None:
     }
 
 
-def test_an_unknown_option_or_value_is_refused_with_the_choices() -> None:
-    from vonk_control.fleet_profiles import FleetProfileInvalidChoice
+def test_an_unknown_option_or_value_is_replaced_by_the_default_and_named() -> None:
+    sessions = _sessions()
+    _seed(sessions, options=True)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+
+    created = _option_profile(service, verification="nope", sampling="greedy")
+
+    assert created.assignments[0].option_choices == {"verification": "standard"}
+    assert created.definition.assignments[0].option_choices == {
+        "verification": "standard"
+    }
+    assert any("nope" in warning for warning in created.warnings)
+    assert any("sampling" in warning for warning in created.warnings)
+
+
+def test_a_profile_holding_a_retired_choice_can_still_be_edited() -> None:
+    """Every edit re-submits all assignments, so one stale choice blocked them all."""
+
+    from vonk_control.models import FleetProfile
 
     sessions = _sessions()
     _seed(sessions, options=True)
     service = FleetProfileService(sessions, clock=lambda: NOW)
-    with pytest.raises(FleetProfileInvalidChoice, match="standard, adaptive"):
-        _option_profile(service, verification="nope")
-    with pytest.raises(FleetProfileInvalidChoice, match="verification"):
-        _option_profile(service, sampling="greedy")
+    created = _option_profile(service, verification="adaptive")
+    with sessions.begin() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None
+        row.assignments = [
+            {**assignment, "option_choices": {"verification": "retired"}}
+            for assignment in row.assignments
+        ]
+
+    definition = service.get(created.id).definition
+    edited = service.update(
+        created.id,
+        FleetProfileInput.model_validate(
+            {
+                **definition.model_dump(mode="json"),
+                "expected_revision": 1,
+                "description": "edited while a choice was stale",
+            }
+        ),
+        actor="test",
+    )
+
+    assert edited.description == "edited while a choice was stale"
+    assert edited.assignments[0].option_choices == {"verification": "standard"}
+    assert any("retired" in warning for warning in edited.warnings)
 
 
 def test_a_profile_saved_without_choices_runs_the_recipe_defaults() -> None:

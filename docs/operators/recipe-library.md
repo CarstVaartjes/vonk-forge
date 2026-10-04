@@ -199,8 +199,11 @@ execution.
 A recipe may declare options (contract 2.1.0): named settings with a fixed set
 of named choices, each carrying literal runtime arguments and environment, and
 exactly one default. A profile assignment stores the effective choice for every
-option (`option_choices`); a choice left out takes the recipe default, and an
-unknown option or value is refused with the valid choices. The Controller
+option (`option_choices`); a choice left out takes the recipe default. A
+choice the recipe does not offer (an unknown option or value, such as one a
+recipe refresh removed) never blocks a save: it takes the default and the save
+names the replacement in the profile's warnings. `vonkctl profile add
+--option` still refuses a typo with the valid choices before saving. The Controller
 merges the chosen arguments and environment into the recipe (an argument or
 variable the recipe already sets is replaced in place, otherwise appended) and
 then applies the same platform checks as to authored values, identically on
