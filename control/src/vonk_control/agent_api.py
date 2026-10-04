@@ -1767,15 +1767,14 @@ def install_agent_routes(
         if plan_digest is None:
             raise HTTPException(status_code=403, detail="assignment is required")
         try:
-            _assignment, object_spec, opened = required.distribution.open_object(
+            _assignment, object_spec, stored = required.distribution.locate_object(
                 node_id=identity.node_id,
                 plan_digest=plan_digest,
                 digest=sha256,
             )
         except DistributionError as error:
             raise _distribution_error(error) from None
-        # Only the name and size were needed; the edge opens the file itself.
-        opened.stream.close()
+        # Only the name and size are needed; the edge opens the file itself.
         etag = f'"sha256:{object_spec.sha256}"'
         # The edge answers the client's range from the file, so a checkpoint
         # from another object must be refused here rather than served.
@@ -1785,8 +1784,8 @@ def install_agent_routes(
             f"sha256:{object_spec.sha256}",
         }:
             raise HTTPException(status_code=412, detail="object checkpoint changed")
-        _range(request.headers.get("range"), opened.size, required.max_range_bytes)
-        return _served_from_edge(required, opened.path, etag)
+        _range(request.headers.get("range"), stored.size, required.max_range_bytes)
+        return _served_from_edge(required, stored.path, etag)
 
     app.include_router(agent)
 

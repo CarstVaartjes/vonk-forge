@@ -1,0 +1,388 @@
+#!/usr/bin/env bash
+# Measure what limits the NAS while it serves model objects to Sparks.
+#
+#   sudo scripts/measure-nas-serving static [--store DIR]
+#   sudo scripts/measure-nas-serving sample [SECONDS] [--interval N]
+#   sudo scripts/measure-nas-serving read [--store DIR] [--object SHA256] [--drop-caches]
+#   sudo scripts/measure-nas-serving write-load MB_PER_SECOND SECONDS [--store DIR]
+#
+# static      Filesystem, RAID, read-ahead, NIC and container settings that decide
+#             disk and network speed. Changes nothing.
+# sample      Run while Sparks copy (default 60 s): NIC, disk, CPU, pressure and the
+#             busiest processes and containers, every interval and in total.
+# read        Read one stored object locally (no network, no Caddy) with 1, 4 and 8
+#             concurrent readers: the most the disks can serve the Sparks.
+# write-load  Write sequentially at a fixed rate into the store, to stand in for
+#             the Hugging Face download while `read` runs in another terminal.
+#
+# Needs root, a Linux host and standard tools; every missing tool only skips its
+# own section. The object store defaults to the Docker volume named
+# *model-cache; its objects sit under objects/xx/SHA256. Read
+# docs/runbooks/transfer-throughput.md for what each number means.
+set -uo pipefail
+
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
+(($# >= 1)) || usage
+mode=$1
+shift
+
+store=${VONK_MODEL_CACHE_DIR:-}
+object=
+drop_caches=
+interval=5
+positional=()
+while (($#)); do
+    case $1 in
+    --store) store=${2:?--store needs a directory}; shift 2 ;;
+    --object) object=${2:?--object needs a sha256}; shift 2 ;;
+    --drop-caches) drop_caches=1; shift ;;
+    --interval) interval=${2:?--interval needs seconds}; shift 2 ;;
+    -h | --help) usage ;;
+    *) positional+=("$1"); shift ;;
+    esac
+done
+
+sysval() { cat "$1" 2>/dev/null; }
+have() { command -v "$1" >/dev/null 2>&1; }
+section() { printf '\n== %s\n' "$*"; }
+note() { printf '   %s\n' "$*"; }
+warn() { printf '   !! %s\n' "$*"; }
+
+[[ $(uname -s) == Linux ]] || { echo "run this on the NAS host (Linux)" >&2; exit 1; }
+[[ $EUID -eq 0 ]] || warn "not root: some settings and processes will not be readable"
+
+find_store() {
+    [[ -n $store ]] && return 0
+    have docker || return 1
+    local volume
+    volume=$(docker volume ls -q 2>/dev/null | grep -E 'model-cache$' | head -n 1)
+    [[ -n $volume ]] || return 1
+    store=$(docker volume inspect -f '{{.Mountpoint}}' "$volume" 2>/dev/null)
+    [[ -n $store ]]
+}
+
+pick_object() { # a stored object of at least 2 GiB (6 GiB preferred): --object, or the first found
+    if [[ -n $object ]]; then
+        local found
+        found=$(find "$store/objects" -type f -name "$object" 2>/dev/null | head -n 1)
+        [[ -n $found ]] && { printf '%s' "$found"; return 0; }
+        return 1
+    fi
+    # The read test wants 6 GiB so that every test reads bytes no earlier test cached.
+    local found
+    found=$(find "$store/objects" -type f -size +6G -print -quit 2>/dev/null)
+    [[ -n $found ]] || found=$(find "$store/objects" -type f -size +2G -print -quit 2>/dev/null)
+    printf '%s' "$found"
+}
+
+# Block devices worth watching: whole disks, md and device-mapper volumes.
+block_devices() {
+    local d
+    for d in /sys/block/*; do
+        d=${d##*/}
+        case $d in loop* | ram* | zram* | sr* | nbd*) continue ;; esac
+        printf '%s\n' "$d"
+    done
+}
+
+nic() { # the interface that carries the default route
+    ip route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }'
+}
+
+static() {
+    section "host"
+    note "$(uname -srm)"
+    local cpu
+    cpu=$(awk -F: '/model name/ { gsub(/^ +/, "", $2); print $2; exit }' /proc/cpuinfo)
+    [[ -n $cpu ]] || cpu=$(have lscpu && lscpu | awk -F: '/Model name/ { gsub(/^ +/, "", $2); print $2; exit }')
+    note "cpu: ${cpu:-unknown}, $(nproc) threads"
+    note "load average: $(cut -d' ' -f1-3 /proc/loadavg)"
+    note "$(awk '/MemTotal/ { t = $2 } /MemAvailable/ { a = $2 } /^Cached/ { c = $2 } END { printf "memory: %.1f GiB total, %.1f GiB available, %.1f GiB page cache", t / 1048576, a / 1048576, c / 1048576 }' /proc/meminfo)"
+    note "a page cache far smaller than a model means every copy reads the disks"
+
+    if find_store; then
+        section "object store: $store"
+        have findmnt && findmnt -T "$store" -o TARGET,SOURCE,FSTYPE,OPTIONS | sed 's/^/   /'
+        have df && df -hP "$store" | sed 's/^/   /'
+        if findmnt -T "$store" -o OPTIONS -n 2>/dev/null | grep -q 'compress'; then
+            warn "mounted with compression: stored model weights do not compress, but every read pays the check"
+        fi
+        local sample
+        sample=$(pick_object)
+        if [[ -n $sample ]]; then
+            note "sample object: $sample ($(($(stat -c %s "$sample") / 1048576)) MiB)"
+            have lsattr && note "attributes: $(lsattr "$sample" 2>/dev/null | cut -d' ' -f1) (C = no copy-on-write)"
+            if have compsize; then compsize -x "$sample" 2>/dev/null | sed 's/^/   /'; else note "compsize is not installed: cannot show compression or extent count"; fi
+            have filefrag && note "extents: $(filefrag "$sample" 2>/dev/null | sed 's/.*: //')"
+        fi
+    else
+        section "object store"
+        warn "not found: pass --store DIR (the directory that holds objects/)"
+    fi
+
+    section "block layer"
+    local d
+    for d in $(block_devices); do
+        local base=/sys/block/$d
+        printf '   %-12s read_ahead_kb=%-6s scheduler=%-22s rotational=%s\n' "$d" \
+            "$(sysval "$base/queue/read_ahead_kb")" "$(sysval "$base/queue/scheduler" | sed 's/.*\[\(.*\)\].*/\1/' )" \
+            "$(sysval "$base/queue/rotational")"
+        if [[ -d $base/md ]]; then
+            printf '   %-12s md level=%s state=%s stripe_cache_size=%s group_thread_cnt=%s degraded=%s sync_action=%s\n' "" \
+                "$(sysval "$base/md/level")" "$(sysval "$base/md/array_state")" \
+                "$(sysval "$base/md/stripe_cache_size")" "$(sysval "$base/md/group_thread_cnt")" \
+                "$(sysval "$base/md/degraded")" "$(sysval "$base/md/sync_action")"
+            local cache threads
+            cache=$(sysval "$base/md/stripe_cache_size")
+            threads=$(sysval "$base/md/group_thread_cnt")
+            [[ ${cache:-0} -ge 4096 ]] || warn "$d: RAID5 stripe_cache_size ${cache:-?} is small; sequential writes stall on it (raising it costs RAM: 8192 uses about 32 MiB per member)"
+            [[ ${threads:-0} -ge 1 ]] || warn "$d: group_thread_cnt is 0: all RAID5 parity work runs on one kernel thread (md*_raid5)"
+            [[ $(sysval "$base/md/sync_action") == idle ]] || warn "$d: a resync/check is running and takes disk bandwidth"
+        fi
+    done
+    [[ -r /proc/mdstat ]] && sed 's/^/   /' /proc/mdstat
+
+    section "network"
+    local dev
+    dev=$(nic)
+    if [[ -n $dev ]]; then
+        note "default route interface: $dev, mtu $(cat "/sys/class/net/$dev/mtu" 2>/dev/null)"
+        if have ethtool; then
+            ethtool "$dev" 2>/dev/null | awk '/Speed|Duplex|Link detected/ { print "   " $0 }'
+            ethtool -k "$dev" 2>/dev/null | awk '/^(tcp-segmentation-offload|generic-segmentation-offload|generic-receive-offload|rx-checksumming|tx-checksumming):/ { print "   " $0 }'
+        else
+            note "speed: $(cat "/sys/class/net/$dev/speed" 2>/dev/null) Mbit/s"
+        fi
+    else
+        warn "no default route interface found"
+    fi
+    have sysctl && sysctl net.ipv4.tcp_congestion_control net.core.rmem_max net.core.wmem_max net.ipv4.tcp_rmem net.ipv4.tcp_wmem 2>/dev/null | sed 's/^/   /'
+
+    if have docker; then
+        section "containers"
+        docker ps --format '   {{.Names}}  {{.Image}}  {{.Status}}' 2>/dev/null | grep -Ei 'caddy|control|worker|postgres|litellm' || note "none matched"
+        local c
+        for c in $(docker ps --format '{{.Names}}' 2>/dev/null | grep -Ei 'caddy|control-api|worker'); do
+            note "$c limits: cpus=$(docker inspect -f '{{.HostConfig.NanoCpus}}' "$c" 2>/dev/null) memory=$(docker inspect -f '{{.HostConfig.Memory}}' "$c" 2>/dev/null) (0 = unlimited)"
+        done
+    fi
+}
+
+# --- sampling -----------------------------------------------------------
+
+# One line per process: "pid comm cpu_ticks cgroup-id".
+proc_cpu() {
+    local stat pid
+    for stat in /proc/[0-9]*/stat; do
+        pid=${stat#/proc/}
+        pid=${pid%/stat}
+        # comm may contain spaces: take what follows the closing parenthesis.
+        awk -v pid="$pid" '{
+            line = $0; lp = index(line, "("); rp = 0
+            for (i = length(line); i > 0; i--) if (substr(line, i, 1) == ")") { rp = i; break }
+            comm = substr(line, lp + 1, rp - lp - 1)
+            split(substr(line, rp + 2), f, " ")
+            gsub(/ /, "_", comm)
+            printf "%s %s %d\n", pid, comm, f[12] + f[13]
+        }' "$stat" 2>/dev/null
+    done
+}
+
+container_names() { # "id12 name" lines
+    have docker && docker ps --no-trunc --format '{{.ID}} {{.Names}}' 2>/dev/null | awk '{ print substr($1, 1, 12), $2 }'
+}
+
+container_of() { # pid -> container name or "-"
+    local id
+    id=$(grep -Eo '[0-9a-f]{64}' "/proc/$1/cgroup" 2>/dev/null | head -n 1 | cut -c1-12)
+    if [[ -n $id ]]; then
+        awk -v id="$id" '$1 == id { print $2; found = 1 } END { if (!found) print "-" }' "$containers_file"
+    else
+        echo "-"
+    fi
+}
+
+disk_snapshot() { # name sectors_read sectors_written io_ms for whole devices
+    local d
+    for d in $(block_devices); do
+        awk -v d="$d" '$3 == d { print d, $6, $10, $13, $4 + $8, $7 + $11 }' /proc/diskstats
+    done
+}
+
+nic_bytes() { # rx tx
+    local dev=$1
+    echo "$(cat "/sys/class/net/$dev/statistics/rx_bytes") $(cat "/sys/class/net/$dev/statistics/tx_bytes")"
+}
+
+cpu_snapshot() { awk '/^cpu / { print $2 + $3 + $4 + $7 + $8 + $9, $5, $6 }' /proc/stat; } # busy idle iowait
+
+sample() {
+    local seconds=${positional[0]:-60}
+    [[ $seconds =~ ^[0-9]+$ && $interval =~ ^[0-9]+$ && $interval -ge 1 ]] || usage
+    local dev
+    dev=$(nic)
+    [[ -n $dev ]] || { echo "no default route interface" >&2; exit 1; }
+    work=$(mktemp -d)
+    containers_file=$work/containers
+    trap 'rm -rf "$work"' EXIT INT TERM HUP
+    container_names >"$containers_file"
+    local hz
+    hz=$(getconf CLK_TCK)
+
+    section "sampling $seconds s every $interval s on $dev (start the Spark copy first)"
+    printf '   %5s %9s %9s %9s %9s %6s %6s %6s\n' "t" "nic_tx" "nic_rx" "disk_rd" "disk_wr" "cpu%" "iowait" "psi_io"
+    proc_cpu >"$work/p0"
+    disk_snapshot >"$work/d0"
+    local start_time rx0 tx0 busy0 idle0 wait0
+    read -r rx0 tx0 < <(nic_bytes "$dev")
+    read -r busy0 idle0 wait0 < <(cpu_snapshot)
+    start_time=$(date +%s.%N)
+    local elapsed=0 prev_time=$start_time prev_rx=$rx0 prev_tx=$tx0 prev_busy=$busy0 prev_idle=$idle0 prev_wait=$wait0
+    cp "$work/d0" "$work/dprev"
+    local psi_prev
+    psi_prev=$(awk -F'[= ]' '/^some/ { print $NF }' /proc/pressure/io 2>/dev/null || echo 0)
+    while ((elapsed < seconds)); do
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
+        local now rx tx busy idle wait
+        now=$(date +%s.%N)
+        read -r rx tx < <(nic_bytes "$dev")
+        read -r busy idle wait < <(cpu_snapshot)
+        disk_snapshot >"$work/dnow"
+        local psi
+        psi=$(awk -F'[= ]' '/^some/ { print $NF }' /proc/pressure/io 2>/dev/null || echo 0)
+        awk -v dt="$(awk -v a="$now" -v b="$prev_time" 'BEGIN { print a - b }')" \
+            -v rx="$((rx - prev_rx))" -v tx="$((tx - prev_tx))" -v t="$elapsed" \
+            -v db="$((busy - prev_busy))" -v di="$((idle - prev_idle))" -v dw="$((wait - prev_wait))" \
+            -v psi="$psi" -v psip="$psi_prev" -v interval="$interval" -v prev="$work/dprev" -v cur="$work/dnow" '
+            BEGIN {
+                while ((getline line < prev) > 0) { split(line, a, " "); pr[a[1]] = a[2]; pw[a[1]] = a[3] }
+                while ((getline line < cur) > 0) {
+                    split(line, a, " ")
+                    # Count real disks only: md and device-mapper volumes duplicate their members.
+                    if (a[1] ~ /^(md|dm-)/) continue
+                    r += a[2] - pr[a[1]]; w += a[3] - pw[a[1]]
+                }
+                total = db + di + dw
+                printf "   %5d %9.1f %9.1f %9.1f %9.1f %6.0f %6.0f %6.0f\n", t, tx / dt / 1e6, rx / dt / 1e6, r * 512 / dt / 1e6, w * 512 / dt / 1e6, total ? 100 * db / total : 0, total ? 100 * dw / total : 0, (psi - psip) / 1e4 / interval
+            }'
+        prev_time=$now prev_rx=$rx prev_tx=$tx prev_busy=$busy prev_idle=$idle prev_wait=$wait
+        psi_prev=$psi
+        cp "$work/dnow" "$work/dprev"
+    done
+    note "nic_tx is what the NAS sent to Sparks; nic_rx includes the Hugging Face download; psi_io is the % of time tasks waited on disk"
+
+    proc_cpu >"$work/p1"
+    disk_snapshot >"$work/d1"
+    local total_time
+    total_time=$(awk -v a="$(date +%s.%N)" -v b="$start_time" 'BEGIN { print a - b }')
+
+    section "busiest processes over the whole sample (100% = one core)"
+    awk -v hz="$hz" -v t="$total_time" 'NR == FNR { before[$1] = $3; name[$1] = $2; next }
+        { d = $3 - (($1 in before) ? before[$1] : 0); if (d > 0) printf "%d %s %.0f\n", $1, $2, 100 * d / hz / t }' \
+        "$work/p0" "$work/p1" | sort -k3 -rn | head -n 10 | while read -r pid comm pct; do
+        printf '   %5s%%  %-22s pid %-7s container %s\n' "$pct" "$comm" "$pid" "$(container_of "$pid")"
+    done
+    note "Caddy on the serving path: ~100% of one core means TLS or copying is the limit; raid5/btrfs kernel threads high means storage"
+    note "md*_raid5 near 100% of one core: the single RAID5 thread is the limit (see group_thread_cnt)"
+
+    section "disks over the whole sample"
+    awk -v t="$total_time" 'NR == FNR { r0[$1] = $2; w0[$1] = $3; io0[$1] = $4; n0[$1] = $5; ms0[$1] = $6; next }
+        { dr = ($2 - r0[$1]) * 512 / t / 1e6; dw = ($3 - w0[$1]) * 512 / t / 1e6; util = ($4 - io0[$1]) / 10 / t
+          ios = $5 - n0[$1]; wait = ios > 0 ? ($6 - ms0[$1]) / ios : 0
+          if (dr + dw >= 0.5) printf "   %-12s read %7.1f MB/s  write %7.1f MB/s  busy %5.0f%%  avg wait %.2f ms\n", $1, dr, dw, util, wait }' \
+        "$work/d0" "$work/d1"
+    note "RAID5 write amplification: compare an md device's write MB/s with its members' total write MB/s, and look for member reads while only writing"
+    note "a member at busy ~100% or an avg wait of tens of ms is saturated"
+
+    if have docker; then
+        section "containers right now (docker stats)"
+        docker stats --no-stream --format '   {{.Name}}  cpu {{.CPUPerc}}  mem {{.MemUsage}}  net {{.NetIO}}  block {{.BlockIO}}' 2>/dev/null | grep -Ei 'caddy|control|worker|postgres|litellm' || note "none matched"
+    fi
+    section "TCP"
+    have nstat && nstat -az TcpRetransSegs TcpExtTCPTimeouts 2>/dev/null | awk 'NR > 1 { print "   " $1, $2 }'
+    note "retransmits climbing during a copy mean packet loss or a congested switch, not the NAS"
+}
+
+# --- local read test ----------------------------------------------------
+
+readers() { # readers bytes_each base: concurrent dd readers at distinct offsets, prints MB/s aggregate
+    local n=$1 each=$2 base=$3 file=$4 i begin end
+    begin=$(date +%s.%N)
+    for ((i = 0; i < n; i++)); do
+        dd if="$file" of=/dev/null bs=1M skip=$(((base + i * each) / 1048576)) count=$((each / 1048576)) status=none 2>/dev/null &
+    done
+    wait
+    end=$(date +%s.%N)
+    awk -v n="$n" -v b="$((n * each))" -v t0="$begin" -v t1="$end" 'BEGIN { printf "%d reader(s): %.0f MB/s aggregate, %.0f MB/s each\n", n, b / (t1 - t0) / 1e6, b / (t1 - t0) / 1e6 / n }'
+}
+
+read_test() {
+    find_store || { echo "object store not found: pass --store DIR" >&2; exit 1; }
+    local file size
+    file=$(pick_object)
+    [[ -n $file ]] || { echo "no object of at least 2 GiB under $store/objects (use --object SHA256)" >&2; exit 1; }
+    size=$(stat -c %s "$file")
+    section "local read of $file ($((size / 1048576)) MiB): no network, no Caddy, no TLS"
+    if [[ -n $drop_caches ]]; then
+        sync
+        if echo 3 >/proc/sys/vm/drop_caches; then note "page cache dropped before each test"; else warn "could not drop caches"; fi
+    else
+        warn "page cache is not dropped: parts of the object that are cached read at memory speed; pass --drop-caches for the disks' own rate"
+    fi
+    local gib=$((1024 * 1048576)) base=0 cursor=0
+    run() { # readers bytes_each
+        local need=$(($1 * $2))
+        if ((cursor + need > size)); then cursor=0; warn "object too small for distinct offsets: later tests may be cached"; fi
+        base=$cursor
+        cursor=$((cursor + need))
+        [[ -z $drop_caches ]] || { sync; echo 3 >/proc/sys/vm/drop_caches; }
+        printf '   '
+        readers "$1" "$2" "$base" "$file"
+    }
+    run 1 $((2 * gib))
+    run 4 $((gib / 2))
+    run 8 $((gib / 4))
+    if [[ -n $drop_caches ]] && dd if="$file" of=/dev/null bs=1M count=1 iflag=direct status=none 2>/dev/null; then
+        sync
+        echo 3 >/proc/sys/vm/drop_caches
+        local begin end
+        begin=$(date +%s.%N)
+        local skip=0
+        ((cursor + 2 * gib <= size)) && skip=$((cursor / 8 / 1048576))
+        dd if="$file" of=/dev/null bs=8M skip="$skip" count=256 iflag=direct status=none
+        end=$(date +%s.%N)
+        awk -v t0="$begin" -v t1="$end" 'BEGIN { printf "   direct I/O, 1 reader, 2 GiB in 8 MiB reads: %.0f MB/s (the device itself)\n", 2147483648 / (t1 - t0) / 1e6 }'
+    fi
+    note "Compare with the network: about 280 MB/s. Local reads far above it and the same under load mean the disks are not the limit."
+    note "4 or 8 readers much slower than 1: concurrent streams fight over the disks (read-ahead, RAID, ingest writes)."
+}
+
+write_load() {
+    local rate=${positional[0]:-} seconds=${positional[1]:-}
+    [[ $rate =~ ^[0-9]+$ && $seconds =~ ^[0-9]+$ ]] || usage
+    ((rate >= 1 && seconds >= 1 && seconds <= 600)) || usage
+    find_store || { echo "object store not found: pass --store DIR" >&2; exit 1; }
+    target=$store/.measure-nas-serving-load.$$
+    trap 'rm -f "$target"' EXIT INT TERM HUP
+    section "writing $rate MB/s for $seconds s into $store (stand-in for the Hugging Face download)"
+    local elapsed
+    for ((elapsed = 0; elapsed < seconds; elapsed++)); do
+        local begin end
+        begin=$(date +%s.%N)
+        dd if=/dev/zero of="$target" bs=1M count="$rate" seek=$(((elapsed % 64) * rate)) conv=notrunc oflag=direct status=none ||
+            { warn "write failed (disk full or no O_DIRECT)"; break; }
+        end=$(date +%s.%N)
+        awk -v b="$begin" -v e="$end" 'BEGIN { rest = 1 - (e - b); if (rest > 0) system("sleep " rest) }'
+    done
+    rm -f "$target"
+    note "done; the probe file is removed"
+}
+
+case $mode in
+static) static ;;
+sample) sample ;;
+read) read_test ;;
+write-load) write_load ;;
+*) usage ;;
+esac

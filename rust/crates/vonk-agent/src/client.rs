@@ -24,6 +24,7 @@ use vonk_agent_protocol::{
     SignedHostHelperGrant, canonical_generated_json, canonical_json, hex_sha256, parse_strict,
 };
 
+use crate::stream_governor::{self, StreamGovernor};
 use crate::{
     config::AgentConfig,
     failure_evidence::sanitize_text,
@@ -57,18 +58,26 @@ const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 // remaining validity window of the 90-second acceptance certificate.
 const ROTATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
-/// Objects fetched at once. One TCP stream can fill a 2.5 GbE link, so a few
-/// sequential files keep the NAS disk reading in order without contending
-/// for its CPU and seeks the way many small transfers do.
-const DISTRIBUTION_CONCURRENCY: usize = 4;
+/// Range requests in flight are bounded by an adaptive governor: it starts at
+/// what a lone transfer is known to sustain and only adds streams while the
+/// aggregate throughput still grows. Objects open at once are the most it can
+/// ever allow, so a waiting object holds nothing but its resumable partial.
+const DISTRIBUTION_CONCURRENCY: usize = stream_governor::MAX_STREAMS;
 /// Bytes requested per HTTP range. Large enough that authorization and
-/// request latency vanish next to the transfer, small enough that a retry or a
-/// restart repeats little.
+/// request latency vanish next to the transfer; the writer resumes from the
+/// bytes it accepted, so a failed range repeats nothing it already wrote.
 const DISTRIBUTION_RANGE_BYTES: u64 = 64 * 1024 * 1024;
 /// Written bytes after which their writeback starts and their pages are
 /// released, so a hundreds-of-gigabytes model never builds a huge dirty backlog
 /// or fills the page cache of a shared-memory machine.
 const WRITE_BEHIND_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Where a distribution object lands and which governor paces its ranges.
+struct ObjectPlacement<'a> {
+    destination: &'a Path,
+    managed_root: &'a Path,
+    governor: &'a StreamGovernor,
+}
 
 /// The last byte of the range that continues a transfer at `offset`.
 fn range_end(offset: u64, total: u64) -> u64 {
@@ -1100,8 +1109,11 @@ impl AgentHttpClient {
             plan_digest,
             sha256,
             expected_bytes,
-            destination,
-            destination.parent().ok_or(ClientError::Protocol)?,
+            ObjectPlacement {
+                destination,
+                managed_root: destination.parent().ok_or(ClientError::Protocol)?,
+                governor: &StreamGovernor::default(),
+            },
             |_, _| {},
         )
         .await
@@ -1187,19 +1199,24 @@ impl AgentHttpClient {
         // Start large objects first so a large model file does not become a
         // lone serial tail after all of the smaller files finish.
         pending.sort_by_key(|(_, object, _, _)| std::cmp::Reverse(object.bytes));
+        let governor = StreamGovernor::default();
         // Bound both network traffic and disk buffers. These futures stay
         // owned by this call: an error or cancellation drops the remaining
         // transfers, whose partial files remain resumable on disk.
         let mut completed: Vec<_> = stream::iter(pending)
             .map(|(index, object, path, managed_root)| {
                 let tracker = &tracker;
+                let governor = &governor;
                 async move {
                     self.download_trusted_distribution_object_with_progress(
                         plan_digest,
                         &object.sha256,
                         object.bytes,
-                        &path,
-                        managed_root,
+                        ObjectPlacement {
+                            destination: &path,
+                            managed_root,
+                            governor,
+                        },
                         |bytes, _step| {
                             tracker
                                 .lock()
@@ -1245,13 +1262,17 @@ impl AgentHttpClient {
         plan_digest: &str,
         sha256: &str,
         expected_bytes: u64,
-        destination: &Path,
-        managed_root: &Path,
+        placement: ObjectPlacement<'_>,
         mut progress: F,
     ) -> Result<(), ClientError>
     where
         F: FnMut(u64, &'static str),
     {
+        let ObjectPlacement {
+            destination,
+            managed_root,
+            governor,
+        } = placement;
         // The assignment-bound mTLS endpoint and its exact ranged response
         // headers establish the transfer contract. The digest is the object's
         // name; its size and custody are checked, its bytes are not re-hashed.
@@ -1300,6 +1321,9 @@ impl AgentHttpClient {
             url.query_pairs_mut()
                 .append_pair("plan_digest", plan_digest);
             let attempt: Result<(), ClientError> = async {
+                // One stream slot for this range: the governor decides how
+                // many ranges the agent keeps in flight at once.
+                let _stream = governor.acquire().await;
                 let mut response = self
                     .current_client()
                     .await
@@ -1334,6 +1358,7 @@ impl AgentHttpClient {
                     // This writer survives network retries, so resume from
                     // its accepted bytes even within an interrupted range.
                     offset += chunk.len() as u64;
+                    governor.record_bytes(chunk.len() as u64);
                     write_behind.written(&mut output, offset).await?;
                     if last_progress.elapsed() >= Duration::from_millis(200) {
                         progress(offset, "copying");
@@ -1349,6 +1374,7 @@ impl AgentHttpClient {
             match attempt {
                 Ok(()) => retries = 0,
                 Err(error) if error.retryable() && retries < 4 => {
+                    governor.throttled();
                     progress(offset, "copying");
                     tokio::time::sleep(Duration::from_millis(500 * (1 << retries))).await;
                     retries += 1;
@@ -2359,8 +2385,8 @@ mod tests {
 
     use super::{
         AgentHttpClient, AgentResult, ClientError, ControllerError, DISTRIBUTION_CONCURRENCY,
-        ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS, WriteBehind,
-        clamp_inventory_request, controller_rejection_digest, is_rotation_conflict,
+        ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS, ObjectPlacement, StreamGovernor,
+        WriteBehind, clamp_inventory_request, controller_rejection_digest, is_rotation_conflict,
         open_trusted_partial, partial_path, preallocate, range_end, valid_reported_hostname,
     };
     use crate::{
@@ -3135,9 +3161,10 @@ mod tests {
     }
 
     #[test]
-    fn transfers_plan_four_files_in_sixty_four_mebibyte_ranges() {
+    fn transfers_plan_files_in_sixty_four_mebibyte_ranges_with_adaptive_streams() {
         const MIB: u64 = 1024 * 1024;
-        assert_eq!(DISTRIBUTION_CONCURRENCY, 4);
+        // Objects open at once are the most streams the governor may allow.
+        assert_eq!(DISTRIBUTION_CONCURRENCY, 8);
         // A large object is walked in whole 64 MiB windows...
         assert_eq!(range_end(0, 1024 * MIB), 64 * MIB - 1);
         assert_eq!(range_end(64 * MIB, 1024 * MIB), 128 * MIB - 1);
@@ -3546,8 +3573,11 @@ mod tests {
                 TEST_PLAN_DIGEST,
                 &assignment.objects[0].sha256,
                 model.len() as u64,
-                &destination,
-                root.path(),
+                ObjectPlacement {
+                    destination: &destination,
+                    managed_root: root.path(),
+                    governor: &StreamGovernor::default(),
+                },
                 |_, phase| {
                     if phase == "finalizing" && !swapped {
                         std::fs::write(&replacement, &corrupt).unwrap();
@@ -3664,8 +3694,11 @@ mod tests {
                 TEST_PLAN_DIGEST,
                 &hex_sha256(model),
                 model.len() as u64,
-                &destination,
-                root.path(),
+                ObjectPlacement {
+                    destination: &destination,
+                    managed_root: root.path(),
+                    governor: &StreamGovernor::default(),
+                },
                 |bytes, phase| updates.push((bytes, phase)),
             )
             .await

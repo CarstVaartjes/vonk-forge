@@ -48,13 +48,17 @@ speed limit.
 The Controller authorizes each Spark request (assignment, node, expiry, range)
 and names the stored file; Caddy then serves the bytes and the range from a
 read-only mount of the model and image stores. The Controller never reads them
-on this path. Each Spark fetches four files at once, in 64 MiB ranges over
-HTTP/1.1, and preallocates and flushes what it writes so a large model neither
-fragments the disk nor fills the page cache.
+on this path. Each Spark fetches files in 64 MiB ranges over HTTP/1.1, with an
+adaptive number of ranges in flight (four to start, at most eight, more only
+while throughput grows), and preallocates and flushes what it writes so a large
+model neither fragments the disk nor fills the page cache.
 
-To measure a transfer from a Spark, run
-`sudo scripts/measure-transfer PLAN_DIGEST OBJECT_SHA256 [NAS_IPERF_HOST]`
-while the plan's object is assigned. About 280 MB/s is the ceiling on 2.5 GbE.
+About 280 MB/s is the ceiling on 2.5 GbE, shared by every Spark copying at the
+same time. When a copy runs far below it, follow the
+[transfer throughput runbook](transfer-throughput.md): it measures the network,
+the Controller round trip, the NAS disks and CPU separately with
+`scripts/measure-transfer` (on a Spark) and `scripts/measure-nas-serving` (on
+the NAS).
 
 On Btrfs the Controller marks the model and image directories no-copy-on-write
 (which also disables compression) when it starts. Only files created later
