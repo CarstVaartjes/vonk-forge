@@ -15,8 +15,10 @@ decision, so an explanation and a release never disagree.
 
 Kept on purpose:
 
-* an installation that is ``installed`` (its files exist; the headroom is
-  accounted by ``disk_reservations``);
+* an installation that is ``installed``: its claim is not "dead", but once its
+  Spark has reported its disk after the install completed the files are in the
+  reported free space and the claim is released as covered
+  (``release_covered_installation_claims``), unless a run of it is live;
 * an installation whose last operation was cancelled or retired, or was a
   cleanup (uninstall, reconcile): its effect on the Spark is uncertain, so its
   claim stays until the exact cleanup proves the effect gone;
@@ -28,14 +30,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Text, cast, select
+from sqlalchemy import Text, cast, func, select
 from sqlalchemy.orm import Session
 
+from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from .models import (
     STOPPABLE_RUN_STATES,
     FleetProfileApplication,
     InstallationNode,
     Job,
+    NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -270,6 +274,89 @@ def release_dead_owner_reservations(
             claim.state = "released"
             claim.released_at = now
         released.append(owner)
+    return tuple(released)
+
+
+def release_covered_installation_claims(
+    session: Session, now: datetime
+) -> tuple[ReservationOwner, ...]:
+    """Release the disk claim of an installation whose files the Spark now reports.
+
+    A claim promises bytes the install is still to write. Once the installation
+    is installed on a Spark and that Spark has reported its disk after the
+    install completed (past the accepted agent-clock skew), the written bytes
+    are already subtracted from the reported free space, so the claim counts
+    them a second time, and the install's staging space is gone with it. The
+    claim is then released, whatever the plan says, until a run of the
+    installation is live: a serving workload still writes its caches, and
+    those bytes are not in any observation yet. Releasing earlier would let
+    admission spend free space an unobserved install is about to use.
+    """
+
+    released: list[ReservationOwner] = []
+    rows = session.execute(
+        select(ResourceReservation, RecipeInstallation, InstallationNode)
+        .join(
+            RecipeInstallation,
+            ResourceReservation.owner_id == RecipeInstallation.id,
+        )
+        .join(
+            InstallationNode,
+            (InstallationNode.installation_id == RecipeInstallation.id)
+            & (InstallationNode.node_id == ResourceReservation.node_id),
+        )
+        .where(
+            ResourceReservation.owner_kind == "installation",
+            ResourceReservation.kind == "disk",
+            ResourceReservation.state == "active",
+            RecipeInstallation.state == "installed",
+            InstallationNode.state == "installed",
+        )
+    ).all()
+    for reservation, installation, node in rows:
+        observed = session.scalar(
+            select(func.max(NodeInventorySnapshot.observed_at)).where(
+                NodeInventorySnapshot.node_id == reservation.node_id
+            )
+        )
+        if observed is None or _aware(observed) <= (
+            _aware(node.updated_at) + MAX_INVENTORY_FUTURE_SKEW
+        ):
+            continue
+        if (
+            session.scalar(
+                select(RecipeRun.id)
+                .where(
+                    RecipeRun.installation_id == installation.id,
+                    RecipeRun.state.in_(STOPPABLE_RUN_STATES),
+                )
+                .limit(1)
+            )
+            is not None
+        ):
+            continue
+        locked = session.scalar(
+            select(ResourceReservation)
+            .where(
+                ResourceReservation.id == reservation.id,
+                ResourceReservation.state == "active",
+            )
+            .with_for_update(skip_locked=True)
+        )
+        if locked is None:
+            continue
+        locked.state = "released"
+        locked.released_at = now
+        released.append(
+            ReservationOwner(
+                "installation",
+                installation.id,
+                "installed",
+                False,
+                "installation",
+                "files already counted in free space",
+            )
+        )
     return tuple(released)
 
 

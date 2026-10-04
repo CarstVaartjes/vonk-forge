@@ -580,7 +580,12 @@ def test_installation_a_live_operation_names_is_kept(world: Catalog) -> None:
 
 
 def _application(
-    world: Catalog, plan: dict[str, object], *, state: str, selected: bool = False
+    world: Catalog,
+    plan: dict[str, object],
+    *,
+    state: str,
+    selected: bool = False,
+    progress: dict[str, object] | None = None,
 ) -> None:
     with world.sessions.begin() as session:
         profile = session.scalar(select(FleetProfile))
@@ -598,6 +603,7 @@ def _application(
             actor="test",
             created_at=OLD,
             updated_at=OLD,
+            **({"progress": progress} if progress is not None else {}),
         )
         session.add(application)
         session.flush()
@@ -1655,3 +1661,82 @@ def test_removals_that_free_what_they_promised_do_not_pause_eviction(
     _report_disk(world.sessions, 150 * GIB, at=world.now)
     assert collector.collect().installations == 0
     assert len(lifecycle.removed) == 2
+
+
+# -- what keeps an installation when disk is short -------------------------------
+
+
+def test_an_operation_that_just_finished_makes_an_installation_recent_not_kept(
+    world: Catalog,
+) -> None:
+    """A sweep loads one recipe after another; each one it finished with is
+    recently used (removed last), not in use. Catches every installation of the
+    last 24 hours being unremovable, so a refused load can never be made room."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    used, _ = world.workload(old, run="stopped", touched=NOW - timedelta(hours=2))
+    _size(world, used, 80 * GIB)
+    world.job(
+        {"plan": {"installation_id": used}},
+        state="succeeded",
+        updated=NOW - timedelta(hours=1),
+    )
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == [used]
+
+
+def test_a_load_waiting_for_this_disk_does_not_keep_the_installations_it_needs_gone(
+    world: Catalog,
+) -> None:
+    """The load that asks for space waits as a queued application naming the
+    Spark. Catches it keeping every installation there, so the space it waits for
+    could never be freed."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    installation, _ = world.workload(old, run="stopped")
+    _size(world, installation, 80 * GIB)
+    _application(
+        world,
+        {"steps": [{"node_ids": [NODE]}]},
+        state="queued",
+        progress={
+            "blockers": [
+                {
+                    "code": "run-switch.insufficient-disk",
+                    "detail": "short",
+                    "severity": "warning",
+                    "node_ids": [NODE],
+                }
+            ]
+        },
+    )
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == [installation]
+
+
+def test_a_refusal_says_what_stays_and_why(world: Catalog) -> None:
+    """Catches 'only N bytes can be removed' with no word on what is kept."""
+
+    head = world.revision("glm", 1, head="active")
+    pointed, _ = world.workload(head, run="stopped")
+    _size(world, pointed, 80 * GIB)
+    _profile(world, "vonk-forge/glm")
+    collector = _collector(
+        world, free=400 * GIB, demands=StorageDemands(lambda: world.now)
+    )
+
+    relief = collector.relief_for_spark(
+        NODE, 800 * GIB, source="profile-load", subject="p", reason="x"
+    )
+
+    assert relief is not None and relief.code == STORAGE_INSUFFICIENT
+    assert f"{80 * GIB} bytes of installations stay because" in relief.detail
+    assert "saved profile" in relief.detail

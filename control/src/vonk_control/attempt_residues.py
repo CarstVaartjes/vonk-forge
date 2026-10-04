@@ -59,7 +59,11 @@ from .models import (
     Job,
     RecipeInstallation,
 )
-from .reservation_owners import ADOPTION_WINDOW, release_dead_owner_reservations
+from .reservation_owners import (
+    ADOPTION_WINDOW,
+    release_covered_installation_claims,
+    release_dead_owner_reservations,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _ACTIVE_JOB_STATES = ("queued", "running", "waiting", "waiting-for-operator")
@@ -298,7 +302,10 @@ class AttemptResidueReconciler:
         now = self._clock()
         try:
             with self._sessions.begin() as session:
-                released = release_dead_owner_reservations(session, now)
+                released = (
+                    *release_dead_owner_reservations(session, now),
+                    *release_covered_installation_claims(session, now),
+                )
         except SQLAlchemyError as error:
             self._log("reservation", "sweep", "refused", error)
             return False

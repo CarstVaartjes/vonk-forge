@@ -198,6 +198,53 @@ class Swept:
     scopes: tuple[dict[str, object], ...] = ()
 
 
+#: How a keeping reason reads in the sentence a waiting load shows.
+_KEPT_WORDS = {
+    "profile": "a saved profile points to",
+    "running": "its workload is running",
+    "run not stopped": "its run was never stopped",
+    "live operation": "a live operation names it",
+    "not installed": "not installed",
+}
+
+_STORAGE_WAIT_CODES = frozenset(
+    {"run-switch.insufficient-disk", STORAGE_EVICTING, STORAGE_INSUFFICIENT}
+)
+
+
+def _kept_sentence(kept_bytes: Mapping[str, int]) -> str:
+    """What stays on the Spark, by reason, so a refusal says why nothing goes."""
+
+    parts = [
+        f"{size} bytes of installations stay because {reason}"
+        for reason, size in sorted(
+            kept_bytes.items(), key=lambda item: (-item[1], item[0])
+        )
+        if size > 0
+    ]
+    return ("; ".join(parts[:2]) + ". ") if parts else ""
+
+
+def _waits_for_storage(application: FleetProfileApplication) -> bool:
+    """A load that issued nothing and waits for disk is the one asking for it.
+
+    It must not keep the installations on its own Sparks: that would make the
+    space it waits for impossible to free. Anything it already issued (a
+    current operation) keeps them as before.
+    """
+
+    progress = application.progress if isinstance(application.progress, dict) else {}
+    blockers = progress.get("blockers")
+    return (
+        application.current_operation_id is None
+        and isinstance(blockers, list)
+        and any(
+            isinstance(item, dict) and item.get("code") in _STORAGE_WAIT_CODES
+            for item in blockers
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _Evidence:
     """Everything that can keep something, read in one snapshot."""
@@ -205,6 +252,8 @@ class _Evidence:
     now: datetime
     cutoff: datetime
     live: frozenset[str]
+    #: Named by an operation that has not ended; one that just finished only
+    #: makes its installation recently used (removed last), never in use.
     operations: frozenset[str]
     #: Digests the newest revisions of the recipes a saved profile names mention.
     pinned: frozenset[str]
@@ -292,18 +341,19 @@ class _Evidence:
             if isinstance(node_id, str)
         )
         scopes = tuple(
-            canonical_message(plan).decode()
-            for plan in session.scalars(
-                select(FleetProfileApplication.plan).where(
+            canonical_message(application.plan).decode()
+            for application in session.scalars(
+                select(FleetProfileApplication).where(
                     FleetProfileApplication.state.in_(("queued", "running"))
                 )
             )
+            if not _waits_for_storage(application)
         )
         return cls(
             now=now,
             cutoff=cutoff,
             live=live_tokens(session, now),
-            operations=operation_tokens(session, now),
+            operations=operation_tokens(session, now, recent=False),
             pinned=pinned,
             pointed_digests=frozenset(row.content_digest for row in pointed),
             pointed_models=bound | pinned,
@@ -578,7 +628,10 @@ class UnusedStorageCollector:
                 if shortfall <= 0:
                     return None
                 evidence = _Evidence.read(session, now)
-                items = self._spark_items(session, node_id, evidence, Counter())
+                kept_bytes: Counter[str] = Counter()
+                items = self._spark_items(
+                    session, node_id, evidence, Counter(), kept_bytes
+                )
                 settling = _spark_settling(session, node_id, snapshot[2])
         except SQLAlchemyError:
             return None
@@ -604,7 +657,9 @@ class UnusedStorageCollector:
                     if paused is not None
                     else ""
                 )
-                + ". Stop or remove something on this Spark to make room."
+                + ". "
+                + _kept_sentence(kept_bytes)
+                + "Stop or remove something on this Spark to make room."
             )
         return StorageRelief(code, shortfall, freeable, detail)
 
@@ -879,6 +934,7 @@ class UnusedStorageCollector:
         node_id: str,
         evidence: _Evidence,
         kept: Counter[str],
+        kept_bytes: Counter[str] | None = None,
     ) -> list[_Item]:
         rows = session.execute(
             select(
@@ -910,6 +966,10 @@ class UnusedStorageCollector:
                 # shared copy, which the profile's own recipe would then fetch
                 # again (and admission counts it as already there).
                 kept["installation: model a profile needs"] += len(members)
+                if kept_bytes is not None:
+                    kept_bytes["a model a saved profile needs"] += max(
+                        installed for _id, _state, installed in members
+                    )
                 continue
             reasons = {
                 installation_id: (
@@ -924,6 +984,13 @@ class UnusedStorageCollector:
                     kept[
                         f"installation: {reason or 'model shared with one in use'}"
                     ] += 1
+                if kept_bytes is not None:
+                    why = next(
+                        reason for reason in reasons.values() if reason is not None
+                    )
+                    kept_bytes[_KEPT_WORDS.get(why, why)] += max(
+                        installed for _id, _state, installed in members
+                    )
                 continue
             freeable = max(installed for _id, _state, installed in members)
             if freeable <= 0:

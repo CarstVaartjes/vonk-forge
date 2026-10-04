@@ -540,41 +540,45 @@ class CatalogRevisionCollector:
         return removed
 
 
-def operation_tokens(session: Session, now: datetime) -> frozenset[str]:
+def operation_tokens(
+    session: Session, now: datetime, *, recent: bool = True
+) -> frozenset[str]:
     """Every id and digest named by a live or recently finished operation.
 
     Searching the stored JSON text, rather than reading each contract's fields,
     finds a reference whichever producer wrote it and whichever contract it was
-    written under.
+    written under. With ``recent=False`` only operations that have not ended
+    count (an expired job has ended): something used a moment ago is then
+    recently used, which orders what to remove, and not in use.
     """
 
-    recent = now - GRACE
+    window = now - GRACE if recent else None
+    ended = _FINISHED if recent else (*_FINISHED, "expired")
+
+    def live(state, updated):
+        return (
+            state.not_in(ended)
+            if window is None
+            else or_(state.not_in(ended), updated >= window)
+        )
+
     selected = session.scalar(select(FleetProfileSelection.application_id))
     sources = (
-        select(Job.payload).where(
-            or_(Job.state.not_in(_FINISHED), Job.updated_at >= recent)
-        ),
+        select(Job.payload).where(live(Job.state, Job.updated_at)),
         select(AgentOperation.payload).where(
-            or_(
-                AgentOperation.state.not_in(_FINISHED),
-                AgentOperation.updated_at >= recent,
-            )
+            live(AgentOperation.state, AgentOperation.updated_at)
         ),
         select(FleetProfileApplication.plan).where(
             or_(
-                FleetProfileApplication.state.not_in(_FINISHED),
-                FleetProfileApplication.updated_at >= recent,
+                live(FleetProfileApplication.state, FleetProfileApplication.updated_at),
                 FleetProfileApplication.id == selected,
             )
         ),
         select(ModelCacheOperation.payload).where(
-            or_(
-                ModelCacheOperation.state.not_in(_FINISHED),
-                ModelCacheOperation.updated_at >= recent,
-            )
+            live(ModelCacheOperation.state, ModelCacheOperation.updated_at)
         ),
         select(ArtifactJob.compiled_contract).where(
-            or_(ArtifactJob.state.not_in(_FINISHED), ArtifactJob.updated_at >= recent)
+            live(ArtifactJob.state, ArtifactJob.updated_at)
         ),
     )
     found: set[str] = set()

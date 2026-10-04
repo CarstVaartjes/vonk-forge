@@ -20,6 +20,7 @@ from vonk_control.disk_reservations import (
     describe_disk_charges,
     outstanding_disk_charges,
 )
+from vonk_control.inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from vonk_control.models import (
     FleetProfileApplication,
     Job,
@@ -322,6 +323,53 @@ def test_an_install_with_nothing_issued_is_judged_only_after_the_settling_grace(
     after = OWNER_SETTLE_GRACE + timedelta(seconds=1)
     assert _reconciler(sessions, service, later=after).tick()
     assert _claims(sessions, owner_kind="installation") == []
+
+
+@pytest.mark.parametrize("serving", [False, True])
+def test_an_installed_claim_is_released_once_the_spark_reports_its_files(
+    tmp_path: Path, serving: bool
+) -> None:
+    """Installed files are already subtracted from the reported free disk, so a
+    claim kept for them counts the same bytes twice (an idle 264 GB install
+    refused a load on a Spark with space). It goes once a Spark observation
+    after completion includes them, but not while a workload still serves from
+    it, and never before that observation."""
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    if serving:
+        started_recipe(
+            sessions,
+            service,
+            installation.owner_id,
+            nodes,
+            request_id=str(uuid.uuid4()),
+        )
+    held = [
+        claim.id
+        for claim in _claims(sessions, owner_kind="installation")
+        if claim.kind == "disk"
+    ]
+    assert held
+    after = MAX_INVENTORY_FUTURE_SKEW + timedelta(seconds=1)
+
+    # The Spark has not reported since the install completed.
+    _reconciler(sessions, service, later=after).tick()
+    assert len(_claims(sessions, owner_kind="installation", kind="disk")) == len(held)
+
+    _record_disk(sessions, nodes[0], at=NOW + after, free=2_000)
+    _reconciler(sessions, service, later=after).tick()
+    kept = _claims(sessions, owner_kind="installation", kind="disk")
+    assert (len(kept) == len(held)) if serving else kept == []
+    if serving:
+        return
+    # The installation itself is untouched.
+    with sessions() as session:
+        assert [row.state for row in session.scalars(select(RecipeInstallation))] == [
+            "installed"
+        ]
 
 
 def test_the_insufficient_disk_blocker_names_who_holds_the_bytes(
