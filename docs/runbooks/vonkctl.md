@@ -813,7 +813,12 @@ releases, on its own, any disk, port or memory claim whose owner has ended (a
 cancelled or failed profile, a stopped run, an installation or build that no
 live operation refers to) however the owner ended; it keeps the claim of an
 installation whose last operation was cancelled or retired until the exact
-cleanup proves the effect gone. A disk blocker names who holds the bytes, for
+cleanup proves the effect gone. An installed installation's claim is released
+once its Spark has reported its disk after the install completed (its files are
+then already in the free space), unless a run of it is live. A load waiting for
+disk does not keep the installations on its own Sparks, and an operation that
+just finished makes an installation recently used (removed last), not in use;
+the waiting load says how many bytes stay and why. A disk blocker names who holds the bytes, for
 example `reserved by cancelled profile application 3f68e2f4`. If another capacity
 writer is briefly busy, progress names the dependency and next retry time,
 and the same operation continues automatically.
