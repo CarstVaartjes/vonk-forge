@@ -281,6 +281,7 @@ from .model_definition_modalities_item import ModelDefinitionModalitiesItem
 from .model_detail_response import ModelDetailResponse
 from .model_family import ModelFamily
 from .model_file import ModelFile
+from .model_file_part import ModelFilePart
 from .model_format import ModelFormat
 from .model_identity import ModelIdentity
 from .model_library_response import ModelLibraryResponse
@@ -822,6 +823,7 @@ __all__ = (
     "ModelDetailResponse",
     "ModelFamily",
     "ModelFile",
+    "ModelFilePart",
     "ModelFormat",
     "ModelIdentity",
     "ModelLibraryResponse",

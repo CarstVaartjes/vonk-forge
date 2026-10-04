@@ -24,7 +24,7 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from io import BufferedReader
 from pathlib import Path
@@ -135,6 +135,7 @@ SOURCE_POLICY = "nas-first"
 _DIGEST_LENGTH = 64
 _DIGEST_PATTERN = r"[0-9a-f]{64}"
 _MAX_ARTIFACTS = 1024
+_MAX_ARTIFACT_PARTS = 1024
 _MAX_MANIFEST_BYTES = 1_048_576
 _CHUNK_BYTES = 1024 * 1024
 _PARALLEL_RANGE_MIN_BYTES = 64 * 1024 * 1024
@@ -314,8 +315,29 @@ def _huggingface_access_url(source: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class ArtifactPart:
+    """One source-published piece of a file the source hosts only split.
+
+    Hugging Face caps a file at 50 GB, so a larger file exists there only as
+    ``name.part00``, ``name.part01``, ...; the pieces are joined by byte
+    concatenation, in order, into the one file the artifact names.
+    """
+
+    path: str
+    source: str
+    sha256: str
+    expected_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class ArtifactSpec:
-    """One exact downloadable artifact in a resolved set."""
+    """One exact downloadable artifact in a resolved set.
+
+    ``sha256`` and ``expected_bytes`` always describe the whole installed file.
+    ``parts`` is set only when the source publishes the file split; the parts
+    are a transport detail of one ingest, never cache objects of their own, so
+    reuse (``cache_identity``) is by the whole file's bytes alone.
+    """
 
     key: str
     artifact_id: str
@@ -328,9 +350,31 @@ class ArtifactSpec:
     expected_bytes: int
     roles: tuple[str, ...]
     model_content_sha256: str | None = None
+    parts: tuple[ArtifactPart, ...] | None = None
+    # Set only on the transient per-part view of a split file (``part_spec``):
+    # transfer progress of a part is accounted on the whole file's ledger entry,
+    # offset by the bytes of the parts already appended.
+    ledger_sha256: str | None = None
+    ledger_base: int = 0
+
+    def part_spec(self, index: int) -> ArtifactSpec:
+        """The transient single-file view that downloads part ``index``."""
+
+        assert self.parts is not None
+        part = self.parts[index]
+        return replace(
+            self,
+            path=part.path,
+            source=part.source,
+            sha256=part.sha256,
+            expected_bytes=part.expected_bytes,
+            parts=None,
+            ledger_sha256=self.sha256,
+            ledger_base=sum(item.expected_bytes for item in self.parts[:index]),
+        )
 
     def identity(self) -> dict[str, object]:
-        return {
+        document: dict[str, object] = {
             "key": self.key,
             "id": self.artifact_id,
             "path": self.path,
@@ -343,6 +387,17 @@ class ArtifactSpec:
             "roles": list(self.roles),
             "model_content_sha256": self.model_content_sha256,
         }
+        if self.parts is not None:
+            document["parts"] = [
+                {
+                    "path": part.path,
+                    "source": part.source,
+                    "sha256": part.sha256,
+                    "download_bytes": part.expected_bytes,
+                }
+                for part in self.parts
+            ]
+        return document
 
     def cache_identity(self) -> dict[str, object]:
         """Return only immutable bytes/source identity for cache reuse.
@@ -388,6 +443,19 @@ class ArtifactSpec:
             expected_bytes=wire.download_bytes,
             roles=tuple(wire.roles),
             model_content_sha256=wire.model_content_sha256,
+            parts=(
+                None
+                if wire.parts is None
+                else tuple(
+                    ArtifactPart(
+                        path=part.path,
+                        source=part.source,
+                        sha256=part.sha256,
+                        expected_bytes=part.download_bytes,
+                    )
+                    for part in wire.parts
+                )
+            ),
         )
         _validate_artifact(result)
         return result
@@ -883,6 +951,37 @@ def _validate_artifact(value: ArtifactSpec) -> None:
     _validate_source(value.source)
     if value.kind == "github-release.asset":
         _github_release_asset_binding(value)
+    if value.parts is not None:
+        _validate_parts(value)
+
+
+def _validate_parts(value: ArtifactSpec) -> None:
+    parts = value.parts
+    assert parts is not None
+    if (
+        value.kind != "huggingface.file"
+        or not 2 <= len(parts) <= _MAX_ARTIFACT_PARTS
+        or len({part.path for part in parts}) != len(parts)
+        or value.path in {part.path for part in parts}
+        or sum(part.expected_bytes for part in parts) != value.expected_bytes
+    ):
+        raise ModelCacheResolutionError(
+            "model_cache.artifact_invalid", "cache artifact parts are invalid"
+        )
+    for part in parts:
+        if (
+            not _valid_relative_path(part.path)
+            or len(part.sha256) != _DIGEST_LENGTH
+            or part.sha256 != part.sha256.lower()
+            or not _is_hex(part.sha256)
+            or not isinstance(part.expected_bytes, int)
+            or isinstance(part.expected_bytes, bool)
+            or part.expected_bytes < 1
+        ):
+            raise ModelCacheResolutionError(
+                "model_cache.artifact_invalid", "cache artifact part is invalid"
+            )
+        _validate_source(part.source)
 
 
 def _validate_manifest(value: ArtifactSetManifest) -> None:
@@ -911,6 +1010,31 @@ def _validate_manifest(value: ArtifactSetManifest) -> None:
         raise ModelCacheResolutionError(
             "model_cache.manifest_too_large", "cache manifest exceeds the size limit"
         )
+
+
+def _part_from_input(raw: object) -> ArtifactPart:
+    value = require_mapping(raw, "artifact part")
+    return ArtifactPart(
+        path=str(value["path"]),
+        source=str(value["source"]),
+        sha256=str(value["sha256"]),
+        expected_bytes=require_integer(value["download_bytes"], "part download bytes"),
+    )
+
+
+def _split_transient_bytes(
+    manifest: ArtifactSetManifest, cached: frozenset[str] | None
+) -> int:
+    """Extra disk a split file needs beyond its own bytes while it is assembled."""
+
+    return max(
+        (
+            max(part.expected_bytes for part in spec.parts)
+            for digest, spec in _unique_artifacts(manifest.artifacts).items()
+            if spec.parts is not None and (cached is None or digest not in cached)
+        ),
+        default=0,
+    )
 
 
 def _unique_artifacts(values: Sequence[ArtifactSpec]) -> dict[str, ArtifactSpec]:
@@ -1251,6 +1375,15 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[dict[str, o
         if release_id is not None:
             artifact["release_id"] = release_id
             artifact["asset_id"] = assets[value.id]
+        if value.parts is not None:
+            artifact["parts"] = [
+                {
+                    "path": part.path,
+                    "sha256": part.sha256,
+                    "download_bytes": part.size_bytes,
+                }
+                for part in value.parts
+            ]
         result.append(artifact)
     return result
 
@@ -3820,6 +3953,7 @@ class ModelCacheService:
                 "production cache downloads require a trusted catalog artifact reference",
             )
         source, revision = _source_for_catalog_artifact(value)
+        parts = self._parts_from_catalog(value)
         spec = ArtifactSpec(
             # The file digest/path is the reusable identity.  A model
             # revision digest is retained as provenance below only.
@@ -3836,9 +3970,50 @@ class ModelCacheService:
             expected_bytes=raw_bytes,
             roles=tuple(str(role) for role in roles),
             model_content_sha256=model_content_sha256,
+            parts=parts,
         )
         _validate_artifact(spec)
         return spec
+
+    @staticmethod
+    def _parts_from_catalog(
+        value: Mapping[str, object],
+    ) -> tuple[ArtifactPart, ...] | None:
+        """The split parts a catalog file declares, each with its own source URL."""
+
+        raw_parts = value.get("parts")
+        if raw_parts is None:
+            return None
+        if not isinstance(raw_parts, list):
+            raise ModelCacheResolutionError(
+                "model_cache.artifact_invalid", "catalog artifact parts are invalid"
+            )
+        parts: list[ArtifactPart] = []
+        for raw in raw_parts:
+            if (
+                not isinstance(raw, Mapping)
+                or not isinstance(raw.get("path"), str)
+                or not isinstance(raw.get("sha256"), str)
+                or type(raw.get("download_bytes")) is not int
+            ):
+                raise ModelCacheResolutionError(
+                    "model_cache.artifact_invalid",
+                    "catalog artifact part is incomplete",
+                )
+            # A part is fetched exactly like a file of the same repository and
+            # immutable revision, so it gets the same guarded source URL.
+            source, _revision = _source_for_catalog_artifact(
+                {**value, "path": raw["path"]}
+            )
+            parts.append(
+                ArtifactPart(
+                    path=str(raw["path"]),
+                    source=source,
+                    sha256=str(raw["sha256"]),
+                    expected_bytes=int(cast(int, raw["download_bytes"])),
+                )
+            )
+        return tuple(parts)
 
     def _artifact_from_input(
         self,
@@ -3865,6 +4040,15 @@ class ModelCacheService:
                 raise TypeError
             digest = str(value["sha256"])
             expected_bytes = require_integer(value["download_bytes"], "download bytes")
+            raw_parts = value.get("parts")
+            parts = (
+                None
+                if raw_parts is None
+                else tuple(
+                    _part_from_input(raw)
+                    for raw in require_sequence(raw_parts, "artifact parts")
+                )
+            )
         except (KeyError, TypeError, ValueError) as error:
             raise ModelCacheResolutionError(
                 "model_cache.artifact_invalid", "cache artifact input is invalid"
@@ -3885,6 +4069,7 @@ class ModelCacheService:
             expected_bytes=expected_bytes,
             roles=tuple(str(role) for role in raw_roles),
             model_content_sha256=model_content_sha256,
+            parts=parts,
         )
         _validate_artifact(spec)
         return spec
@@ -4156,10 +4341,13 @@ class ModelCacheService:
             manifest, force=False, cached=cached
         )
         new_bytes = require_integer(transfer["total_bytes"], "transfer total bytes")
+        # A split file is assembled part by part, each part deleted once
+        # appended: the disk peaks at the file plus its largest part.
+        needed = new_bytes + _split_transient_bytes(manifest, cached)
         blockers = []
-        if new_bytes > self.free_bytes():
+        if needed > self.free_bytes():
             blockers.append("insufficient-reserved-storage")
-            self._request_storage(new_bytes, "insufficient-reserved-storage")
+            self._request_storage(needed, "insufficient-reserved-storage")
         plan = {
             "schema_version": SCHEMA_VERSION,
             "kind": "download",
@@ -4217,6 +4405,8 @@ class ModelCacheService:
 
     def _partial_bytes(self, set_digest: str, spec: ArtifactSpec) -> int:
         """Return only a bounded, reusable partial checkpoint length."""
+        if spec.parts is not None:
+            return self._split_partial_bytes(set_digest, spec, spec.parts)
         partial = self._partial_path(set_digest, spec.sha256)
         try:
             if partial.is_symlink():
@@ -4235,6 +4425,47 @@ class ModelCacheService:
         if size == spec.expected_bytes and not self._verify_file(partial, spec):
             return 0
         return size
+
+    def _split_partial_bytes(
+        self, set_digest: str, spec: ArtifactSpec, parts: tuple[ArtifactPart, ...]
+    ) -> int:
+        """Retained bytes of a split file: appended whole parts plus the next part.
+
+        Cheap by design (no hashing): digests are verified where the bytes are
+        appended, so this only sizes what a resume will not refetch.
+        """
+
+        assembled = self._partial_path(set_digest, spec.sha256)
+        try:
+            if assembled.is_symlink() or not assembled.is_file():
+                size = 0
+            else:
+                size = assembled.stat().st_size
+            if size > spec.expected_bytes:
+                size = 0
+            appended = 0
+            done = 0
+            for part in parts:
+                if appended + part.expected_bytes > size:
+                    break
+                appended += part.expected_bytes
+                done += 1
+            retained = 0
+            if done < len(parts):
+                next_part = parts[done]
+                path = self._partial_path(set_digest, next_part.sha256)
+                if not path.is_symlink():
+                    if next_part.expected_bytes >= _PARALLEL_RANGE_MIN_BYTES:
+                        retained = range_partial_bytes(
+                            path,
+                            next_part.expected_bytes,
+                            workers=_PARALLEL_RANGE_WORKERS,
+                        )
+                    elif path.is_file():
+                        retained = min(path.stat().st_size, next_part.expected_bytes)
+            return appended + retained
+        except OSError:
+            return 0
 
     def _transfer_state_for_manifest(
         self,
@@ -4597,14 +4828,23 @@ class ModelCacheService:
         if (not force or spec.sha256 in repaired) and self._object_is_stored(spec):
             self._mark_artifact_verified(spec, set_digest)
             return
-        self._download_artifact(
-            spec,
-            set_digest,
-            operation_id=operation_id,
-            completed_artifacts=0,
-            force=force,
-            interrupt_after_bytes=interrupt_after_bytes,
-        )
+        if spec.parts is not None:
+            self._download_split(
+                spec,
+                set_digest,
+                operation_id=operation_id,
+                force=force,
+                interrupt_after_bytes=interrupt_after_bytes,
+            )
+        else:
+            self._download_artifact(
+                spec,
+                set_digest,
+                operation_id=operation_id,
+                completed_artifacts=0,
+                force=force,
+                interrupt_after_bytes=interrupt_after_bytes,
+            )
         if is_repair:
             with self._session(write=True) as session:
                 operation = session.get(
@@ -4622,6 +4862,178 @@ class ModelCacheService:
                     ),
                 ).model_dump(mode="json")
                 _store_operation_payload(operation, "repair", payload)
+
+    def _download_split(
+        self,
+        spec: ArtifactSpec,
+        set_digest: str,
+        *,
+        operation_id: str,
+        force: bool,
+        interrupt_after_bytes: int | None,
+    ) -> None:
+        """Ingest a file the source hosts only as ordered parts.
+
+        Each part is fetched with the ordinary resumable transfer, then appended
+        to one retained temp file while both the part's digest (verified at
+        ingress) and the whole file's digest are computed from those same bytes,
+        and the part is deleted. The temp file is therefore the only checkpoint:
+        its length says which parts are in, a restart cuts it back to a part
+        boundary and re-reads that prefix once to recover the digest state, and a
+        part that fails its digest is discarded and fetched again. The finished
+        file is checked against the declared whole digest, then renamed into the
+        object store, so peak extra disk is one part beyond the final file.
+        """
+
+        parts = spec.parts
+        assert parts is not None
+        owner = self._partial_owner(operation_id, set_digest)
+        assembled = self._partial_path(owner, spec.sha256)
+        assembled.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+        if assembled.is_symlink() or (assembled.exists() and not assembled.is_file()):
+            assembled.unlink()
+        boundaries = [0]
+        for part in parts:
+            boundaries.append(boundaries[-1] + part.expected_bytes)
+        size = assembled.stat().st_size if assembled.exists() else 0
+        if size > spec.expected_bytes:
+            assembled.unlink()
+            size = 0
+        # Resume from the last whole part already appended: a crash can leave a
+        # torn tail, which is cut off (its part is still on disk or refetched).
+        done = max(index for index, edge in enumerate(boundaries) if edge <= size)
+        if size != boundaries[done]:
+            with assembled.open("r+b") as torn:
+                torn.truncate(boundaries[done])
+                os.fsync(torn.fileno())
+        whole = hashlib.sha256()
+        if done:
+            self._rehash_prefix(assembled, boundaries[done], whole)
+        later = {part.sha256 for part in parts[done:]}
+        for index in range(done):
+            if parts[index].sha256 not in later:
+                self._partial_path(owner, parts[index].sha256).unlink(missing_ok=True)
+        for index in range(done, len(parts)):
+            part_spec = spec.part_spec(index)
+            self._download_artifact(
+                part_spec,
+                set_digest,
+                operation_id=operation_id,
+                completed_artifacts=0,
+                force=force,
+                interrupt_after_bytes=interrupt_after_bytes,
+                fetch_only=True,
+            )
+            self._append_part(
+                part_spec,
+                self._partial_path(owner, part_spec.sha256),
+                assembled,
+                whole,
+                boundaries[index],
+                operation_id=operation_id,
+                set_digest=set_digest,
+            )
+        self._require_transfer_running(operation_id)
+        if (
+            assembled.stat().st_size != spec.expected_bytes
+            or whole.hexdigest() != spec.sha256
+        ):
+            assembled.unlink(missing_ok=True)
+            self._checkpoint_artifact(
+                spec,
+                operation_id=operation_id,
+                set_digest=set_digest,
+                actual_bytes=0,
+                state="corrupt",
+            )
+            raise ModelCacheStorageError(
+                "model_cache.digest_mismatch",
+                "assembled artifact failed SHA-256 verification; the bytes were discarded and the download restarts",
+                recovery="resume",
+            )
+        if self._operation_cancellation_pending(operation_id):
+            raise InterruptedError("model download cancelled during assembly")
+        with self._lock:
+            if not self._publication_allowed(operation_id, set_digest, spec.sha256):
+                raise InterruptedError("model download was removed during assembly")
+            self._place_object(spec, assembled)
+            self._mark_artifact_verified(spec, set_digest)
+
+    @staticmethod
+    def _rehash_prefix(path: Path, length: int, digest: hashlib._Hash) -> None:
+        remaining = length
+        with path.open("rb") as retained:
+            while remaining:
+                chunk = retained.read(min(_CHUNK_BYTES, remaining))
+                if not chunk:
+                    raise ModelCacheStorageError(
+                        "model_cache.source_truncated",
+                        "retained assembled bytes are shorter than recorded",
+                        recovery="resume",
+                    )
+                digest.update(chunk)
+                remaining -= len(chunk)
+
+    def _append_part(
+        self,
+        part_spec: ArtifactSpec,
+        part: Path,
+        assembled: Path,
+        whole: hashlib._Hash,
+        boundary: int,
+        *,
+        operation_id: str,
+        set_digest: str,
+    ) -> None:
+        """Append one fetched part, verifying its size and digest in the same pass."""
+
+        if part.is_symlink() or not part.is_file():
+            raise ModelCacheStorageError(
+                "model_cache.source_truncated",
+                "a downloaded part is missing; it is fetched again",
+                recovery="resume",
+            )
+        if part.stat().st_size != part_spec.expected_bytes:
+            part.unlink(missing_ok=True)
+            raise ModelCacheStorageError(
+                "model_cache.source_size_mismatch",
+                "a downloaded part does not have its pinned size; it is fetched again",
+                recovery="resume",
+            )
+        self._checkpoint_artifact(
+            part_spec,
+            operation_id=operation_id,
+            set_digest=set_digest,
+            actual_bytes=part_spec.expected_bytes,
+            state="verifying",
+        )
+        stop = self._transfer_stop(operation_id)
+        digest = hashlib.sha256()
+        with part.open("rb") as source, assembled.open("ab") as output:
+            while chunk := source.read(_CHUNK_BYTES):
+                if stop.is_set() or self._closed.is_set():
+                    raise InterruptedError(
+                        "model download stopped; partial files preserved"
+                    )
+                digest.update(chunk)
+                whole.update(chunk)
+                output.write(chunk)
+            output.flush()
+            os.fsync(output.fileno())
+        if digest.hexdigest() != part_spec.sha256:
+            # Cut the bad bytes back off; the next attempt recovers the whole
+            # file's digest state from the retained prefix and refetches the part.
+            with assembled.open("r+b") as retained:
+                retained.truncate(boundary)
+                os.fsync(retained.fileno())
+            part.unlink(missing_ok=True)
+            raise ModelCacheStorageError(
+                "model_cache.digest_mismatch",
+                "downloaded part failed SHA-256 verification; the bytes were discarded and the part restarts",
+                recovery="resume",
+            )
+        # The part's bytes are durably in the assembled file: free the space now.
+        part.unlink(missing_ok=True)
 
     def _transfer_stop(self, operation_id: str) -> threading.Event:
         with self._lock:
@@ -4692,6 +5104,19 @@ class ModelCacheService:
             if errors:
                 raise errors[0]
 
+    def _partial_owner(self, operation_id: str, set_digest: str) -> str:
+        """The partials directory an operation's retained bytes live under."""
+
+        with self._session() as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            if operation is None or operation.kind != "repair":
+                return set_digest
+            checkpoint = read_stored_model(
+                ModelCacheRepairCheckpoint,
+                _validated_operation_payload(operation)["repair_checkpoint"],
+            )
+            return "repair-" + checkpoint.transfer_id
+
     def _download_artifact(
         self,
         spec: ArtifactSpec,
@@ -4701,20 +5126,15 @@ class ModelCacheService:
         completed_artifacts: int,
         force: bool,
         interrupt_after_bytes: int | None,
+        fetch_only: bool = False,
     ) -> None:
-        partial_owner = set_digest
-        with self._session() as session:
-            operation = session.get(ModelCacheOperation, operation_id)
-            is_repair = operation is not None and operation.kind == "repair"
-        if is_repair:
-            with self._session() as session:
-                operation = session.get(ModelCacheOperation, operation_id)
-                assert operation is not None
-                checkpoint = read_stored_model(
-                    ModelCacheRepairCheckpoint,
-                    _validated_operation_payload(operation)["repair_checkpoint"],
-                )
-                partial_owner = "repair-" + checkpoint.transfer_id
+        """Fetch one file into its partial and publish it as a cache object.
+
+        ``fetch_only`` (one part of a split file) stops once the retained file
+        holds every byte: a part is verified where it is appended to the file it
+        belongs to, and is never a cache object.
+        """
+        partial_owner = self._partial_owner(operation_id, set_digest)
         part = self._partial_path(partial_owner, spec.sha256)
         part.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
         if part.is_symlink():
@@ -4730,6 +5150,8 @@ class ModelCacheService:
             with part.open("r+b") as retained:
                 os.fsync(retained.fileno())
         received = offset
+        if fetch_only and offset == spec.expected_bytes:
+            return
         if offset == spec.expected_bytes and self._verify_file(part, spec):
             with self._lock:
                 if not self._publication_allowed(operation_id, set_digest, spec.sha256):
@@ -4759,6 +5181,9 @@ class ModelCacheService:
                 completed_artifacts,
             )
         ):
+            if fetch_only:
+                self._require_transfer_running(operation_id)
+                return
             self._complete_download(
                 spec, set_digest, part, operation_id, completed_artifacts
             )
@@ -4774,9 +5199,16 @@ class ModelCacheService:
                 completed_artifacts=completed_artifacts,
                 interrupt_after_bytes=interrupt_after_bytes,
             )
+        if fetch_only:
+            self._require_transfer_running(operation_id)
+            return
         self._complete_download(
             spec, set_digest, part, operation_id, completed_artifacts
         )
+
+    def _require_transfer_running(self, operation_id: str) -> None:
+        if self._transfer_stop(operation_id).is_set() or self._closed.is_set():
+            raise InterruptedError("model download stopped; partial files preserved")
 
     def _stream_gate(self, operation_id: str):
         stop = self._transfer_stop(operation_id)
@@ -5766,12 +6198,17 @@ class ModelCacheService:
                 "cache artifact failed verification; the bytes were discarded and the download restarts",
                 recovery="resume",
             )
+        self._place_object(spec, part)
+
+    def _place_object(self, spec: ArtifactSpec, verified: Path) -> None:
+        """Atomically install bytes whose digest was already verified at ingress."""
+
         target = self._object_path(spec.sha256)
         target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
         # Atomic overwrite preserves both the pathname and already-open
         # readers until the verified replacement is ready. Moving the old
         # object aside first creates an availability gap (and a crash window).
-        os.replace(part, target)
+        os.replace(verified, target)
         _fsync_directory(target.parent)
 
     def _checkpoint_artifact(
@@ -5838,7 +6275,11 @@ class ModelCacheService:
                         if isinstance(raw_artifacts, Mapping)
                         else {}
                     )
-                    raw_entry = artifacts.get(spec.sha256)
+                    # A part of a split file reports on the whole file's ledger
+                    # entry, offset by the parts already appended.
+                    ledger_digest = spec.ledger_sha256 or spec.sha256
+                    actual_bytes += spec.ledger_base
+                    raw_entry = artifacts.get(ledger_digest)
                     entry = dict(raw_entry) if isinstance(raw_entry, Mapping) else {}
                     baseline = entry.get("baseline_bytes")
                     baseline = (
@@ -5854,7 +6295,7 @@ class ModelCacheService:
                     entry["received_bytes"] = max(
                         previous_received, max(0, actual_bytes - baseline)
                     )
-                    artifacts[spec.sha256] = entry
+                    artifacts[ledger_digest] = entry
                     transfer["schema_version"] = SCHEMA_VERSION
                     transfer["artifacts"] = artifacts
                     total = transfer.get("total_bytes")
@@ -7771,6 +8212,7 @@ class ModelCacheService:
         manifest = self._manifest_for_set(digest)
         transfer = self._transfer_state_for_manifest(manifest, force=True)
         repair_bytes = require_integer(transfer["total_bytes"], "transfer total bytes")
+        repair_bytes += _split_transient_bytes(manifest, None)
         if repair_bytes > self.free_bytes():
             self._request_storage(repair_bytes, "insufficient-reserved-storage")
             raise ModelCacheConflict(

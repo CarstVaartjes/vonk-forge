@@ -66,6 +66,15 @@ class StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
 
+class CacheManifestArtifactPart(StrictModel):
+    """One source-published piece of a split artifact (joined in list order)."""
+
+    path: str
+    source: str
+    sha256: str
+    download_bytes: int
+
+
 class CacheManifestArtifact(StrictModel):
     key: str
     id: str
@@ -78,6 +87,9 @@ class CacheManifestArtifact(StrictModel):
     download_bytes: int
     roles: list[str]
     model_content_sha256: str | None
+    # Omitted unless the source publishes the file only as split parts, so the
+    # manifests of ordinary files stay byte-identical.
+    parts: list[CacheManifestArtifactPart] | None = None
 
 
 class CacheManifest(StrictModel):
