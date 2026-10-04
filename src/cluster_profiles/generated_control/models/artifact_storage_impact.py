@@ -19,6 +19,8 @@ from ..models.artifact_storage_impact_spark_coverage import check_artifact_stora
 from ..types import UNSET, Unset
 from typing import cast
 
+if TYPE_CHECKING:
+  from ..models.artifact_storage_impact_missing_spark_bytes_by_node_type_0 import ArtifactStorageImpactMissingSparkBytesByNodeType0
 
 
 
@@ -42,6 +44,7 @@ class ArtifactStorageImpact:
             copied_bytes (int | Unset):  Default: 0.
             missing_nas_bytes (int | None | Unset):
             missing_spark_bytes (int | None | Unset):
+            missing_spark_bytes_by_node (ArtifactStorageImpactMissingSparkBytesByNodeType0 | None | Unset):
             reclaimable_bytes (int | Unset):  Default: 0.
             reclaimable_digests (list[str] | Unset):
             reclaimed_bytes (int | Unset):  Default: 0.
@@ -59,6 +62,7 @@ class ArtifactStorageImpact:
     copied_bytes: int | Unset = 0
     missing_nas_bytes: int | None | Unset = UNSET
     missing_spark_bytes: int | None | Unset = UNSET
+    missing_spark_bytes_by_node: ArtifactStorageImpactMissingSparkBytesByNodeType0 | None | Unset = UNSET
     reclaimable_bytes: int | Unset = 0
     reclaimable_digests: list[str] | Unset = UNSET
     reclaimed_bytes: int | Unset = 0
@@ -71,6 +75,7 @@ class ArtifactStorageImpact:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.artifact_storage_impact_missing_spark_bytes_by_node_type_0 import ArtifactStorageImpactMissingSparkBytesByNodeType0 # noqa: PLC0415
         nas_coverage: str = self.nas_coverage
 
         retention: str = self.retention
@@ -108,6 +113,14 @@ class ArtifactStorageImpact:
             missing_spark_bytes = UNSET
         else:
             missing_spark_bytes = self.missing_spark_bytes
+
+        missing_spark_bytes_by_node: dict[str, Any] | None | Unset
+        if isinstance(self.missing_spark_bytes_by_node, Unset):
+            missing_spark_bytes_by_node = UNSET
+        elif isinstance(self.missing_spark_bytes_by_node, ArtifactStorageImpactMissingSparkBytesByNodeType0):
+            missing_spark_bytes_by_node = self.missing_spark_bytes_by_node.to_dict()
+        else:
+            missing_spark_bytes_by_node = self.missing_spark_bytes_by_node
 
         reclaimable_bytes = self.reclaimable_bytes
 
@@ -152,6 +165,8 @@ class ArtifactStorageImpact:
             field_dict["missing_nas_bytes"] = missing_nas_bytes
         if missing_spark_bytes is not UNSET:
             field_dict["missing_spark_bytes"] = missing_spark_bytes
+        if missing_spark_bytes_by_node is not UNSET:
+            field_dict["missing_spark_bytes_by_node"] = missing_spark_bytes_by_node
         if reclaimable_bytes is not UNSET:
             field_dict["reclaimable_bytes"] = reclaimable_bytes
         if reclaimable_digests is not UNSET:
@@ -171,6 +186,7 @@ class ArtifactStorageImpact:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.artifact_storage_impact_missing_spark_bytes_by_node_type_0 import ArtifactStorageImpactMissingSparkBytesByNodeType0 # noqa: PLC0415
         d = dict(src_dict)
         nas_coverage = check_artifact_storage_impact_nas_coverage(d.pop("nas_coverage"))
 
@@ -232,6 +248,26 @@ class ArtifactStorageImpact:
         missing_spark_bytes = _parse_missing_spark_bytes(d.pop("missing_spark_bytes", UNSET))
 
 
+        def _parse_missing_spark_bytes_by_node(data: object) -> ArtifactStorageImpactMissingSparkBytesByNodeType0 | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                missing_spark_bytes_by_node_type_0 = ArtifactStorageImpactMissingSparkBytesByNodeType0.from_dict(data)
+
+
+
+                return missing_spark_bytes_by_node_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(ArtifactStorageImpactMissingSparkBytesByNodeType0 | None | Unset, data)
+
+        missing_spark_bytes_by_node = _parse_missing_spark_bytes_by_node(d.pop("missing_spark_bytes_by_node", UNSET))
+
+
         reclaimable_bytes = d.pop("reclaimable_bytes", UNSET)
 
         reclaimable_digests = cast(list[str], d.pop("reclaimable_digests", UNSET))
@@ -271,6 +307,7 @@ class ArtifactStorageImpact:
             copied_bytes=copied_bytes,
             missing_nas_bytes=missing_nas_bytes,
             missing_spark_bytes=missing_spark_bytes,
+            missing_spark_bytes_by_node=missing_spark_bytes_by_node,
             reclaimable_bytes=reclaimable_bytes,
             reclaimable_digests=reclaimable_digests,
             reclaimed_bytes=reclaimed_bytes,

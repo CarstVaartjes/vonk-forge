@@ -98,7 +98,9 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationProvider,
     RunSwitchOperationService,
     _build_receipt_in_session,
+    _node_missing_bytes,
     _phase_result,
+    _planned_transfer_bytes,
     _transient_distribution_exception,
     effective_build_receipt,
 )
@@ -5884,3 +5886,147 @@ def test_stored_run_switch_with_retired_fields_stays_readable_and_new_work_proce
     assert item["id"] == old.operation_id
     assert item["kind"] != "run-switch-unreadable"
     assert service.get(old.operation_id).operation_id == old.operation_id
+
+
+SPARK_A = "spk_" + "a" * 32
+SPARK_B = "spk_" + "b" * 32
+
+
+def _uneven_dual_preparation(tmp_path: Path, *, image_by_node, model_by_node):
+    """Prepare a two-Spark group whose presence is uneven and byte counts odd."""
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    group = SparkGroup(
+        nodes=[
+            SparkGroupNode(
+                node_id=node_id,
+                rank=rank,
+                role="entrypoint" if rank == 0 else "worker",
+                endpoint_owner=rank == 0,
+            )
+            for rank, node_id in enumerate((SPARK_A, SPARK_B))
+        ]
+    )
+    image_bytes = plan.runtime_storage.image_bytes
+    assert image_bytes is not None
+    runtime_storage = plan.runtime_storage.model_copy(
+        update={
+            "image_bytes": 1025,
+            "missing_image_distribution_bytes": sum(image_by_node.values()),
+            "missing_image_distribution_bytes_by_node": image_by_node,
+        }
+    )
+    with sessions() as session:
+        revision = session.get(CatalogDocumentRevision, request.recipe_revision_id)
+        inspection = CompleteArtifactInspector().inspect(
+            session,
+            model_content_sha256=request.model_content_sha256,
+            recipe_revision_id=request.recipe_revision_id,
+            node_ids=(SPARK_A, SPARK_B),
+            retention="retain-cached",
+            now=NOW,
+        )
+    inspection = replace(
+        inspection,
+        missing_spark_bytes=sum(model_by_node.values()),
+        missing_spark_bytes_by_node=model_by_node,
+    )
+    preparation = RunSwitchOperationService._preparation(
+        revision=revision,
+        group=group,
+        inspection=inspection,
+        build=None,
+        build_candidate=None,
+        runtime_storage=runtime_storage,
+        now=NOW,
+        reasons=(),
+    )
+    return plan, group, runtime_storage, inspection, preparation
+
+
+def test_image_present_on_one_spark_with_odd_bytes_is_prepared_per_node(
+    tmp_path: Path,
+) -> None:
+    """Regression: total / N raised run-switch.per-target-byte-evidence-invalid."""
+
+    *_, preparation = _uneven_dual_preparation(
+        tmp_path,
+        image_by_node={SPARK_A: 0, SPARK_B: 1025},
+        model_by_node={SPARK_A: 0, SPARK_B: 0},
+    )
+    assert preparation is not None
+    states = {t.node_id: t for t in preparation.runtime_image.targets}
+    assert states[SPARK_A].state == "ready"
+    assert (states[SPARK_A].present_bytes, states[SPARK_A].missing_bytes) == (
+        1025,
+        0,
+    )
+    assert states[SPARK_B].state == "unknown"
+    assert (states[SPARK_B].present_bytes, states[SPARK_B].missing_bytes) == (
+        0,
+        1025,
+    )
+    assert not preparation.ready
+
+
+def test_model_present_on_one_spark_is_prepared_per_node(tmp_path: Path) -> None:
+    *_, preparation = _uneven_dual_preparation(
+        tmp_path,
+        image_by_node={SPARK_A: 0, SPARK_B: 0},
+        model_by_node={SPARK_A: 1024, SPARK_B: 0},
+    )
+    assert preparation is not None
+    states = {t.node_id: t for t in preparation.model.targets}
+    assert states[SPARK_A].state == "unknown"
+    assert states[SPARK_A].missing_bytes == 1024
+    assert states[SPARK_B].state == "ready"
+    assert states[SPARK_B].present_bytes == 1024
+
+
+def test_missing_per_node_evidence_means_missing_here_never_an_error(
+    tmp_path: Path,
+) -> None:
+    plan, group, runtime_storage, inspection, _ = _uneven_dual_preparation(
+        tmp_path,
+        image_by_node={SPARK_A: 0, SPARK_B: 1025},
+        model_by_node={SPARK_A: 0, SPARK_B: 0},
+    )
+    # A plan or inspection persisted before node-keyed evidence existed.
+    legacy_storage = runtime_storage.model_copy(
+        update={"missing_image_distribution_bytes_by_node": None}
+    )
+    preparation = RunSwitchOperationService._preparation(
+        revision=None,
+        group=group,
+        inspection=inspection,
+        build=None,
+        build_candidate=None,
+        runtime_storage=legacy_storage,
+        now=NOW,
+        reasons=(),
+    )
+    assert preparation is None  # no revision: unchanged honest-identity rule
+    assert _node_missing_bytes(None, SPARK_A, 1025, 2) is None
+    assert _node_missing_bytes(None, SPARK_A, 0, 2) == 0
+    assert _node_missing_bytes(None, SPARK_A, 1025, 1) == 1025
+    assert _node_missing_bytes({SPARK_B: 5}, SPARK_B, 9, 2) == 5
+
+    uneven = plan.model_copy(
+        update={
+            "spark_group": group,
+            "storage": plan.storage.model_copy(
+                update={
+                    "missing_spark_bytes": 1024,
+                    "missing_spark_bytes_by_node": {SPARK_A: 0, SPARK_B: 1024},
+                }
+            ),
+            "runtime_storage": runtime_storage,
+        }
+    )
+    _total, per_node = _planned_transfer_bytes(uneven)
+    assert per_node == {SPARK_A: 0, SPARK_B: 1024 + 1025}

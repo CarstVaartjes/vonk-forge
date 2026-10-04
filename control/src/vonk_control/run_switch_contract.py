@@ -423,6 +423,8 @@ class ArtifactStorageImpact(_StrictModel):
     copied_bytes: int = Field(default=0, ge=0)
     missing_nas_bytes: int | None = Field(default=None, ge=0)
     missing_spark_bytes: int | None = Field(default=None, ge=0)
+    # Per-node evidence behind ``missing_spark_bytes`` (a SUM over targets).
+    missing_spark_bytes_by_node: dict[str, Annotated[int, Field(ge=0)]] | None = None
     reclaimable_bytes: int = Field(default=0, ge=0)
     reclaimed_bytes: int = Field(default=0, ge=0)
     nas_coverage: RunSwitchCoverage
@@ -465,6 +467,10 @@ class RuntimeImageStorageImpact(_StrictModel):
     missing_nas_bytes: int | None = Field(default=None, ge=0)
     missing_spark_bytes: int | None = Field(default=None, ge=0)
     missing_image_distribution_bytes: int | None = Field(default=None, ge=0)
+    # Per-node evidence behind ``missing_image_distribution_bytes``.
+    missing_image_distribution_bytes_by_node: (
+        dict[str, Annotated[int, Field(ge=0)]] | None
+    ) = None
     nas_coverage: RunSwitchCoverage
     spark_coverage: RunSwitchCoverage
     running_coverage: RunSwitchCoverage = "unknown"

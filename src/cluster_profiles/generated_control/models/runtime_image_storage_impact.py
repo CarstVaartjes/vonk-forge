@@ -17,6 +17,8 @@ from ..models.runtime_image_storage_impact_spark_coverage import RuntimeImageSto
 from ..types import UNSET, Unset
 from typing import cast
 
+if TYPE_CHECKING:
+  from ..models.runtime_image_storage_impact_missing_image_distribution_bytes_by_node_type_0 import RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0
 
 
 
@@ -38,6 +40,8 @@ class RuntimeImageStorageImpact:
             copied_bytes (int | Unset):  Default: 0.
             image_bytes (int | None | Unset):
             missing_image_distribution_bytes (int | None | Unset):
+            missing_image_distribution_bytes_by_node (None |
+                RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0 | Unset):
             missing_nas_bytes (int | None | Unset):
             missing_spark_bytes (int | None | Unset):
             oci_layout_sha256 (None | str | Unset):
@@ -56,6 +60,7 @@ class RuntimeImageStorageImpact:
     copied_bytes: int | Unset = 0
     image_bytes: int | None | Unset = UNSET
     missing_image_distribution_bytes: int | None | Unset = UNSET
+    missing_image_distribution_bytes_by_node: None | RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0 | Unset = UNSET
     missing_nas_bytes: int | None | Unset = UNSET
     missing_spark_bytes: int | None | Unset = UNSET
     oci_layout_sha256: None | str | Unset = UNSET
@@ -70,6 +75,7 @@ class RuntimeImageStorageImpact:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.runtime_image_storage_impact_missing_image_distribution_bytes_by_node_type_0 import RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0 # noqa: PLC0415
         build_id: None | str
         build_id = self.build_id
 
@@ -95,6 +101,14 @@ class RuntimeImageStorageImpact:
             missing_image_distribution_bytes = UNSET
         else:
             missing_image_distribution_bytes = self.missing_image_distribution_bytes
+
+        missing_image_distribution_bytes_by_node: dict[str, Any] | None | Unset
+        if isinstance(self.missing_image_distribution_bytes_by_node, Unset):
+            missing_image_distribution_bytes_by_node = UNSET
+        elif isinstance(self.missing_image_distribution_bytes_by_node, RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0):
+            missing_image_distribution_bytes_by_node = self.missing_image_distribution_bytes_by_node.to_dict()
+        else:
+            missing_image_distribution_bytes_by_node = self.missing_image_distribution_bytes_by_node
 
         missing_nas_bytes: int | None | Unset
         if isinstance(self.missing_nas_bytes, Unset):
@@ -151,6 +165,8 @@ class RuntimeImageStorageImpact:
             field_dict["image_bytes"] = image_bytes
         if missing_image_distribution_bytes is not UNSET:
             field_dict["missing_image_distribution_bytes"] = missing_image_distribution_bytes
+        if missing_image_distribution_bytes_by_node is not UNSET:
+            field_dict["missing_image_distribution_bytes_by_node"] = missing_image_distribution_bytes_by_node
         if missing_nas_bytes is not UNSET:
             field_dict["missing_nas_bytes"] = missing_nas_bytes
         if missing_spark_bytes is not UNSET:
@@ -174,6 +190,7 @@ class RuntimeImageStorageImpact:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.runtime_image_storage_impact_missing_image_distribution_bytes_by_node_type_0 import RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0 # noqa: PLC0415
         d = dict(src_dict)
         def _parse_build_id(data: object) -> None | str:
             if data is None:
@@ -223,6 +240,26 @@ class RuntimeImageStorageImpact:
             return cast(int | None | Unset, data)
 
         missing_image_distribution_bytes = _parse_missing_image_distribution_bytes(d.pop("missing_image_distribution_bytes", UNSET))
+
+
+        def _parse_missing_image_distribution_bytes_by_node(data: object) -> None | RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0 | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                missing_image_distribution_bytes_by_node_type_0 = RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0.from_dict(data)
+
+
+
+                return missing_image_distribution_bytes_by_node_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0 | Unset, data)
+
+        missing_image_distribution_bytes_by_node = _parse_missing_image_distribution_bytes_by_node(d.pop("missing_image_distribution_bytes_by_node", UNSET))
 
 
         def _parse_missing_nas_bytes(data: object) -> int | None | Unset:
@@ -291,6 +328,7 @@ class RuntimeImageStorageImpact:
             copied_bytes=copied_bytes,
             image_bytes=image_bytes,
             missing_image_distribution_bytes=missing_image_distribution_bytes,
+            missing_image_distribution_bytes_by_node=missing_image_distribution_bytes_by_node,
             missing_nas_bytes=missing_nas_bytes,
             missing_spark_bytes=missing_spark_bytes,
             oci_layout_sha256=oci_layout_sha256,
