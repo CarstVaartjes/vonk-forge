@@ -598,6 +598,7 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "runtime_run_missing"
             | "runtime_fabric_unavailable"
             | "runtime_fabric_firewall_rejected"
+            | "runtime_endpoint_firewall_rejected"
             | "installation_reconciliation_busy"
             | "installation_reconciliation_storage_unavailable"
             | "grant_invalid"

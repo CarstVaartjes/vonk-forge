@@ -1,0 +1,3 @@
+FAILED tests/test_profile_installed_execution.py::test_install_review_does_not_require_serving_memory_or_an_available_port
+1 failed, 2730 passed, 607 skipped, 2 warnings in 122.30s (0:02:02)
+done

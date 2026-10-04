@@ -41,6 +41,21 @@ fi
 $helper --config "$config" apply
 $helper --config "$config" check
 $helper --config "$config" check-host-port 8888
+$helper --config "$config" check-endpoint-port 8000
+$helper --config "$config" check-endpoint-port 8101
+# A published port outside the authorised set would run unreachable behind the
+# managed chain's final DROP, so the refusal must say which port and which set.
+# Exit status 3 is a positive refusal; the helper fails the start only on it.
+status=0
+refusal=$($helper --config "$config" check-endpoint-port 30000 2>&1) || status=$?
+test "$status" = 3
+case "$refusal" in
+    *"published endpoint host port 30000 is not authorized"*"authorized endpoint host ports: 8000,8101"*) ;;
+    *) echo "endpoint port refusal does not name the port: $refusal" >&2; exit 1 ;;
+esac
+status=0
+$helper --config "$config" check-endpoint-port 8888 >/dev/null 2>&1 || status=$?
+test "$status" = 3
 test "$($helper --config "$config" check-fabric-run 192.168.100.10 192.168.100.10 29500 8888)" = vonk-fabric
 test "$($helper --config "$config" check-fabric-run 192.168.100.10 192.168.100.11 29500 none)" = vonk-fabric
 for invalid in \

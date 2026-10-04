@@ -140,7 +140,10 @@ from .recipe_build_cancellation import (
     BuildConsumerError,
     lock_profile_build_dependencies,
 )
-from .recipe_execution_contract import installation_matches_runtime_image
+from .recipe_execution_contract import (
+    installation_matches_runtime_image,
+    installation_serves_authorised_ports,
+)
 from .recipe_operations import RecipeOperationConflict
 from .recipe_runtime_specs import (
     recipe_topology,
@@ -8881,17 +8884,27 @@ class FleetProfileService:
                 run=None,
                 build=build,
             )
-        installation = session.scalar(
-            select(RecipeInstallation)
-            .where(
-                RecipeInstallation.mapping_id == mapping.id,
-                RecipeInstallation.recipe_revision_id == assignment.recipe_revision_id,
-                RecipeInstallation.state.in_(_ACTIVE_INSTALL_STATES),
-            )
-            .order_by(
-                RecipeInstallation.updated_at.desc(), RecipeInstallation.id.desc()
-            )
-            .limit(1)
+        installation = next(
+            (
+                candidate
+                for candidate in session.scalars(
+                    select(RecipeInstallation)
+                    .where(
+                        RecipeInstallation.mapping_id == mapping.id,
+                        RecipeInstallation.recipe_revision_id
+                        == assignment.recipe_revision_id,
+                        RecipeInstallation.state.in_(_ACTIVE_INSTALL_STATES),
+                    )
+                    .order_by(
+                        RecipeInstallation.updated_at.desc(),
+                        RecipeInstallation.id.desc(),
+                    )
+                )
+                # An installation compiled for a port the platform no longer
+                # assigns cannot launch; the load installs the recipe again.
+                if installation_serves_authorised_ports(candidate)
+            ),
+            None,
         )
         if installation is None:
             return cls._AssignmentState(

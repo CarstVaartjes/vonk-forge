@@ -24,6 +24,7 @@ from vonk_agent_protocol.inventory import MemoryPool
 
 from .content_identity import ImageContent, same_image
 from .library_contract import Digest, ImageDigest, NodeId, Text64, UuidId
+from .platform_ports import serving_port
 from .strict_json import StrictJSONModel
 from .validation_detail import validation_error_detail
 
@@ -269,6 +270,29 @@ def installation_matches_runtime_image(
             same_image(compiled.runtime_image, expected)
             for compiled in plan.compiled_execution_plans.values()
         )
+    )
+
+
+def installation_serves_authorised_ports(installation: RecipeInstallation) -> bool:
+    """Whether the stored plan serves on the host port the platform now assigns.
+
+    The agent compares every start request with the plan it installed, so an
+    installation compiled before the Controller owned host ports keeps the
+    recipe's own port and can never launch on the firewall-authorised one. Such
+    an installation is superseded: the next load installs the recipe again and
+    space-driven cleanup removes the old one. A plan this check cannot read is
+    left to its existing owners.
+    """
+
+    try:
+        plan = parse_stored_installation_plan(installation.plan)
+    except RecipeExecutionContractError:
+        return True
+    return all(
+        compiled.endpoint is None
+        or compiled.endpoint.port
+        == serving_port(compiled.endpoint.port, node_count=compiled.topology.node_count)
+        for compiled in plan.compiled_execution_plans.values()
     )
 
 

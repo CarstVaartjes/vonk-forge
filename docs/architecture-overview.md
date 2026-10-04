@@ -499,8 +499,14 @@ private IPC, and bounded shared memory. It has no Docker port publications, so
 the engine listens on the host: the Controller admits such a run on the one host
 endpoint port the Spark firewall authorises (8888), whatever port the recipe
 declares, and compiles that port into the installed plan's endpoint and engine
-command. An installation compiled before that choice keeps the recipe's port and
-is replaced by installing the recipe again.
+command. A single-Spark endpoint is published by Docker instead: the Controller
+allocates a free authorised endpoint host port (8000 or 8101) for each run and the
+recipe's own port stays the container port. Both sets of ports are read from
+`control/src/vonk_control/resources/site-ports.json`, the file the Spark setup
+program renders into the firewall configuration. An installation compiled for a
+port the platform no longer assigns is superseded: the next load installs the
+recipe again. The helper also refuses to start a published endpoint whose host
+port the firewall positively refuses, instead of leaving it unreachable.
 The helper first checks the root-owned firewall configuration against the
 requested local address, master, rendezvous port and endpoint port.
 It then resolves the unique active RoCE v2 GID for that address and interface

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -34,8 +33,8 @@ from vonk_control.models import (
     ResourceReservation,
     User,
 )
+from vonk_control.platform_ports import ENDPOINT_HOST_PORTS, RENDEZVOUS_PORT
 from vonk_control.run_switch_operations import RunSwitchOperationService
-from vonk_forge_contracts import RecipeDefinition
 
 from cluster_profiles.cli_render import render_payload
 
@@ -44,9 +43,18 @@ from .test_profile_installed_execution import _profile_service
 from .test_recipe_operations import installed_recipe, setup_services, started_recipe
 
 
-def _service_port(revision: CatalogDocumentRevision) -> int:
-    recipe = RecipeDefinition.model_validate_json(json.dumps(revision.document))
-    return next(item.port for item in recipe.interfaces if item.adapter == "openai")
+def _occupying_ports(
+    revision: CatalogDocumentRevision, *, rendezvous: bool
+) -> tuple[str, ...]:
+    """The reservations that leave a node with no port for the recipe.
+
+    The platform allocates any free authorised endpoint host port, so occupying
+    the service takes every one of them; the rendezvous port is a single key.
+    """
+
+    if rendezvous:
+        return (str(RENDEZVOUS_PORT),)
+    return tuple(str(port) for port in ENDPOINT_HOST_PORTS)
 
 
 def _capacity_profile(tmp_path, engine, *, node_count: int = 1):
@@ -183,22 +191,22 @@ def test_load_parks_capacity_lost_after_its_last_preview(
                     )
                 )
                 assert revision is not None
-                service_port = _service_port(revision)
-                session.add(
-                    ResourceReservation(
-                        node_id=nodes[0],
-                        kind="port",
-                        resource_key=str(
-                            29500 if change == "rendezvous-port" else service_port
-                        ),
-                        amount_bytes=0,
-                        owner_kind="run",
-                        owner_id=str(uuid4()),
-                        state="active",
-                        plan_digest="f" * 64,
-                        created_at=service._clock(),
+                for key in _occupying_ports(
+                    revision, rendezvous=change == "rendezvous-port"
+                ):
+                    session.add(
+                        ResourceReservation(
+                            node_id=nodes[0],
+                            kind="port",
+                            resource_key=key,
+                            amount_bytes=0,
+                            owner_kind="run",
+                            owner_id=str(uuid4()),
+                            state="active",
+                            plan_digest="f" * 64,
+                            created_at=service._clock(),
+                        )
                     )
-                )
             else:
                 kind = "disk" if change == "disk-reservation" else "unified-memory"
                 session.add(
@@ -304,21 +312,20 @@ def test_fresh_installation_review_refuses_an_occupied_runtime_port(
             )
         )
         assert revision is not None
-        service_port = _service_port(revision)
-        port = 29500 if port_kind == "rendezvous" else service_port
-        session.add(
-            ResourceReservation(
-                node_id=nodes[0],
-                kind="port",
-                resource_key=str(port),
-                amount_bytes=0,
-                owner_kind="run",
-                owner_id=str(uuid4()),
-                state="active",
-                plan_digest="e" * 64,
-                created_at=profiles._clock(),
+        for key in _occupying_ports(revision, rendezvous=port_kind == "rendezvous"):
+            session.add(
+                ResourceReservation(
+                    node_id=nodes[0],
+                    kind="port",
+                    resource_key=key,
+                    amount_bytes=0,
+                    owner_kind="run",
+                    owner_id=str(uuid4()),
+                    state="active",
+                    plan_digest="e" * 64,
+                    created_at=profiles._clock(),
+                )
             )
-        )
     response = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
     assert response.status_code == 200, response.text
     assert not response.json()["allowed"]

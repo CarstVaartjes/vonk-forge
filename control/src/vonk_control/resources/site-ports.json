@@ -1,0 +1,5 @@
+{
+  "endpoint_host_ports": [8000, 8101],
+  "host_endpoint_ports": [8888],
+  "rendezvous_port": 29500
+}

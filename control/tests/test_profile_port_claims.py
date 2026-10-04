@@ -24,6 +24,7 @@ from vonk_control.models import (
     RecipeRun,
     ResourceReservation,
 )
+from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 from vonk_control.recipe_operations import RecipeOperationConflict
 from vonk_control.run_admission import RunAdmissionBusy
 
@@ -52,6 +53,42 @@ def _ready_profile(tmp_path, engine, *, node_count=1):
     return sessions, profiles, planner, profile, api, headers, nodes, installed.owner_id
 
 
+def _occupy_unpromised_endpoint_ports(sessions, node_ids) -> None:
+    """Leave the promised port as the only authorised endpoint port in play.
+
+    The platform gives a run any free authorised endpoint port, so unrelated
+    work only collides with a promise once every other port is taken.
+    """
+
+    with sessions.begin() as session:
+        for node_id in node_ids:
+            taken = set(
+                session.scalars(
+                    select(ResourceReservation.resource_key).where(
+                        ResourceReservation.node_id == node_id,
+                        ResourceReservation.kind == "port",
+                        ResourceReservation.state.in_(("active", "promised")),
+                    )
+                )
+            )
+            for port in ENDPOINT_HOST_PORTS:
+                if str(port) in taken:
+                    continue
+                session.add(
+                    ResourceReservation(
+                        node_id=node_id,
+                        kind="port",
+                        resource_key=str(port),
+                        amount_bytes=0,
+                        owner_kind="run",
+                        owner_id=str(uuid4()),
+                        state="active",
+                        plan_digest="d" * 64,
+                        created_at=datetime.now(UTC),
+                    )
+                )
+
+
 def _load(profile, api, headers):
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers).json()
     assert review["allowed"], review
@@ -70,7 +107,7 @@ def _load(profile, api, headers):
 def test_profile_ports_block_competing_start_and_transfer_without_a_gap(
     tmp_path, postgres_engine, node_count
 ):
-    sessions, profiles, planner, profile, api, headers, _, installation_id = (
+    sessions, profiles, planner, profile, api, headers, nodes, installation_id = (
         _ready_profile(tmp_path, postgres_engine, node_count=node_count)
     )
     lifecycle = planner._lifecycle
@@ -78,6 +115,7 @@ def test_profile_ports_block_competing_start_and_transfer_without_a_gap(
     previously_fitting = lifecycle.preview_run(installation_id, "competing")
     assert previously_fitting.allowed
     application_id, review = _load(profile, api, headers)
+    _occupy_unpromised_endpoint_ports(sessions, nodes)
     expected = {
         (node["node_id"], str(port))
         for decision in review["admission_decisions"]
@@ -222,6 +260,7 @@ def test_profile_port_promise_preserves_live_owner_and_survives_reviewed_stop(
         inventory.record(InventorySnapshotInput(**sample))
     # Even after the old owner releases its active port, unrelated work cannot
     # take the promised port in the gap before the replacement worker starts.
+    _occupy_unpromised_endpoint_ports(sessions, nodes)
     competing = lifecycle.preview_run(installation_id, "competing")
     assert not competing.allowed
     assert any(
