@@ -136,6 +136,7 @@ from .recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
     installation_matches_runtime_image,
+    installation_serves_authorised_ports,
     parse_stored_build_plan,
     parse_stored_installation_plan,
     run_plan_document,
@@ -173,6 +174,7 @@ from .resource_planning import (
 from .run_admission import (
     PORT_ADMISSION_CODES,
     RunAdmissionBusy,
+    allocate_service_port,
     run_port_blockers,
     run_port_demand,
 )
@@ -4327,6 +4329,8 @@ class RunSwitchOperationService:
         )
         desired = {(node.node_id, node.rank, node.role) for node in group.nodes}
         for installation in candidates:
+            if not installation_serves_authorised_ports(installation):
+                continue
             installed = {
                 (node.node_id, node.rank, node.role)
                 for node in session.scalars(
@@ -5558,10 +5562,16 @@ class RunSwitchOperationService:
             ports_required: list[int] = []
             if serving and revision is not None:
                 try:
-                    port_demand = run_port_demand(
-                        revision.document,
-                        node_count=len(group.nodes),
-                        endpoint_owner=item.endpoint_owner,
+                    port_demand = allocate_service_port(
+                        session,
+                        item.node_id,
+                        run_port_demand(
+                            revision.document,
+                            node_count=len(group.nodes),
+                            endpoint_owner=item.endpoint_owner,
+                        ),
+                        excluded_run_ids=excluded_run_ids,
+                        excluded_profile_application_ids=excluded_profile_application_ids,
                     )
                 except (TypeError, ValueError) as error:
                     node_blockers.append(

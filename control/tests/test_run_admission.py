@@ -29,7 +29,9 @@ from vonk_control.run_admission import (
     RunAdmissionBusy,
     RunAdmissionService,
     RunPlanConflict,
+    allocate_service_port,
     require_admissible,
+    run_port_demand,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
@@ -38,7 +40,7 @@ def setup(
     tmp_path,
     *,
     free_memory=300,
-    port_reserved=False,
+    port_reserved: bool | tuple[str, ...] = False,
     system_reserve=0,
     memory_pool: MemoryPool = "shared",
     denied_jurisdictions=(),
@@ -213,12 +215,16 @@ def setup(
                 updated_at=now,
             )
         )
-        if port_reserved:
+        for reserved in (
+            port_reserved
+            if isinstance(port_reserved, tuple)
+            else (("8000", "8101") if port_reserved else ())
+        ):
             session.add(
                 ResourceReservation(
                     node_id=node,
                     kind="port",
-                    resource_key="8000",
+                    resource_key=reserved,
                     amount_bytes=0,
                     owner_kind="run",
                     owner_id="1" * 36,
@@ -253,6 +259,98 @@ def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -
         run = session.get(RecipeRun, run_id)
         assert run is not None
         assert run.alias == plan.alias == run.plan["alias"]
+
+
+def test_a_second_single_spark_run_takes_the_other_authorised_port(tmp_path) -> None:
+    """The platform allocates the host port; the recipe's own port stays inside.
+
+    Wrong implementation this catches: the run was admitted on the recipe's
+    declared port, so a recipe on 30000 was published on a host port the Spark
+    firewall drops, and two recipes on 8000 could never share a Spark.
+    """
+    sessions, now, _node, installation = setup(
+        tmp_path, free_memory=300, port_reserved=("8000",)
+    )
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    )
+    plan = service.plan_run(installation, alias="qwen", now=now)
+    assert plan.allowed is True
+    assert plan.nodes[0].port == 8101
+
+    run_id = service.accept_run(plan, actor="admin", now=now)
+
+    with sessions() as session:
+        node = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).one()
+        held = {
+            item.resource_key
+            for item in session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.kind == "port",
+                    ResourceReservation.owner_id == run_id,
+                )
+            )
+        }
+    assert node.port == 8101
+    assert held == {"8101"}
+
+
+def test_a_run_consumes_the_port_its_profile_promised_not_the_first_free_one(
+    tmp_path,
+) -> None:
+    """A reviewed promise, not the lowest free port, is what the run takes.
+
+    Wrong implementation this catches: the run picked the first free port after
+    the old run released 8000, so it disagreed with the 8101 the profile had
+    promised and admission failed with "run ports changed after profile review".
+    """
+    sessions, now, node, _installation = setup(
+        tmp_path, free_memory=300, port_reserved=()
+    )
+    with sessions.begin() as session:
+        session.add(
+            ResourceReservation(
+                node_id=node,
+                kind="port",
+                resource_key="8101",
+                amount_bytes=0,
+                owner_kind="fleet-profile",
+                owner_id="profile-application-1",
+                state="promised",
+                plan_digest="c" * 64,
+                created_at=now,
+            )
+        )
+    demand = run_port_demand(
+        {"interfaces": [{"adapter": "openai", "port": 30000}]},
+        node_count=1,
+        endpoint_owner=True,
+    )
+    with sessions() as session:
+        others = allocate_service_port(session, node, demand)
+        own = allocate_service_port(
+            session,
+            node,
+            demand,
+            excluded_profile_application_ids=("profile-application-1",),
+        )
+    assert others.service_port == 8000
+    assert own.service_port == 8101
+
+
+def test_a_single_spark_run_with_every_authorised_port_taken_names_them(
+    tmp_path,
+) -> None:
+    sessions, now, _node, installation = setup(
+        tmp_path, free_memory=300, port_reserved=("8000", "8101")
+    )
+    plan = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    ).plan_run(installation, alias="qwen", now=now)
+
+    reasons = [r for r in plan.nodes[0].blockers if r.code == "run.port_occupied"]
+    assert len(reasons) == 1
+    assert "8000" in reasons[0].detail and "8101" in reasons[0].detail
 
 
 def test_a_plan_does_not_count_the_capacity_of_the_run_it_stops(tmp_path) -> None:

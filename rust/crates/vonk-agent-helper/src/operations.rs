@@ -120,6 +120,12 @@ pub enum OperationError {
         /// check could not run. Names only values from the signed plan.
         reason: String,
     },
+    #[error("endpoint firewall rejected the published port")]
+    RuntimeEndpointFirewallRejected {
+        /// The published host port the firewall refused and the set it
+        /// authorises, or why the check could not run.
+        reason: String,
+    },
     #[error("one-shot runtime could not be stopped safely")]
     StopUncertain,
     #[error("installation runtime reconciliation is busy")]
@@ -158,6 +164,9 @@ impl OperationError {
             Self::RuntimeRunMissing => "helper.runtime_run_missing",
             Self::RuntimeFabricUnavailable => "helper.runtime_fabric_unavailable",
             Self::RuntimeFabricFirewallRejected { .. } => "helper.runtime_fabric_firewall_rejected",
+            Self::RuntimeEndpointFirewallRejected { .. } => {
+                "helper.runtime_endpoint_firewall_rejected"
+            }
             Self::StopUncertain => "helper.stop_uncertain",
             Self::InstallationReconciliationBusy => "helper.installation_reconciliation_busy",
             Self::InstallationReconciliationStorageUnavailable => {
@@ -195,6 +204,9 @@ impl OperationError {
             Self::RuntimeFabricUnavailable => "native fabric is unavailable or ambiguous",
             Self::RuntimeFabricFirewallRejected { .. } => {
                 "native fabric firewall rejected the placement"
+            }
+            Self::RuntimeEndpointFirewallRejected { .. } => {
+                "endpoint firewall rejected the published port"
             }
             Self::StopUncertain => "one-shot runtime could not be stopped safely",
             Self::InstallationReconciliationBusy => "installation runtime reconciliation is busy",
@@ -2208,6 +2220,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Err(OperationError::InvalidOperation);
         }
         self.bind_native_fabric(&mut validated, Path::new(NATIVE_FABRIC_ROOT))?;
+        self.require_authorised_published_endpoint(&validated)?;
         let (inspected, operational_image) =
             self.inspect_runtime_image_for_reference(&validated.local_image_reference)?;
         self.require_image_receipt(
@@ -2386,6 +2399,43 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         self.runtime_stop_once(identity, logical_run_id, plan_digest, 30)
             .map_err(|_| OperationError::StopUncertain)
+    }
+
+    /// A published endpoint port outside the firewall's authorised set is
+    /// dropped by the managed chain, so the workload would run and never be
+    /// reachable. Refuse the start and say which port and which set.
+    fn require_authorised_published_endpoint(
+        &self,
+        run: &ValidatedDockerRun,
+    ) -> Result<(), OperationError> {
+        let Some(port) = run.published_endpoint_port else {
+            return Ok(());
+        };
+        let request = format!("check-endpoint-port {port}");
+        let rejected = |reason: String| {
+            eprintln!(
+                "vonk-agent-helper: run {} endpoint firewall rejected: {reason}",
+                run.run_id
+            );
+            OperationError::RuntimeEndpointFirewallRejected { reason }
+        };
+        let output = self
+            .runner
+            .run_with_timeout(
+                Path::new(DOCKER_FIREWALL),
+                &[
+                    "--config".to_owned(),
+                    DOCKER_FIREWALL_CONFIG.to_owned(),
+                    "check-endpoint-port".to_owned(),
+                    port.to_string(),
+                ],
+                Duration::from_secs(10),
+            )
+            .map_err(|error| rejected(format!("{request}: firewall check did not run: {error}")))?;
+        if !output.success {
+            return Err(rejected(firewall_rejection_reason(&request, &output)));
+        }
+        Ok(())
     }
 
     fn bind_native_fabric(
@@ -3160,6 +3210,8 @@ struct ValidatedDockerRun {
     tmp_root: PathBuf,
     runtime_contract: PathBuf,
     host_endpoint_port: Option<u16>,
+    /// The host port Docker publishes the endpoint on (bridge runs only).
+    published_endpoint_port: Option<u16>,
     native_fabric: Option<NativeFabric>,
     /// The `NCCL_IB_HCA` argument as launched, replacing the single-device one
     /// that the container identity is computed over.
@@ -3242,6 +3294,7 @@ fn validate_docker_run_with_archive(
     let mut user: Option<(u32, Option<u32>)> = None;
     let mut publishes = 0_usize;
     let mut published_ports = BTreeSet::new();
+    let mut published_host_ports = Vec::new();
     let mut environments = 0_usize;
     let mut listen_port = None;
     let mut master_port = None;
@@ -3402,7 +3455,7 @@ fn validate_docker_run_with_archive(
             }
             "--publish" if publishes < 2 => {
                 index += 1;
-                let (_, _, container_port) = parse_publication(
+                let (_, host_port, container_port) = parse_publication(
                     arguments
                         .get(index)
                         .ok_or(OperationError::InvalidOperation)?,
@@ -3411,6 +3464,7 @@ fn validate_docker_run_with_archive(
                 if !published_ports.insert(container_port) {
                     return Err(OperationError::InvalidOperation);
                 }
+                published_host_ports.push((host_port, container_port));
                 publishes += 1;
             }
             "--env" if environments < 160 => {
@@ -3782,6 +3836,10 @@ fn validate_docker_run_with_archive(
         tmp_root,
         runtime_contract,
         host_endpoint_port: (network == Some("host")).then_some(listen_port).flatten(),
+        published_endpoint_port: published_host_ports
+            .iter()
+            .find(|(_, container)| listen_port == Some(*container))
+            .map(|(host, _)| *host),
         native_fabric,
         launch_hca: None,
         job_timeout_seconds,
@@ -6266,6 +6324,77 @@ mod tests {
             .unwrap();
         fabric[device] = "/dev/infiniband:/dev/infiniband".to_owned();
         assert!(validate_docker_run(&fabric, &roots, None).is_err());
+    }
+
+    #[test]
+    fn a_published_endpoint_port_outside_the_firewall_set_fails_the_start() {
+        // Wrong implementation: the start ran and the workload was unreachable,
+        // because the managed chain drops every published port it does not
+        // authorise and nothing said so.
+        struct EndpointRunner;
+        impl CommandRunner for EndpointRunner {
+            fn run(
+                &self,
+                executable: &Path,
+                arguments: &[String],
+            ) -> Result<CommandOutput, String> {
+                assert_eq!(executable, Path::new(super::DOCKER_FIREWALL));
+                assert_eq!(arguments[2], "check-endpoint-port");
+                let authorised = matches!(arguments[3].as_str(), "8000" | "8101");
+                Ok(CommandOutput {
+                    success: authorised,
+                    stdout: Vec::new(),
+                    stderr: if authorised {
+                        Vec::new()
+                    } else {
+                        b"vonk-forge-docker-firewall: published endpoint host port 30000 is not \
+                          authorized (authorized endpoint host ports: 8000,8101)\n"
+                            .to_vec()
+                    },
+                    exit_code: Some(i32::from(!authorised)),
+                })
+            }
+        }
+        let run_for = |host_port: &str| {
+            let (_temp, roots) = runtime_fixture();
+            let model = artifact_path(&roots, 'a');
+            fs::create_dir_all(&model).unwrap();
+            let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+            let network = arguments.iter().position(|value| value == "none").unwrap();
+            arguments[network] = "bridge".to_owned();
+            let image = arguments
+                .iter()
+                .position(|value| value.starts_with("localhost/vonk/"))
+                .unwrap();
+            arguments.splice(
+                image..image,
+                [
+                    "--publish".to_owned(),
+                    format!("192.168.1.211:{host_port}:8000"),
+                    "--device".to_owned(),
+                    "nvidia.com/gpu=all".to_owned(),
+                    "--env".to_owned(),
+                    "VONK_LISTEN_PORT=8000".to_owned(),
+                ],
+            );
+            let executor =
+                OperationExecutor::new(roots.clone(), &[0; 32], EndpointRunner, None).unwrap();
+            let run = validate_docker_run(&arguments, &roots, None).unwrap();
+            (executor.require_authorised_published_endpoint(&run), run)
+        };
+
+        let (accepted, run) = run_for("8101");
+        assert!(accepted.is_ok());
+        assert_eq!(run.published_endpoint_port, Some(8101));
+        let (refused, _) = run_for("30000");
+        let Err(OperationError::RuntimeEndpointFirewallRejected { reason }) = refused else {
+            panic!("an unauthorised published port must fail the start");
+        };
+        assert!(reason.contains("check-endpoint-port 30000"), "{reason}");
+        assert!(
+            reason.contains("authorized endpoint host ports: 8000,8101"),
+            "{reason}"
+        );
     }
 
     #[test]

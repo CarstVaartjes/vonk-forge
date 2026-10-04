@@ -56,6 +56,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.operation_api import OperationQuery
+from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.preparation_contract import (
     ControllerAssetState,
     ModelArtifactPreparation,
@@ -91,6 +92,8 @@ def _installed_pair_plan(
         node_id = _node_id(rank + 1)
         nodes.append({**node_template, "node_id": node_id, "rank": rank, "role": role})
         payload = deepcopy(template)
+        # A two-Spark engine listens on the firewall-authorised host port.
+        _nested_object(payload, "endpoint")["port"] = HOST_ENDPOINT_PORT
         _nested_object(payload, "identity")["recipe_revision_sha256"] = recipe_digest
         _nested_object(payload, "runtime", "placement").update(
             rank=rank, role=role, world_size=2
@@ -2988,9 +2991,10 @@ def test_profile_apply_uses_latest_saved_profile_when_digest_is_stale() -> None:
     assert application.state == "queued"
 
 
-def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation() -> (
-    None
-):
+@pytest.mark.parametrize("compiled_port", ["authorised", "recipe-declared"])
+def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
+    compiled_port: str,
+) -> None:
     sessions = _database()
     _recipe_id, dual_revision_id = _seed(sessions)
     revisions = CatalogDocumentRevision.__table__
@@ -3259,6 +3263,20 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
         ),
         actor="admin",
     )
+    if compiled_port == "recipe-declared":
+        # Wrong implementation this catches: the load reused an installation
+        # compiled for a port the firewall refuses, so the start failed again
+        # and the recipe could never be loaded without removing it by hand.
+        with sessions.begin() as session:
+            stale = session.get(RecipeInstallation, _uuid(14))
+            assert stale is not None
+            plan = deepcopy(stale.plan)
+            for compiled in _nested_object(plan, "compiled_execution_plans").values():
+                _nested_object(compiled, "endpoint")["port"] = 8000
+            stale.plan = plan
+        reload = service.preview(profile_a.id)
+        assert reload.summary.installs == 1
+        return
     no_op = service.preview(profile_a.id)
     assert no_op.steps == []
     retained = service.apply(

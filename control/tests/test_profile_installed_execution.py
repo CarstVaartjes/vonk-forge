@@ -23,6 +23,7 @@ from vonk_control.models import (
     RecipeRun,
     ResourceReservation,
 )
+from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 from vonk_control.recipe_execution_contract import parse_stored_installation_plan
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
@@ -195,19 +196,23 @@ def test_install_review_does_not_require_serving_memory_or_an_available_port(
         snapshot = session.scalar(select(NodeInventorySnapshot))
         assert snapshot is not None
         snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = 0
-        session.add(
-            ResourceReservation(
-                node_id=nodes[0],
-                kind="port",
-                resource_key=str(run_plan.nodes[0].port),
-                amount_bytes=0,
-                owner_kind="test",
-                owner_id=str(uuid4()),
-                state="active",
-                plan_digest="a" * 64,
-                created_at=lifecycle._clock(),
+        # The platform picks any free authorised endpoint port, so the node is
+        # only out of ports once all of them are reserved.
+        assert run_plan.nodes[0].port in ENDPOINT_HOST_PORTS
+        for reserved in ENDPOINT_HOST_PORTS:
+            session.add(
+                ResourceReservation(
+                    node_id=nodes[0],
+                    kind="port",
+                    resource_key=str(reserved),
+                    amount_bytes=0,
+                    owner_kind="test",
+                    owner_id=str(uuid4()),
+                    state="active",
+                    plan_digest="a" * 64,
+                    created_at=lifecycle._clock(),
+                )
             )
-        )
     assert "run.port_occupied" in {
         reason.code
         for node in lifecycle.preview_run(installation.owner_id, "qwen").nodes

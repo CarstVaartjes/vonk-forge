@@ -108,7 +108,9 @@ the firewall's own refusal (which argument, which authorised value) and the
 checked request as its diagnostic: it appears in the operation's failure text
 and in the helper journal as
 `run <id> native fabric firewall rejected: ...`. A firewall check that could
-not run (timeout, missing binary) is reported the same way. Launch failures
+not run (timeout, missing binary) is reported the same way. A single-Spark start
+whose published endpoint host port is outside the firewall's authorised set
+fails the same way with `runtime_endpoint_firewall_rejected`. Launch failures
 preserve `runtime_fabric_unavailable` when there is no unique active RoCE v2
 binding.
 These are terminal launch rejections, not permission to select another network

@@ -7,11 +7,13 @@ from typing import cast
 import pytest
 from vonk_agent_protocol import canonical_message
 from vonk_control.bounded_json import require_mapping, require_sequence
+from vonk_control.models import RecipeInstallation
 from vonk_control.recipe_execution_contract import (
     RecipeExecutionContractError,
     StoredRunNodePlan,
     StoredRunPlan,
     installation_plan_document,
+    installation_serves_authorised_ports,
     parse_stored_build_policy,
     parse_stored_installation_plan,
     parse_stored_run_endpoint,
@@ -205,3 +207,30 @@ def test_installation_plan_payload_expectation_is_optional_and_byte_stable() -> 
     assert "required_payload_bytes" not in _plan_node(
         _installation_plan({"required_payload_bytes": None})
     )
+
+
+@pytest.mark.parametrize(
+    ("node_count", "port", "current"),
+    [(1, 8000, True), (1, 30000, True), (2, 8888, True), (2, 8000, False)],
+)
+def test_an_installation_is_current_only_if_it_serves_on_a_port_the_platform_assigns(
+    node_count: int, port: int, current: bool
+) -> None:
+    """A two-Spark plan compiled for the recipe's own port can never launch.
+
+    Wrong implementation this catches: the stale installation was reused, so a
+    fixed Controller kept starting the recipe on the port the firewall refuses.
+    A single Spark keeps its declared container port.
+    """
+
+    plan = _installation_plan({})
+    for compiled in require_mapping(plan["compiled_execution_plans"], "plans").values():
+        document = cast(dict[str, object], compiled)
+        cast(dict[str, object], document["endpoint"])["port"] = port
+        cast(dict[str, object], document["topology"])["node_count"] = node_count
+        cast(
+            dict[str, object], cast(dict[str, object], document["runtime"])["placement"]
+        )["world_size"] = node_count
+    installation = RecipeInstallation(plan=plan)
+
+    assert installation_serves_authorised_ports(installation) is current

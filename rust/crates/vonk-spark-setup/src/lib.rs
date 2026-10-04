@@ -43,9 +43,22 @@ const MONITOR_SERVICE: &str = "vonk-forge-monitor.service";
 const HELPER_SOCKET: &str = "vonk-forge-package-helper.socket";
 const FIREWALL_SERVICE: &str = "vonk-forge-docker-firewall.service";
 const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
-const ENDPOINT_HOST_PORTS: [u16; 2] = [8000, 8101];
-const HOST_ENDPOINT_PORTS: [u16; 1] = [8888];
-const RENDEZVOUS_PORT: u16 = 29500;
+/// The ports the Spark firewall authorises. The Controller reads the same file
+/// to decide which port every run uses, so the two cannot drift.
+const SITE_PORTS: &str =
+    include_str!("../../../../control/src/vonk_control/resources/site-ports.json");
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SitePorts {
+    endpoint_host_ports: Vec<u16>,
+    host_endpoint_ports: Vec<u16>,
+    rendezvous_port: u16,
+}
+
+fn site_ports() -> SitePorts {
+    serde_json::from_str(SITE_PORTS).expect("packaged site ports are valid")
+}
 const FABRIC_BANDWIDTH_MBPS: u64 = 200_000;
 const IP_PATH: &str = "/usr/sbin/ip";
 const RDMA_PATH: &str = "/usr/bin/rdma";
@@ -632,14 +645,15 @@ impl FirewallConfig {
             "Peer Spark fabric IPv4 address",
             "peer Spark fabric address",
         )?;
+        let ports = site_ports();
         let config = Self {
             nas_management_ip,
             node_management_ip,
             node_fabric_ip,
             peer_fabric_ip,
-            endpoint_host_ports: ENDPOINT_HOST_PORTS.to_vec(),
-            host_endpoint_ports: HOST_ENDPOINT_PORTS.to_vec(),
-            rendezvous_port: RENDEZVOUS_PORT,
+            endpoint_host_ports: ports.endpoint_host_ports,
+            host_endpoint_ports: ports.host_endpoint_ports,
+            rendezvous_port: ports.rendezvous_port,
             fabric_bandwidth_mbps: FABRIC_BANDWIDTH_MBPS,
         };
         if !config.valid() {

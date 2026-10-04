@@ -39,7 +39,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
-from .platform_ports import RENDEZVOUS_PORT, serving_port
+from .platform_ports import RENDEZVOUS_PORT, service_host_port_candidates
 from .profile_capacity import (
     inherited_profile_memory,
     inherited_profile_ports,
@@ -77,14 +77,25 @@ PORT_ADMISSION_CODES = frozenset(code for code, _ in _PORT_CONFLICTS.values())
 
 @dataclass(frozen=True, slots=True)
 class RunPortDemand:
-    """The ports one mapped rank requires, including before installation."""
+    """The ports one mapped rank requires, including before installation.
 
-    service_port: int | None
+    ``service_candidates`` are the host ports the endpoint may take, in
+    allocation order; ``service_port`` is the one chosen for this rank (the
+    first candidate until ``allocated`` picks a free one). A logical job has
+    neither.
+    """
+
+    service_candidates: tuple[int, ...]
     rendezvous_port: int | None
+    service_port: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.service_port is None and self.service_candidates:
+            object.__setattr__(self, "service_port", self.service_candidates[0])
 
     @property
     def logical_job(self) -> bool:
-        return self.service_port is None
+        return not self.service_candidates
 
     @property
     def plan_port(self) -> int:
@@ -103,6 +114,9 @@ class RunPortDemand:
                 }
             )
         )
+
+    def with_service_port(self, port: int) -> RunPortDemand:
+        return replace(self, service_port=port)
 
 
 def run_port_demand(
@@ -129,14 +143,76 @@ def run_port_demand(
     if interface is None and len(artifact_interfaces) == 1:
         if node_count != 1:
             raise TypeError("artifact job recipes currently require one node")
-        return RunPortDemand(None, None)
+        return RunPortDemand((), None)
     port = interface.get("port") if interface is not None else None
     if type(port) is not int or not 1 <= port <= 65535:
         raise TypeError("recipe interface port is invalid")
     return RunPortDemand(
-        serving_port(port, node_count=node_count),
+        service_host_port_candidates(port, node_count=node_count),
         RENDEZVOUS_PORT if node_count > 1 and endpoint_owner else None,
     )
+
+
+def allocate_service_port(
+    session: Session,
+    node_id: str,
+    demand: RunPortDemand,
+    *,
+    excluded_run_ids: Sequence[str] = (),
+    excluded_profile_application_ids: Sequence[str] = (),
+) -> RunPortDemand:
+    """Choose the first authorised endpoint host port not reserved on the node.
+
+    The platform owns host ports: a recipe's declared port is only the
+    container port. Every caller that admits or plans a run resolves its demand
+    here so that review, admission and the reservation agree. When every
+    candidate is reserved the first stays chosen and ``run_port_blockers``
+    reports it.
+    """
+
+    if len(demand.service_candidates) < 2:
+        return demand
+    keys = tuple(str(port) for port in demand.service_candidates)
+    occupied = set(
+        session.scalars(
+            select(ResourceReservation.resource_key).where(
+                ResourceReservation.node_id == node_id,
+                ResourceReservation.kind == "port",
+                ResourceReservation.state.in_(("active", "promised")),
+                reservation_visible(
+                    excluded_profile_application_ids,
+                    excluded_run_ids=excluded_run_ids,
+                ),
+                ResourceReservation.resource_key.in_(keys),
+            )
+        )
+    )
+    # A reviewed profile promised a specific port to this load. The promise is
+    # what the run must consume, so it is chosen first even when an earlier
+    # candidate has since been released.
+    promised = (
+        set(
+            session.scalars(
+                select(ResourceReservation.resource_key).where(
+                    ResourceReservation.node_id == node_id,
+                    ResourceReservation.kind == "port",
+                    ResourceReservation.state == "promised",
+                    ResourceReservation.owner_kind == "fleet-profile",
+                    ResourceReservation.owner_id.in_(
+                        tuple(excluded_profile_application_ids)
+                    ),
+                    ResourceReservation.resource_key.in_(keys),
+                )
+            )
+        )
+        if excluded_profile_application_ids
+        else set()
+    )
+    ordered = sorted(
+        demand.service_candidates, key=lambda port: (str(port) not in promised,)
+    )
+    free = next((port for port in ordered if str(port) not in occupied), None)
+    return demand if free is None else demand.with_service_port(free)
 
 
 def run_port_blockers(
@@ -147,6 +223,7 @@ def run_port_blockers(
     excluded_run_ids: Sequence[str] = (),
     excluded_profile_application_ids: Sequence[str] = (),
 ) -> tuple[AdmissionReason, ...]:
+    wanted = {*demand.service_candidates, *demand.required_ports}
     reservations = session.scalars(
         select(ResourceReservation).where(
             ResourceReservation.node_id == node_id,
@@ -155,9 +232,7 @@ def run_port_blockers(
             reservation_visible(
                 excluded_profile_application_ids, excluded_run_ids=excluded_run_ids
             ),
-            ResourceReservation.resource_key.in_(
-                tuple(str(port) for port in demand.required_ports)
-            ),
+            ResourceReservation.resource_key.in_(tuple(str(port) for port in wanted)),
         )
     )
     occupied = {item.resource_key for item in reservations}
@@ -175,7 +250,21 @@ def run_port_blockers(
                     code, f"Port {port} is required by both serving and rendezvous."
                 )
             )
-        elif str(port) in occupied:
+        elif (
+            kind == "service"
+            and len(demand.service_candidates) > 1
+            and all(str(item) in occupied for item in demand.service_candidates)
+        ):
+            taken = " and ".join(str(item) for item in demand.service_candidates)
+            blockers.append(
+                AdmissionReason(
+                    code,
+                    f"Every endpoint port ({taken}) is already reserved on this GPU node.",
+                )
+            )
+        elif (kind == "rendezvous" or len(demand.service_candidates) <= 1) and str(
+            port
+        ) in occupied:
             blockers.append(AdmissionReason(code, detail.format(port=port)))
     return tuple(blockers)
 
@@ -489,25 +578,26 @@ class RunAdmissionService:
                         *((profile_application_id,) if profile_application_id else ()),
                     ),
                 )
-                port_demand = run_port_demand(
-                    revision.document,
-                    node_count=len(ordered),
-                    endpoint_owner=placement.endpoint_owner,
+                port_exclusions = {
+                    "excluded_run_ids": released,
+                    "excluded_profile_application_ids": (
+                        *excluded_profile_application_ids,
+                        *((profile_application_id,) if profile_application_id else ()),
+                    ),
+                }
+                port_demand = allocate_service_port(
+                    session,
+                    placement.node_id,
+                    run_port_demand(
+                        revision.document,
+                        node_count=len(ordered),
+                        endpoint_owner=placement.endpoint_owner,
+                    ),
+                    **port_exclusions,
                 )
                 blockers.extend(
                     run_port_blockers(
-                        session,
-                        placement.node_id,
-                        port_demand,
-                        excluded_run_ids=released,
-                        excluded_profile_application_ids=(
-                            *excluded_profile_application_ids,
-                            *(
-                                (profile_application_id,)
-                                if profile_application_id
-                                else ()
-                            ),
-                        ),
+                        session, placement.node_id, port_demand, **port_exclusions
                     )
                 )
             port = port_demand.plan_port
@@ -778,11 +868,16 @@ class RunAdmissionService:
             resolve_recipe_entities(session, revision.document)
         except RecipeRuntimeSpecError as error:
             raise RunPlanConflict("run.dependencies_stale") from error
+        # The fresh plan above chose each node's endpoint host port under the
+        # node locks this admission holds; reserve exactly that port.
         port_demands = {
-            node.node_id: run_port_demand(
-                revision.document,
-                node_count=len(plan.nodes),
-                endpoint_owner=node.endpoint_owner,
+            node.node_id: _planned_port_demand(
+                run_port_demand(
+                    revision.document,
+                    node_count=len(plan.nodes),
+                    endpoint_owner=node.endpoint_owner,
+                ),
+                node,
             )
             for node in plan.nodes
         }
@@ -916,6 +1011,10 @@ class RunAdmissionService:
                     )
                 )
         return run.id
+
+
+def _planned_port_demand(demand: RunPortDemand, node: RunNodePlan) -> RunPortDemand:
+    return demand if demand.logical_job else demand.with_service_port(node.port)
 
 
 def _node_document(node: RunNodePlan) -> dict[str, object]:

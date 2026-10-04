@@ -113,7 +113,8 @@ impl HelperRejection {
             } => (capture_error.map(str::to_owned), logs.clone()),
             // The firewall's refusal names the argument and rule, so it travels
             // as the diagnostic instead of collapsing to the stable code.
-            OperationError::RuntimeFabricFirewallRejected { reason } => {
+            OperationError::RuntimeFabricFirewallRejected { reason }
+            | OperationError::RuntimeEndpointFirewallRejected { reason } => {
                 (Some(reason.clone()), None)
             }
             _ => (None, None),
@@ -144,6 +145,9 @@ impl HelperRejection {
             OperationError::RuntimeFabricUnavailable => ("runtime_fabric_unavailable", None),
             OperationError::RuntimeFabricFirewallRejected { .. } => {
                 ("runtime_fabric_firewall_rejected", None)
+            }
+            OperationError::RuntimeEndpointFirewallRejected { .. } => {
+                ("runtime_endpoint_firewall_rejected", None)
             }
             OperationError::InstallationReconciliationBusy => {
                 ("installation_reconciliation_busy", None)
@@ -842,6 +846,22 @@ mod tests {
         assert_eq!(
             rejection.detail,
             "native fabric firewall rejected the placement"
+        );
+    }
+
+    #[test]
+    fn an_endpoint_firewall_rejection_has_its_own_code_and_diagnostic() {
+        let rejection = HelperRejection::for_error(
+            "request-1",
+            false,
+            OperationError::RuntimeEndpointFirewallRejected {
+                reason: "check-endpoint-port 30000: not authorized".into(),
+            },
+        );
+        assert_eq!(rejection.error_code, "runtime_endpoint_firewall_rejected");
+        assert_eq!(
+            rejection.diagnostic.as_deref(),
+            Some("check-endpoint-port 30000: not authorized")
         );
     }
 
