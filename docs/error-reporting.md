@@ -103,8 +103,14 @@ when no container output is available. These diagnostics do not alter launch
 timing, authorization, or cleanup behavior.
 
 Native fabric launch failures preserve `runtime_fabric_firewall_rejected` when
-the configured firewall does not authorize the placement, and
-`runtime_fabric_unavailable` when there is no unique active RoCE v2 binding.
+the configured firewall does not authorize the placement. The rejection carries
+the firewall's own refusal (which argument, which authorised value) and the
+checked request as its diagnostic: it appears in the operation's failure text
+and in the helper journal as
+`run <id> native fabric firewall rejected: ...`. A firewall check that could
+not run (timeout, missing binary) is reported the same way. Launch failures
+preserve `runtime_fabric_unavailable` when there is no unique active RoCE v2
+binding.
 These are terminal launch rejections, not permission to select another network
 interface. Kernel observation I/O failures retain the helper I/O classification.
 

@@ -495,7 +495,11 @@ user, runtime-interface label, resource limits, mounts, ports, and optional
 `--device nvidia.com/gpu=all` request. Single-node endpoints use bridge mode.
 A signed distributed serving placement uses one native fabric shape: host
 networking, the exact `/dev/infiniband` device mount, fixed memlock/stack limits,
-private IPC, and bounded shared memory. It has no Docker port publications.
+private IPC, and bounded shared memory. It has no Docker port publications, so
+the engine listens on the host: the Controller admits such a run on the one host
+endpoint port the Spark firewall authorises (8888), whatever port the recipe
+declares, and the start payload carries that port into the endpoint and the
+engine command.
 The helper first checks the root-owned firewall configuration against the
 requested local address, master, rendezvous port and endpoint port.
 It then resolves the unique active RoCE v2 GID for that address and interface

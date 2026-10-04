@@ -111,6 +111,11 @@ impl HelperRejection {
                 logs,
                 capture_error,
             } => (capture_error.map(str::to_owned), logs.clone()),
+            // The firewall's refusal names the argument and rule, so it travels
+            // as the diagnostic instead of collapsing to the stable code.
+            OperationError::RuntimeFabricFirewallRejected { reason } => {
+                (Some(reason.clone()), None)
+            }
             _ => (None, None),
         };
         let (error_code, exit_code) = match error {
@@ -137,7 +142,7 @@ impl HelperRejection {
             OperationError::RuntimeProcessExited { .. } => ("runtime_process_exited", None),
             OperationError::RuntimeRunMissing => ("runtime_run_missing", None),
             OperationError::RuntimeFabricUnavailable => ("runtime_fabric_unavailable", None),
-            OperationError::RuntimeFabricFirewallRejected => {
+            OperationError::RuntimeFabricFirewallRejected { .. } => {
                 ("runtime_fabric_firewall_rejected", None)
             }
             OperationError::InstallationReconciliationBusy => {
@@ -816,6 +821,28 @@ mod tests {
             OperationError::PackageMetadataInvalid,
         );
         assert_eq!(metadata.error_code, "package_metadata_failed");
+    }
+
+    #[test]
+    fn a_firewall_rejection_carries_its_reason_as_the_diagnostic() {
+        // Wrong implementation: the reason stopped at the helper, so the
+        // rejection the agent received held only the stable code.
+        let rejection = HelperRejection::for_error(
+            "request-1",
+            false,
+            OperationError::RuntimeFabricFirewallRejected {
+                reason: "endpoint=8000: host endpoint port 8000 is not authorized".into(),
+            },
+        );
+        assert_eq!(rejection.error_code, "runtime_fabric_firewall_rejected");
+        assert_eq!(
+            rejection.diagnostic.as_deref(),
+            Some("endpoint=8000: host endpoint port 8000 is not authorized")
+        );
+        assert_eq!(
+            rejection.detail,
+            "native fabric firewall rejected the placement"
+        );
     }
 
     #[test]

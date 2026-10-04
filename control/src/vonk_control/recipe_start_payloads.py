@@ -114,6 +114,8 @@ def _bind_compiled_execution_plan(
             "memory_floor_bytes": placement.memory_floor_bytes,
         }
     )
+    if world_size > 1 and master_port is not None:
+        _serve_on_placement_port(payload, runtime, placement.port)
     security = payload.get("security")
     if isinstance(security, dict):
         native_fabric = world_size > 1 and master_port is not None
@@ -125,3 +127,43 @@ def _bind_compiled_execution_plan(
             else "none"
         )
     return payload
+
+
+def _serve_on_placement_port(
+    payload: dict[str, object], runtime: dict[str, object], port: int
+) -> None:
+    """Make a host-networked engine serve on the port the run was admitted with.
+
+    Installation compiles the recipe's declared port into the endpoint and the
+    engine command, but a host-networked rank has no Docker publication to map
+    it: the engine must itself listen on the port the Spark firewall
+    authorises. Rewriting here, where every start and recovery payload is
+    built, also covers installations compiled before the platform chose it.
+    """
+
+    endpoint = payload.get("endpoint")
+    if not isinstance(endpoint, dict) or type(endpoint.get("port")) is not int:
+        return
+    declared = endpoint["port"]
+    if declared == port:
+        return
+    endpoint["port"] = port
+    argv = runtime.get("argv")
+    if not isinstance(argv, list):
+        return
+    runtime["argv"] = [
+        _rebound_port_argument(
+            argument, argv[index - 1] if index else None, declared, port
+        )
+        for index, argument in enumerate(argv)
+    ]
+
+
+def _rebound_port_argument(
+    argument: object, previous: object, declared: int, port: int
+) -> object:
+    if argument == f"--port={declared}":
+        return f"--port={port}"
+    if argument == str(declared) and previous == "--port":
+        return str(port)
+    return argument

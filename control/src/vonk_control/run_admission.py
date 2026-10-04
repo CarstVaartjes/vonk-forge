@@ -39,6 +39,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .platform_ports import RENDEZVOUS_PORT, serving_port
 from .profile_capacity import (
     inherited_profile_memory,
     inherited_profile_ports,
@@ -132,7 +133,10 @@ def run_port_demand(
     port = interface.get("port") if interface is not None else None
     if type(port) is not int or not 1 <= port <= 65535:
         raise TypeError("recipe interface port is invalid")
-    return RunPortDemand(port, 29500 if node_count > 1 and endpoint_owner else None)
+    return RunPortDemand(
+        serving_port(port, node_count=node_count),
+        RENDEZVOUS_PORT if node_count > 1 and endpoint_owner else None,
+    )
 
 
 def run_port_blockers(
