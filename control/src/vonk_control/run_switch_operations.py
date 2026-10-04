@@ -56,8 +56,9 @@ from .cluster_mappings import (
 )
 from .content_identity import ImageContent, differing_image_fields, same_image
 from .disk_reservations import (
+    describe_disk_charges,
     models_stored_on_node,
-    outstanding_disk_reservation_bytes,
+    outstanding_disk_charges,
 )
 from .distribution_assignment import NodeDistributionAssignment
 from .failure_classification import error_code, is_redownload, is_security_failure
@@ -5841,7 +5842,7 @@ class RunSwitchOperationService:
                         snapshot.disk_free_bytes if snapshot is not None else None
                     )
                     if snapshot is not None and disk_free is not None:
-                        reserved_disk = outstanding_disk_reservation_bytes(
+                        charges = outstanding_disk_charges(
                             session,
                             item.node_id,
                             inventory_observed_at=snapshot.observed_at,
@@ -5852,12 +5853,15 @@ class RunSwitchOperationService:
                             # so its claim is not capacity to wait for.
                             excluded_installation_ids=adoptable,
                         )
+                        reserved_disk = sum(charge.amount_bytes for charge in charges)
                         disk_free_after = disk_free - reserved_disk - required_disk
                         if disk_free_after < 0:
+                            holders = describe_disk_charges(session, charges)
                             node_blockers.append(
                                 _as_reason(
                                     "run-switch.insufficient-disk",
-                                    f"The operation needs {required_disk} bytes and would leave {disk_free_after} bytes.",
+                                    f"The operation needs {required_disk} bytes and would leave {disk_free_after} bytes."
+                                    + (f" Disk is {holders}." if holders else ""),
                                     scope="node",
                                     node_ids=(item.node_id,),
                                 )

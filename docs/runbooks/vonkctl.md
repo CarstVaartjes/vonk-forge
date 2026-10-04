@@ -808,7 +808,13 @@ Accepted installation work reserves its reviewed disk space. Other installs
 cannot consume that space while the profile is preparing. The reservation
 passes to the exact installation and survives a Controller restart. A failed
 or superseded profile releases space it has not handed to an installation;
-it does not free space still owned by an installation. If another capacity
+it does not free space still owned by an installation. The Controller also
+releases, on its own, any disk, port or memory claim whose owner has ended (a
+cancelled or failed profile, a stopped run, an installation or build that no
+live operation refers to) however the owner ended; it keeps the claim of an
+installation whose last operation was cancelled or retired until the exact
+cleanup proves the effect gone. A disk blocker names who holds the bytes, for
+example `reserved by cancelled profile application 3f68e2f4`. If another capacity
 writer is briefly busy, progress names the dependency and next retry time,
 and the same operation continues automatically.
 

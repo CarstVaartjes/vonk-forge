@@ -206,7 +206,7 @@
     },
     {
       "path": "control/src/vonk_control/disk_reservations.py",
-      "function": "outstanding_disk_reservation_bytes",
+      "function": "outstanding_disk_charges",
       "kind": "provenance_comparison",
       "expression": "plan.recipe_revision_id == installation.recipe_revision_id",
       "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."

@@ -28,7 +28,9 @@ from .compiled_execution_plan import (
 )
 from .content_identity import same_image, same_model_object
 from .disk_reservations import (
+    describe_disk_charges,
     models_stored_on_node,
+    outstanding_disk_charges,
     outstanding_disk_reservation_bytes,
 )
 from .inventory_repository import InventoryRepository, InventorySnapshotView
@@ -541,7 +543,7 @@ class InstallAdmissionService:
                     )
                 )
                 stored_models = models_stored_on_node(session, mapping_node.node_id)
-                reserved = outstanding_disk_reservation_bytes(
+                charges = outstanding_disk_charges(
                     session,
                     mapping_node.node_id,
                     inventory_observed_at=snapshot.observed_at if snapshot else None,
@@ -549,6 +551,8 @@ class InstallAdmissionService:
                     if profile_application_id is not None
                     else (),
                 )
+                reserved = sum(charge.amount_bytes for charge in charges)
+                holders = describe_disk_charges(session, charges)
             raw_image_digest = image_digest.removeprefix("sha256:")
             reused_image = (
                 image_bytes
@@ -608,7 +612,10 @@ class InstallAdmissionService:
                 blockers.append(
                     AdmissionReason(
                         "install.insufficient_disk",
-                        f"Installation would leave {free_after} bytes, below the required {floor}-byte floor.",
+                        (
+                            f"Installation would leave {free_after} bytes, below the required {floor}-byte floor."
+                            + (f" Disk is {holders}." if holders else "")
+                        )[:512],
                     )
                 )
             plans.append(

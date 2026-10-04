@@ -3770,6 +3770,20 @@ class RecipeOperationService:
         installation.updated_at = now
         for node in nodes:
             node.state = "planned"
+        # The attempt that failed may have had its disk claim released as
+        # abandoned (nothing was issued for it); the retry is that operation
+        # again, so it takes the same exact claim back.
+        for claim in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "installation",
+                ResourceReservation.owner_id == owner_id,
+                ResourceReservation.kind == "disk",
+                ResourceReservation.state == "released",
+                ResourceReservation.plan_digest == previous_plan_digest,
+            )
+        ):
+            claim.state = "active"
+            claim.released_at = None
         return self._queue_in_session(
             session,
             kind="recipe.install",
