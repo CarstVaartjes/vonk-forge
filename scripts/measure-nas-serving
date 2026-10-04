@@ -107,6 +107,18 @@ static() {
         if findmnt -T "$store" -o OPTIONS -n 2>/dev/null | grep -q 'compress'; then
             warn "mounted with compression: stored model weights do not compress, but every read pays the check"
         fi
+        if have lsattr; then
+            local entry
+            for entry in "$store" "$store/objects" "$store/partials"; do
+                [[ -d $entry ]] && note "directory attributes: $(lsattr -d "$entry" 2>/dev/null | cut -d' ' -f1) $entry (C = new files are not copy-on-write)"
+            done
+            note "a directory without C passes nothing to its new files; objects written there are copy-on-write and may be heavily fragmented"
+        fi
+        if [[ $(findmnt -T "$store" -n -o FSTYPE 2>/dev/null) == btrfs ]]; then
+            have btrfs && btrfs filesystem usage -T "$store" 2>/dev/null | sed 's/^/   /'
+            have btrfs && btrfs device stats "$store" 2>/dev/null | grep -v ' 0$' | sed 's/^/   !! /'
+            note "Data profile RAID5 above means Btrfs-native RAID5 (no md device): the md settings below do not apply"
+        fi
         local sample
         sample=$(pick_object)
         if [[ -n $sample ]]; then
@@ -361,21 +373,36 @@ read_test() {
 write_load() {
     local rate=${positional[0]:-} seconds=${positional[1]:-}
     [[ $rate =~ ^[0-9]+$ && $seconds =~ ^[0-9]+$ ]] || usage
-    ((rate >= 1 && seconds >= 1 && seconds <= 600)) || usage
+    ((rate >= 4 && rate <= 1000 && seconds >= 1 && seconds <= 600)) || usage
     find_store || { echo "object store not found: pass --store DIR" >&2; exit 1; }
     target=$store/.measure-nas-serving-load.$$
-    trap 'rm -f "$target"' EXIT INT TERM HUP
-    section "writing $rate MB/s for $seconds s into $store (stand-in for the Hugging Face download)"
-    local elapsed
+    buffer=$(mktemp)
+    trap 'rm -f "$target" "$buffer"' EXIT INT TERM HUP
+    # Incompressible data into a no-copy-on-write file, like the real ingest:
+    # zeros would compress away and a COW file would not behave like the objects.
+    head -c $((16 * 1048576)) /dev/urandom >"$buffer"
+    : >"$target"
+    have chattr && chattr +C "$target" 2>/dev/null
+    have lsattr && note "probe attributes: $(lsattr "$target" 2>/dev/null | cut -d' ' -f1) (C = no copy-on-write)"
+    section "writing $rate MB/s for $seconds s into $store, as 4 interleaved writers (stand-in for the Hugging Face download)"
+    local elapsed per_writer=$((rate / 4)) writer
+    ((per_writer <= 16)) || per_writer=16 # one buffer's worth per writer per pass
+    local passes=$(((rate / 4 + per_writer - 1) / per_writer))
     for ((elapsed = 0; elapsed < seconds; elapsed++)); do
-        local begin end
+        local begin end pass
         begin=$(date +%s.%N)
-        dd if=/dev/zero of="$target" bs=1M count="$rate" seek=$(((elapsed % 64) * rate)) conv=notrunc oflag=direct status=none ||
-            { warn "write failed (disk full or no O_DIRECT)"; break; }
+        for ((pass = 0; pass < passes; pass++)); do
+            for ((writer = 0; writer < 4; writer++)); do
+                dd if="$buffer" of="$target" bs=1M count="$per_writer" \
+                    seek=$((writer * 256 + (elapsed * passes + pass) * per_writer % 256)) \
+                    conv=notrunc oflag=direct status=none 2>/dev/null &
+            done
+            wait
+        done
         end=$(date +%s.%N)
         awk -v b="$begin" -v e="$end" 'BEGIN { rest = 1 - (e - b); if (rest > 0) system("sleep " rest) }'
     done
-    rm -f "$target"
+    rm -f "$target" "$buffer"
     note "done; the probe file is removed"
 }
 

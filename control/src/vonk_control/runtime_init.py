@@ -419,6 +419,37 @@ def _disable_copy_on_write(directory: Path) -> None:
         os.close(descriptor)
 
 
+def _disable_copy_on_write_below(root: Path) -> None:
+    """Mark the directories that already exist under an object store.
+
+    A directory only passes the attribute to files created after it was set, so
+    a store that predates it keeps writing copy-on-write below its existing
+    ``objects``, ``partials`` and per-download directories. Marking them lets
+    every file created from now on skip it; existing files are not rewritten.
+    """
+    try:
+        children = [
+            entry.path
+            for entry in os.scandir(root)
+            if entry.is_dir(follow_symlinks=False)
+        ]
+    except OSError:
+        return
+    for child in children:
+        _disable_copy_on_write(Path(child))
+        if os.path.basename(child) == "partials":
+            try:
+                downloads = [
+                    entry.path
+                    for entry in os.scandir(child)
+                    if entry.is_dir(follow_symlinks=False)
+                ]
+            except OSError:
+                continue
+            for download in downloads:
+                _disable_copy_on_write(Path(download))
+
+
 def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
     """Apply the existing per-consumer ownership contract to shared volumes."""
     paths = SharedRuntimePaths() if paths is None else paths
@@ -428,6 +459,7 @@ def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
     # fragmentation, so new files created below these roots skip them.
     for objects in (paths.agent_artifacts, paths.model_cache):
         _disable_copy_on_write(_directory(objects, 10001, 10001, 0o750))
+        _disable_copy_on_write_below(objects)
     routes = _directory(paths.routes, 10001, 10001, 0o750)
     _directory(routes / "generations", 10001, 10001, 0o750)
     _directory(paths.supervisor, 10002, 10001, 0o750)

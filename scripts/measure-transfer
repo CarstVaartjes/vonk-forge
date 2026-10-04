@@ -108,8 +108,8 @@ echo "   first request opens the connection (connect, TLS), the rest reuse it; t
 mapfile -t probes < <(
     # curl reuses the connection across the URLs of one invocation.
     args=()
-    for _ in $(seq 1 21); do args+=("$url"); done
-    curl "${curl_common[@]}" -H "Range: bytes=0-0" -o /dev/null \
+    for _ in $(seq 1 21); do args+=(-o /dev/null "$url"); done # -o applies to one URL
+    curl "${curl_common[@]}" -H "Range: bytes=0-0" \
         -w '%{time_connect} %{time_appconnect} %{time_starttransfer}\n' "${args[@]}"
 )
 read -r connect tls first <<<"${probes[0]}"

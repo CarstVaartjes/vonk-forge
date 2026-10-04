@@ -105,17 +105,22 @@ Decide with run 1 against run 2, and with run 3:
 - `read` with 4 and 8 readers is much slower under `write-load` (or during
   ingest) than without it, or `measure-transfer` rises sharply when ingest is
   paused: **confirmed**.
-- In `sample`, an `md*_raid5` thread near 100% of a core, or member disks with a
-  write rate well above the md device's own write rate while members also read
-  during a pure write, is the RAID5 read-modify-write. `static` shows
-  `stripe_cache_size` and `group_thread_cnt`.
+- With Linux md RAID5 (`static` lists an md device): in `sample`, an `md*_raid5`
+  thread near 100% of a core, or member disks with a write rate well above the
+  md device's own write rate while members also read during a pure write, is the
+  RAID5 read-modify-write. `static` shows `stripe_cache_size` and
+  `group_thread_cnt`.
+- With Btrfs-native RAID5 (`static` shows a `RAID5` data profile and no md
+  device): the md settings do not exist. Parallel partial writes are a known
+  weakness of that profile; read the member disks' `busy` and `avg wait` in
+  `sample` and compare `write-load` runs.
 - `psi_io` high and `iowait` high while `nic_tx` is low: tasks wait on the disks.
 
 What helps, in this order: finish or pause the download while a profile copies
-(a Controller policy would need its own change); give the RAID5 more stripe
-cache (`echo 8192 > /sys/block/mdX/md/stripe_cache_size`) and worker threads
-(`echo 4 > /sys/block/mdX/md/group_thread_cnt`), which reset at reboot unless
-the NAS boot scripts set them; keep the Hugging Face writes sequential.
+(a Controller policy would need its own change); with md RAID5, give the array
+more stripe cache (`echo 8192 > /sys/block/mdX/md/stripe_cache_size`) and worker
+threads (`echo 4 > /sys/block/mdX/md/group_thread_cnt`), which reset at reboot
+unless the NAS boot scripts set them; keep the Hugging Face writes sequential.
 
 ### 2. The NAS CPU is saturated
 
@@ -132,10 +137,18 @@ off the serving window, not TLS tuning.
 the 280 MB/s the network can take:
 
 - One reader far below 280 MB/s: the file is the problem. `static` shows
-  `compression` in the mount options, no `C` (no-copy-on-write) attribute on
-  the sample object, and `compsize`/`filefrag` extents. Objects written before
-  the Controller marked the directory no-copy-on-write keep their old
-  attributes; a fragmented or compressed object reads slowly.
+  `compression` in the mount options, whether the store, `objects` and
+  `partials` directories and the sample object carry `C` (no-copy-on-write),
+  and `compsize`/`filefrag` extents (tens of thousands of extents in a
+  multi-gigabyte object mean it was written copy-on-write by interleaved
+  writers and reads slowly forever). At start the Controller marks the
+  model-cache root and the directories already below it (`objects`, `partials`
+  and each download's directory) `+C`, so files created afterwards are not
+  copy-on-write. Before that change a store whose `partials` directory predates
+  the first marking kept writing copy-on-write, and every object written then
+  keeps its extents (a rename from `partials` into `objects` does not rewrite
+  them). A fragmented object is repaired by downloading it again (a refresh),
+  not by `chattr`.
 - One reader fast, four or eight slow: concurrent sequential readers lose to
   each other. Raise read-ahead on the array (`blockdev --setra`, or
   `read_ahead_kb`) and compare. The agent's governor will already have settled
