@@ -42,6 +42,7 @@ from .catalog_revision_contract import read_catalog_document
 from .cluster_mappings import mapping_option_choices
 from .failure_classification import error_code, is_security_failure
 from .fleet_profile_contract import (
+    MAX_PROFILE_WARNINGS,
     FleetProfileAction,
     FleetProfileAdmissionDecision,
     FleetProfileApplicationCancellationIntent,
@@ -617,10 +618,6 @@ _PROFILE_PHASE_BY_RUN_PHASE = {
 
 class FleetProfileConflict(RuntimeError):
     """A Fleet profile is invalid, stale, or cannot be safely applied."""
-
-
-class FleetProfileInvalidChoice(ValueError):
-    """A saved recipe option names an option or value the recipe does not offer."""
 
 
 class FleetProfileAdmissionBusy(FleetProfileConflict):
@@ -2807,16 +2804,14 @@ def _validate_remaining_effects(
 def _effective_option_choices(
     document: Mapping[str, object],
     stored: Mapping[str, str],
-    *,
-    strict: bool,
 ) -> tuple[dict[str, str], list[str]]:
     """The choice for every option the recipe declares, defaults filled in.
 
-    Saving is strict: an unknown option or value is refused with the choices
-    listed. Reading a saved profile is tolerant, because a newer recipe
-    revision may no longer offer a stored value: that option falls back to the
-    default and the second result names what was replaced, so it is shown
-    rather than blocking the profile.
+    Saving and reading are both tolerant: a newer recipe revision may no longer
+    offer a stored option or value, and a profile holds one such choice per
+    assignment it re-submits on every edit. A choice the recipe does not offer
+    falls back to the default and the second result names what was replaced, so
+    it is shown instead of blocking the profile.
     """
 
     try:
@@ -2825,9 +2820,8 @@ def _effective_option_choices(
         return dict(stored), []
     try:
         return recipe.resolve_options(stored), []
-    except RecipeOptionError as error:
-        if strict:
-            raise FleetProfileInvalidChoice(str(error)) from error
+    except RecipeOptionError:
+        pass
     declared = {option.name: option for option in recipe.options}
     kept: dict[str, str] = {}
     notes: list[str] = []
@@ -2843,6 +2837,15 @@ def _effective_option_choices(
         else:
             kept[name] = value
     return recipe.resolve_options(kept), notes
+
+
+def _with_save_notes(view: FleetProfileView, notes: Sequence[str]) -> FleetProfileView:
+    """Show what saving replaced, within the view's warning bound."""
+
+    if not notes:
+        return view
+    warnings = [*notes, *view.warnings][:MAX_PROFILE_WARNINGS]
+    return view.model_copy(update={"warnings": warnings})
 
 
 def _choice_id(value: FleetProfileAssignmentInput) -> str:
@@ -3334,7 +3337,7 @@ class FleetProfileService:
             document, revision, _cache = self._resolve_choice(session, choice)
             topology = recipe_topology(revision.document)
             option_choices, _notes = _effective_option_choices(
-                revision.document, choice.option_choices, strict=False
+                revision.document, choice.option_choices
             )
             roles = _expanded_roles(topology)
             nodes = [
@@ -3505,7 +3508,7 @@ class FleetProfileService:
     ) -> FleetProfileView:
         now = _aware(self._clock())
         with self._sessions.begin() as session:
-            assignments = self._validated_assignments(session, value.assignments)
+            assignments, notes = self._validated_assignments(session, value.assignments)
             self._reserve_saved_profile_references(session, value.assignments, now=now)
             row = FleetProfile(
                 number=number
@@ -3530,7 +3533,7 @@ class FleetProfileService:
                     "a Fleet profile with this name already exists"
                 ) from error
             result = self._view(session, row)
-        return result
+        return _with_save_notes(result, notes)
 
     def update(
         self, profile_id: str, value: FleetProfileInput, *, actor: str
@@ -3547,7 +3550,7 @@ class FleetProfileService:
                 raise FleetProfileConflict(
                     f"profile revision conflict: expected {value.expected_revision}, current {row.revision}"
                 )
-            assignments = self._validated_assignments(session, value.assignments)
+            assignments, notes = self._validated_assignments(session, value.assignments)
             self._reserve_saved_profile_references(session, value.assignments, now=now)
             row.name = value.name
             row.description = value.description
@@ -3564,7 +3567,7 @@ class FleetProfileService:
                     "a Fleet profile with this name already exists"
                 ) from error
             result = self._view(session, row)
-        return result
+        return _with_save_notes(result, notes)
 
     def update_number(
         self, number: int, value: FleetProfileInput, *, actor: str
@@ -8290,15 +8293,25 @@ class FleetProfileService:
 
     def _validated_assignments(
         self, session: Session, values: Sequence[FleetProfileAssignmentInput]
-    ) -> list[dict[str, object]]:
+    ) -> tuple[list[dict[str, object]], list[str]]:
+        """Canonical assignments to store, and what saving replaced.
+
+        A profile re-submits every assignment on each edit, so a choice the
+        recipe stopped offering (a refreshed revision removed or renamed it)
+        must not block saving the profile. It is replaced by the recipe
+        default, and the notes name each replacement for the caller to show.
+        """
+
         assignments: list[dict[str, object]] = []
+        notes: list[str] = []
         for value in values:
             document, revision = self._recipe_document(session, value.recipe_selector)
             # Every option is saved with an explicit value: the operator's
-            # choice, or the recipe default where none was made.
-            choices, _notes = _effective_option_choices(
-                revision.document, value.option_choices, strict=True
+            # choice, or the recipe default where none was made or offered.
+            choices, replaced = _effective_option_choices(
+                revision.document, value.option_choices
             )
+            notes.extend(f"{value.recipe_selector}: {note}" for note in replaced)
             # Save the canonical catalog selector.  This is a logical recipe
             # choice; its active revision is deliberately resolved later.
             normalized = value.model_copy(
@@ -8308,7 +8321,7 @@ class FleetProfileService:
                 }
             )
             assignments.append(json.loads(canonical_message(normalized)))
-        return assignments
+        return assignments, notes
 
     @staticmethod
     def _reserve_saved_profile_references(
@@ -8507,7 +8520,7 @@ class FleetProfileService:
                 model_name = self._model_title(session, revision.document)
             assignment_selector = self._assignment_selector(choice)
             effective_choices, choice_notes = _effective_option_choices(
-                revision.document, choice.option_choices, strict=False
+                revision.document, choice.option_choices
             )
             warnings.extend(
                 f"{recipe.publisher}/{recipe.slug}: {note}" for note in choice_notes
@@ -8837,7 +8850,7 @@ class FleetProfileService:
         # assignment's, even for the same recipe revision and Sparks.
         wanted_choices = (
             _effective_option_choices(
-                recipe_revision.document, assignment.option_choices, strict=False
+                recipe_revision.document, assignment.option_choices
             )[0]
             if recipe_revision is not None
             else dict(assignment.option_choices)

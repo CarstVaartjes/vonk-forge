@@ -211,6 +211,31 @@ def _bounded_error_content(
     return canonical_message(response.model_dump(mode="json", exclude_none=True))
 
 
+def _validation_detail(issues: list[RequestValidationIssue]) -> str:
+    """Name the first rejected fields, so the bare status line is diagnosable.
+
+    ``issues`` keeps every structural error; the detail carries as many as fit
+    the response bound, as ``field.path: reason``.
+    """
+
+    prefix = "request is invalid"
+    shown: list[str] = []
+    for issue in issues:
+        field = ".".join(str(part) for part in issue.loc) or "body"
+        shown.append(f"{field}: {issue.msg}")
+    detail = prefix
+    for count, entry in enumerate(shown):
+        candidate = f"{detail}{':' if count == 0 else ';'} {entry}"
+        remaining = len(shown) - count - 1
+        suffix = f" (+{remaining} more)" if remaining else ""
+        if len(candidate) + len(suffix) > 256:
+            if count == 0:
+                return candidate[:256]
+            return f"{detail} (+{len(shown) - count} more)"[:256]
+        detail = candidate
+    return detail
+
+
 def _invalid_login_content() -> bytes:
     from .auth_api import LoginRequestInvalid
 
@@ -614,16 +639,16 @@ def create_app(
                     for item in error.errors()[:8]
                 ),
             )
+        issues = [
+            RequestValidationIssue(
+                type=item["type"],
+                loc=list(item["loc"]),
+                msg=redact_text(item["msg"]),
+            )
+            for item in error.errors()
+        ]
         response = RequestValidationProblem(
-            detail="request is invalid",
-            issues=[
-                RequestValidationIssue(
-                    type=item["type"],
-                    loc=list(item["loc"]),
-                    msg=redact_text(item["msg"]),
-                )
-                for item in error.errors()
-            ],
+            detail=_validation_detail(issues), issues=issues
         )
         return Response(
             content=canonical_message(response.model_dump(mode="json")),

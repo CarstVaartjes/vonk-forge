@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, TypedDict
 
 import httpx2
 from jsonschema import Draft202012Validator, FormatChecker, validators
-from jsonschema.exceptions import SchemaError
+from jsonschema.exceptions import SchemaError, ValidationError, best_match
 
 from .control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from .control_transport import open_https
@@ -403,12 +403,35 @@ def _validate_schema(value: object, schema: object, *, message: str) -> None:
         instance = json.loads(json.dumps(value))
     except (TypeError, ValueError):
         raise ControlClientError(message) from None
-    error = next(
-        _control_validator().evolve(schema=operation_schema).iter_errors(instance),
-        None,
+    error = best_match(
+        _control_validator().evolve(schema=operation_schema).iter_errors(instance)
     )
     if error is not None:
-        raise ControlClientError(message) from None
+        raise ControlClientError(f"{message}: {_schema_violation(error)}") from None
+
+
+# Violations whose own message names only fields, never a submitted value.
+_VALUE_FREE_VIOLATIONS = frozenset(
+    {"required", "additionalProperties", "unevaluatedProperties", "dependentRequired"}
+)
+
+
+def _schema_violation(error: ValidationError) -> str:
+    """Name the failing field and the rule it broke, never the submitted value.
+
+    The document can hold a credential or an operator's text, so the reason is
+    built from the schema's own rule rather than from jsonschema's message,
+    which repeats the rejected value.
+    """
+
+    path = "$"
+    for part in error.absolute_path:
+        path += f"[{part}]" if isinstance(part, int) else f".{part}"
+    if error.validator in _VALUE_FREE_VIOLATIONS:
+        reason = str(error.message)
+    else:
+        reason = f"violates {error.validator} {error.validator_value!r}"
+    return f"{path}: {reason}"[:240]
 
 
 def validate_control_document(name: str, document: object) -> dict[str, object]:

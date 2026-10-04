@@ -479,7 +479,14 @@ def test_profile_load_bound_to_a_review_refuses_a_plan_that_changed() -> None:
     assert accepted.status_code == 202
 
 
-def test_saving_a_profile_fills_option_defaults_and_refuses_unknown_choices() -> None:
+def test_saving_a_profile_fills_option_defaults_and_replaces_stale_choices() -> None:
+    """A choice the recipe does not offer never blocks the save.
+
+    A refreshed recipe revision can drop an option or a value while a saved
+    profile still holds it, and every edit re-submits all assignments. The
+    save must keep going with the recipe default and say what it replaced.
+    """
+
     from .test_fleet_profiles_canonical import NODE_1, NOW, _seed, _sessions
 
     sessions = _sessions()
@@ -503,15 +510,81 @@ def test_saving_a_profile_fills_option_defaults_and_refuses_unknown_choices() ->
             ],
         }
 
-    refused = client.put(
-        "/api/profile/1", headers=headers, json=body({"verification": "nope"})
+    stale = client.put(
+        "/api/profile/1",
+        headers=headers,
+        json=body({"verification": "nope", "retired-option": "x"}),
     )
-    assert refused.status_code == 422
-    assert "standard" in refused.json()["detail"]
-    assert client.get("/api/profile/1/definition", headers=headers).json()["id"] is None
+    assert stale.status_code == 200, stale.text
+    assert stale.json()["assignments"][0]["option_choices"] == {
+        "verification": "standard"
+    }
+    warnings = " ".join(stale.json()["warnings"])
+    assert "verification: nope" in warnings
+    assert "retired-option" in warnings
+    stored = client.get("/api/profile/1/definition", headers=headers).json()
+    assert stored["definition"]["assignments"][0]["option_choices"] == {
+        "verification": "standard"
+    }
 
-    saved = client.put("/api/profile/1", headers=headers, json=body({}))
+    saved = client.put(
+        "/api/profile/1",
+        headers=headers,
+        json={**body({}), "expected_revision": stored["revision"]},
+    )
     assert saved.status_code == 200, saved.text
     assert saved.json()["assignments"][0]["option_choices"] == {
         "verification": "standard"
     }
+    assert not any("no longer offered" in w for w in saved.json()["warnings"])
+
+
+@pytest.mark.parametrize(
+    ("assignments", "expected"),
+    [
+        pytest.param(
+            [{"assignment_name": "Qwen3-Coder-Next-FP8"}],
+            ["assignments.0.assignment_name"],
+            id="alias-with-capitals",
+        ),
+        pytest.param(
+            [{"assignment_name": "same"}, {"assignment_name": "same", "second": True}],
+            ["body", "aliases must be unique"],
+            id="duplicate-alias",
+        ),
+    ],
+)
+def test_a_rejected_profile_save_names_the_field_and_the_reason(
+    assignments: list[dict[str, object]], expected: list[str]
+) -> None:
+    """The refusal itself carries what to fix, not a bare status line."""
+
+    from .test_fleet_profiles_canonical import NODE_1, NODE_2, NOW, _seed, _sessions
+
+    sessions = _sessions()
+    _seed(sessions)
+    client, codec = _client(
+        sessions, profiles=FleetProfileService(sessions, clock=lambda: NOW)
+    )
+    headers = _headers(codec, "administrator")
+    documents = [
+        {
+            "recipe_selector": "vonk-forge/synthetic-tiny-build",
+            "spark_ids": [NODE_2] if item.get("second") else [NODE_1],
+            "assignment_name": item["assignment_name"],
+        }
+        for item in assignments
+    ]
+
+    refused = client.put(
+        "/api/profile/1",
+        headers=headers,
+        json={"name": "Bad", "expected_revision": 0, "assignments": documents},
+    )
+
+    assert refused.status_code == 422
+    detail = refused.json()["detail"]
+    assert len(detail) <= 256
+    for text in expected:
+        assert text in detail
+    assert refused.json()["issues"]

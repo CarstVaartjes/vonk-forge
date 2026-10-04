@@ -107,6 +107,20 @@ def test_unknown_value_is_refused_with_the_choices(capsys):
     assert "adaptive-k" in capsys.readouterr().out
 
 
+def test_a_profile_document_the_contract_rejects_names_the_field(capsys):
+    """The reviewed service alias of a recipe can be mixed case; the contract's
+    endpoint alias cannot. The refusal must say which field and rule, not only
+    that the document does not match."""
+
+    client = Fake()
+    assert _add(client, "--as", "Qwen3-Coder-Next-FP8", "--no-input") != 0
+    assert client.saved is None
+    output = capsys.readouterr()
+    text = output.out + output.err
+    assert "assignments[0].assignment_name" in text
+    assert "pattern" in text
+
+
 def test_no_input_without_options_is_not_an_error_and_sends_no_choice(capsys):
     client = Fake()
     assert _add(client, "--no-input") == 0
