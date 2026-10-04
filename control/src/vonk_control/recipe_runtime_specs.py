@@ -32,6 +32,7 @@ from .catalog_revision_contract import read_model_set
 from .harnesses.canonical import compile_canonical_harness
 from .harnesses.common import HarnessCompileError
 from .models import CatalogDocumentRevision
+from .platform_ports import serving_port
 from .runtime_writable_paths import document as writable_path_document
 
 RUNTIME_INTERFACE = "vonk.runtime.v1"
@@ -323,7 +324,7 @@ def compile_runtime_spec(
     }
     if interface.adapter == "openai":
         spec["endpoint"] = {
-            "port": interface.port,
+            "port": serving_port(interface.port, node_count=parsed.topology.node_count),
             "model_aliases": list(interface.model_aliases),
             "health_path": interface.health_path,
         }

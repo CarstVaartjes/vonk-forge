@@ -498,8 +498,9 @@ networking, the exact `/dev/infiniband` device mount, fixed memlock/stack limits
 private IPC, and bounded shared memory. It has no Docker port publications, so
 the engine listens on the host: the Controller admits such a run on the one host
 endpoint port the Spark firewall authorises (8888), whatever port the recipe
-declares, and the start payload carries that port into the endpoint and the
-engine command.
+declares, and compiles that port into the installed plan's endpoint and engine
+command. An installation compiled before that choice keeps the recipe's port and
+is replaced by installing the recipe again.
 The helper first checks the root-owned firewall configuration against the
 requested local address, master, rendezvous port and endpoint port.
 It then resolves the unique active RoCE v2 GID for that address and interface
