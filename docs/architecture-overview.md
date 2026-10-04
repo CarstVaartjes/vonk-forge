@@ -506,7 +506,7 @@ recipe's own port stays the container port. Both sets of ports are read from
 program renders into the firewall configuration. An installation compiled for a
 port the platform no longer assigns is superseded: the next load installs the
 recipe again. The helper also refuses to start a published endpoint whose host
-port the firewall does not authorise, instead of leaving it unreachable.
+port the firewall positively refuses, instead of leaving it unreachable.
 The helper first checks the root-owned firewall configuration against the
 requested local address, master, rendezvous port and endpoint port.
 It then resolves the unique active RoCE v2 GID for that address and interface

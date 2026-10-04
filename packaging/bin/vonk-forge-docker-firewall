@@ -12,6 +12,13 @@ fail() {
     exit 1
 }
 
+# Exit status of a port the policy positively refuses, so a caller can tell it
+# from a check that could not run (a missing or unapplied firewall).
+refuse() {
+    echo "vonk-forge-docker-firewall: $*" >&2
+    exit 3
+}
+
 usage() {
     echo "usage: vonk-forge-docker-firewall --config PATH apply|check|check-host-port PORT|check-endpoint-port PORT|check-fabric-run LOCAL MASTER RENDEZVOUS ENDPOINT" >&2
     exit 64
@@ -179,10 +186,10 @@ fi
 
 if [ "$action" = check-endpoint-port ]; then
     valid_port "$requested_endpoint_port" \
-        || fail "requested endpoint host port $requested_endpoint_port is invalid"
+        || refuse "requested endpoint host port $requested_endpoint_port is invalid"
     case ",$endpoint_ports," in
         *,$requested_endpoint_port,*) ;;
-        *) fail "published endpoint host port $requested_endpoint_port is not authorized (authorized endpoint host ports: $endpoint_ports)" ;;
+        *) refuse "published endpoint host port $requested_endpoint_port is not authorized (authorized endpoint host ports: $endpoint_ports)" ;;
     esac
 fi
 

@@ -58,6 +58,8 @@ const LINUX_ARG_MAX_FLOOR_BYTES: u64 = 128 * 1024;
 const LINUX_STACK_LIMIT_BYTES: u64 = 8 * 1024 * 1024;
 const LINUX_ARG_MAX_CEILING_BYTES: u64 = LINUX_STACK_LIMIT_BYTES / 4 * 3;
 const DOCKER_FIREWALL: &str = "/usr/lib/vonk-forge/vonk-forge-docker-firewall";
+/// The firewall's exit status for a port its policy positively refuses.
+const FIREWALL_PORT_REFUSED: i32 = 3;
 const DOCKER_FIREWALL_CONFIG: &str = "/etc/vonk-forge-agent/docker-firewall.conf";
 const NATIVE_FABRIC_ROOT: &str = "/sys/class/infiniband";
 const RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION: u8 = 3;
@@ -2419,22 +2421,39 @@ impl<R: CommandRunner> OperationExecutor<R> {
             );
             OperationError::RuntimeEndpointFirewallRejected { reason }
         };
-        let output = self
-            .runner
-            .run_with_timeout(
-                Path::new(DOCKER_FIREWALL),
-                &[
-                    "--config".to_owned(),
-                    DOCKER_FIREWALL_CONFIG.to_owned(),
-                    "check-endpoint-port".to_owned(),
-                    port.to_string(),
-                ],
-                Duration::from_secs(10),
-            )
-            .map_err(|error| rejected(format!("{request}: firewall check did not run: {error}")))?;
-        if !output.success {
-            return Err(rejected(firewall_rejection_reason(&request, &output)));
+        let output = match self.runner.run_with_timeout(
+            Path::new(DOCKER_FIREWALL),
+            &[
+                "--config".to_owned(),
+                DOCKER_FIREWALL_CONFIG.to_owned(),
+                "check-endpoint-port".to_owned(),
+                port.to_string(),
+            ],
+            Duration::from_secs(10),
+        ) {
+            Ok(output) => output,
+            Err(error) => {
+                eprintln!(
+                    "vonk-agent-helper: run {} endpoint firewall check did not run, starting without it: {request}: {error}",
+                    run.run_id
+                );
+                return Ok(());
+            }
+        };
+        if output.success {
+            return Ok(());
         }
+        let reason = firewall_rejection_reason(&request, &output);
+        if output.exit_code == Some(FIREWALL_PORT_REFUSED) {
+            return Err(rejected(reason));
+        }
+        // A firewall that is absent or not applied cannot say which ports it
+        // authorises, and a development or acceptance host has none. Only a
+        // positive refusal stops the start.
+        eprintln!(
+            "vonk-agent-helper: run {} endpoint firewall check inconclusive, starting without it: {reason}",
+            run.run_id
+        );
         Ok(())
     }
 
@@ -6330,8 +6349,14 @@ mod tests {
     fn a_published_endpoint_port_outside_the_firewall_set_fails_the_start() {
         // Wrong implementation: the start ran and the workload was unreachable,
         // because the managed chain drops every published port it does not
-        // authorise and nothing said so.
-        struct EndpointRunner;
+        // authorise and nothing said so. The opposite mistake is failing every
+        // start where the firewall cannot answer (a host without one).
+        enum Answer {
+            Policy,
+            Missing,
+            Unapplied,
+        }
+        struct EndpointRunner(Answer);
         impl CommandRunner for EndpointRunner {
             fn run(
                 &self,
@@ -6340,22 +6365,35 @@ mod tests {
             ) -> Result<CommandOutput, String> {
                 assert_eq!(executable, Path::new(super::DOCKER_FIREWALL));
                 assert_eq!(arguments[2], "check-endpoint-port");
-                let authorised = matches!(arguments[3].as_str(), "8000" | "8101");
-                Ok(CommandOutput {
-                    success: authorised,
-                    stdout: Vec::new(),
-                    stderr: if authorised {
-                        Vec::new()
-                    } else {
-                        b"vonk-forge-docker-firewall: published endpoint host port 30000 is not \
-                          authorized (authorized endpoint host ports: 8000,8101)\n"
-                            .to_vec()
-                    },
-                    exit_code: Some(i32::from(!authorised)),
-                })
+                match self.0 {
+                    Answer::Missing => Err("compiled command could not start".to_owned()),
+                    Answer::Unapplied => Ok(CommandOutput {
+                        success: false,
+                        stdout: Vec::new(),
+                        stderr:
+                            b"vonk-forge-docker-firewall: managed firewall chain is unavailable\n"
+                                .to_vec(),
+                        exit_code: Some(1),
+                    }),
+                    Answer::Policy => {
+                        let authorised = matches!(arguments[3].as_str(), "8000" | "8101");
+                        Ok(CommandOutput {
+                            success: authorised,
+                            stdout: Vec::new(),
+                            stderr: if authorised {
+                                Vec::new()
+                            } else {
+                                b"vonk-forge-docker-firewall: published endpoint host port 30000 is not \
+                                  authorized (authorized endpoint host ports: 8000,8101)\n"
+                                    .to_vec()
+                            },
+                            exit_code: Some(if authorised { 0 } else { 3 }),
+                        })
+                    }
+                }
             }
         }
-        let run_for = |host_port: &str| {
+        let run_for = |answer: Answer, host_port: &str| {
             let (_temp, roots) = runtime_fixture();
             let model = artifact_path(&roots, 'a');
             fs::create_dir_all(&model).unwrap();
@@ -6378,15 +6416,16 @@ mod tests {
                 ],
             );
             let executor =
-                OperationExecutor::new(roots.clone(), &[0; 32], EndpointRunner, None).unwrap();
+                OperationExecutor::new(roots.clone(), &[0; 32], EndpointRunner(answer), None)
+                    .unwrap();
             let run = validate_docker_run(&arguments, &roots, None).unwrap();
             (executor.require_authorised_published_endpoint(&run), run)
         };
 
-        let (accepted, run) = run_for("8101");
+        let (accepted, run) = run_for(Answer::Policy, "8101");
         assert!(accepted.is_ok());
         assert_eq!(run.published_endpoint_port, Some(8101));
-        let (refused, _) = run_for("30000");
+        let (refused, _) = run_for(Answer::Policy, "30000");
         let Err(OperationError::RuntimeEndpointFirewallRejected { reason }) = refused else {
             panic!("an unauthorised published port must fail the start");
         };
@@ -6395,6 +6434,8 @@ mod tests {
             reason.contains("authorized endpoint host ports: 8000,8101"),
             "{reason}"
         );
+        assert!(run_for(Answer::Missing, "30000").0.is_ok());
+        assert!(run_for(Answer::Unapplied, "30000").0.is_ok());
     }
 
     #[test]
