@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import re
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,7 @@ from vonk_agent_protocol import (
 from vonk_control.auth import CursorCodec
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.failure_classification import is_security_failure
 from vonk_control.install_admission import (
     InstallAdmissionBusy,
     installation_plan_digest_from_stored_document,
@@ -98,10 +100,10 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationProvider,
     RunSwitchOperationService,
     _build_receipt_in_session,
+    _failure_code_of,
     _node_missing_bytes,
     _phase_result,
     _planned_transfer_bytes,
-    _transient_distribution_exception,
     effective_build_receipt,
 )
 from vonk_control.runtime_adapters import resolve_runtime_adapter
@@ -2113,13 +2115,22 @@ def test_run_switch_retry_reports_its_wait_and_is_not_failed(
     assert recovered.blockers == [] and recovered.next_attempt_at is None
 
 
+def _admission_delay(reason: str | None, attempt: int) -> int:
+    """The delay a capacity wait names: the lifecycle core's backoff (2, 4, 8 ...)."""
+
+    found = re.search(rf"admission retry {attempt} in (\d+)s", reason or "")
+    assert found is not None, reason
+    return int(found.group(1))
+
+
 def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
     tmp_path: Path,
 ) -> None:
     switch = _cold_compile_switch(tmp_path)
-    expected_delays = [5, 10, 20, 40, 80, 160, 300, 300, 300]
+    # One retry clock: the lifecycle core's stable jittered backoff (2..60 s).
+    expected_caps = [2, 4, 8, 16, 32, 60, 60, 60, 60]
     observed_delays: list[int] = []
-    for delay in expected_delays:
+    for cap in expected_caps:
         current = switch.service.get(switch.operation.operation_id)
         assert current.result is not None
         assert switch.service._hold_capacity_writer(
@@ -2133,7 +2144,7 @@ def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
         assert view.result is not None and view.result.observation_due_at is not None
         due = view.result.observation_due_at
         observed_delays.append(int((due - switch.clock.now).total_seconds()))
-        assert observed_delays[-1] == delay
+        assert max(1, cap * 3 // 4) <= observed_delays[-1] <= min(60, cap * 5 // 4)
         assert view.result.retry_attempt == len(observed_delays) + 1
         switch.clock.now = due
 
@@ -3112,7 +3123,6 @@ def test_a_refusal_that_survives_a_replan_retries_in_place_and_keeps_counting(
         service._fail(
             parent.operation_id,
             reason,
-            retryable=True,
             replan=True,
             checkpoint=(0, 0, None),
         )
@@ -3678,31 +3688,23 @@ def test_typed_transient_child_failure_is_retried_automatically(
     assert _child_operation_id(resumed) != child_id
 
 
-def test_run_switch_retry_classification_rejects_terminal_http_and_storage_errors() -> (
+def test_run_switch_failure_classification_is_terminal_only_for_authentication() -> (
     None
 ):
     request = httpx2.Request("GET", "https://example.invalid/artifact")
-    for status in (401, 403, 404):
+
+    def status_error(status: int) -> httpx2.HTTPStatusError:
         response = httpx2.Response(status, request=request)
-        error = httpx2.HTTPStatusError(
+        return httpx2.HTTPStatusError(
             "request failed", request=request, response=response
         )
-        assert _transient_distribution_exception(error) is False
-    for status in (429, 500, 503):
-        response = httpx2.Response(status, request=request)
-        error = httpx2.HTTPStatusError(
-            "request failed", request=request, response=response
-        )
-        assert _transient_distribution_exception(error) is True
-    assert (
-        _transient_distribution_exception(OSError(errno.EPERM, "permission denied"))
-        is False
-    )
-    assert (
-        _transient_distribution_exception(OSError(errno.ENOSPC, "no space left"))
-        is False
-    )
-    assert _transient_distribution_exception(OSError(errno.ECONNRESET, "reset")) is True
+
+    for status in (401, 403):
+        assert is_security_failure(_failure_code_of(status_error(status))) is True
+    for status in (404, 429, 500, 503):
+        assert is_security_failure(_failure_code_of(status_error(status))) is False
+    for number in (errno.EPERM, errno.ENOSPC, errno.ECONNRESET):
+        assert is_security_failure(_failure_code_of(OSError(number, "x"))) is False
 
 
 class _CountingPreviewLifecycle(RecipeOperationService):
@@ -4427,8 +4429,13 @@ def test_cancel_closes_a_transfer_parked_for_an_operator_instead_of_waiting(tmp_
     assert executor.abandoned == [child_id]
 
 
-def test_succeeded_child_with_invalid_receipt_fails_without_reissue(tmp_path):
-    """A receipt that does not validate never re-issues its child's effects."""
+def test_succeeded_child_with_invalid_receipt_is_observed_again_not_failed(tmp_path):
+    """A receipt that does not validate is an unknown effect (audit top-10 #2).
+
+    The operation is never failed for it: the idempotent child is issued again
+    under a new identity at the lifecycle core's backoff, and its fresh receipt is
+    validated.
+    """
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
     installed_recipe(
@@ -4442,6 +4449,8 @@ def test_succeeded_child_with_invalid_receipt_fails_without_reissue(tmp_path):
         executor,
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
     )
+    now = [NOW]
+    service._clock = lambda: now[0]
     request = _request(sessions, nodes[0])
     operation = service.apply(
         RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
@@ -4454,12 +4463,20 @@ def test_succeeded_child_with_invalid_receipt_fails_without_reissue(tmp_path):
     child.result = {"evidence": [{"phase": "transfer", "unexpected": True}]}
     for _ in range(3):
         service.tick()
-    failed = service.get(operation.operation_id)
-    assert failed.state == "failed", failed.status_reason
-    assert _result(failed).failure_code == "run-switch.receipt_invalid"
-    assert _result(failed).retryable is False
-    assert list(executor.children) == [child_id]
-    assert executor.calls.count("transfer") == 1
+    held = service.get(operation.operation_id)
+    assert held.state == "running", held.status_reason
+    assert _result(held).failure_code is None
+    assert _result(held).child_operation_id is None
+    assert _result(held).retry_reason == "run-switch phase receipt is invalid"
+    due = _result(held).observation_due_at
+    assert due is not None and due > now[0]
+    assert "next attempt" in (held.status_reason or "")
+
+    now[0] = due
+    service.tick()
+    reissued = service.get(operation.operation_id)
+    assert _child_operation_id(reissued) != child_id
+    assert executor.calls.count("transfer") == 2
 
 
 def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_path):
@@ -4748,7 +4765,8 @@ def test_parked_start_after_observation_deadline_keeps_exact_effect_pending(
     assert view.progress.state == "waiting"
     assert "start-observation-expired" in (view.status_reason or "")
     assert view.result is not None and view.result.observation_due_at is not None
-    assert view.result.observation_due_at == now[0] + timedelta(seconds=60)
+    # One retry clock: the lifecycle core's bounded backoff, never past a minute.
+    assert now[0] < view.result.observation_due_at <= now[0] + timedelta(seconds=60)
     assert service.tick() is False
     assert isinstance(service._lifecycle, _ObservingLifecycle)
     service._lifecycle._healthy = True
@@ -4758,10 +4776,19 @@ def test_parked_start_after_observation_deadline_keeps_exact_effect_pending(
     assert service.get(operation.operation_id).state == "succeeded"
 
 
-def test_operator_wait_without_observation_deadline_is_not_auto_claimed(
+def test_legacy_operator_wait_without_a_clock_is_healed_not_left_waiting(
     tmp_path: Path,
 ) -> None:
+    """No Run/Switch action exists, so a wait for an operator can never end.
+
+    A legacy ``waiting-for-operator`` row with no observation clock is
+    re-evaluated by its first advance (core rules 1 and 3): it is retried at the
+    core's bounded backoff, then observes its child again and completes.
+    """
+
     service, operation, _start_index = _parked_start_switch(tmp_path, healthy=False)
+    now = [NOW]
+    service._clock = lambda: now[0]
     with service._sessions.begin() as session:
         row = session.get(Job, operation.operation_id)
         assert row is not None and isinstance(row.result, dict)
@@ -4772,9 +4799,11 @@ def test_operator_wait_without_observation_deadline_is_not_auto_claimed(
 
     held = service.get(operation.operation_id)
     assert held.state == "waiting-for-operator"
-    assert held.progress.state == "waiting-for-operator"
-    assert service.tick() is False
-    assert service.get(operation.operation_id).state == "waiting-for-operator"
+    assert service.tick() is True  # healed: it is observed again, not parked
+    healed = service.get(operation.operation_id)
+    assert healed.state != "waiting-for-operator"
+    assert healed.result is not None and healed.result.observation_due_at is not None
+    assert healed.result.observation_due_at > now[0]
 
 
 def test_parked_start_still_progressing_is_observed_before_final_success(
@@ -5399,7 +5428,7 @@ def test_scoped_cleanup_retries_when_uninstall_capacity_writer_is_busy(
     parked = service.get(operation.operation_id)
     assert parked.state == "running"
     assert parked.status_reason is not None
-    assert "admission retry 1 in 5s" in parked.status_reason
+    assert _admission_delay(parked.status_reason, 1) in range(1, 4)
     assert parked.result is not None
     assert parked.result.retry_reason == RunAdmissionBusy.code
     assert parked.result.phase_index == 0
@@ -5451,11 +5480,11 @@ def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
     try:
         assert service.tick() is True
         view, current = result()
-        assert "admission retry 1 in 5s" in (view.status_reason or "")
+        assert _admission_delay(view.status_reason, 1) in range(1, 4)
         advance_to_due()
         assert service.tick() is True
         view, current = result()
-        assert "admission retry 2 in 10s" in (view.status_reason or "")
+        assert _admission_delay(view.status_reason, 2) in range(3, 6)
         assert current.retry_attempt == 3
 
         # A checkpoint retry continues the same counter, bounded by its cap.
@@ -5479,7 +5508,7 @@ def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
         advance_to_due()
         assert service.tick() is True
         view, current = result()
-        assert "admission retry 1 in 5s" in (view.status_reason or "")
+        assert _admission_delay(view.status_reason, 1) in range(1, 4)
         assert current.retry_attempt == 2
         assert current.retry_reason == RunAdmissionBusy.code
     finally:

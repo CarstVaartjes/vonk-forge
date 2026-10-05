@@ -349,9 +349,15 @@ def test_successful_install_child_does_not_hide_invalid_final_installation(
     for _ in range(8):
         planner.tick()
         service.tick()
-    completed = service.application(application.id)
-    assert completed.state == "queued"
-    assert "run-switch.installation-" in (completed.status_reason or "")
+    # The invalid installation is never accepted as a finished load.  It is an
+    # unknown, not a failure: the Run/Switch observes it again at the lifecycle
+    # core's backoff and says why, and the profile follows its child.
+    assert service.application(application.id).state in {"queued", "running"}
+    with sessions() as session:
+        child = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
+        assert child is not None
+        assert child.state in {"queued", "running", "waiting"}
+        assert "run-switch.installation-" in (child.status_reason or "")
 
 
 def test_running_to_installed_stops_and_reuses_the_existing_installation(

@@ -103,7 +103,7 @@ def test_postgres_conflicts_deduplicate_distributed_runs_and_preserve_group_safe
         assert len(conflicts) == 1 and stops == []
 
 
-def test_postgres_invalid_terminal_child_fails_without_nested_row_lock(
+def test_postgres_invalid_terminal_child_is_retried_without_nested_row_lock(
     tmp_path, migrated_engine
 ):
     sessions, lifecycle, nodes, _ = _installed(tmp_path, migrated_engine)
@@ -129,11 +129,16 @@ def test_postgres_invalid_terminal_child_fails_without_nested_row_lock(
     artifacts.children[child_id].state = "succeeded"
     artifacts.children[child_id].result = None
     service.tick()
-    failed = service.get(operation.operation_id)
-    assert failed.state == "failed"
-    assert failed.status_reason == "run-switch.transfer-returned-invalid-evidence"
-    assert failed.result is not None
-    assert failed.result.retryable is False
+    # A receipt that does not validate is an unknown, not a failure: the operation
+    # is decided under the one lock it already holds (no nested row lock) and the
+    # idempotent child is issued again at the core's backoff.
+    held = service.get(operation.operation_id)
+    assert held.state == "running"
+    assert held.result is not None
+    assert held.result.failure_code is None
+    assert held.result.retry_reason == "run-switch.transfer-returned-invalid-evidence"
+    assert held.result.child_operation_id is None
+    assert held.result.observation_due_at is not None
 
 
 def _awaiting_final_verification(tmp_path, engine, *, distributed=False):

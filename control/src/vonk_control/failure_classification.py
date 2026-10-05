@@ -54,6 +54,14 @@ _SECURITY_CODES = frozenset(
         "permission_denied",
         "recipe_update.authority_denied",
         "request_replayed",
+        # Run/Switch receipt checks that guard a destructive or digest-bound
+        # effect: the executor reported something the plan forbids (a NAS
+        # eviction, a digest the plan never named, bytes whose digest is not the
+        # planned one).  Reviewed in the blocker allowlist as security edges.
+        "run-switch.artifact-digest-verification-failed",
+        "run-switch.cleanup-nas-eviction-forbidden",
+        "run-switch.cleanup-reclaimed-digest-not-planned",
+        "run-switch.runtime-image-preparation-digest-mismatch",
         "runtime_image.authorization_invalid",
         "runtime_image.authorization_revoked",
         "runtime_image_identity_invalid",
