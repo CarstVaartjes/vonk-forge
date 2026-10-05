@@ -177,7 +177,14 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
         assert settled.state == "cancelled"
         assert settled.progress["phase"] == "completed"
         assert not restarted._object_path(str(artifact["sha256"])).exists()
-        restarted._set_operation_state(operation.id, "succeeded")
+        restarted._finish_succeeded(
+            operation.id,
+            {
+                "schema_version": 2,
+                "artifact_set_sha256": str(operation.artifact_set_sha256),
+                "coverage": "complete",
+            },
+        )
         assert restarted.get_operation(operation.id).state == "cancelled"
 
         restarted.run_pending(limit=2)

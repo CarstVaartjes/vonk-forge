@@ -1236,6 +1236,23 @@ class ModelCacheOperation(Base):
     actor: Mapped[str] = mapped_column(String(200), nullable=False)
     current_artifact_key: Mapped[str | None] = mapped_column(String(256))
     last_error: Mapped[str | None] = mapped_column(String(512))
+    #: The one retry, observation and cancel clock of the lifecycle core: when a
+    #: queued or interrupted operation may be claimed again.  It replaces the
+    #: payload's ``retry.next_retry_at``/``retry_after_seconds`` (read only by the
+    #: lifecycle adapter's ``adopt`` for rows written before the core).
+    next_action_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    #: How many times the core looked at a cancelled operation since it last ran
+    #: (a stop and its confirmation); the stop budget of a cancel.
+    observe_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    #: The claim: which Controller process runs the operation and until when.  It
+    #: replaces the payload's ``claim`` (owner and expiry).  A lapsed lease is
+    #: decided by the core, not stolen by the next claimant.
+    fence: Mapped[str | None] = mapped_column(String(64))
+    lease_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )

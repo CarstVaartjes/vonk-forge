@@ -555,7 +555,13 @@ files. The NAS model and recipe-image cache is the profile choice and admission
 surface. Published images and local builds both land in one OCI layout,
 `image-cache/oci`, where images share layers; a published image keeps its
 original manifest digest, and a local build is converted into the layout once
-it has succeeded. Model files live under `/state/model-cache`; the image store
+it has succeeded. A model-cache operation (download, repair, removal) is decided by the same
+lifecycle core through its adapter: nothing it does is irreversible, so a failed,
+interrupted or lapsed transfer is retried on the one `next_action_at` clock (the
+transfer's lease replaces the payload claim), a cancel always completes, and a
+missing or unverified object receipt is re-verified and repaired instead of
+ending the request; a full disk queues the download behind a retryable blocker.
+Model files live under `/state/model-cache`; the image store
 lives under `/state/agent-artifacts/image-cache`, shared by the API and worker.
 Each is its own Compose volume, mounted read-only into Caddy, which serves the
 bytes of a model download the Controller has authorized (`X-Vonk-File`, never

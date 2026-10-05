@@ -299,11 +299,19 @@ def test_two_services_claim_distinct_operations_and_expired_lease_is_recovered(
     with sessions.begin() as session:
         row = session.get(ModelCacheOperation, operation_a.id)
         assert row is not None
-        row.payload = dict(row.payload) | {
-            "claim": {"owner": "dead-worker", "expires_at": "2020-01-01T00:00:00+00:00"}
-        }
+        row.fence = "dead-worker"
+        row.lease_deadline = datetime(2020, 1, 1, tzinfo=UTC)
         row.state = "running"
     fresh, _ = _service(tmp_path, sessions, maximum=1)
+    # The dead worker's lease lapsed.  The core decides it, not the next claimant: the
+    # attempt is retried with the shared bounded backoff instead of being stolen.
+    assert fresh._claim_operations(limit=1, respect_backoff=True) == []
+    with sessions() as session:
+        decided = session.get(ModelCacheOperation, operation_a.id)
+        assert decided is not None
+        assert decided.state == "partial"
+        assert decided.next_action_at is not None
+    fresh._clock = lambda: datetime.now(UTC) + timedelta(minutes=5)
     assert fresh._claim_operations(limit=1, respect_backoff=True) == [
         (operation_a.id, "download")
     ]
@@ -843,8 +851,14 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
         assert failure is not None
         assert failure.code == "rate_limited"
         assert failure.retry_time == NOW.replace(second=30).isoformat()
-        assert payload.retry.next_retry_at == failure.retry_time
-        assert payload.retry.retry_after_seconds == 30
+        # One retry clock: the column.  The payload no longer carries one.
+        assert persisted.next_action_at is not None
+        assert (
+            persisted.next_action_at.replace(tzinfo=UTC).isoformat()
+            == failure.retry_time
+        )
+        assert payload.retry.next_retry_at is None
+        assert payload.retry.retry_after_seconds is None
     assert service._hf_cooldown_until == NOW.replace(second=30)
     now[0] = NOW + timedelta(seconds=31)
     _drain(service, resumed.id)

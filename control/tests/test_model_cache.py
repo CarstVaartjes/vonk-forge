@@ -29,7 +29,6 @@ from vonk_control.distribution import (
 from vonk_control.jobs import JobService
 from vonk_control.model_cache import (
     _CHUNK_BYTES,
-    _RETRY_MAX_SECONDS,
     ArtifactSetManifest,
     ArtifactSpec,
     ModelCacheConflict,
@@ -59,6 +58,7 @@ from vonk_control.models import (
     ModelCacheSetArtifact,
     RecipeBuild,
 )
+from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_control.worker import Worker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
@@ -1972,7 +1972,9 @@ def test_transient_download_failure_requeues_with_exact_identity_and_bound(
     service.run_pending()
     queued = service.get_operation(operation.id)
     assert queued.state == "queued"
-    assert queued.attempt == 2
+    # The attempt number counts claims: the retry shows the attempt that failed
+    # until the next claim starts attempt 2.
+    assert queued.attempt == 1
     assert queued.plan_digest == preview["plan_digest"]
     assert queued.artifact_set_sha256 == preview["artifact_set_sha256"]
     assert queued.progress["downloaded_bytes"] == 0
@@ -2019,8 +2021,11 @@ def test_transient_download_failures_retry_with_capped_backoff_until_success(
         assert waiting.state == "queued"
         assert waiting.failure is not None and waiting.failure["retryable"] is True
         delays.append(waiting.failure["retry_after_seconds"])
-    assert delays == sorted(delays)
-    assert max(delays) == _RETRY_MAX_SECONDS
+    # One bounded, jittered policy for every kind (the lifecycle core's): the
+    # delay grows from its base to its cap and never beyond it.
+    policy = RecoveryPolicy()
+    assert delays[0] < max(delays) <= policy.max_delay_seconds
+    assert all(delay >= 1 for delay in delays)
 
     restarted = ModelCacheService(
         sessions, service.root, reserve_bytes=0, fixture_sources=True
@@ -2628,17 +2633,32 @@ def test_repair_capacity_admission_preserves_verified_object(
     monkeypatch.setattr(
         "vonk_control.model_cache.shutil.disk_usage", lambda _: usage(100, 100, 0)
     )
-    with pytest.raises(ModelCacheConflict, match="insufficient-reserved-storage"):
-        service.start_repair(
-            actor="test",
-            request_key="00000000-0000-4000-8000-000000001007",
-            artifact_set_sha256=digest,
-            plan_digest=service.repair_preview(digest)["plan_digest"],
-        )
+    # No capacity is a wait, not a refusal (top-10 #8): the repair is queued
+    # behind a retryable blocker and nothing is touched until the space exists.
+    queued = service.start_repair(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000001007",
+        artifact_set_sha256=digest,
+        plan_digest=service.repair_preview(digest)["plan_digest"],
+    )
+    assert queued.state == "queued"
+    assert queued.failure is not None
+    assert queued.failure["code"] == "model_cache.download_blocked"
+    assert queued.failure["retryable"] is True
+    assert queued.next_attempt_at is not None
     assert (
         service.read_verified_artifact(digest, artifact["sha256"], "weights.bin")
         == b"model"
     )
+    # Still no space: the core reschedules it instead of starting the transfer.
+    assert service._claim_operations(limit=1, respect_backoff=False) == []
+    monkeypatch.setattr(
+        "vonk_control.model_cache.shutil.disk_usage",
+        lambda _: usage(10**12, 0, 10**12),
+    )
+    assert service._claim_operations(limit=1, respect_backoff=False) == [
+        (queued.id, "repair")
+    ]
 
 
 def test_repair_checkpoint_requires_exact_nested_contract():
@@ -3384,7 +3404,14 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
         partials = list((service.root / "partials").rglob("*.part"))
         assert len(partials) == 1
         assert partials[0].read_bytes() == payload
-        service._set_operation_state(operation.id, "succeeded")
+        service._finish_succeeded(
+            operation.id,
+            {
+                "schema_version": 2,
+                "artifact_set_sha256": str(operation.artifact_set_sha256),
+                "coverage": "complete",
+            },
+        )
         assert service.get_operation(operation.id).state == "cancelled"
     finally:
         service.close()
@@ -3546,9 +3573,7 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
         with sessions.begin() as session:
             row = session.get(ModelCacheOperation, removal.id)
             assert row is not None
-            row.payload = dict(row.payload) | {
-                "retry": dict(row.payload["retry"]) | {"next_retry_at": None}
-            }
+            row.next_action_at = None  # the one retry clock: due now
     waiting = service.get_operation(removal.id)
     assert waiting.state in {"queued", "partial"}
     assert waiting.failure is not None and waiting.failure["retryable"] is True
