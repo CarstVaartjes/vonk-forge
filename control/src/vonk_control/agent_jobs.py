@@ -1499,6 +1499,7 @@ class AgentJobService:
         self._result_consumer = result_consumer
         self._contact_consumer = contact_consumer
         self._advance_rollout: Callable[[Session, Job], None] | None = None
+        self._reconcile_rollouts: Callable[[int], bool] | None = None
         self._advance_node: Callable[[str], None] | None = None
         self._configuration_lock = threading.Lock()
         self._started = False
@@ -1654,7 +1655,12 @@ class AgentJobService:
         healed = ArtifactJobAdapter(
             sessions=self._sessions, clock=self._clock
         ).reconcile(limit)
-        return progressed or report.changed > 0 or healed > 0
+        rollouts = (
+            self._reconcile_rollouts(limit)
+            if self._reconcile_rollouts is not None
+            else False
+        )
+        return progressed or report.changed > 0 or healed > 0 or rollouts
 
     def _order_reconciler(self) -> Reconciler:
         reconciler = getattr(self, "_reconciler", None)
@@ -2089,6 +2095,8 @@ class AgentJobService:
         self,
         advance: Callable[[Session, Job], None],
         advance_node: Callable[[str], None],
+        *,
+        reconcile: Callable[[int], bool] | None = None,
     ) -> None:
         """Bind the agent-upgrade rollout owner.
 
@@ -2100,6 +2108,7 @@ class AgentJobService:
         with self._configuration_lock:
             self._advance_rollout = advance
             self._advance_node = advance_node
+            self._reconcile_rollouts = reconcile
 
     def _mark_started(self) -> None:
         with self._configuration_lock:
