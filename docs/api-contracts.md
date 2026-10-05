@@ -353,6 +353,16 @@ with its own closed reason set; the blocker allowlist's `security-edge` and
 `input-validation` families are the first two, and `already-retried` and
 `bookkeeping-debt` are the third (`error_category_of`).
 
+Inside the Controller the same three are raised as `SecurityRefusalError`,
+`InvalidRequestError` and `UnknownOutcomeError` (all `CategorizedError`, in
+`vonk_agent_protocol.outcome`; these are Python exceptions and are not part of the
+wire schema). An existing error type joins a category by inheriting the base beside
+its current one (`class AuthError(SecurityRefusalError, ValueError)`), which
+changes no `except` clause; the optional keyword-only `reason=` names a closed
+reason and `typed_error()` returns the wire `SecurityRefusal` / `InvalidRequest` /
+`UnknownError` for it. A raise in a lifecycle or operation path must use one of
+these types; the guard is described in [testing and CI](testing-and-ci.md).
+
 ## Required launch checks
 
 The `Controller and Spark wire contract` CI job checks both sides of the

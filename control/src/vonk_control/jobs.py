@@ -15,6 +15,7 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import SecurityRefusalError
 
 from .compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
 from .lifecycle.job import JobAdapter
@@ -25,8 +26,8 @@ _MAX_PAYLOAD = 65_536
 _TARGETS = TypeAdapter(list[str])
 
 
-class StaleAttempt(RuntimeError):
-    pass
+class StaleAttempt(SecurityRefusalError, RuntimeError):
+    """The attempt's lease or fence is not current: it has no authority to write."""
 
 
 @dataclass(frozen=True)
