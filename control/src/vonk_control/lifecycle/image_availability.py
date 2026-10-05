@@ -62,6 +62,8 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from vonk_agent_protocol import LEGACY_WAIT_STATE
+
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..models import Job
 from ..recipe_image_removal_contract import RECIPE_CACHE_REMOVE_KIND
@@ -87,7 +89,7 @@ from .types import (
 KIND = "image-availability"
 OPERATION_KIND = "recipe.image.availability.v2"
 REMOVAL_KIND = RECIPE_CACHE_REMOVE_KIND
-WAITING = "waiting-for-operator"
+WAITING = LEGACY_WAIT_STATE
 CANCEL_BUDGET = timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
 #: How long a stored ``running`` removal is trusted to be between two steps.
 REMOVAL_STEP_LEASE = timedelta(minutes=2)
@@ -104,13 +106,13 @@ _EFFECT_KEYS = (
 KEEP: Any = object()
 
 _STORED = {
-    State.QUEUED: "queued",
-    State.RUNNING: "running",
+    State.QUEUED: State.QUEUED.value,
+    State.RUNNING: State.RUNNING.value,
     State.OBSERVING: "cancelling",
     State.NEEDS_OPERATOR: WAITING,
-    State.SUCCEEDED: "succeeded",
-    State.FAILED: "failed",
-    State.CANCELLED: "cancelled",
+    State.SUCCEEDED: State.SUCCEEDED.value,
+    State.FAILED: State.FAILED.value,
+    State.CANCELLED: State.CANCELLED.value,
 }
 
 
@@ -174,11 +176,11 @@ class ImageAvailabilityAdapter:
             or (int(job.current_attempt or 0) > 0 and not removal)
             or any(payload.get(key) for key in _EFFECT_KEYS)
         )
-        if stored == "queued":
+        if stored == State.QUEUED:
             state = State.BACKOFF if due is not None and due > now else State.QUEUED
         elif stored == "partial":
             state = State.BACKOFF
-        elif stored == "running":
+        elif stored == State.RUNNING:
             lease = (
                 job.updated_at + REMOVAL_STEP_LEASE
                 if removal
@@ -194,11 +196,11 @@ class ImageAvailabilityAdapter:
                 due = lease if lease is not None else due
         elif stored == "cancelling":
             state = State.OBSERVING
-        elif stored == "succeeded":
+        elif stored == State.SUCCEEDED:
             state = State.SUCCEEDED
-        elif stored == "failed":
+        elif stored == State.FAILED:
             state = State.FAILED
-        elif stored == "cancelled":
+        elif stored == State.CANCELLED:
             state = State.CANCELLED
         else:  # waiting-for-operator or an unknown state: re-evaluate it
             state = State.NEEDS_OPERATOR
@@ -298,9 +300,13 @@ class ImageAvailabilityAdapter:
 
         now = aware(now)
         if after.state is State.BACKOFF:
-            state = visible or ("partial" if job.kind == REMOVAL_KIND else "queued")
+            state = visible or (
+                "partial" if job.kind == REMOVAL_KIND else State.QUEUED.value
+            )
         elif after.state is State.QUEUED and job.kind == REMOVAL_KIND:
-            state = visible or ("queued" if job.state == "queued" else "running")
+            state = visible or (
+                State.QUEUED.value if job.state == State.QUEUED else State.RUNNING.value
+            )
         else:
             state = _STORED[after.state]
         job.state = state
@@ -510,7 +516,7 @@ class ImageAvailabilityAdapter:
         return self._drive(job, answer, now, row=row).row
 
     @staticmethod
-    def new_job(*, state: str = "queued", **fields: Any) -> Job:
+    def new_job(*, state: str = State.QUEUED.value, **fields: Any) -> Job:
         """A new job, ``queued`` and claimable now."""
 
         return Job(state=state, **fields)
@@ -534,9 +540,9 @@ class PrebuiltImageAdapter:
         """A claimed import is running; an ended one is its end."""
 
         state = {
-            "succeeded": State.SUCCEEDED,
-            "failed": State.FAILED,
-            "cancelled": State.CANCELLED,
+            State.SUCCEEDED.value: State.SUCCEEDED,
+            State.FAILED.value: State.FAILED,
+            State.CANCELLED.value: State.CANCELLED,
         }.get(stored.state, State.RUNNING)
         return Lifecycle(
             id=stored.id,
