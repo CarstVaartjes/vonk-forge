@@ -350,12 +350,6 @@ family, and `max_debt` / `debt_ceiling.total` only fall. Both scanners take
 `--list`, and `--write-baseline` lowers the recorded counts after a fix; a new
 site always needs a reviewed entry by hand.
 
-The lifecycle also has a hardware canary that nothing in CI runs:
-`scripts/lifecycle-canary` drives one load, one cancel during start and one
-Controller-restart-tolerant wait through `vonkctl` and asserts that no operator
-wait lacks an action and no admission is stuck. It is run by hand after
-lifecycle releases; see [the runbook](runbooks/lifecycle-canary.md).
-
 A third ratchet keeps the vocabulary the contract owns out of hand-written code.
 `control/tests/vocabulary_literals.py` finds string literals equal to a word of
 `vonk_agent_protocol.lifecycle_vocabulary` in the Python sources
@@ -369,6 +363,12 @@ same test requires the web app (`control/web/src`, except generated files and te
 to spell none and to import `vocabulary.generated.ts` instead. The Rust agent has
 the equivalent check in `rust/crates/vonk-agent/tests/protocol_literals.rs`: no
 vocabulary word in a string literal and no `json!` result body outside tests.
+
+The lifecycle also has a hardware canary that nothing in CI runs:
+`scripts/lifecycle-canary` drives one load, one cancel during start and one
+Controller-restart-tolerant wait through `vonkctl` and asserts that no operator
+wait lacks an action and no admission is stuck. It is run by hand after
+lifecycle releases; see [the runbook](runbooks/lifecycle-canary.md).
 
 There is no separate ESLint or Prettier configuration. TypeScript formatting
 follows the surrounding files, and `npm run build` is the type gate.
