@@ -28,6 +28,7 @@ from .bounded_json import sequence
 from .content_identity import ImageContent, same_image
 from .distribution import DistributionService
 from .distribution_assignment import NodeDistributionAssignment
+from .lifecycle.job import JobAdapter
 from .logging import redact_text
 from .model_cache import ModelCacheNotFound
 from .model_cache_contract import ModelCacheDownloadResult
@@ -590,8 +591,7 @@ class DurableDistributionPhaseExecutor:
                 if code is not None:
                     payload["error_code"] = code
             if state != child.state:
-                child.state = state
-                child.status_reason = payload.get("reason")
+                JobAdapter.amend_ended(child, payload.get("reason"), self._clock())
             payload = _child_receipt(payload)
             child.result = payload
             child.updated_at = self._clock()
@@ -757,14 +757,13 @@ class DurableDistributionPhaseExecutor:
                     for node_id in (*cached, *assignments)
                 ],
             }
-            child = Job(
+            child = JobAdapter.new_job(
                 # The request key provides replay identity. Job/operation IDs
                 # are persisted once and follow the shared helper UUIDv4
                 # contract when this transfer requests a runtime image pull.
                 id=str(uuid.uuid4()),
                 request_id=child_request,
                 kind="artifact-distribution",
-                state="queued",
                 actor=actor,
                 authority_revision=plan.plan_digest,
                 targets=list(assignments),
