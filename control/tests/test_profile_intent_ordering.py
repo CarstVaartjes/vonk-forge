@@ -284,14 +284,14 @@ def test_older_unbound_admission_cannot_overtake_newer_bound_deferred_intent(
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         assert node.workload_intent_ordinal == 1
-    assert newer_after_retry.state != "cancelled"
+    assert newer_after_retry.state != "superseded"
     assert newer_after_retry.progress["workload_intent_ordinal"] == 1
     if newer_after_retry.progress["admission_pending"]:
         assert newer_after_retry.state == "queued"
     else:
         assert newer_after_retry.state == "queued"
     assert older_after_retry.progress["workload_intent_ordinal"] is None
-    assert older_after_retry.state == "cancelled"
+    assert older_after_retry.state == "superseded"
 
 
 def test_equal_persisted_acceptance_time_uses_deterministic_uuid4_order(
@@ -364,8 +364,8 @@ def test_equal_persisted_acceptance_time_uses_deterministic_uuid4_order(
         node = session.get(AgentNode, nodes[0])
     assert node is not None and node.workload_intent_ordinal == 1
     assert lower_after_retry.progress["workload_intent_ordinal"] is None
-    assert lower_after_retry.state == "cancelled"
-    assert higher_after_retry.state != "cancelled"
+    assert lower_after_retry.state == "superseded"
+    assert higher_after_retry.state != "superseded"
     assert higher_after_retry.progress["workload_intent_ordinal"] == 1
     if higher_after_retry.progress["admission_pending"]:
         assert higher_after_retry.state == "queued"
@@ -465,7 +465,7 @@ def test_direct_queue_cannot_overtake_later_terminal_receipt(
         node = session.get(AgentNode, nodes[0])
     assert node is not None and node.workload_intent_ordinal == 1
     assert older_after.progress["workload_intent_ordinal"] is None
-    assert older_after.state == "cancelled"
+    assert older_after.state == "superseded"
     assert newer_after.progress["workload_intent_ordinal"] == 1
     assert newer_after.state == "failed"
 

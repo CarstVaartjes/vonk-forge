@@ -25,6 +25,7 @@ from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .fleet_profile_contract import (
+    FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
     FleetProfileAssignment,
     FleetProfilePreview,
@@ -773,7 +774,7 @@ def prepared_profile_installation(
 def release_unassigned_profile_claims(
     session: Session, application: FleetProfileApplication, *, now: datetime
 ) -> None:
-    if application.state not in {"succeeded", "failed", "cancelled"}:
+    if application.state not in FLEET_PROFILE_ENDED_STATES:
         return
     for claim in session.scalars(
         select(ResourceReservation)

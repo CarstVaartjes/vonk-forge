@@ -2517,6 +2517,36 @@ def test_follow_survives_lost_connections_and_reports_the_durable_outcome() -> N
     assert len(client.calls) == 4
 
 
+def test_follow_adopts_the_successor_of_a_superseded_application() -> None:
+    """A load the Controller replaced (its own retry) is followed, not reported failed."""
+
+    first = "33333333-3333-4333-8333-333333333333"
+    second = "44444444-4444-4444-8444-444444444444"
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/progress"): {"id": first, "state": "running"},
+            ("GET", f"/api/profile/applications/{first}"): {
+                "id": first,
+                "state": "superseded",
+                "superseded_by": second,
+                "reason_code": "superseded-by-retry",
+            },
+            ("GET", f"/api/profile/applications/{second}"): [
+                {"id": second, "state": "running"},
+                {"id": second, "state": "succeeded"},
+            ],
+        }
+    )
+    status, payload = run(
+        ("profile", "progress", "--follow", "--interval-seconds", "0.01", "--json"),
+        client,
+    )
+
+    assert status == 0
+    assert payload["id"] == second and payload["state"] == "succeeded"
+    assert payload["supersedes_chain"] == [first]
+
+
 def test_observation_timeout_names_the_connection_it_lost() -> None:
     """An unreachable Controller is an observation failure, not a run failure."""
 

@@ -33,6 +33,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import Text, cast, func, select
 from sqlalchemy.orm import Session
 
+from .fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from .models import (
     STOPPABLE_RUN_STATES,
@@ -47,7 +48,7 @@ from .models import (
 )
 
 _TERMINAL_JOB_STATES = ("succeeded", "failed", "expired", "cancelled")
-_ENDED_APPLICATION_STATES = frozenset({"succeeded", "failed", "cancelled"})
+_ENDED_APPLICATION_STATES = FLEET_PROFILE_ENDED_STATES
 # How long an unowned plan waits for the next attempt to adopt it.
 ADOPTION_WINDOW = timedelta(minutes=15)
 # A claim is created in the same transaction as the operation that owns it; this

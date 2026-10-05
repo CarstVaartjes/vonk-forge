@@ -8,6 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.fleet_profile_application_progress_supersede_code_type_0 import check_fleet_profile_application_progress_supersede_code_type_0
+from ..models.fleet_profile_application_progress_supersede_code_type_0 import FleetProfileApplicationProgressSupersedeCodeType0
 from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
@@ -49,6 +51,8 @@ class FleetProfileApplicationProgress:
             retry_due_at (datetime.datetime | None | Unset):
             retry_of_application_id (None | str | Unset):
             step_results (FleetProfileApplicationProgressStepResults | Unset):
+            supersede_code (FleetProfileApplicationProgressSupersedeCodeType0 | None | Unset):
+            superseded_by (None | str | Unset):
             switch_adapter (FleetProfileSwitchAdapterState | None | Unset):
             total_steps (int | Unset):  Default: 0.
             workload_intent_ordinal (int | None | Unset):
@@ -69,6 +73,8 @@ class FleetProfileApplicationProgress:
     retry_due_at: datetime.datetime | None | Unset = UNSET
     retry_of_application_id: None | str | Unset = UNSET
     step_results: FleetProfileApplicationProgressStepResults | Unset = UNSET
+    supersede_code: FleetProfileApplicationProgressSupersedeCodeType0 | None | Unset = UNSET
+    superseded_by: None | str | Unset = UNSET
     switch_adapter: FleetProfileSwitchAdapterState | None | Unset = UNSET
     total_steps: int | Unset = 0
     workload_intent_ordinal: int | None | Unset = UNSET
@@ -169,6 +175,20 @@ class FleetProfileApplicationProgress:
         if not isinstance(self.step_results, Unset):
             step_results = self.step_results.to_dict()
 
+        supersede_code: None | str | Unset
+        if isinstance(self.supersede_code, Unset):
+            supersede_code = UNSET
+        elif isinstance(self.supersede_code, str):
+            supersede_code = self.supersede_code
+        else:
+            supersede_code = self.supersede_code
+
+        superseded_by: None | str | Unset
+        if isinstance(self.superseded_by, Unset):
+            superseded_by = UNSET
+        else:
+            superseded_by = self.superseded_by
+
         switch_adapter: dict[str, Any] | None | Unset
         if isinstance(self.switch_adapter, Unset):
             switch_adapter = UNSET
@@ -220,6 +240,10 @@ class FleetProfileApplicationProgress:
             field_dict["retry_of_application_id"] = retry_of_application_id
         if step_results is not UNSET:
             field_dict["step_results"] = step_results
+        if supersede_code is not UNSET:
+            field_dict["supersede_code"] = supersede_code
+        if superseded_by is not UNSET:
+            field_dict["superseded_by"] = superseded_by
         if switch_adapter is not UNSET:
             field_dict["switch_adapter"] = switch_adapter
         if total_steps is not UNSET:
@@ -418,6 +442,36 @@ class FleetProfileApplicationProgress:
 
 
 
+        def _parse_supersede_code(data: object) -> FleetProfileApplicationProgressSupersedeCodeType0 | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                supersede_code_type_0 = check_fleet_profile_application_progress_supersede_code_type_0(data)
+
+
+
+                return supersede_code_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(FleetProfileApplicationProgressSupersedeCodeType0 | None | Unset, data)
+
+        supersede_code = _parse_supersede_code(d.pop("supersede_code", UNSET))
+
+
+        def _parse_superseded_by(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        superseded_by = _parse_superseded_by(d.pop("superseded_by", UNSET))
+
+
         def _parse_switch_adapter(data: object) -> FleetProfileSwitchAdapterState | None | Unset:
             if data is None:
                 return data
@@ -466,6 +520,8 @@ class FleetProfileApplicationProgress:
             retry_due_at=retry_due_at,
             retry_of_application_id=retry_of_application_id,
             step_results=step_results,
+            supersede_code=supersede_code,
+            superseded_by=superseded_by,
             switch_adapter=switch_adapter,
             total_steps=total_steps,
             workload_intent_ordinal=workload_intent_ordinal,

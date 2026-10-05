@@ -1023,6 +1023,7 @@ _TERMINAL_STATES = {
     "failed",
     "partial",
     "cancelled",
+    "superseded",
     "blocked",
     "rejected",
 }
@@ -3785,15 +3786,44 @@ def _profile(
                 )
         if not args.follow:
             return result
-        path = f"/api/profile/applications/{_quoted(application_id)}"
+        # An application the Controller replaced (its own automatic retry, or a
+        # later intent) ends ``superseded``: follow ``superseded_by`` to the
+        # application that continues the work instead of reporting an end.
+        chain: list[str] = []
+        current = result
+        while True:
+            observed_id = str(current["id"])
+            path = f"/api/profile/applications/{_quoted(observed_id)}"
 
-        def same_application(observed: Mapping[str, object]) -> None:
-            if observed.get("id") != application_id:
-                raise ControlMalformedResponse(
-                    "profile progress observation changed application identity"
-                )
+            def same_application(
+                observed: Mapping[str, object], expected: str = observed_id
+            ) -> None:
+                if observed.get("id") != expected:
+                    raise ControlMalformedResponse(
+                        "profile progress observation changed application identity"
+                    )
 
-        return _poll_path(client, path, result, args, validate=same_application)
+            current = _poll_path(client, path, current, args, validate=same_application)
+            successor = current.get("superseded_by")
+            if (
+                operation_state(current) != "superseded"
+                # Only the Controller's own retry continues the same work; a
+                # later intent another request accepted is reported as ended.
+                or current.get("reason_code") != "superseded-by-retry"
+                or not isinstance(successor, str)
+                or not successor
+                or successor in chain
+                or getattr(getattr(args, "observation", None), "status", "complete")
+                != "complete"
+            ):
+                break
+            chain.append(observed_id)
+            current = client.request(
+                "GET", f"/api/profile/applications/{_quoted(successor)}"
+            )
+        if chain:
+            current = {**current, "supersedes_chain": chain}
+        return current
     if action in {"add", "remove", "configure", "export", "import"}:
         return _profile_authoring(args, client)
     if action == "cancel":

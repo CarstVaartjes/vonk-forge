@@ -42,7 +42,9 @@ type ProfileDraft = {
 type FleetEntry = {id: string; name: string; state: string};
 type PendingProfileLoad = {requestKey: string; reviewedEffectsDigest?: string | null};
 
-const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
+const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled", "superseded"]);
+/** A superseded load that names its successor is not an end: the latest-load observation continues under the successor. */
+const ended = (application: Pick<FleetProfileApplicationView, "state" | "superseded_by">) => TERMINAL_STATES.has(application.state) && !(application.state === "superseded" && application.superseded_by);
 
 function stringField(value: unknown, key: string): string {
   if (!value || typeof value !== "object") return "";
@@ -175,6 +177,7 @@ function ProfileProgress({application, cancel, notice}: {application: FleetProfi
     <div className={`library-profile-application-progress${value === undefined ? " is-indeterminate" : ""}`} role="progressbar" aria-label="Profile load progress" aria-valuemin={0} aria-valuemax={100} {...(value === undefined ? {"aria-valuetext": "Progress total unavailable"} : {"aria-valuenow": value})}><span style={value === undefined ? undefined : {transform: `scaleX(${value / 100})`}}/></div>
     {nodeIds.length > 0 && <ul className="library-profile-application-members" aria-label="Profile load targets">{nodeIds.map(nodeId => <li key={nodeId}><span>{nodeId}</span><small>Participating</small></li>)}</ul>}
     {application.status_reason && <p>{application.status_reason}</p>}
+    {application.state === "superseded" && <p className="library-profile-application-superseded">Not a failure: {application.superseded_by ? <>this load continues as application <code>{application.superseded_by}</code>.</> : "a newer profile intent replaced this load; review it again."}</p>}
     <WaitingFor blockers={application.blockers} nextAttemptAt={application.next_attempt_at}/>
     {notice}
     {cancel && <CancelOperation what="load" consequence="Stops this profile load and reconciles what it already changed. Sparks may be left partly changed until you load again." command={`vonkctl profile cancel ${application.id}`} cancel={cancel}/>}
@@ -260,7 +263,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     return result;
   }, [api]);
   const observer = useOperationObserver<FleetProfileApplicationView>({
-    isTerminal: next => TERMINAL_STATES.has(next.state),
+    isTerminal: ended,
     onTerminal: () => { void refreshProfiles().catch(() => undefined); },
   });
   const application = observer.value;
@@ -274,7 +277,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     if (!draft) return;
     if (dirty) unsavedDrafts.set(draftKey(draft), draft); else unsavedDrafts.delete(draftKey(draft));
   }, [dirty, draft]);
-  const applicationRunning = Boolean(application && !TERMINAL_STATES.has(application.state));
+  const applicationRunning = Boolean(application && !ended(application));
 
   useEffect(() => {
     const controller = new AbortController();

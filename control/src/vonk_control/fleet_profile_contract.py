@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol import LifecycleState, OperationProgress
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .endpoint_contract import EndpointResponse
@@ -110,7 +110,24 @@ FleetProfileOperationState = Literal[
     "succeeded",
     "failed",
     "cancelled",
+    "superseded",
 ]
+#: Why an application ended ``superseded`` (never ``failed``): a newer accepted
+#: intent, or the Controller's own automatic retry, took over its work.
+FleetProfileSupersedeCode = Literal[
+    "superseded-by-retry",
+    "superseded-by-intent",
+    "effects-changed-during-admission",
+]
+#: Application states from which nothing more happens; one name for every consumer.
+FLEET_PROFILE_ENDED_STATES = frozenset(
+    {
+        LifecycleState.SUCCEEDED.value,
+        LifecycleState.FAILED.value,
+        LifecycleState.CANCELLED.value,
+        "superseded",
+    }
+)
 FleetProfileChildPhase = Literal[
     "model-download",
     "container-download",
@@ -919,6 +936,10 @@ class FleetProfileApplicationProgress(_StrictModel):
     step_results: dict[str, FleetProfileStepResult] = Field(default_factory=dict)
     switch_adapter: FleetProfileSwitchAdapterState | None = None
     cancellation: FleetProfileApplicationCancellationIntent | None = None
+    #: The application that took over this one's work (set when it ended
+    #: ``superseded`` and a successor exists), with the typed reason.
+    superseded_by: UuidId | None = None
+    supersede_code: FleetProfileSupersedeCode | None = None
     #: What the application is waiting for, as of its latest check.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
 
@@ -1103,6 +1124,11 @@ class FleetProfileApplicationView(_StrictModel):
     plan_digest: Digest
     attempt: int = Field(default=1, ge=1)
     retry_of_application_id: UuidId | None = None
+    #: The application that continues this one's work once it ended ``superseded``;
+    #: follow the chain to the live application.
+    superseded_by: UuidId | None = None
+    #: Typed reason of a ``superseded`` end.
+    reason_code: FleetProfileSupersedeCode | None = None
     state: FleetProfileOperationState
     current_step: int = Field(ge=0, le=1024)
     total_steps: int = Field(ge=0, le=1024)
@@ -1147,10 +1173,18 @@ class FleetProfileApplicationView(_StrictModel):
             and not (self.status_reason or "").strip()
         ):
             raise ValueError("failed or waiting application requires a failure reason")
+        if self.state == "superseded":
+            if self.reason_code is None:
+                raise ValueError("superseded application requires a reason code")
+            if self.reason_code == "superseded-by-retry" and self.superseded_by is None:
+                raise ValueError("a retry supersession names its successor")
+        elif self.superseded_by is not None or self.reason_code is not None:
+            raise ValueError("only a superseded application names a successor")
         return self
 
 
 __all__ = [
+    "FLEET_PROFILE_ENDED_STATES",
     "FleetProfileApplicationCancelRequest",
     "FleetProfileApplicationCancellationIntent",
     "FleetProfileApplicationCancellationView",
@@ -1185,6 +1219,7 @@ __all__ = [
     "FleetProfileScope",
     "FleetProfileScopePreview",
     "FleetProfileStepResult",
+    "FleetProfileSupersedeCode",
     "FleetProfileSwitchAdapter",
     "FleetProfileSwitchAdapterResult",
     "FleetProfileSwitchAdapterState",

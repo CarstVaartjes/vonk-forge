@@ -1269,6 +1269,14 @@ def _application(payload: Mapping[str, object]) -> None:
     _field("State", payload.get("state"))
     if payload.get("status_reason") is not None:
         _field("Reason", payload["status_reason"])
+    if payload.get("reason_code") is not None:
+        _field("Reason code", payload["reason_code"])
+    if payload.get("superseded_by") is not None:
+        # Not a failure: the Controller continued this work under a successor.
+        _field("Continued by", payload["superseded_by"])
+    chain = payload.get("supersedes_chain")
+    if isinstance(chain, list) and chain:
+        _field("Superseded applications", _words(chain))
     cancellation = _optional(payload.get("cancellation"), "cancellation")
     if cancellation:
         _field("Cancellation", cancellation.get("state"))

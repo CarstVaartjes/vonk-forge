@@ -681,6 +681,13 @@ vonkctl --profile 2 run "Qwen Code" --spark Atlas
 vonkctl --profile 2 run google/gemma-4-26B-A4B-it --yes
 ```
 
+A load the Controller replaces (its own automatic retry after a failed step, or a
+later accepted intent) ends `superseded`, never `failed`. The application names
+its `reason_code` and, when a successor exists, `superseded_by`; `profile progress
+--follow` follows that chain to the live application and lists the replaced ids as
+`supersedes_chain`. A `superseded` end without a successor means the reviewed
+effects changed during admission: review and load again.
+
 `run` accepts one unambiguous recipe or model from the active library. It
 prepares the recipe and its model, adds the assignment to the selected saved
 profile (profile 1 by default), previews the complete profile change, asks for
