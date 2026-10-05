@@ -100,8 +100,13 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
                 "tests/control/",
                 "src/cluster_profiles/",
                 "inventory/wheels/",
+                # The blocker scanner reads the agent's Rust results; a new
+                # operator wait there must run the Controller guard.
+                "rust/crates/vonk-agent/src/",
             ),
             (
+                "tools/blocker-allowlist.json",
+                "tools/lifecycle-writers-allowlist.json",
                 "tests/acceptance/recipe-library-revision.txt",
                 "scripts/tests/run_agent_wire_contracts.py",
                 "scripts/export-agent-wire-schema",
