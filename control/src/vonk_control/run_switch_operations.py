@@ -9,7 +9,6 @@ cache payload itself.
 
 from __future__ import annotations
 
-import errno
 import hashlib
 import json
 import logging
@@ -23,7 +22,7 @@ from typing import Any, Literal, Protocol, TypeGuard, runtime_checkable
 
 import httpx2
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import String, and_, cast, func, or_, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
@@ -69,6 +68,19 @@ from .install_admission import (
     InstallPreflightExpired,
 )
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
+from .lifecycle.run_switch import (
+    KEEP as _KEEP_REASON,
+)
+from .lifecycle.run_switch import (
+    LIVE_STATES as _LIVE_STATES,
+)
+from .lifecycle.run_switch import (
+    WAITING,
+    RunSwitchAdapter,
+    set_member_state,
+)
+from .lifecycle.types import Effect as _LifecycleEffect
+from .lifecycle.types import State as _LifecycleState
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .logging import log_event, redact_text
 from .memory_reservations import (
@@ -158,7 +170,6 @@ from .recipe_runtime_specs import (
 from .recovery_policy import (
     FailureKind,
     RecoveryDecision,
-    RecoveryPolicy,
     classify,
     kind_for_agent_error,
 )
@@ -2259,6 +2270,11 @@ class RecipeLifecyclePhaseExecutor:
         raise KeyError(operation_id)
 
 
+#: Decisions and writes of every operation go through the lifecycle core; the
+#: reads (a child's orders, a stop) use an adapter bound to the caller's session.
+_ADAPTER = RunSwitchAdapter()
+
+
 class RunSwitchOperationService:
     """Preview and advance one durable, digest-bound Run/Switch outcome."""
 
@@ -3227,7 +3243,7 @@ class RunSwitchOperationService:
                         "run-switch cancellation request was already used differently"
                     )
                 return self._operation_view(job)
-            if job.state not in {"queued", "running", "waiting"}:
+            if job.state not in _LIVE_STATES:
                 raise RunSwitchOperationConflict(
                     "run-switch operation is not cancellable"
                 )
@@ -3266,26 +3282,30 @@ class RunSwitchOperationService:
                     else None
                 )
                 stop_run_id = plan.run_id or _string_or_none(owner_id)
-                if stop_run_id is None:
-                    raise RunSwitchOperationConflict(
-                        "run-switch active intent has no run identity to stop"
-                    )
                 # The operation is marked cancelled only after its Stop is
                 # durably accepted below; a failed Stop leaves it cancellable.
-            else:
+                # An intent with no run identity to Stop is a bookkeeping gap,
+                # not a refusal: the cancel is recorded and driven like any
+                # other, so it observes the child and completes (rule 4).
+            if stop_run_id is None:
                 progress["cancellation"] = cancellation.model_dump(mode="json")
-                if job.state == "waiting":
+                progress.pop("retry_attempt", None)
+                if job.state in {"waiting", WAITING}:
                     progress["observation_due_at"] = (
                         cancellation.requested_at.isoformat()
                     )
                 job.status_reason = (
                     "Cancellation requested; finishing the current preparation safely."
                 )
-                if phase.subphase == "container-build" or (
-                    job.state == "queued" and not progress.get("child_operation_id")
-                ):
+                if phase.subphase == "container-build":
                     _complete_cancellation(job, progress, cancellation.requested_at)
                 else:
+                    # Nothing issued ends at once; an issued child is stopped and
+                    # observed up to the core's budget, then the cancel ends with
+                    # its effect recorded unknown.
+                    self._cancel_with_session(
+                        session, job, progress, cancellation.requested_at
+                    )
                     job.result = _persisted_result(progress)
                     job.updated_at = cancellation.requested_at
         if stop_run_id is not None:
@@ -3298,13 +3318,17 @@ class RunSwitchOperationService:
             )
             with self._sessions.begin() as session:
                 job = session.get(Job, operation_id, with_for_update=True)
-                if job is not None and job.state in {"queued", "running", "waiting"}:
+                if job is not None and job.state in _LIVE_STATES:
                     progress = _read_progress(job.result)
                     progress["cancellation"] = cancellation.model_dump(mode="json")
-                    job.state = "cancelled"
-                    job.status_reason = (
-                        "Cancellation translated into Run/Switch Stop "
-                        f"operation {stop.operation_id}"
+                    _ADAPTER.cancelled(
+                        job,
+                        progress,
+                        cancellation.requested_at,
+                        reason=(
+                            "Cancellation translated into Run/Switch Stop "
+                            f"operation {stop.operation_id}"
+                        ),
                     )
                     job.result = _persisted_result(progress)
                     job.updated_at = cancellation.requested_at
@@ -3439,11 +3463,11 @@ class RunSwitchOperationService:
             progress["retryable"] = False
             progress.pop("failure_code", None)
             progress["workload_intent_ordinal"] = ordinal
-            job = Job(
+            job = _ADAPTER.new_operation(
+                allowed=True,
                 id=retry_job_id,
                 request_id=request_key,
                 kind=previous.kind,
-                state="queued",
                 actor=actor,
                 authority_revision=previous.authority_revision,
                 targets=list(previous.targets),
@@ -3494,12 +3518,18 @@ class RunSwitchOperationService:
                     Job.kind.in_(_OPERATION_KINDS),
                     or_(
                         Job.state.in_(("queued", "running", "waiting")),
-                        and_(
-                            Job.state == "waiting-for-operator",
-                            due_at.is_not(None),
-                        ),
+                        # Legacy: a wait with a clock is observed, one without is
+                        # healed (re-evaluated) by the first advance, never left.
+                        Job.state == "waiting-for-operator",
                     ),
-                    or_(due_at.is_(None), due_at <= _now(self._clock).isoformat()),
+                    or_(
+                        due_at.is_(None),
+                        due_at <= _now(self._clock).isoformat(),
+                        # A cancel in flight is looked at on every tick: it ends as
+                        # soon as its child does (its stop attempts are spaced by
+                        # the core, not by this clock).
+                        Job.result["cancellation"].as_string().is_not(None),
+                    ),
                 )
                 .order_by(Job.id)
                 .limit(16)
@@ -3563,16 +3593,17 @@ class RunSwitchOperationService:
                     and progress.get("retry_attempt") is not None
                     else 1
                 )
-                delay = min(300, 5 * (2 ** min(attempt - 1, 6)))
-                due = now + timedelta(seconds=delay)
-                progress["retry_reason"] = code
-                progress["retry_attempt"] = attempt + 1
-                progress["observation_due_at"] = due.isoformat()
-                job.state = "running"
-                job.status_reason = (
-                    f"{code}: {type(error).__name__}: {redact_text(error)}"[:400]
-                    + f"; retry {attempt} at {due.isoformat()}"
-                )[:512]
+                _ADAPTER.retry(
+                    job,
+                    progress,
+                    code,
+                    now,
+                    reset_on_change=True,
+                    describe=lambda due: (
+                        f"{code}: {type(error).__name__}: {redact_text(error)}"[:400]
+                        + f"; retry {attempt} at {due.isoformat()}"
+                    ),
+                )
                 job.result = _persisted_result(progress)
                 job.updated_at = now
             self._record_wait(operation_id)
@@ -6532,11 +6563,11 @@ class RunSwitchOperationService:
                 )
             payload["workload_intent_ordinal"] = workload_intent_ordinal
             payload["progress"]["workload_intent_ordinal"] = workload_intent_ordinal
-            job = Job(
+            job = _ADAPTER.new_operation(
+                allowed=plan.allowed,
                 id=str(uuid.uuid4()),
                 request_id=request_key,
                 kind=kind,
-                state="queued" if plan.allowed else "waiting",
                 actor=actor,
                 authority_revision=(plan.recipe_content_sha256 or plan.plan_digest),
                 targets=list(target_node_ids),
@@ -6548,12 +6579,19 @@ class RunSwitchOperationService:
             )
             if not plan.allowed:
                 progress = dict(payload["progress"])
-                due = _next_replan(job.id, progress, now)
+                blocked = "; ".join(reason.code for reason in plan.blockers[:8])
+                _ADAPTER.retry(
+                    job,
+                    progress,
+                    blocked,
+                    now,
+                    visible="waiting",
+                    record_reason=False,
+                    describe=lambda due: (
+                        f"{blocked}; next re-plan at {due.isoformat()}"
+                    ),
+                )
                 job.result = _persisted_result(progress)
-                job.status_reason = (
-                    "; ".join(reason.code for reason in plan.blockers[:8])
-                    + f"; next re-plan at {due.isoformat()}"
-                )[:512]
             session.add(job)
             session.flush()
             return self._operation_view(job)
@@ -6754,11 +6792,10 @@ class RunSwitchOperationService:
                 # The last refusal stays on record: if a fresh plan meets the
                 # same refusal again, ``_fail`` retries in place and counts it.
                 progress.pop("failed_phase", None)
-                current.state = "queued"
-                current.status_reason = None
+                _ADAPTER.project(
+                    current, progress, now, state=_LifecycleState.QUEUED, reason=None
+                )
             else:
-                due = _next_replan(current.id, progress, now)
-                current.state = "waiting"
                 reasons = (
                     "run-switch.plan-targets-changed"
                     if targets_changed
@@ -6766,9 +6803,17 @@ class RunSwitchOperationService:
                     if refreshed is not None
                     else "run-switch.plan-refresh-unavailable"
                 )
-                current.status_reason = f"{reasons}; next re-plan at {due.isoformat()}"[
-                    :512
-                ]
+                _ADAPTER.retry(
+                    current,
+                    progress,
+                    reasons,
+                    now,
+                    visible="waiting",
+                    record_reason=False,
+                    describe=lambda due: (
+                        f"{reasons}; next re-plan at {due.isoformat()}"
+                    ),
+                )
             current.result = _persisted_result(progress)
             current.payload = {**current.payload, "progress": progress}
             current.payload_digest = _digest(current.payload)
@@ -6844,36 +6889,61 @@ class RunSwitchOperationService:
                     and now < _aware(datetime.fromisoformat(pending_due))
                 ):
                     return False
-                due = _next_replan(job.id, progress, now)
-                job.state = "waiting"
-                job.status_reason = (
-                    "Waiting for a target Spark to return to active state; "
-                    f"next check at {due.isoformat()}"
-                )[:512]
+                _ADAPTER.retry(
+                    job,
+                    progress,
+                    "run-switch.target-not-active",
+                    now,
+                    visible="waiting",
+                    record_reason=False,
+                    describe=lambda due: (
+                        "Waiting for a target Spark to return to active state; "
+                        f"next check at {due.isoformat()}"
+                    ),
+                )
                 job.result = _persisted_result(progress)
                 job.updated_at = now
                 session.commit()
                 return True
             if intent_status == "superseded":
-                job.state = "cancelled"
-                job.status_reason = (
-                    "run-switch.superseded: the logical order was cancelled by "
-                    "a later authorized Spark intent; issued effects still "
-                    "require their own cancellation receipts"
+                _ADAPTER.cancelled(
+                    job,
+                    progress,
+                    now,
+                    reason=(
+                        "run-switch.superseded: the logical order was cancelled by "
+                        "a later authorized Spark intent; issued effects still "
+                        "require their own cancellation receipts"
+                    ),
+                    effect=_LifecycleEffect.UNKNOWN,
                 )
-                progress["retryable"] = False
                 job.result = _persisted_result(progress)
                 job.updated_at = now
                 session.commit()
                 return True
-            if (
+            if progress.get("observation_due_at") is None and (
                 job.state == "waiting-for-operator"
-                and progress.get("observation_due_at") is None
+                or (
+                    job.state == "waiting"
+                    and not progress.get("child_operation_id")
+                    and progress.get("phase") != "final_verify"
+                )
             ):
-                return False
+                # A wait nothing will ever end: a legacy ``waiting-for-operator``
+                # (no Run/Switch action exists) or a ``waiting`` with no clock.
+                # Rules 1 and 3: it is retried, never left for a person.
+                _ADAPTER.heal(job, progress, now)
+                job.result = _persisted_result(progress)
+                session.commit()
+                return True
             observation_due = progress.get("observation_due_at")
-            if isinstance(observation_due, str) and now < _aware(
-                datetime.fromisoformat(observation_due)
+            if (
+                isinstance(observation_due, str)
+                and now < _aware(datetime.fromisoformat(observation_due))
+                # A cancel in flight looks at its child on every pass, so it ends
+                # as soon as the child does; only the stop attempts are spaced
+                # (by the core), never the observation.
+                and not progress.get("cancellation")
             ):
                 return False
             raw_phase_index = progress.get("phase_index", 0)
@@ -6893,15 +6963,20 @@ class RunSwitchOperationService:
                         job.state == "waiting" and isinstance(observation_due, str)
                     ):
                         return False
-                    job.state = "running"
-                    if progress.get("phase") != "final_verify":
-                        job.status_reason = None
-                    job.updated_at = now
+                    _ADAPTER.project(
+                        job,
+                        None,
+                        now,
+                        state=_LifecycleState.RUNNING,
+                        reason=_KEEP_REASON
+                        if progress.get("phase") == "final_verify"
+                        else None,
+                    )
                     session.commit()
                 else:
                     # Only observe the already-issued child. No new effect is
                     # authorized by reopening this parent's observation checkpoint.
-                    job.state = "running"
+                    _ADAPTER.project(job, None, now, state=_LifecycleState.RUNNING)
                     session.commit()
             if progress.get("cancellation") and child_id is None:
                 _complete_cancellation(job, progress, now)
@@ -6933,9 +7008,7 @@ class RunSwitchOperationService:
                 or raw_phase_index < 0
                 or raw_item_index < 0
             ):
-                job.state = "failed"
-                job.status_reason = "run-switch persisted progress is invalid"
-                job.updated_at = now
+                _ADAPTER.reject(job, "run-switch persisted progress is invalid", now)
                 session.commit()
                 return True
             # Declare the validated integers so the checkpoint closure below
@@ -6943,9 +7016,8 @@ class RunSwitchOperationService:
             phase_index: int = raw_phase_index
             item_index: int = raw_item_index
             if phase_index >= len(plan.phases):
-                job.state = "succeeded"
-                job.status_reason = None
                 progress = _complete_operation_progress(plan, progress)
+                _ADAPTER.succeed(job, progress, now)
                 job.result = _persisted_result(progress)
                 job.updated_at = now
                 session.commit()
@@ -6986,31 +7058,35 @@ class RunSwitchOperationService:
         def fail(
             reason: str,
             *,
-            retryable: bool = False,
             failure_code: str | None = None,
             replan: bool = False,
+            clear_child: bool = False,
+            definite: bool = False,
         ) -> None:
             self._fail(
                 operation_id,
                 reason,
-                retryable=retryable,
+                definite=definite,
                 replan=replan,
                 checkpoint=(phase_index, item_index, child_id),
                 failure_code=failure_code,
                 checkpoint_guard=checkpoint_job,
+                clear_child=clear_child,
             )
 
         if child_id is not None:
             if not isinstance(child_id, str):
-                fail("run-switch child operation identity is invalid")
+                # Bookkeeping: the child is looked up again by the phase's
+                # deterministic identity, which reconciles what it issued.
+                fail("run-switch child operation identity is invalid", clear_child=True)
                 return True
             try:
                 child = self._get_child_operation(child_id)
             except KeyError:
-                fail("run-switch child operation disappeared")
+                fail("run-switch child operation disappeared", clear_child=True)
                 return True
             if child is None:
-                fail("run-switch child operation disappeared")
+                fail("run-switch child operation disappeared", clear_child=True)
                 return True
             if child.state in {"queued", "running"}:
                 child_progress = _child_progress_payload(child)
@@ -7042,6 +7118,17 @@ class RunSwitchOperationService:
                     )
                     progress["phase"] = persisted_phase.kind
                     progress["subphase"] = persisted_phase.subphase
+                    if progress.get("cancellation"):
+                        # A cancel is driven, not waited for: the child is stopped
+                        # when it can be and observed at the core's bounded rate,
+                        # and the cancel ends within the stop budget either way.
+                        if self._cancel_with_session(
+                            session, job, progress, now, tick=True
+                        ):
+                            job.result = _persisted_result(progress)
+                            job.updated_at = now
+                            return True
+                        return False
                     retry_due_at = getattr(child, "retry_due_at", None)
                     if child.state == "queued" and isinstance(retry_due_at, datetime):
                         progress["observation_due_at"] = _aware(
@@ -7060,8 +7147,13 @@ class RunSwitchOperationService:
                         == _without_observation_time(original)
                     ):
                         return False
-                    job.state = "running"
-                    job.status_reason = status_reason
+                    _ADAPTER.project(
+                        job,
+                        progress,
+                        now,
+                        state=_LifecycleState.RUNNING,
+                        reason=status_reason,
+                    )
                     job.result = _persisted_result(progress)
                     job.updated_at = now
                 return True
@@ -7128,17 +7220,23 @@ class RunSwitchOperationService:
                             job, progress, phase_index, item_index, child_id
                         ):
                             return False
-                        job.state = "waiting"
-                        due = now + timedelta(seconds=60)
-                        progress["observation_due_at"] = due.isoformat()
+                        child_reason = (
+                            getattr(child, "status_reason", None)
+                            or "Lifecycle effect is uncertain; exact child remains pending"
+                        )[:400]
+                        _ADAPTER.retry(
+                            job,
+                            progress,
+                            child_reason,
+                            now,
+                            visible="waiting",
+                            record_reason=False,
+                            describe=lambda due: (
+                                f"{child_reason}; next exact observation at "
+                                f"{due.isoformat()}"
+                            ),
+                        )
                         job.result = _persisted_result(progress)
-                        job.status_reason = (
-                            (
-                                getattr(child, "status_reason", None)
-                                or "Lifecycle effect is uncertain; exact child remains pending"
-                            )[:400]
-                            + f"; next exact observation at {due.isoformat()}"
-                        )[:512]
                         job.updated_at = now
                     return True
                 else:
@@ -7228,15 +7326,10 @@ class RunSwitchOperationService:
                             if isinstance(receipt, Mapping)
                         )
                     except RunSwitchOperationConflict as error:
-                        # The child succeeded; re-issuing it would repeat its
-                        # effects, so a receipt that does not validate fails.
-                        self._mark_failed(
-                            job,
-                            str(error),
-                            now=now,
-                            progress=progress,
-                            failure_code="run-switch.receipt_invalid",
-                        )
+                        # A receipt that does not validate is an unknown, not a
+                        # failure: the idempotent child is issued again under a
+                        # new identity and its fresh receipt is validated.
+                        self._settle_invalid_receipt(job, error, now, reissue=True)
                         return True
                     progress["phase_results"] = results
                 if phase.subphase == "container-build":
@@ -7247,17 +7340,10 @@ class RunSwitchOperationService:
                             expected_image=expected_image,
                         )
                     except RunSwitchOperationConflict as error:
-                        # A succeeded child already produced its effects. A receipt that
-                        # does not validate is an integrity failure; re-issuing the child
-                        # would repeat those effects on the Spark.
-                        self._mark_failed(
-                            job,
-                            str(error),
-                            now=now,
-                            progress=progress,
-                            failure_code=error_code(error)
-                            or "run-switch.receipt_invalid",
-                        )
+                        # The build's receipt is read from the Controller's own
+                        # records, which may not be complete yet: observe it
+                        # again without issuing the build a second time.
+                        self._settle_invalid_receipt(job, error, now, reissue=False)
                         return True
                     results = list(
                         require_sequence(
@@ -7281,17 +7367,10 @@ class RunSwitchOperationService:
                             expected_image=expected_image,
                         )
                     except RunSwitchOperationConflict as error:
-                        # A succeeded child already produced its effects. A receipt that
-                        # does not validate is an integrity failure; re-issuing the child
-                        # would repeat those effects on the Spark.
-                        self._mark_failed(
-                            job,
-                            str(error),
-                            now=now,
-                            progress=progress,
-                            failure_code=error_code(error)
-                            or "run-switch.receipt_invalid",
-                        )
+                        # A receipt that does not validate is an unknown, not a
+                        # failure: the idempotent child is issued again under a
+                        # new identity and its fresh receipt is validated.
+                        self._settle_invalid_receipt(job, error, now, reissue=True)
                         return True
                 if (
                     child_receipts is None
@@ -7304,17 +7383,10 @@ class RunSwitchOperationService:
                     try:
                         receipt = _phase_result(child_result, phase=phase)
                     except RunSwitchOperationConflict as error:
-                        # A succeeded child already produced its effects. A receipt that
-                        # does not validate is an integrity failure; re-issuing the child
-                        # would repeat those effects on the Spark.
-                        self._mark_failed(
-                            job,
-                            str(error),
-                            now=now,
-                            progress=progress,
-                            failure_code=error_code(error)
-                            or "run-switch.receipt_invalid",
-                        )
+                        # A receipt that does not validate is an unknown, not a
+                        # failure: the idempotent child is issued again under a
+                        # new identity and its fresh receipt is validated.
+                        self._settle_invalid_receipt(job, error, now, reissue=True)
                         return True
                     progress["phase_results"] = [
                         *require_sequence(
@@ -7347,7 +7419,7 @@ class RunSwitchOperationService:
                     )
                 else:
                     progress["item_index"] = item_index
-                job.state = "running"
+                _ADAPTER.project(job, progress, now, state=_LifecycleState.RUNNING)
                 job.result = _persisted_result(progress)
                 job.updated_at = now
                 if progress.get("cancellation"):
@@ -7363,7 +7435,7 @@ class RunSwitchOperationService:
             if progress.get("cancellation"):
                 _complete_cancellation(job, progress, now)
                 return True
-            job.state = "running"
+            _ADAPTER.project(job, None, now, state=_LifecycleState.RUNNING)
             phase_index = require_integer(progress.get("phase_index", 0), "phase index")
             item_index = require_integer(progress.get("item_index", 0), "item index")
             if phase_index >= len(plan.phases):
@@ -7388,7 +7460,7 @@ class RunSwitchOperationService:
                     plan, phase, actor=actor, request_key=request_key, progress=progress
                 )
             except (RuntimeError, ValueError, KeyError) as error:
-                fail(str(error))
+                fail(str(error), failure_code=error_code(error), replan=True)
                 return True
             if checkpoint is not None:
                 with self._sessions.begin() as session:
@@ -7407,7 +7479,19 @@ class RunSwitchOperationService:
                         else None
                     )
                     if blocked:
-                        self._mark_failed(job, blocked, now=now, progress=current)
+                        # Runtime evidence that says "not now" (a full disk, a
+                        # missing prerequisite) is observed again at the core's
+                        # backoff, with a re-plan before any Start could have
+                        # launched: the request stays accepted and recovers when
+                        # the cause clears, instead of ending the load.
+                        current["force_replan"] = (
+                            "start"
+                            not in require_sequence(
+                                current.get("completed_phases", []), "completed phases"
+                            )
+                            and current.get("phase") != "start"
+                        )
+                        self._schedule_checkpoint_retry(job, current, blocked, now)
                         return True
                     if checkpoint.pending_job_id:
                         current["operation"] = observe_progress(
@@ -7426,7 +7510,7 @@ class RunSwitchOperationService:
         if phase.state in {"skipped", "retained"}:
             execution = PhaseExecution()
         elif phase.state == "blocked":
-            fail(f"run-switch phase blocked: {phase.kind}")
+            fail(f"run-switch phase blocked: {phase.kind}", replan=True)
             return True
         elif self._phase_executor is None:
             fail(f"run-switch phase executor unavailable: {phase.kind}")
@@ -7473,17 +7557,19 @@ class RunSwitchOperationService:
                 )
             except RunSwitchOperationConflict as error:
                 code = error_code(error)
-                # Final verification checks effects that already happened. A
-                # mismatch (wrong image, missing member) is refused rather than
-                # hidden behind endless retries; other conflicts re-plan.
-                retryable = phase.kind != "final_verify" and not is_security_failure(
-                    code
-                )
+                # Bookkeeping becomes unknown, then reconcile: a conflict that is
+                # not a security refusal is observed again by re-entering the
+                # same idempotent phase.  That includes final verification: a
+                # check that cannot be observed (wrong image, missing member) is
+                # not proof that the workload failed, so it is looked at again,
+                # visibly (the retry names the cause and attempt), until it
+                # holds, a newer intent supersedes it, or the load is cancelled.
+                # A re-plan is only for planning drift before a Start could have
+                # launched, never for a final verification of a live workload.
                 fail(
                     str(error),
-                    retryable=retryable,
                     failure_code=code,
-                    replan=retryable,
+                    replan=phase.kind != "final_verify",
                 )
                 return True
             except RuntimeImagePreparationError as error:
@@ -7502,10 +7588,13 @@ class RunSwitchOperationService:
                     )
                 # Bytes that failed their digest are refused and fetched again
                 # by the ordinary preparation retry, with exponential backoff.
+                # The preparation owner types its own verdict: an invalid archive
+                # or identity is not retried, a transient failure and a digest
+                # that is fetched again are.
                 fail(
                     f"{type(error).__name__}: {error}",
-                    retryable=error.retryable or is_redownload(error.code),
                     failure_code=error.code,
+                    definite=not (error.retryable or is_redownload(error.code)),
                 )
                 return True
             except (
@@ -7519,10 +7608,7 @@ class RunSwitchOperationService:
                 detail = f"{type(error).__name__}: {error}"
                 fail(
                     detail,
-                    retryable=(
-                        not is_security_failure(error_code(error))
-                        and _transient_distribution_exception(error)
-                    ),
+                    failure_code=_failure_code_of(error),
                     replan=isinstance(error, (RuntimeError, ValueError)),
                 )
                 return True
@@ -7532,7 +7618,7 @@ class RunSwitchOperationService:
             and phase.kind != "final_verify"
             and not (phase.kind == "prepare" and phase.subphase == "runtime-image")
         ):
-            fail(f"run-switch.{phase.kind}-waiting-without-child")
+            fail(f"run-switch.{phase.kind}-waiting-without-child", replan=True)
             return True
         if (
             execution.operation_id is None
@@ -7547,9 +7633,12 @@ class RunSwitchOperationService:
                     plan, phase, execution.result, expected_image=expected_image
                 )
             except RunSwitchOperationConflict as error:
-                # Completed work whose receipt does not validate is refused;
-                # repeating the identical execution cannot repair it.
-                fail(str(error), failure_code=error_code(error))
+                # Completed work whose receipt does not validate is not proof
+                # that the work failed: its effect is unknown.  Entering the
+                # same idempotent phase again observes it (a transfer or verify
+                # re-reads the bytes; a cleanup re-reads the reclaim evidence),
+                # and a re-plan drops stale evidence.  Never terminal.
+                fail(str(error), failure_code=error_code(error), replan=True)
                 return True
         with self._sessions.begin() as session:
             job = checkpoint_job(session)
@@ -7677,7 +7766,14 @@ class RunSwitchOperationService:
                             f"{owner_reason[:220]}; exact reconciliation retains the "
                             f"run and reservations; next observation at {due.isoformat()}"
                         )[:512]
-                        job.state = "waiting"
+                        _ADAPTER.project(
+                            job,
+                            progress,
+                            now,
+                            state=_LifecycleState.OBSERVING,
+                            due=due,
+                            visible="waiting",
+                        )
                         if not (
                             isinstance(previous_status_reason, str)
                             and previous_status_reason.startswith(
@@ -7718,7 +7814,14 @@ class RunSwitchOperationService:
                         "Runtime image preparation is running in the background; "
                         f"next check at {due.isoformat()}"
                     )
-                    job.state = "waiting"
+                    _ADAPTER.project(
+                        job,
+                        progress,
+                        now,
+                        state=_LifecycleState.OBSERVING,
+                        due=due,
+                        visible="waiting",
+                    )
             elif execution.operation_id is not None:
                 progress["child_operation_id"] = execution.operation_id
                 progress["phase"] = phase.kind
@@ -7761,17 +7864,10 @@ class RunSwitchOperationService:
                             session, plan, expected_image=expected_image
                         )
                     except RunSwitchOperationConflict as error:
-                        # A succeeded child already produced its effects. A receipt that
-                        # does not validate is an integrity failure; re-issuing the child
-                        # would repeat those effects on the Spark.
-                        self._mark_failed(
-                            job,
-                            str(error),
-                            now=now,
-                            progress=progress,
-                            failure_code=error_code(error)
-                            or "run-switch.receipt_invalid",
-                        )
+                        # The build's receipt is read from the Controller's own
+                        # records, which may not be complete yet: observe it
+                        # again without issuing the build a second time.
+                        self._settle_invalid_receipt(job, error, now, reissue=False)
                         return True
                     results = list(
                         require_sequence(
@@ -7812,7 +7908,7 @@ class RunSwitchOperationService:
                 and phase.kind == "prepare"
                 and phase.subphase == "runtime-image"
             ):
-                job.state = "running"
+                _ADAPTER.project(job, progress, now, state=_LifecycleState.RUNNING)
             job.result = _persisted_result(progress)
             job.updated_at = now
             if progress.get("cancellation") and not progress.get("child_operation_id"):
@@ -7896,22 +7992,31 @@ class RunSwitchOperationService:
                 # failed runtime. Preserve the exact child and reservations;
                 # its owner alone can reconcile or retry the uncertain effect.
                 progress["observation_deadline_at"] = deadline.isoformat()
-                due = now + timedelta(seconds=60)
-                progress["observation_due_at"] = due.isoformat()
-                job.state = "waiting"
-                job.status_reason = (
-                    "run-switch.start-observation-expired: exact effect remains "
-                    f"unresolved; next observation at {due.isoformat()}"
+                _ADAPTER.retry(
+                    job,
+                    progress,
+                    "run-switch.start-observation-expired",
+                    now,
+                    visible="waiting",
+                    record_reason=False,
+                    describe=lambda due: (
+                        "run-switch.start-observation-expired: exact effect remains "
+                        f"unresolved; next observation at {due.isoformat()}"
+                    ),
                 )
                 job.result = _persisted_result(progress)
                 job.updated_at = now
                 return True
             progress["observation_deadline_at"] = deadline.isoformat()
-            progress["observation_due_at"] = min(
-                deadline, now + timedelta(seconds=5)
-            ).isoformat()
-            job.state = "running"
-            job.status_reason = "Start result uncertain; observing the existing run."
+            _ADAPTER.project(
+                job,
+                progress,
+                now,
+                state=_LifecycleState.OBSERVING,
+                due=min(deadline, now + timedelta(seconds=5)),
+                visible="running",
+                reason="Start result uncertain; observing the existing run.",
+            )
             job.result = _persisted_result(progress)
             job.updated_at = now
         return True
@@ -7946,12 +8051,18 @@ class RunSwitchOperationService:
                     max(now + timedelta(seconds=5), _aware(pending.observe_due_at)),
                 )
             )
-            progress["observation_due_at"] = due.isoformat()
             progress["observation_deadline_at"] = deadline.isoformat()
-            job.state = "running"
-            job.status_reason = (
-                f"Observing older {pending.kind} operation {pending.job_id}; "
-                f"effect unresolved, next observation at {due.isoformat()}"
+            _ADAPTER.project(
+                job,
+                progress,
+                now,
+                state=_LifecycleState.OBSERVING,
+                due=due,
+                visible="running",
+                reason=(
+                    f"Observing older {pending.kind} operation {pending.job_id}; "
+                    f"effect unresolved, next observation at {due.isoformat()}"
+                ),
             )
             job.result = _persisted_result(progress)
             job.updated_at = now
@@ -7989,19 +8100,25 @@ class RunSwitchOperationService:
                     and progress.get("retry_attempt") is not None
                     else 1
                 )
-                delay_seconds = min(300, 5 * (2 ** min(attempt - 1, 6)))
-                due = now + timedelta(seconds=delay_seconds)
-                progress["retry_attempt"] = attempt + 1
-                progress["retry_reason"] = reason
-                progress["observation_due_at"] = due.isoformat()
-                progress["observation_deadline_at"] = due.isoformat()
-                job.state = "running"
-                job.status_reason = (
-                    detail or "Admission is waiting for the Controller capacity writer"
-                ) + (
-                    f"; admission retry {attempt} in {delay_seconds}s "
-                    f"at {due.isoformat()}."
+                _ADAPTER.retry(
+                    job,
+                    progress,
+                    reason,
+                    now,
+                    reset_on_change=True,
+                    describe=lambda due: (
+                        (
+                            detail
+                            or "Admission is waiting for the Controller capacity writer"
+                        )
+                        + (
+                            f"; admission retry {attempt} in "
+                            f"{max(int((due - now).total_seconds()), 1)}s "
+                            f"at {due.isoformat()}."
+                        )
+                    ),
                 )
+                progress["observation_deadline_at"] = progress.get("observation_due_at")
                 job.result = _persisted_result(progress)
                 job.updated_at = now
         return True
@@ -8076,6 +8193,51 @@ class RunSwitchOperationService:
             )
         return True
 
+    def _stop_child(self, session: Session, job: Job, now: datetime) -> bool:
+        """The adapter's idempotent stop: whether nothing of the child still runs.
+
+        A child that already ended, or a parked idempotent one that can be closed
+        (its copied bytes stay on the Spark), is stopped.  A running child is
+        observed, not aborted: its own lifecycle owns it, and the core's stop budget
+        ends the cancel either way.
+        """
+
+        result = job.result
+        child_id = (
+            result.get("child_operation_id") if isinstance(result, Mapping) else None
+        )
+        if not isinstance(child_id, str) or not child_id:
+            return True
+        try:
+            child = self._get_child_operation(child_id)
+        except KeyError:
+            return True  # nothing is left to stop
+        if child is None or child.state in _TERMINAL_STATES:
+            return True
+        if child.state == "waiting-for-operator":
+            return self._abandon_idempotent_child(session, child_id, now)
+        return False
+
+    def _cancel_with_session(
+        self,
+        session: Session,
+        job: Job,
+        progress: dict[str, Any],
+        now: datetime,
+        *,
+        tick: bool = False,
+    ) -> bool:
+        """Drive a recorded cancel through the core (rule 4); it always completes.
+
+        Returns whether the cancel moved (a tick that is not due changes nothing).
+        """
+
+        adapter = RunSwitchAdapter(session, clock=lambda: now, stopper=self._stop_child)
+        if tick:
+            return adapter.tick_cancel(job, progress, now)
+        adapter.request_cancel(job, progress, now)
+        return True
+
     def _abandon_idempotent_child(
         self, session: Session, operation_id: str, now: datetime
     ) -> bool:
@@ -8112,13 +8274,26 @@ class RunSwitchOperationService:
         operation_id: str,
         reason: str,
         *,
-        retryable: bool = False,
         replan: bool = False,
         failure_code: str | None = None,
         checkpoint: tuple[int, int, object] | None = None,
         child_evidence: object | None = None,
         checkpoint_guard: Callable[[Session], Job | None] | None = None,
+        clear_child: bool = False,
+        definite: bool = False,
     ) -> None:
+        """A phase could not be settled.
+
+        Only a real security refusal (``is_security_failure``) is a definite end.
+        Everything else (a receipt that does not validate, a verification that
+        cannot be observed, a missing child, a wiring gap) is an unknown: the same
+        idempotent phase is entered again at the core's bounded backoff, so the
+        failure never ends a load whose bytes and workload are fine.  The caller
+        no longer chooses; the classifier does (``failure_classification``).
+        ``definite`` is only for an owner that typed its own verdict (the image
+        preparation's non-retryable errors: an invalid archive or identity).
+        """
+
         with self._sessions.begin() as session:
             job = (
                 checkpoint_guard(session)
@@ -8142,8 +8317,19 @@ class RunSwitchOperationService:
             if progress.get("cancellation"):
                 if progress.get("child_operation_id") is None:
                     _complete_cancellation(job, progress, now)
-                    return
-            elif retryable and checkpoint is not None and checkpoint[2] is None:
+                else:
+                    # A failure under a cancel is not the end of it: the cancel is
+                    # driven (the child stopped, observed up to the budget).
+                    self._cancel_with_session(session, job, progress, now, tick=True)
+                    job.result = _persisted_result(progress)
+                    job.updated_at = now
+                return
+            elif (
+                not definite
+                and not is_security_failure(failure_code)
+                and checkpoint is not None
+                and (checkpoint[2] is None or clear_child)
+            ):
                 # Re-enter the current phase with the same accepted intent and
                 # deterministic child identity. The executor reconciles any
                 # issued effect before it retries; the parent never replaces a
@@ -8163,31 +8349,58 @@ class RunSwitchOperationService:
                     )
                     and progress.get("phase") != "start"
                 )
+                if clear_child:
+                    progress["child_operation_id"] = None
                 self._schedule_checkpoint_retry(job, progress, reason, now)
                 return
             self._mark_failed(
                 job,
                 reason,
                 now=now,
-                retryable=retryable,
                 failure_code=failure_code,
                 progress=progress,
             )
+
+    @staticmethod
+    def _settle_invalid_receipt(
+        job: Job, error: RunSwitchOperationConflict, now: datetime, *, reissue: bool
+    ) -> None:
+        """A receipt did not validate inside the checkpoint transaction (rule 5).
+
+        Its effect is unknown, so the phase is entered again at the core's backoff:
+        an idempotent child is issued again under a new identity (``reissue``), a
+        receipt read from the Controller's own records is simply observed again.
+        Only a reviewed destructive-effect or digest guard ends the operation.
+        The progress is re-read, so nothing half-merged from the invalid receipt is
+        kept.
+        """
+
+        code = error_code(error)
+        progress = _read_progress(job.result)
+        if is_security_failure(code):
+            RunSwitchOperationService._mark_failed(
+                job, str(error), now=now, progress=progress, failure_code=code
+            )
+            return
+        if reissue:
+            progress["child_operation_id"] = None
+            progress["phase_retry_generation"] = (
+                require_integer(
+                    progress.get("phase_retry_generation") or 0,
+                    "phase retry generation",
+                )
+                + 1
+            )
+        RunSwitchOperationService._schedule_checkpoint_retry(
+            job, progress, str(error), now
+        )
 
     @staticmethod
     def _schedule_checkpoint_retry(
         job: Job, progress: dict[str, Any], reason: str, now: datetime
     ) -> None:
         """Wait at the exact checkpoint without replacing accepted intent."""
-        attempt = require_integer(progress.get("retry_attempt") or 1, "retry attempt")
-        due = RecoveryPolicy().next_attempt(job.id, attempt, now, ongoing_intent=True)
-        assert due is not None
-        progress["retry_attempt"] = attempt + 1
-        progress["retry_reason"] = reason[:512]
-        progress["observation_due_at"] = due.isoformat()
-        progress["retryable"] = False
-        job.state = "running"
-        job.status_reason = f"{reason[:400]}; next attempt at {due.isoformat()}"[:512]
+        _ADAPTER.retry(job, progress, reason, now)
         job.result = _persisted_result(progress)
         job.updated_at = now
 
@@ -8203,16 +8416,16 @@ class RunSwitchOperationService:
     ) -> None:
         """Record failure using the caller's transaction and existing row lock."""
 
-        job.state = "failed"
-        job.status_reason = reason[:512]
         if progress is None:
             progress = _read_progress(job.result)
-        progress["failed_phase"] = progress.get("phase")
-        progress["retryable"] = retryable
-        if failure_code is None:
-            progress.pop("failure_code", None)
-        else:
-            progress["failure_code"] = failure_code
+        _ADAPTER.fail(
+            job,
+            progress,
+            reason,
+            now,
+            failure_code=failure_code,
+            retryable=retryable,
+        )
         job.result = _persisted_result(progress)
         job.updated_at = now
 
@@ -9070,45 +9283,16 @@ def _start_still_progressing(
     )
 
 
-def _transient_distribution_exception(error: BaseException) -> bool:
+def _failure_code_of(error: BaseException) -> str | None:
+    """The code ``fail`` classifies: an authentication refusal from a dependency
+    (HTTP 401/403) is a real security boundary and the only terminal case; every
+    other error is an unknown that is observed again."""
+
     if isinstance(error, httpx2.HTTPError):
-        response = getattr(error, "response", None)
-        status = getattr(response, "status_code", None)
-        if type(status) is int:
-            return status == 429 or status >= 500
-        return isinstance(error, (httpx2.TimeoutException, httpx2.ConnectError))
-    if isinstance(error, OSError):
-        return getattr(error, "errno", None) in {
-            errno.ECONNRESET,
-            errno.ECONNREFUSED,
-            errno.EHOSTUNREACH,
-            errno.ENETUNREACH,
-            errno.ETIMEDOUT,
-            errno.EPIPE,
-        }
-    if isinstance(error, (RuntimeError, ValueError)):
-        return not is_security_failure(error_code(error))
-    return False
-
-
-_REPLAN_POLICY = RecoveryPolicy(max_delay_seconds=300)
-
-
-def _next_replan(
-    operation_id: str, progress: dict[str, Any], now: datetime
-) -> datetime:
-    """Schedule the next re-plan with exponential backoff capped at 5 minutes.
-
-    The attempt count is reset whenever a phase completes or a re-plan is
-    accepted, so a long-lived intent backs off only while it makes no progress.
-    """
-
-    attempt = require_integer(progress.get("retry_attempt") or 1, "retry attempt")
-    due = _REPLAN_POLICY.next_attempt(operation_id, attempt, now, ongoing_intent=True)
-    assert due is not None
-    progress["retry_attempt"] = attempt + 1
-    progress["observation_due_at"] = due.isoformat()
-    return due
+        status = getattr(getattr(error, "response", None), "status_code", None)
+        if status in {401, 403}:
+            return str(status)
+    return error_code(error)
 
 
 def _same_intent(existing: Job, intent: Mapping[str, object] | None) -> bool:
@@ -9218,13 +9402,13 @@ def _progress_member_entries(value: object) -> list[Mapping[str, object]]:
 def _complete_cancellation(
     job: Job, progress: dict[str, object], now: datetime
 ) -> None:
-    job.state = "cancelled"
-    cancellation = _progress_mapping(progress.get("cancellation"))
-    if cancellation is None:
-        raise RunSwitchOperationConflict("run-switch cancellation evidence is invalid")
-    job.status_reason = _string_or_none(cancellation.get("reason"))
-    progress["child_operation_id"] = None
-    progress["retryable"] = False
+    """End a cancelled operation: the child's phase ended (or none was issued).
+
+    A cancellation record that cannot be read does not refuse the cancel: the
+    operation still ends ``cancelled`` (rule 4), just without the requester's text.
+    """
+
+    _ADAPTER.cancelled(job, progress, now, reason=None)
     job.result = _persisted_result(progress)
     job.updated_at = now
 
@@ -9431,7 +9615,7 @@ def _merge_progress_evidence(
             target["phase"] = member_phase
         member_state = _progress_state(item.get("state"))
         if member_state is not None:
-            target["state"] = member_state
+            set_member_state(target, member_state)
         error = item.get("error")
         if isinstance(error, str):
             target["error"] = error[:256]
@@ -9478,7 +9662,7 @@ def _complete_phase_progress(
             item["total_bytes"] = member_total
             item["completed_bytes"] = member_total
         item["phase"] = phase.kind
-        item["state"] = "succeeded"
+        set_member_state(item, "succeeded")
         item["error"] = None
     progress["members"] = list(entries.values())
 
@@ -9503,7 +9687,7 @@ def _complete_operation_progress(
             item["total_bytes"] = member_total
             item["completed_bytes"] = member_total
         item["phase"] = "final_verify"
-        item["state"] = "succeeded"
+        set_member_state(item, "succeeded")
         item["error"] = None
     progress["members"] = list(entries.values())
     progress["phase"] = "final_verify"
@@ -10281,9 +10465,7 @@ def _reject_invalid_operation(job: Job, reason: str, now: datetime) -> None:
     cancellation receipts, so this never claims they were stopped.
     """
 
-    job.state = "failed"
-    job.status_reason = reason[:512]
-    job.updated_at = now
+    _ADAPTER.reject(job, reason, now)
 
 
 __all__ = [

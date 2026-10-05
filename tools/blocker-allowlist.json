@@ -22,7 +22,7 @@
   },
   "max_debt": 16,
   "debt_ceiling": {
-    "total": 499,
+    "total": 408,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "operator_waits": [
@@ -1224,7 +1224,6 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "run-switch-request-key-was-already-used", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "run-switch-retry-request-key-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "run-switch.superseded", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_complete_cancellation", "run-switch-cancellation-evidence-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_require_profile_runtime_image", "profile.runtime-image-changed", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_require_reviewed_plan", "run-switch.stale_plan", 1],
         ["control/src/vonk_control/run_switch_operations.py", "_RunSwitchIncompleteProfileGroupConflict", "RecipeLifecyclePhaseExecutor.execute", "run-switch.profile.incomplete_multi_spark_model", 1]
@@ -1240,9 +1239,9 @@
       ]
     },
     {
-      "family": "runswitch.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping uncertainty (missing receipt, stale stored plan, persisted state, changed scope) that rule 5 of the lifecycle core turns into unknown-then-reconcile. Debt: the ceiling only falls. Audit notes: Phase receipt/bookkeeping validation. Raised from _validate_artifact_execution and ends the load terminally (fail(..) without retryable). Executor/adapter unavailable, persisted state invalid, installation identity changed; retried via checkpoint (replan) unless security code. Verification after the effect; final_verify is intentionally non-retryable so a mismatch ends the load. Container-build plan/receipt/executor unavailable; retried by checkpoint except final_verify.",
+      "family": "runswitch.phase-retried",
+      "category": "already-retried",
+      "reason": "Raised on the phase-advance path of a Run/Switch operation. A conflict that is not a reviewed security edge is caught at the phase checkpoint (fail -> the lifecycle core's bounded backoff, the same idempotent phase entered again) or, outside it, by the tick guard (_hold_after_advance_failure, same clock). Bookkeeping becomes unknown, then reconcile; a final verification that cannot be observed is observed again, never declared failed. Covered by test_run_switch_lifecycle.",
       "sites": [
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RecipeLifecyclePhaseExecutor._bound_installation", "run-switch.installation-identity-changed", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RecipeLifecyclePhaseExecutor._bound_installation", "run-switch.installation-membership-changed", 1],
@@ -1286,29 +1285,14 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RecipeLifecyclePhaseExecutor.execute", "run-switch.uninstall-start-failed", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RecipeLifecyclePhaseExecutor.execute", "run-switch.uninstall_target_unavailable", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RecipeLifecyclePhaseExecutor.preflight", "run-switch.preflight-recipe-changed", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService._apply_plan", "message", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService._apply_plan", "run-switch-target-spark-scope-changed", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService._refresh_blocked_plan", "run-switch-intent-is-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.bind_model_cache", "run-switch.artifact-inspector-does-not-support-model-cache", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.cancel", "message", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.cancel", "run-switch-active-intent-has-no-run-identity-to-stop", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.preview_stop", "run-switch.lifecycle-unavailable", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.preview_stop", "run-switch.profile_stop_scope_changed", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.preview_stop", "run-switch.run-plan-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.recheck_resources_in_session", "run-switch.recipe_unresolved", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "message", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "run-switch-retry-runtime-image-reference-is-invalid", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_bound_workload_intent", "run-switch-workload-intent-is-unbound", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_build_receipt_in_session", "run-switch.container-build-receipt-unavailable", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_container_build_result", "run-switch.container-build-evidence-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_load_plan", "run-switch-persisted-plan-is-invalid", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_lock_current_build_parent", "run-switch.container-build-parent-invalid", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_lock_current_build_parent", "run-switch.container-build-plan-invalid", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_parse_persisted_result", "run-switch-persisted-result-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_phase_result", "run-switch-phase-receipt-is-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_progress_view", "run-switch-operation-has-no-target-members", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_required_string", "run-switch-persisted-identity-is-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_reserve_run_switch_assets", "message", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_started_operation_id", "run-switch-child-operation-identity-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_validate_artifact_execution", "run-switch", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_validate_artifact_execution", "run-switch.artifact-verification-result-invalid", 1],
@@ -1325,6 +1309,34 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_validate_artifact_execution", "run-switch.runtime-image-preparation-receipt-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_validate_artifact_execution", "run-switch.transfer-byte-evidence-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RuntimeImagePreparationError", "_persist_run_switch_runtime_image_reference", "message", 1]
+      ]
+    },
+    {
+      "family": "runswitch.submit-time",
+      "category": "input-validation",
+      "reason": "Raised while a request is accepted, cancelled or retried (the request key, the reviewed scope, an operation that is not in a state the request applies to). No operation is ended by it: the request is refused and the caller reads the reason. Nothing in flight dead-ends.",
+      "sites": [
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService._apply_plan", "message", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService._apply_plan", "run-switch-target-spark-scope-changed", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.cancel", "message", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.preview_stop", "run-switch.profile_stop_scope_changed", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "message", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "run-switch-retry-runtime-image-reference-is-invalid", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_reserve_run_switch_assets", "message", 1]
+      ]
+    },
+    {
+      "family": "runswitch.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping uncertainty (missing receipt, stale stored plan, persisted state, changed scope) that rule 5 of the lifecycle core turns into unknown-then-reconcile. Debt: the ceiling only falls. Audit notes: Phase receipt/bookkeeping validation. Raised from _validate_artifact_execution and ends the load terminally (fail(..) without retryable). Executor/adapter unavailable, persisted state invalid, installation identity changed; retried via checkpoint (replan) unless security code. Verification after the effect; final_verify is intentionally non-retryable so a mismatch ends the load. Container-build plan/receipt/executor unavailable; retried by checkpoint except final_verify.",
+      "sites": [
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.bind_model_cache", "run-switch.artifact-inspector-does-not-support-model-cache", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.preview_stop", "run-switch.lifecycle-unavailable", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.preview_stop", "run-switch.run-plan-invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.recheck_resources_in_session", "run-switch.recipe_unresolved", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_load_plan", "run-switch-persisted-plan-is-invalid", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_parse_persisted_result", "run-switch-persisted-result-is-invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_progress_view", "run-switch-operation-has-no-target-members", 1]
       ]
     }
   ]
