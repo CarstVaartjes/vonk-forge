@@ -596,3 +596,61 @@ def test_the_adapter_projects_children_through_the_composite_aggregate(
         row = adapter.adopt(job)
         assert adapter.children(row) == ()
         assert adapter.observe(row).effect is Effect.NONE  # nothing was issued
+
+
+def _phase_path_classes(family_name: str) -> set[str]:
+    """The exception classes the allowlist lists for a family on the phase path."""
+
+    document = json.loads(_ALLOWLIST.read_text(encoding="utf-8"))
+    family = next(
+        item for item in document["fail_closed"] if item["family"] == family_name
+    )
+    return {
+        site[1]
+        for site in family["sites"]
+        if site[2].startswith("RecipeLifecyclePhaseExecutor.")
+        or site[2] == "_require_profile_runtime_image"
+    }
+
+
+def test_the_allowlist_category_decides_whether_a_phase_conflict_is_definite() -> None:
+    """The class, tied to the review: on the phase path, an ``input-validation``
+    refusal of the accepted request is a typed definite conflict, and a
+    bookkeeping one (``phase-retried``) is not, so the allowlist and the behaviour
+    cannot drift apart."""
+
+    from vonk_control import run_switch_operations as module
+
+    for name in _phase_path_classes("runswitch.input-validation"):
+        assert getattr(module, name).definite is True, name
+    for name in _phase_path_classes("runswitch.phase-retried"):
+        if name == "RunSwitchOperationConflict" or name.startswith("_RunSwitch"):
+            assert getattr(module, name).definite is False, name
+
+
+def test_a_changed_accepted_image_ends_the_operation_but_a_stop_gap_is_observed(
+    tmp_path: Path,
+) -> None:
+    executor = _ScriptedExecutor()
+    for kind in ("prepare", "transfer", "stop", "verify"):
+        executor.faults[kind] = module_conflict("profile.runtime-image-changed: x")
+    harness = _Harness(tmp_path, executor)
+    for _ in range(3):
+        harness.service.tick()
+    assert harness.view().state == "failed"
+
+    other = _ScriptedExecutor()
+    for kind in ("prepare", "transfer", "stop", "verify"):
+        other.faults[kind] = RunSwitchOperationConflict(
+            "run-switch.stop-still-unresolved-after-cancellation"
+        )
+    (tmp_path / "other").mkdir()
+    retrying = _Harness(tmp_path / "other", other)
+    retrying.service.tick()
+    assert _retrying(retrying.view())
+
+
+def module_conflict(message: str) -> RunSwitchOperationConflict:
+    from vonk_control.run_switch_operations import _RunSwitchDefiniteConflict
+
+    return _RunSwitchDefiniteConflict(message)

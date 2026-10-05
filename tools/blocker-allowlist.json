@@ -1207,8 +1207,7 @@
       "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led). Audit notes: Apply/cancel/retry request is stale, replayed, superseded or blocked by a reviewed plan.",
       "sites": [
         ["control/src/vonk_control/run_switch_operations.py", "RecipeRuntimeSpecError", "RunSwitchOperationService.inspect_candidate", "recipe-has-no-exact-primary-model", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RecipeLifecyclePhaseExecutor.execute", "run-switch.prepare-subphase-unsupported", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RecipeLifecyclePhaseExecutor.execute", "run-switch.stop-still-unresolved-after-cancellation", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RunSwitchDefiniteConflict", "RecipeLifecyclePhaseExecutor.execute", "run-switch.prepare-subphase-unsupported", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService._apply_plan", "run-switch.request_key_reused_differently", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService._apply_plan", "run-switch.superseded", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService._existing_request_operation", "run-switch.request_key_reused_differently", 1],
@@ -1224,7 +1223,7 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "run-switch-request-key-was-already-used", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "run-switch-retry-request-key-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "run-switch.superseded", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_require_profile_runtime_image", "profile.runtime-image-changed", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RunSwitchDefiniteConflict", "_require_profile_runtime_image", "profile.runtime-image-changed", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_require_reviewed_plan", "run-switch.stale_plan", 1],
         ["control/src/vonk_control/run_switch_operations.py", "_RunSwitchIncompleteProfileGroupConflict", "RecipeLifecyclePhaseExecutor.execute", "run-switch.profile.incomplete_multi_spark_model", 1]
       ]
@@ -1308,7 +1307,8 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_validate_artifact_execution", "run-switch.runtime-image-preparation-layout-mismatch", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_validate_artifact_execution", "run-switch.runtime-image-preparation-receipt-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_validate_artifact_execution", "run-switch.transfer-byte-evidence-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RuntimeImagePreparationError", "_persist_run_switch_runtime_image_reference", "message", 1]
+        ["control/src/vonk_control/run_switch_operations.py", "RuntimeImagePreparationError", "_persist_run_switch_runtime_image_reference", "message", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RecipeLifecyclePhaseExecutor.execute", "run-switch.stop-still-unresolved-after-cancellation", 1]
       ]
     },
     {

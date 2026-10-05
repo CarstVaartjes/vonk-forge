@@ -270,10 +270,30 @@ _REASON_SEVERITY_ADAPTER = TypeAdapter(RunSwitchReasonSeverity)
 
 
 class RunSwitchOperationConflict(RuntimeError):
-    """The selected outcome is stale, unsupported, or unsafe to execute."""
+    """The selected outcome is stale, unsupported, or unsafe to execute.
+
+    ``definite`` marks an outcome its raiser *reports* rather than a failure to
+    observe: the phase did its work and the answer is "this is how it ended" (the
+    profile Stop below), which the parent reads as a typed result.  It ends the
+    operation; every other conflict is an unknown that is observed again.
+    """
+
+    definite = False
 
 
-class _RunSwitchIncompleteProfileGroupConflict(RunSwitchOperationConflict):
+class _RunSwitchDefiniteConflict(RunSwitchOperationConflict):
+    """A refusal of the accepted request itself, not a failure to observe.
+
+    The accepted image identity changed, or the plan names a phase this executor
+    cannot do: nothing observed again will change it, and the person (or the
+    profile above) must review and apply again.  The allowlist keeps these in its
+    ``input-validation`` family; ``test_run_switch_lifecycle`` ties the two together.
+    """
+
+    definite = True
+
+
+class _RunSwitchIncompleteProfileGroupConflict(_RunSwitchDefiniteConflict):
     """Reachable ranks stopped, but the profile group remains incomplete."""
 
     code = "run-switch.profile.incomplete_multi_spark_model"
@@ -1665,7 +1685,7 @@ class RecipeLifecyclePhaseExecutor:
                 {"installation_id": installation_id},
             )
         if phase.kind == "prepare":
-            raise RunSwitchOperationConflict("run-switch.prepare-subphase-unsupported")
+            raise _RunSwitchDefiniteConflict("run-switch.prepare-subphase-unsupported")
         if phase.kind == "start":
             ordinal = _bound_workload_intent(progress)
             installation_id = plan.installation_id
@@ -7460,7 +7480,12 @@ class RunSwitchOperationService:
                     plan, phase, actor=actor, request_key=request_key, progress=progress
                 )
             except (RuntimeError, ValueError, KeyError) as error:
-                fail(str(error), failure_code=error_code(error), replan=True)
+                fail(
+                    str(error),
+                    failure_code=error_code(error),
+                    replan=True,
+                    definite=getattr(error, "definite", False),
+                )
                 return True
             if checkpoint is not None:
                 with self._sessions.begin() as session:
@@ -7570,6 +7595,7 @@ class RunSwitchOperationService:
                     str(error),
                     failure_code=code,
                     replan=phase.kind != "final_verify",
+                    definite=error.definite,
                 )
                 return True
             except RuntimeImagePreparationError as error:
@@ -7638,7 +7664,12 @@ class RunSwitchOperationService:
                 # same idempotent phase again observes it (a transfer or verify
                 # re-reads the bytes; a cleanup re-reads the reclaim evidence),
                 # and a re-plan drops stale evidence.  Never terminal.
-                fail(str(error), failure_code=error_code(error), replan=True)
+                fail(
+                    str(error),
+                    failure_code=error_code(error),
+                    replan=True,
+                    definite=error.definite,
+                )
                 return True
         with self._sessions.begin() as session:
             job = checkpoint_job(session)
@@ -8377,7 +8408,7 @@ class RunSwitchOperationService:
 
         code = error_code(error)
         progress = _read_progress(job.result)
-        if is_security_failure(code):
+        if error.definite or is_security_failure(code):
             RunSwitchOperationService._mark_failed(
                 job, str(error), now=now, progress=progress, failure_code=code
             )
@@ -8887,7 +8918,7 @@ def _require_profile_runtime_image(
         name for name, value in observed.items() if getattr(expected, name) != value
     ]
     if changes:
-        raise RunSwitchOperationConflict(
+        raise _RunSwitchDefiniteConflict(
             "profile.runtime-image-changed: "
             + ", ".join(changes)
             + " differs from the accepted image; review and load the profile again"
