@@ -2592,6 +2592,77 @@ class AgentJobService:
             .limit(1)
         )
 
+    def _fail_spent_start_budgets(
+        self, session: Session, node_id: str, now: datetime
+    ) -> int:
+        """Close a start whose immutable budget is spent, instead of waiting.
+
+        A start that binds a ``start_deadline`` may not outlive it, and nothing
+        can make it succeed afterwards: every later attempt is refused by the
+        agent before it executes anything, and the deadline never extends.  Such
+        an order has no uncertain effect to wait on, so it fails with a named
+        reason and flows through the normal failed-start path (cleanup Stop,
+        run and job projection).  Parked or lease-lapsed orders therefore never
+        sit behind an operator, and a cancellation no longer waits for a
+        receipt that cannot come.  An attempt with a live lease reports its own
+        outcome and is left alone.
+        """
+
+        failed = 0
+        candidates = session.scalars(
+            select(StoredOperation)
+            .where(
+                StoredOperation.node_id == node_id,
+                StoredOperation.kind == AgentOperation.RECIPE_START.value,
+                StoredOperation.state.in_({"running", "waiting-for-operator"}),
+                StoredOperation.current_attempt > 0,
+            )
+            .order_by(StoredOperation.id)
+            .with_for_update(of=StoredOperation, skip_locked=True)
+        )
+        for operation in tuple(candidates):
+            deadline = _operation_start_deadline(operation)
+            if deadline is None or _aware(now) < _aware(deadline):
+                continue
+            attempt = session.scalar(
+                select(AgentOperationAttempt)
+                .where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == operation.current_attempt,
+                )
+                .with_for_update(of=AgentOperationAttempt)
+            )
+            if attempt is None or (
+                operation.state == "running"
+                and attempt.state == "running"
+                and _aware(attempt.lease_deadline) > _aware(now)
+            ):
+                continue
+            reason = (
+                f"distributed start deadline {_aware(deadline).isoformat()} "
+                "elapsed before the start completed; it never ran to readiness "
+                "and is not retried"
+            )
+            result = _failure_result("recipe_start_failed", reason, uncertain=False)
+            message = AgentResult.model_validate_json(
+                canonical_message(
+                    {"fence": attempt.fence, "state": "failed", "result": result}
+                )
+            )
+            attempt.state = "failed"
+            attempt.result = result
+            operation.state = "failed"
+            operation.retry_disposition = None
+            operation.retry_disposition_attempt = None
+            operation.retry_due_at = None
+            operation.status_reason = reason[:512]
+            operation.updated_at = now
+            if self._result_consumer is not None:
+                self._result_consumer(session, operation, attempt, message)
+            self._aggregate_parent(session, operation.parent_job_id)
+            failed += 1
+        return failed
+
     def _claim_once(
         self,
         node_id: str,
@@ -2603,6 +2674,7 @@ class AgentJobService:
     ) -> AgentClaim | None:
         with self._claim_lock, self._sessions.begin() as session:
             now = self._clock()
+            self._fail_spent_start_budgets(session, node_id, now)
             candidate_id = session.scalar(
                 self._claimable_operations(node_id, now).with_only_columns(
                     StoredOperation.id
@@ -4101,11 +4173,19 @@ class AgentJobService:
                 )
             attempt.result = message_result
             attempt.state = state
-            safe_retry = _safe_retry_failure(
-                operation.kind, state, message_result
-            ) and not (
-                isinstance(parent.result, Mapping)
-                and parent.result.get("cancel_requested") is True
+            start_deadline = _operation_start_deadline(operation)
+            safe_retry = (
+                _safe_retry_failure(operation.kind, state, message_result)
+                and not (
+                    isinstance(parent.result, Mapping)
+                    and parent.result.get("cancel_requested") is True
+                )
+                # A spent start budget is final: a retry could only be refused.
+                and not (
+                    operation.kind == AgentOperation.RECIPE_START.value
+                    and start_deadline is not None
+                    and _aware(now) >= _aware(start_deadline)
+                )
             )
             operation.state = "waiting-for-operator" if safe_retry else state
             operation.updated_at = now
