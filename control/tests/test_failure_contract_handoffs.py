@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult
+from vonk_agent_protocol import AgentResult, AgentResultState
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
@@ -98,7 +98,7 @@ def test_persisted_agent_failure_survives_activity(sessions, tmp_path, failure):
     claim = claim_agent(jobs, NODE_A, "serial-a")
     message = AgentResult(
         **{key: getattr(claim, key) for key in ("fence",)},
-        state="failed",
+        state=AgentResultState.FAILED,
         result=AgentFailureResult.model_validate(failure),
     )
     jobs.record_result(message)

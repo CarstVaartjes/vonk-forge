@@ -1,0 +1,409 @@
+"""The lifecycle and outcome vocabulary shared by Python, Rust and TypeScript.
+
+This module is the one definition of the closed words the Controller's lifecycle
+core, the agent's results and the CI ratchets speak.  ``scripts/export-agent-wire-schema``
+publishes it through :class:`LifecycleVocabulary` into ``wire.json``, and
+``scripts/generate-agent-wire`` turns that into Rust types, so no consumer
+spells one of these words by hand.
+
+Stored state values are *not* the subject here: the Controller's persisted
+``state`` columns keep their current spellings (``waiting-for-operator`` and the
+rest) until each kind migrates onto the core.  The word for that legacy
+spelling lives here too (:data:`LEGACY_WAIT_STATE`) so a guard can allow
+exactly one place to know it.
+"""
+
+from __future__ import annotations
+
+from .wire_model import WireEnum, WireModel
+
+
+class LifecycleState(WireEnum):
+    """The eight lifecycle states.
+
+    ``waiting``, ``partial``, ``cancelling`` and ``expired`` of the legacy kinds
+    map onto these: waiting and partial work is ``backoff`` or ``observing``, a
+    cancelling row is a non-terminal row with ``cancel_requested_at`` set.
+    """
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    OBSERVING = "observing"
+    BACKOFF = "backoff"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    NEEDS_OPERATOR = "needs-operator"
+
+
+class AgentResultState(WireEnum):
+    """The state words of an agent result on the wire.
+
+    The wire keeps four words, shared with agents already deployed.  A typed
+    outcome decides which one is truthful (``done`` is ``succeeded``, a
+    confirmed cancellation is ``cancelled``, any other definite failure is
+    ``failed`` and ``unknown`` is the legacy ``waiting-for-operator``); the
+    Controller maps them onto its stored state values unchanged.
+    """
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    WAITING_FOR_OPERATOR = "waiting-for-operator"
+
+
+class LifecycleEffect(WireEnum):
+    """What is known about the real-world effect of the work."""
+
+    UNKNOWN = "unknown"
+    NONE = "none"
+    ISSUED = "issued"
+    ESTABLISHED = "established"
+    STOPPED = "stopped"
+
+
+class OutcomeKind(WireEnum):
+    """What an executor reported, as the lifecycle core sees it.
+
+    ``done``, ``cancelled`` and a ``failed`` that is not retryable are
+    *definite*: the executor says what happened, and the row ends there.
+    ``unknown`` (and a retryable failure) says the effect may or may not have
+    happened, which the core resolves by observing it.  On the agent wire a
+    cancellation is a definite ``failed`` outcome with the
+    ``operation_cancelled`` code.
+    """
+
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    UNKNOWN = "unknown"
+
+
+class StopOutcome(WireEnum):
+    """Whether an idempotent stop confirmed that the effect is gone."""
+
+    CONFIRMED = "confirmed"
+    UNCONFIRMED = "unconfirmed"
+
+
+class LifecycleEventKind(WireEnum):
+    """The kinds of event the pure transition function accepts."""
+
+    SUBMITTED = "submitted"
+    CLAIMED = "claimed"
+    HEARTBEAT = "heartbeat"
+    REPORTED = "reported"
+    LEASE_LAPSED = "lease-lapsed"
+    CANCEL_REQUESTED = "cancel-requested"
+    OBSERVED = "observed"
+    OPERATOR_ACTION = "operator-action"
+    TICK = "tick"
+
+
+class OperatorActionName(WireEnum):
+    """The operator actions a row can advertise and the core accepts."""
+
+    RESUME = "resume"
+    RETIRE = "retire"
+    RETRY = "retry"
+    STOP = "stop"
+
+
+class OperatorSurface(WireEnum):
+    """The real surfaces behind an advertised action in the blocker allowlist."""
+
+    RESUME = "resume"
+    RETIRE = "retire"
+    RETRY = "retry"
+    STOP = "stop"
+    AUTOMATIC = "automatic"
+
+
+#: The stored spelling of "an operator must act" that the legacy kinds still
+#: write.  Only the legacy adapter and the allowlisted legacy writers may spell it.
+LEGACY_WAIT_STATE = AgentResultState.WAITING_FOR_OPERATOR.value
+
+
+class BlockerCategory(WireEnum):
+    """The categories of the blocker allowlist (fail-closed raises)."""
+
+    SECURITY_EDGE = "security-edge"
+    INPUT_VALIDATION = "input-validation"
+    ALREADY_RETRIED = "already-retried"
+    BOOKKEEPING_DEBT = "bookkeeping-debt"
+
+
+class WaitVerdict(WireEnum):
+    """The verdicts of the blocker allowlist for an operator wait."""
+
+    KEEP = "KEEP"
+    SELF_HEAL = "SELF-HEAL"
+    FIX_ACTION = "FIX-ACTION"
+    DERIVED = "DERIVED"
+
+
+class LifecycleSubject(WireEnum):
+    """The persisted models whose ``state`` the lifecycle core owns."""
+
+    JOB = "Job"
+    JOB_ATTEMPT = "JobAttempt"
+    AGENT_OPERATION = "AgentOperation"
+    AGENT_OPERATION_ATTEMPT = "AgentOperationAttempt"
+    MODEL_CACHE_OPERATION = "ModelCacheOperation"
+    ARTIFACT_JOB = "ArtifactJob"
+    FLEET_PROFILE_APPLICATION = "FleetProfileApplication"
+
+
+class StateWriteKind(WireEnum):
+    """The shapes of a lifecycle state write the writers ratchet recognises."""
+
+    ATTRIBUTE = "attribute"
+    DICT_ITEM = "dict-item"
+    BULK_UPDATE = "bulk-update"
+    CONSTRUCTOR = "constructor"
+    HELPER_CALL = "helper-call"
+
+
+class MigrationStep(WireEnum):
+    """The migration steps of the blocker audit (section 5.6) that retire a writer."""
+
+    STEP_2 = "step-2"
+    STEP_3 = "step-3"
+    STEP_4 = "step-4"
+    STEP_5 = "step-5"
+    STEP_6 = "step-6"
+    STEP_7 = "step-7"
+
+
+class ErrorCategory(WireEnum):
+    """The only three things a lifecycle adapter may raise or report.
+
+    ``security-refusal`` and ``invalid-request`` are decided at submit time and
+    fail closed.  Everything else is ``unknown``: it is observed and reconciled,
+    never parked.  The blocker allowlist's ``already-retried`` and
+    ``bookkeeping-debt`` families are both ``unknown`` (see
+    :func:`error_category_of`).
+    """
+
+    SECURITY_REFUSAL = "security-refusal"
+    INVALID_REQUEST = "invalid-request"
+    UNKNOWN = "unknown"
+
+
+_BLOCKER_TO_ERROR = {
+    BlockerCategory.SECURITY_EDGE: ErrorCategory.SECURITY_REFUSAL,
+    BlockerCategory.INPUT_VALIDATION: ErrorCategory.INVALID_REQUEST,
+    BlockerCategory.ALREADY_RETRIED: ErrorCategory.UNKNOWN,
+    BlockerCategory.BOOKKEEPING_DEBT: ErrorCategory.UNKNOWN,
+}
+
+
+def error_category_of(category: BlockerCategory | str) -> ErrorCategory:
+    """The contract error category of a blocker allowlist category."""
+
+    return _BLOCKER_TO_ERROR[BlockerCategory(category)]
+
+
+class WaitReason(WireEnum):
+    """Typed reason codes for an effect that cannot be confirmed (the *unknown* kind).
+
+    Each code names the one fact the executor could not establish.  The free
+    text of a report is for people; the Controller decides on this code.
+    """
+
+    OPERATION_NOT_ENABLED = "operation-not-enabled"
+    UPGRADE_AWAITING_IDENTITY = "agent-upgrade-awaiting-identity"
+    AGENT_RESTART_INTERRUPTED = "agent-restart-interrupted"
+    STOP_UNCONFIRMED = "stop-unconfirmed"
+    CLEANUP_UNCONFIRMED = "cleanup-unconfirmed"
+    STOP_METADATA_UNCONFIRMED = "stop-metadata-unconfirmed"
+    RETAINED_IDENTITY_MISMATCH = "retained-identity-mismatch"
+    MODEL_CUSTODY_UNCONFIRMED = "model-custody-unconfirmed"
+    RUNTIME_EFFECT_UNCONFIRMED = "runtime-effect-unconfirmed"
+    JOB_STOP_UNCONFIRMED = "job-stop-unconfirmed"
+    JOB_STATE_UNCERTAIN = "job-state-uncertain"
+    LEASE_LAPSED = "lease-lapsed"
+    REPORT_UNCERTAIN = "report-uncertain"
+    OBSERVATION_UNAVAILABLE = "observation-unavailable"
+    RECEIPT_MISSING = "receipt-missing"
+    STALE_PLAN = "stale-plan"
+    SCOPE_CHANGED = "scope-changed"
+    LEGACY_UNCLASSIFIED = "legacy-unclassified"
+
+
+class InvalidRequestReason(WireEnum):
+    """Closed reason codes of an invalid request (submit-time input validation)."""
+
+    MALFORMED = "malformed"
+    OUT_OF_RANGE = "out-of-range"
+    LIMIT_EXCEEDED = "limit-exceeded"
+    UNKNOWN_FIELD = "unknown-field"
+    INCOMPLETE = "incomplete"
+    IMMUTABLE = "immutable"
+    DUPLICATE = "duplicate"
+    CONFLICT = "conflict"
+    NOT_FOUND = "not-found"
+    NOT_READY = "not-ready"
+    SUPERSEDED = "superseded"
+    UNSUPPORTED = "unsupported"
+
+
+class SecurityRefusalReason(WireEnum):
+    """Closed reason codes of a security refusal: a real security boundary.
+
+    Authentication and authorization, identity and certificate expiry, node
+    revocation, enrollment, signed package metadata, host-helper authority,
+    tombstone fencing, credential denial and the digest-bound destructive-effect
+    checks of Run/Switch.  ``failure_classification`` derives its code set from
+    this enum, so the Controller and the contract cannot disagree.
+    """
+
+    HTTP_401 = "401"
+    HTTP_403 = "403"
+    AGENT_CERTIFICATE_ROTATION_CONFLICT = "agent.certificate.rotation.conflict"
+    AGENT_ENROLLMENT_SUBMIT_REJECTED = "agent.enrollment.submit.rejected"
+    AGENT_IDENTITY_MISMATCH = "agent.identity_mismatch"
+    AGENT_TOMBSTONE_FENCED = "agent.tombstone_fenced"
+    CATALOG_AUTHENTICATION_REQUIRED = "catalog.authentication_required"
+    CONTROLLER_AUTHENTICATION_REQUIRED = "controller.authentication_required"
+    CONTROLLER_FLEET_ENROLLMENT_DENIED = "controller.fleet.enrollment_denied"
+    CONTROLLER_REQUEST_REJECTED = "controller.request_rejected"
+    DISTRIBUTION_REVOKED = "distribution.revoked"
+    FORBIDDEN = "forbidden"
+    GRANT_INVALID = "grant_invalid"
+    GRANT_NODE_MISMATCH = "grant_node_mismatch"
+    GRANT_UNAUTHORIZED = "grant_unauthorized"
+    HELPER_AUTHORIZATION_INVALID = "helper.authorization_invalid"
+    HELPER_GRANT_INVALID = "helper_grant_invalid"
+    HELPER_GRANT_NODE_MISMATCH = "helper_grant_node_mismatch"
+    HELPER_GRANT_UNAUTHORIZED = "helper_grant_unauthorized"
+    HELPER_OPERATION_INVALID_ARTIFACT = "helper_operation_invalid_artifact"
+    HELPER_PEER_IDENTITY_INVALID = "helper_peer_identity_invalid"
+    HELPER_REQUEST_INSTALLATION_IDENTITY_INVALID = (
+        "helper_request_installation_identity_invalid"
+    )
+    HELPER_REQUEST_PLAN_BINDING_INVALID = "helper_request_plan_binding_invalid"
+    HELPER_REQUEST_REPLAYED = "helper_request_replayed"
+    HELPER_RUNTIME_IMAGE_IDENTITY_INVALID = "helper_runtime_image_identity_invalid"
+    HOST_HELPER_AUTHORITY_DENIED = "host_helper.authority_denied"
+    LOCAL_IDENTITY_EXPIRED = "local.identity_expired"
+    LOCAL_IDENTITY_FAILED = "local.identity_failed"
+    MODEL_CACHE_CREDENTIALS_DENIED = "model_cache.credentials_denied"
+    MODEL_CACHE_CREDENTIALS_INVALID = "model_cache.credentials_invalid"
+    MODEL_CACHE_SOURCE_ACCESS_DENIED = "model_cache.source_access_denied"
+    OPERATION_INVALID_ARTIFACT = "operation_invalid_artifact"
+    PEER_IDENTITY_INVALID = "peer_identity_invalid"
+    PERMISSION_DENIED = "permission_denied"
+    RECIPE_UPDATE_AUTHORITY_DENIED = "recipe_update.authority_denied"
+    REQUEST_REPLAYED = "request_replayed"
+    RUN_SWITCH_ARTIFACT_DIGEST_VERIFICATION_FAILED = (
+        "run-switch.artifact-digest-verification-failed"
+    )
+    RUN_SWITCH_CLEANUP_NAS_EVICTION_FORBIDDEN = (
+        "run-switch.cleanup-nas-eviction-forbidden"
+    )
+    RUN_SWITCH_CLEANUP_RECLAIMED_DIGEST_NOT_PLANNED = (
+        "run-switch.cleanup-reclaimed-digest-not-planned"
+    )
+    RUN_SWITCH_RUNTIME_IMAGE_PREPARATION_DIGEST_MISMATCH = (
+        "run-switch.runtime-image-preparation-digest-mismatch"
+    )
+    RUNTIME_IMAGE_AUTHORIZATION_INVALID = "runtime_image.authorization_invalid"
+    RUNTIME_IMAGE_AUTHORIZATION_REVOKED = "runtime_image.authorization_revoked"
+    RUNTIME_IMAGE_IDENTITY_INVALID = "runtime_image_identity_invalid"
+    TUF_METADATA_INVALID = "tuf.metadata_invalid"
+    TUF_SIGNATURE_INVALID = "tuf.signature_invalid"
+    UNAUTHORIZED = "unauthorized"
+
+
+#: Suffixes of the same security families, so a new producer of an existing
+#: boundary is classified without editing the enum.
+SECURITY_REFUSAL_SUFFIXES: tuple[str, ...] = (
+    ".authentication_required",
+    ".authorization_invalid",
+    ".authorization_revoked",
+    ".authority_denied",
+    ".enrollment_denied",
+    ".identity_expired",
+    ".node_revoked",
+    ".permission_denied",
+    ".signature_invalid",
+    ".tombstone_fenced",
+)
+
+
+class FailureCode(WireEnum):
+    """Closed codes of a definite failed outcome reported by the agent."""
+
+    OPERATION_FAILED = "operation_failed"
+    OPERATION_CANCELLED = "operation_cancelled"
+    AGENT_UPGRADE_FAILED = "agent_upgrade_failed"
+    ARTIFACT_DISTRIBUTION_FAILED = "artifact_distribution_failed"
+    RECIPE_BUILD_FAILED = "recipe_build_failed"
+    RECIPE_JOB_RUN_FAILED = "recipe_job_run_failed"
+    RECIPE_INSTALL_FAILED = "recipe_install_failed"
+    RECIPE_START_FAILED = "recipe_start_failed"
+    RECIPE_STOP_FAILED = "recipe_stop_failed"
+    RECIPE_UNINSTALL_FAILED = "recipe_uninstall_failed"
+    RUNTIME_OBSERVATION_UNAVAILABLE = "runtime_observation_unavailable"
+    INSTALLATION_RECONCILIATION_BUSY = "installation_reconciliation_busy"
+    INSTALLATION_STORAGE_TEMPORARILY_UNAVAILABLE = (
+        "installation_storage_temporarily_unavailable"
+    )
+    RECIPE_RECONCILIATION_DEPENDENCY_UNAVAILABLE = (
+        "recipe_reconciliation_dependency_unavailable"
+    )
+
+
+class LifecycleVocabulary(WireModel):
+    """Carrier that publishes every vocabulary enum into the wire schema.
+
+    The model is never sent: it exists so the schema exporter, the Rust
+    generator and the OpenAPI/TypeScript generators emit each closed word set
+    from this one module.
+    """
+
+    state: LifecycleState
+    agent_result_state: AgentResultState
+    effect: LifecycleEffect
+    outcome_kind: OutcomeKind
+    stop_outcome: StopOutcome
+    event_kind: LifecycleEventKind
+    operator_action: OperatorActionName
+    operator_surface: OperatorSurface
+    blocker_category: BlockerCategory
+    wait_verdict: WaitVerdict
+    lifecycle_subject: LifecycleSubject
+    state_write_kind: StateWriteKind
+    migration_step: MigrationStep
+    error_category: ErrorCategory
+    wait_reason: WaitReason
+    invalid_request_reason: InvalidRequestReason
+    security_refusal_reason: SecurityRefusalReason
+    failure_code: FailureCode
+
+
+__all__ = [
+    "LEGACY_WAIT_STATE",
+    "SECURITY_REFUSAL_SUFFIXES",
+    "AgentResultState",
+    "BlockerCategory",
+    "ErrorCategory",
+    "FailureCode",
+    "InvalidRequestReason",
+    "LifecycleEffect",
+    "LifecycleEventKind",
+    "LifecycleState",
+    "LifecycleSubject",
+    "LifecycleVocabulary",
+    "MigrationStep",
+    "OperatorActionName",
+    "OperatorSurface",
+    "OutcomeKind",
+    "SecurityRefusalReason",
+    "StateWriteKind",
+    "StopOutcome",
+    "WaitReason",
+    "WaitVerdict",
+    "error_category_of",
+]

@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     OperationProgress,
+    SecurityRefusalReason,
     canonical_message,
 )
 
@@ -9951,7 +9952,7 @@ def _validate_artifact_execution(
         )
         if "image_digest" in differing:
             raise RunSwitchOperationConflict(
-                "run-switch.runtime-image-preparation-digest-mismatch"
+                SecurityRefusalReason.RUN_SWITCH_RUNTIME_IMAGE_PREPARATION_DIGEST_MISMATCH.value
             )
         if "archive_sha256" in differing:
             raise RunSwitchOperationConflict(
@@ -10024,7 +10025,7 @@ def _validate_artifact_execution(
         result = verification.model_dump(mode="python")
         if result.get("verified") is not True:
             raise RunSwitchOperationConflict(
-                "run-switch.artifact-digest-verification-failed"
+                SecurityRefusalReason.RUN_SWITCH_ARTIFACT_DIGEST_VERIFICATION_FAILED.value
             )
         if verification.verified_build_id != plan.recipe_build_id:
             # A build performed by the same high-level operation has no OCI
@@ -10038,7 +10039,7 @@ def _validate_artifact_execution(
             raise RunSwitchOperationConflict("run-switch.cleanup-scope-invalid")
         if result.get("nas_evicted") is True:
             raise RunSwitchOperationConflict(
-                "run-switch.cleanup-nas-eviction-forbidden"
+                SecurityRefusalReason.RUN_SWITCH_CLEANUP_NAS_EVICTION_FORBIDDEN.value
             )
         reclaimed = result.get("reclaimed_bytes")
         if type(reclaimed) is not int or reclaimed < 0:
@@ -10074,7 +10075,7 @@ def _validate_artifact_execution(
         allowed_reclaimable.update(plan.runtime_storage.reclaimable_digests)
         if not reclaimed_digests <= allowed_reclaimable:
             raise RunSwitchOperationConflict(
-                "run-switch.cleanup-reclaimed-digest-not-planned"
+                SecurityRefusalReason.RUN_SWITCH_CLEANUP_RECLAIMED_DIGEST_NOT_PLANNED.value
             )
         maximum_reclaimable = (
             plan.storage.reclaimable_bytes + plan.runtime_storage.reclaimable_bytes

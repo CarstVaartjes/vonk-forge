@@ -3921,7 +3921,7 @@ class RecipeOperationService:
                 operation,
                 None,
                 job,
-                Outcome.OK if succeeded else Outcome.FAILED,
+                Outcome.DONE if succeeded else Outcome.FAILED,
                 now,
             )
             cleanup_queued = self._project_node_result(

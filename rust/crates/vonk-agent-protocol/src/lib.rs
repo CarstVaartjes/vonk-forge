@@ -769,6 +769,13 @@ impl AgentResult {
         ) {
             return Err(ProtocolError::Identity("result identity"));
         }
+        // A typed outcome decides its own state word; the legacy state field
+        // must say the same thing, so the two cannot drift.
+        if let Some(state) = self.result.outcome_state()
+            && state != self.state
+        {
+            return Err(ProtocolError::Identity("result state"));
+        }
         Ok(())
     }
 
@@ -782,61 +789,31 @@ impl AgentResult {
         use generated::{AgentOperation, AgentResultResult, AgentResultState};
 
         self.validate()?;
-        let matches = match self.state {
-            AgentResultState::Succeeded => match operation {
-                AgentOperation::RuntimePreflightV1 => {
-                    let AgentResultResult::RuntimePreflightResult(result) = &self.result else {
-                        return Err(ProtocolError::Identity("result operation"));
-                    };
-                    result.validate()?;
-                    true
-                }
-                AgentOperation::AgentUpgradeV1 => {
-                    matches!(&self.result, AgentResultResult::AgentUpgradeResult(_))
-                }
-                AgentOperation::ArtifactDistributionV1 => matches!(
-                    &self.result,
-                    AgentResultResult::ArtifactDistributionResult(_)
-                ),
-                // An empty success deserializes into the first empty-capable
-                // variant, so it is recognized by content, not by variant.
-                AgentOperation::RecipeBuildCleanupV1 => empty_result(&self.result),
-                AgentOperation::RecipeBuildV1 => {
-                    matches!(&self.result, AgentResultResult::RecipeBuildEvidence(_))
-                }
-                AgentOperation::RecipeInstall => {
-                    matches!(&self.result, AgentResultResult::AgentInstallResult(_))
-                }
-                // Stop, uninstall and reconcile succeed with `{}`, which an
-                // untagged parse reads as the first empty variant.
-                AgentOperation::RecipeStart
-                | AgentOperation::RecipeStop
-                | AgentOperation::RecipeUninstall
-                | AgentOperation::RecipeReconcile => {
-                    self.result.is_empty_success()
-                        || (*operation == AgentOperation::RecipeStart
-                            && matches!(&self.result, AgentResultResult::RecipeStartResult(_)))
-                }
-                AgentOperation::RecipeJobRunV1 => {
-                    let AgentResultResult::RecipeJobRunResult(result) = &self.result else {
-                        return Err(ProtocolError::Identity("result operation"));
-                    };
-                    result.validate()?;
-                    true
+        let matches = match &self.result {
+            AgentResultResult::OutcomeDone(done) => {
+                success_matches(operation, &AgentResultResult::from(done.result.clone()))?
+            }
+            AgentResultResult::OutcomeFailed(failed) => match &failed.receipt {
+                None => true,
+                Some(receipt) => {
+                    *operation == AgentOperation::RecipeJobRunV1 && {
+                        receipt.validate()?;
+                        self.state == AgentResultState::Cancelled || receipt.exit_code != 0
+                    }
                 }
             },
-            AgentResultState::Failed => match (&self.result, operation) {
-                (AgentResultResult::AgentFailureResult(result), _) => {
-                    result.reason.is_some() || result.error_code.is_some()
+            AgentResultResult::OutcomeUnknown(unknown) => match &unknown.receipt {
+                None => true,
+                Some(receipt) => {
+                    *operation == AgentOperation::RecipeJobRunV1 && {
+                        receipt.validate()?;
+                        true
+                    }
                 }
-                (AgentResultResult::RecipeJobRunResult(result), AgentOperation::RecipeJobRunV1) => {
-                    result.validate()?;
-                    result.exit_code != 0
-                }
-                _ => false,
             },
-            AgentResultState::Cancelled | AgentResultState::WaitingForOperator => {
-                match (&self.result, operation) {
+            body => match self.state {
+                AgentResultState::Succeeded => success_matches(operation, body)?,
+                AgentResultState::Failed => match (body, operation) {
                     (AgentResultResult::AgentFailureResult(result), _) => {
                         result.reason.is_some() || result.error_code.is_some()
                     }
@@ -845,11 +822,26 @@ impl AgentResult {
                         AgentOperation::RecipeJobRunV1,
                     ) => {
                         result.validate()?;
-                        true
+                        result.exit_code != 0
                     }
                     _ => false,
+                },
+                AgentResultState::Cancelled | AgentResultState::WaitingForOperator => {
+                    match (body, operation) {
+                        (AgentResultResult::AgentFailureResult(result), _) => {
+                            result.reason.is_some() || result.error_code.is_some()
+                        }
+                        (
+                            AgentResultResult::RecipeJobRunResult(result),
+                            AgentOperation::RecipeJobRunV1,
+                        ) => {
+                            result.validate()?;
+                            true
+                        }
+                        _ => false,
+                    }
                 }
-            }
+            },
         };
         if matches {
             Ok(())
@@ -859,7 +851,75 @@ impl AgentResult {
     }
 }
 
+/// Whether a success body is the one the operation reports.
+fn success_matches(
+    operation: &generated::AgentOperation,
+    body: &generated::AgentResultResult,
+) -> Result<bool, ProtocolError> {
+    use generated::{AgentOperation, AgentResultResult};
+
+    Ok(match operation {
+        AgentOperation::RuntimePreflightV1 => {
+            let AgentResultResult::RuntimePreflightResult(result) = body else {
+                return Err(ProtocolError::Identity("result operation"));
+            };
+            result.validate()?;
+            true
+        }
+        AgentOperation::AgentUpgradeV1 => {
+            matches!(body, AgentResultResult::AgentUpgradeResult(_))
+        }
+        AgentOperation::ArtifactDistributionV1 => {
+            matches!(body, AgentResultResult::ArtifactDistributionResult(_))
+        }
+        // An empty success deserializes into the first empty-capable
+        // variant, so it is recognized by content, not by variant.
+        AgentOperation::RecipeBuildCleanupV1 => empty_result(body),
+        AgentOperation::RecipeBuildV1 => {
+            matches!(body, AgentResultResult::RecipeBuildEvidence(_))
+        }
+        AgentOperation::RecipeInstall => {
+            matches!(body, AgentResultResult::AgentInstallResult(_))
+        }
+        // Stop, uninstall and reconcile succeed with `{}`, which an
+        // untagged parse reads as the first empty variant.
+        AgentOperation::RecipeStart
+        | AgentOperation::RecipeStop
+        | AgentOperation::RecipeUninstall
+        | AgentOperation::RecipeReconcile => {
+            body.is_empty_success()
+                || (*operation == AgentOperation::RecipeStart
+                    && matches!(body, AgentResultResult::RecipeStartResult(_)))
+        }
+        AgentOperation::RecipeJobRunV1 => {
+            let AgentResultResult::RecipeJobRunResult(result) = body else {
+                return Err(ProtocolError::Identity("result operation"));
+            };
+            result.validate()?;
+            true
+        }
+    })
+}
+
 impl generated::AgentResultResult {
+    /// The state word a typed outcome reports under, or `None` for a legacy body.
+    pub fn outcome_state(&self) -> Option<generated::AgentResultState> {
+        use generated::{AgentResultResult, AgentResultState, FailureCode};
+
+        match self {
+            AgentResultResult::OutcomeDone(_) => Some(AgentResultState::Succeeded),
+            AgentResultResult::OutcomeFailed(failed) => {
+                Some(if failed.code == FailureCode::OperationCancelled {
+                    AgentResultState::Cancelled
+                } else {
+                    AgentResultState::Failed
+                })
+            }
+            AgentResultResult::OutcomeUnknown(_) => Some(AgentResultState::WaitingForOperator),
+            _ => None,
+        }
+    }
+
     /// Whether this is the empty `{}` success body of a stop, uninstall,
     /// reconcile or non-serving start.
     pub fn is_empty_success(&self) -> bool {
@@ -869,6 +929,26 @@ impl generated::AgentResultResult {
             | Self::RecipeUninstallResult(_)
             | Self::RecipeReconcileResult(_) => true,
             _ => false,
+        }
+    }
+}
+
+impl From<generated::OutcomeDoneResult> for generated::AgentResultResult {
+    fn from(value: generated::OutcomeDoneResult) -> Self {
+        use generated::{AgentResultResult as To, OutcomeDoneResult as From};
+
+        match value {
+            From::RuntimePreflightResult(body) => To::RuntimePreflightResult(body),
+            From::AgentInstallResult(body) => To::AgentInstallResult(body),
+            From::RecipeStartResult(body) => To::RecipeStartResult(body),
+            From::RecipeStopResult(body) => To::RecipeStopResult(body),
+            From::RecipeReconcileResult(body) => To::RecipeReconcileResult(body),
+            From::RecipeUninstallResult(body) => To::RecipeUninstallResult(body),
+            From::RecipeBuildEvidence(body) => To::RecipeBuildEvidence(body),
+            From::RecipeBuildCleanupEvidence(body) => To::RecipeBuildCleanupEvidence(body),
+            From::RecipeJobRunResult(body) => To::RecipeJobRunResult(body),
+            From::ArtifactDistributionResult(body) => To::ArtifactDistributionResult(body),
+            From::AgentUpgradeResult(body) => To::AgentUpgradeResult(body),
         }
     }
 }
@@ -884,6 +964,85 @@ mod agent_result_binding_tests {
             result: serde_json::from_value(body).unwrap(),
             state,
         }
+    }
+
+    fn typed(state: AgentResultState, body: Value) -> AgentResult {
+        result(state, body)
+    }
+
+    #[test]
+    fn typed_outcome_is_bound_to_its_state_and_operation() {
+        let done = typed(
+            AgentResultState::Succeeded,
+            serde_json::json!({"kind": "done", "result": {"installed_bytes": 3}}),
+        );
+        done.validate_for_operation(&AgentOperation::RecipeInstall)
+            .unwrap();
+        assert!(
+            done.validate_for_operation(&AgentOperation::RecipeStop)
+                .is_err()
+        );
+
+        let unknown = serde_json::json!({
+            "kind": "unknown",
+            "wait_reason": "stop-unconfirmed",
+            "reason": "workload stop remains unconfirmed",
+        });
+        typed(AgentResultState::WaitingForOperator, unknown.clone())
+            .validate_for_operation(&AgentOperation::RecipeStop)
+            .unwrap();
+        for wrong in [
+            AgentResultState::Failed,
+            AgentResultState::Cancelled,
+            AgentResultState::Succeeded,
+        ] {
+            assert!(
+                typed(wrong, unknown.clone())
+                    .validate_for_operation(&AgentOperation::RecipeStop)
+                    .is_err()
+            );
+        }
+
+        let cancelled = serde_json::json!({
+            "kind": "failed",
+            "code": "operation_cancelled",
+            "reason": "controller cancellation confirmed after exact workload stop",
+        });
+        typed(AgentResultState::Cancelled, cancelled.clone())
+            .validate_for_operation(&AgentOperation::RecipeStart)
+            .unwrap();
+        assert!(
+            typed(AgentResultState::Failed, cancelled)
+                .validate_for_operation(&AgentOperation::RecipeStart)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_job_receipt_belongs_to_the_recipe_job_operation_only() {
+        let receipt: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
+        ))
+        .unwrap();
+        let mut receipt = receipt["result"].clone();
+        receipt["exit_code"] = serde_json::json!(1);
+        let failed = typed(
+            AgentResultState::Failed,
+            serde_json::json!({
+                "kind": "failed",
+                "code": "recipe_job_run_failed",
+                "reason": "runtime failed",
+                "receipt": receipt,
+            }),
+        );
+        failed
+            .validate_for_operation(&AgentOperation::RecipeJobRunV1)
+            .unwrap();
+        assert!(
+            failed
+                .validate_for_operation(&AgentOperation::RecipeStop)
+                .is_err()
+        );
     }
 
     #[test]

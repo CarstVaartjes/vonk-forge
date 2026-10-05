@@ -19,6 +19,7 @@ from pydantic import ConfigDict, Field, model_serializer
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import SecurityRefusalReason
 
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
 from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
@@ -689,7 +690,9 @@ def _operator_error(error: Exception) -> HTTPException:
         return HTTPException(
             status_code=409,
             detail=_domain_refusal_detail(error),
-            headers={"x-vonk-error-code": "controller.fleet.enrollment_denied"},
+            headers={
+                "x-vonk-error-code": SecurityRefusalReason.CONTROLLER_FLEET_ENROLLMENT_DENIED.value
+            },
         )
     detail = stored_document_detail(error)
     if detail is not None:

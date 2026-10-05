@@ -36,7 +36,11 @@ from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, ValidationErro
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, object_session, sessionmaker
-from vonk_agent_protocol import OperationMemberProgress, canonical_message
+from vonk_agent_protocol import (
+    OperationMemberProgress,
+    SecurityRefusalReason,
+    canonical_message,
+)
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -236,8 +240,8 @@ class _ArtifactWriterBusy(ModelCacheError):
 _CREDENTIAL_FAILURE_CODES = frozenset(
     {
         "model_cache.credentials_missing",
-        "model_cache.credentials_denied",
-        "model_cache.credentials_invalid",
+        SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_DENIED.value,
+        SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_INVALID.value,
     }
 )
 _CREDENTIAL_FAILURE_PUBLIC_CODES = frozenset(
@@ -245,7 +249,7 @@ _CREDENTIAL_FAILURE_PUBLIC_CODES = frozenset(
 )
 _TERMINAL_FAILURE_CODES = _CREDENTIAL_FAILURE_CODES | frozenset(
     {
-        "model_cache.source_access_denied",
+        SecurityRefusalReason.MODEL_CACHE_SOURCE_ACCESS_DENIED.value,
         "model_cache.source_invalid",
         "model_cache.source_unsupported",
         "model_cache.source_untrusted",
@@ -838,8 +842,8 @@ def _cache_failure(
     """Translate an exception once, then persist the canonical public contract."""
     semantic_codes = {
         "model_cache.credentials_missing": "access_required",
-        "model_cache.credentials_denied": "access_denied",
-        "model_cache.credentials_invalid": "credentials_invalid",
+        SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_DENIED.value: "access_denied",
+        SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_INVALID.value: "credentials_invalid",
         "model_cache.rate_limited": "rate_limited",
         "model_cache.digest_mismatch": "integrity_mismatch",
         "model_cache.source_size_mismatch": "integrity_mismatch",
@@ -3528,7 +3532,7 @@ class ModelCacheService:
             self._lifecycle.settle(
                 operation,
                 Reported(
-                    Outcome.UNCERTAIN,
+                    Outcome.UNKNOWN,
                     retry_after=now + timedelta(seconds=retry_after_seconds),
                     reason=detail,
                 ),
@@ -3908,7 +3912,7 @@ class ModelCacheService:
         operation.progress = cache_phase(previous, "completed", now)
         _store_operation_payload(operation, "remove", payload)
         operation.last_error = None
-        self._lifecycle.complete(operation, Reported(Outcome.OK), now)
+        self._lifecycle.complete(operation, Reported(Outcome.DONE), now)
 
     @staticmethod
     def _newest_readable_revision(
@@ -5982,7 +5986,7 @@ class ModelCacheService:
             )
         if status in {401, 403}:
             raise ModelCacheStorageError(
-                "model_cache.source_access_denied",
+                SecurityRefusalReason.MODEL_CACHE_SOURCE_ACCESS_DENIED.value,
                 "GitHub denied anonymous access to the public release source",
                 recovery="inspect",
             )
@@ -6165,7 +6169,7 @@ class ModelCacheService:
                 response.close()
                 if authenticated:
                     raise ModelCacheStorageError(
-                        "model_cache.credentials_denied",
+                        SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_DENIED.value,
                         "Hugging Face could not authorize this download; verify account access and token scope at "
                         f"{_huggingface_access_url(source)}; the download resumes automatically when the token changes",
                         recovery="access_denied",
@@ -6308,7 +6312,7 @@ class ModelCacheService:
             raw = read_runtime_secret(path)
         except (OSError, RuntimeSecretError):
             raise ModelCacheStorageError(
-                "model_cache.credentials_invalid",
+                SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_INVALID.value,
                 "Hugging Face credential file is unavailable; configure HF_TOKEN_FILE",
                 recovery="credentials_invalid",
             ) from None
@@ -6319,13 +6323,13 @@ class ModelCacheService:
             token = value.decode("ascii")
         except UnicodeDecodeError:
             raise ModelCacheStorageError(
-                "model_cache.credentials_invalid",
+                SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_INVALID.value,
                 "Hugging Face credential file must contain one ASCII bearer token",
                 recovery="credentials_invalid",
             ) from None
         if any(character.isspace() for character in token) or "\x00" in token:
             raise ModelCacheStorageError(
-                "model_cache.credentials_invalid",
+                SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_INVALID.value,
                 "Hugging Face credential file must contain one bearer token",
                 recovery="credentials_invalid",
             )
@@ -6592,7 +6596,7 @@ class ModelCacheService:
                     self._lifecycle.complete(
                         operation,
                         Reported(
-                            Outcome.UNCERTAIN,
+                            Outcome.UNKNOWN,
                             fence=self._claim_owner,
                             reason=detail[:512],
                         ),
@@ -6659,7 +6663,7 @@ class ModelCacheService:
             self._lifecycle.complete(
                 operation,
                 Reported(
-                    Outcome.UNCERTAIN,
+                    Outcome.UNKNOWN,
                     fence=self._claim_owner,
                     retry_after=now + timedelta(seconds=_RETRY_BASE_SECONDS),
                     reason=error.detail,
@@ -7247,7 +7251,7 @@ class ModelCacheService:
                 now,
             )
             self._lifecycle.complete(
-                operation, Reported(Outcome.OK, fence=self._claim_owner), now
+                operation, Reported(Outcome.DONE, fence=self._claim_owner), now
             )
 
     def _set_operation_progress(
@@ -8484,7 +8488,7 @@ class ModelCacheService:
         self._lifecycle.complete(
             operation,
             Reported(
-                Outcome.UNCERTAIN,
+                Outcome.UNKNOWN,
                 retry_after=now + timedelta(seconds=_RETRY_BASE_SECONDS),
                 reason="insufficient-reserved-storage",
             ),

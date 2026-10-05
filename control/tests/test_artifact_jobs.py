@@ -9,12 +9,13 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from threading import Event
 from types import SimpleNamespace
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
+    AgentResultState,
     RecipeJobFile,
     RecipeJobRunResult,
     canonical_message,
@@ -405,13 +406,13 @@ def cancellation_result(
     claim,
     artifact_job,
     *,
-    state: Literal["succeeded", "failed", "cancelled", "waiting-for-operator"],
+    state: str,
     reason: str,
 ) -> AgentResult:
     empty: tuple[RecipeJobFile, ...] = ()
     return AgentResult(
         fence=claim.fence,
-        state=state,
+        state=AgentResultState(state),
         result=RecipeJobRunResult.model_validate(
             {
                 "job_id": artifact_job.id,

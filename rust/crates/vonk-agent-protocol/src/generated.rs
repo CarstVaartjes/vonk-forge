@@ -257,6 +257,8 @@ pub struct AgentFailureResult {
     pub summary: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub uncertain: ::std::option::Option<bool>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub wait_reason: ::std::option::Option<WaitReason>,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -382,6 +384,9 @@ pub enum AgentResultResult {
     ArtifactDistributionResult(ArtifactDistributionResult),
     AgentFailureResult(AgentFailureResult),
     AgentUpgradeResult(AgentUpgradeResult),
+    OutcomeDone(OutcomeDone),
+    OutcomeFailed(OutcomeFailed),
+    OutcomeUnknown(OutcomeUnknown),
 }
 impl ::std::convert::From<RuntimePreflightResult> for AgentResultResult {
     fn from(value: RuntimePreflightResult) -> Self {
@@ -443,18 +448,22 @@ impl ::std::convert::From<AgentUpgradeResult> for AgentResultResult {
         Self::AgentUpgradeResult(value)
     }
 }
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
+impl ::std::convert::From<OutcomeDone> for AgentResultResult {
+    fn from(value: OutcomeDone) -> Self {
+        Self::OutcomeDone(value)
+    }
+}
+impl ::std::convert::From<OutcomeFailed> for AgentResultResult {
+    fn from(value: OutcomeFailed) -> Self {
+        Self::OutcomeFailed(value)
+    }
+}
+impl ::std::convert::From<OutcomeUnknown> for AgentResultResult {
+    fn from(value: OutcomeUnknown) -> Self {
+        Self::OutcomeUnknown(value)
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum AgentResultState {
     #[serde(rename = "succeeded")]
     Succeeded,
@@ -611,6 +620,53 @@ pub struct ArtifactDistributionPayload {
 #[derive(Eq)]
 pub struct ArtifactDistributionResult {
     pub downloaded_bytes: u64,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum BlockerCategory {
+    #[serde(rename = "security-edge")]
+    SecurityEdge,
+    #[serde(rename = "input-validation")]
+    InputValidation,
+    #[serde(rename = "already-retried")]
+    AlreadyRetried,
+    #[serde(rename = "bookkeeping-debt")]
+    BookkeepingDebt,
+}
+impl ::std::fmt::Display for BlockerCategory {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::SecurityEdge => f.write_str("security-edge"),
+            Self::InputValidation => f.write_str("input-validation"),
+            Self::AlreadyRetried => f.write_str("already-retried"),
+            Self::BookkeepingDebt => f.write_str("bookkeeping-debt"),
+        }
+    }
+}
+impl ::std::str::FromStr for BlockerCategory {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "security-edge" => Ok(Self::SecurityEdge),
+            "input-validation" => Ok(Self::InputValidation),
+            "already-retried" => Ok(Self::AlreadyRetried),
+            "bookkeeping-debt" => Ok(Self::BookkeepingDebt),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for BlockerCategory {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for BlockerCategory {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1030,6 +1086,79 @@ pub struct EnrollmentSubmitRequest {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct ErrorCatalog {
+    pub error: ErrorCatalogError,
+}
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
+#[derive(Eq)]
+pub enum ErrorCatalogError {
+    SecurityRefusal(SecurityRefusal),
+    InvalidRequest(InvalidRequest),
+    UnknownError(UnknownError),
+}
+impl ::std::convert::From<SecurityRefusal> for ErrorCatalogError {
+    fn from(value: SecurityRefusal) -> Self {
+        Self::SecurityRefusal(value)
+    }
+}
+impl ::std::convert::From<InvalidRequest> for ErrorCatalogError {
+    fn from(value: InvalidRequest) -> Self {
+        Self::InvalidRequest(value)
+    }
+}
+impl ::std::convert::From<UnknownError> for ErrorCatalogError {
+    fn from(value: UnknownError) -> Self {
+        Self::UnknownError(value)
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ErrorCategory {
+    #[serde(rename = "security-refusal")]
+    SecurityRefusal,
+    #[serde(rename = "invalid-request")]
+    InvalidRequest,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+impl ::std::fmt::Display for ErrorCategory {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::SecurityRefusal => f.write_str("security-refusal"),
+            Self::InvalidRequest => f.write_str("invalid-request"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for ErrorCategory {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "security-refusal" => Ok(Self::SecurityRefusal),
+            "invalid-request" => Ok(Self::InvalidRequest),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ErrorCategory {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ErrorCategory {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct ErrorContextResponse {
     pub code: ::std::string::String,
     pub decision: ErrorContextResponseDecision,
@@ -1250,6 +1379,101 @@ impl ::std::convert::TryFrom<&str> for ExecuteContainerRuntimeRequestOperationAc
 impl ::std::convert::TryFrom<::std::string::String>
     for ExecuteContainerRuntimeRequestOperationAction
 {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum FailureCode {
+    #[serde(rename = "operation_failed")]
+    OperationFailed,
+    #[serde(rename = "operation_cancelled")]
+    OperationCancelled,
+    #[serde(rename = "agent_upgrade_failed")]
+    AgentUpgradeFailed,
+    #[serde(rename = "artifact_distribution_failed")]
+    ArtifactDistributionFailed,
+    #[serde(rename = "recipe_build_failed")]
+    RecipeBuildFailed,
+    #[serde(rename = "recipe_job_run_failed")]
+    RecipeJobRunFailed,
+    #[serde(rename = "recipe_install_failed")]
+    RecipeInstallFailed,
+    #[serde(rename = "recipe_start_failed")]
+    RecipeStartFailed,
+    #[serde(rename = "recipe_stop_failed")]
+    RecipeStopFailed,
+    #[serde(rename = "recipe_uninstall_failed")]
+    RecipeUninstallFailed,
+    #[serde(rename = "runtime_observation_unavailable")]
+    RuntimeObservationUnavailable,
+    #[serde(rename = "installation_reconciliation_busy")]
+    InstallationReconciliationBusy,
+    #[serde(rename = "installation_storage_temporarily_unavailable")]
+    InstallationStorageTemporarilyUnavailable,
+    #[serde(rename = "recipe_reconciliation_dependency_unavailable")]
+    RecipeReconciliationDependencyUnavailable,
+}
+impl ::std::fmt::Display for FailureCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::OperationFailed => f.write_str("operation_failed"),
+            Self::OperationCancelled => f.write_str("operation_cancelled"),
+            Self::AgentUpgradeFailed => f.write_str("agent_upgrade_failed"),
+            Self::ArtifactDistributionFailed => f.write_str("artifact_distribution_failed"),
+            Self::RecipeBuildFailed => f.write_str("recipe_build_failed"),
+            Self::RecipeJobRunFailed => f.write_str("recipe_job_run_failed"),
+            Self::RecipeInstallFailed => f.write_str("recipe_install_failed"),
+            Self::RecipeStartFailed => f.write_str("recipe_start_failed"),
+            Self::RecipeStopFailed => f.write_str("recipe_stop_failed"),
+            Self::RecipeUninstallFailed => f.write_str("recipe_uninstall_failed"),
+            Self::RuntimeObservationUnavailable => f.write_str("runtime_observation_unavailable"),
+            Self::InstallationReconciliationBusy => f.write_str("installation_reconciliation_busy"),
+            Self::InstallationStorageTemporarilyUnavailable => {
+                f.write_str("installation_storage_temporarily_unavailable")
+            }
+            Self::RecipeReconciliationDependencyUnavailable => {
+                f.write_str("recipe_reconciliation_dependency_unavailable")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for FailureCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "operation_failed" => Ok(Self::OperationFailed),
+            "operation_cancelled" => Ok(Self::OperationCancelled),
+            "agent_upgrade_failed" => Ok(Self::AgentUpgradeFailed),
+            "artifact_distribution_failed" => Ok(Self::ArtifactDistributionFailed),
+            "recipe_build_failed" => Ok(Self::RecipeBuildFailed),
+            "recipe_job_run_failed" => Ok(Self::RecipeJobRunFailed),
+            "recipe_install_failed" => Ok(Self::RecipeInstallFailed),
+            "recipe_start_failed" => Ok(Self::RecipeStartFailed),
+            "recipe_stop_failed" => Ok(Self::RecipeStopFailed),
+            "recipe_uninstall_failed" => Ok(Self::RecipeUninstallFailed),
+            "runtime_observation_unavailable" => Ok(Self::RuntimeObservationUnavailable),
+            "installation_reconciliation_busy" => Ok(Self::InstallationReconciliationBusy),
+            "installation_storage_temporarily_unavailable" => {
+                Ok(Self::InstallationStorageTemporarilyUnavailable)
+            }
+            "recipe_reconciliation_dependency_unavailable" => {
+                Ok(Self::RecipeReconciliationDependencyUnavailable)
+            }
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for FailureCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for FailureCode {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -1984,6 +2208,140 @@ pub struct InstallerReleaseObject {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct InvalidRequest {
+    pub category: InvalidRequestCategory,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub field: ::std::option::Option<::std::string::String>,
+    pub reason: InvalidRequestReason,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum InvalidRequestCategory {
+    #[serde(rename = "invalid-request")]
+    InvalidRequest,
+}
+impl ::std::fmt::Display for InvalidRequestCategory {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::InvalidRequest => f.write_str("invalid-request"),
+        }
+    }
+}
+impl ::std::str::FromStr for InvalidRequestCategory {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "invalid-request" => Ok(Self::InvalidRequest),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for InvalidRequestCategory {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for InvalidRequestCategory {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum InvalidRequestReason {
+    #[serde(rename = "malformed")]
+    Malformed,
+    #[serde(rename = "out-of-range")]
+    OutOfRange,
+    #[serde(rename = "limit-exceeded")]
+    LimitExceeded,
+    #[serde(rename = "unknown-field")]
+    UnknownField,
+    #[serde(rename = "incomplete")]
+    Incomplete,
+    #[serde(rename = "immutable")]
+    Immutable,
+    #[serde(rename = "duplicate")]
+    Duplicate,
+    #[serde(rename = "conflict")]
+    Conflict,
+    #[serde(rename = "not-found")]
+    NotFound,
+    #[serde(rename = "not-ready")]
+    NotReady,
+    #[serde(rename = "superseded")]
+    Superseded,
+    #[serde(rename = "unsupported")]
+    Unsupported,
+}
+impl ::std::fmt::Display for InvalidRequestReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Malformed => f.write_str("malformed"),
+            Self::OutOfRange => f.write_str("out-of-range"),
+            Self::LimitExceeded => f.write_str("limit-exceeded"),
+            Self::UnknownField => f.write_str("unknown-field"),
+            Self::Incomplete => f.write_str("incomplete"),
+            Self::Immutable => f.write_str("immutable"),
+            Self::Duplicate => f.write_str("duplicate"),
+            Self::Conflict => f.write_str("conflict"),
+            Self::NotFound => f.write_str("not-found"),
+            Self::NotReady => f.write_str("not-ready"),
+            Self::Superseded => f.write_str("superseded"),
+            Self::Unsupported => f.write_str("unsupported"),
+        }
+    }
+}
+impl ::std::str::FromStr for InvalidRequestReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "malformed" => Ok(Self::Malformed),
+            "out-of-range" => Ok(Self::OutOfRange),
+            "limit-exceeded" => Ok(Self::LimitExceeded),
+            "unknown-field" => Ok(Self::UnknownField),
+            "incomplete" => Ok(Self::Incomplete),
+            "immutable" => Ok(Self::Immutable),
+            "duplicate" => Ok(Self::Duplicate),
+            "conflict" => Ok(Self::Conflict),
+            "not-found" => Ok(Self::NotFound),
+            "not-ready" => Ok(Self::NotReady),
+            "superseded" => Ok(Self::Superseded),
+            "unsupported" => Ok(Self::Unsupported),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for InvalidRequestReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for InvalidRequestReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct InventoryRequest {
     pub artifact_store_read_only: bool,
     pub capabilities: ::std::vec::Vec<::std::string::String>,
@@ -2074,6 +2432,317 @@ pub struct IssuedCertificateResponse {
     pub not_after: ::std::string::String,
     pub not_before: ::std::string::String,
     pub serial: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum LifecycleEffect {
+    #[serde(rename = "unknown")]
+    Unknown,
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "issued")]
+    Issued,
+    #[serde(rename = "established")]
+    Established,
+    #[serde(rename = "stopped")]
+    Stopped,
+}
+impl ::std::fmt::Display for LifecycleEffect {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Unknown => f.write_str("unknown"),
+            Self::None => f.write_str("none"),
+            Self::Issued => f.write_str("issued"),
+            Self::Established => f.write_str("established"),
+            Self::Stopped => f.write_str("stopped"),
+        }
+    }
+}
+impl ::std::str::FromStr for LifecycleEffect {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "unknown" => Ok(Self::Unknown),
+            "none" => Ok(Self::None),
+            "issued" => Ok(Self::Issued),
+            "established" => Ok(Self::Established),
+            "stopped" => Ok(Self::Stopped),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LifecycleEffect {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LifecycleEffect {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum LifecycleEventKind {
+    #[serde(rename = "submitted")]
+    Submitted,
+    #[serde(rename = "claimed")]
+    Claimed,
+    #[serde(rename = "heartbeat")]
+    Heartbeat,
+    #[serde(rename = "reported")]
+    Reported,
+    #[serde(rename = "lease-lapsed")]
+    LeaseLapsed,
+    #[serde(rename = "cancel-requested")]
+    CancelRequested,
+    #[serde(rename = "observed")]
+    Observed,
+    #[serde(rename = "operator-action")]
+    OperatorAction,
+    #[serde(rename = "tick")]
+    Tick,
+}
+impl ::std::fmt::Display for LifecycleEventKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Submitted => f.write_str("submitted"),
+            Self::Claimed => f.write_str("claimed"),
+            Self::Heartbeat => f.write_str("heartbeat"),
+            Self::Reported => f.write_str("reported"),
+            Self::LeaseLapsed => f.write_str("lease-lapsed"),
+            Self::CancelRequested => f.write_str("cancel-requested"),
+            Self::Observed => f.write_str("observed"),
+            Self::OperatorAction => f.write_str("operator-action"),
+            Self::Tick => f.write_str("tick"),
+        }
+    }
+}
+impl ::std::str::FromStr for LifecycleEventKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "submitted" => Ok(Self::Submitted),
+            "claimed" => Ok(Self::Claimed),
+            "heartbeat" => Ok(Self::Heartbeat),
+            "reported" => Ok(Self::Reported),
+            "lease-lapsed" => Ok(Self::LeaseLapsed),
+            "cancel-requested" => Ok(Self::CancelRequested),
+            "observed" => Ok(Self::Observed),
+            "operator-action" => Ok(Self::OperatorAction),
+            "tick" => Ok(Self::Tick),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LifecycleEventKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LifecycleEventKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum LifecycleState {
+    #[serde(rename = "queued")]
+    Queued,
+    #[serde(rename = "running")]
+    Running,
+    #[serde(rename = "observing")]
+    Observing,
+    #[serde(rename = "backoff")]
+    Backoff,
+    #[serde(rename = "succeeded")]
+    Succeeded,
+    #[serde(rename = "failed")]
+    Failed,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+    #[serde(rename = "needs-operator")]
+    NeedsOperator,
+}
+impl ::std::fmt::Display for LifecycleState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Queued => f.write_str("queued"),
+            Self::Running => f.write_str("running"),
+            Self::Observing => f.write_str("observing"),
+            Self::Backoff => f.write_str("backoff"),
+            Self::Succeeded => f.write_str("succeeded"),
+            Self::Failed => f.write_str("failed"),
+            Self::Cancelled => f.write_str("cancelled"),
+            Self::NeedsOperator => f.write_str("needs-operator"),
+        }
+    }
+}
+impl ::std::str::FromStr for LifecycleState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "queued" => Ok(Self::Queued),
+            "running" => Ok(Self::Running),
+            "observing" => Ok(Self::Observing),
+            "backoff" => Ok(Self::Backoff),
+            "succeeded" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            "needs-operator" => Ok(Self::NeedsOperator),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LifecycleState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LifecycleState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum LifecycleSubject {
+    Job,
+    JobAttempt,
+    AgentOperation,
+    AgentOperationAttempt,
+    ModelCacheOperation,
+    ArtifactJob,
+    FleetProfileApplication,
+}
+impl ::std::fmt::Display for LifecycleSubject {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Job => f.write_str("Job"),
+            Self::JobAttempt => f.write_str("JobAttempt"),
+            Self::AgentOperation => f.write_str("AgentOperation"),
+            Self::AgentOperationAttempt => f.write_str("AgentOperationAttempt"),
+            Self::ModelCacheOperation => f.write_str("ModelCacheOperation"),
+            Self::ArtifactJob => f.write_str("ArtifactJob"),
+            Self::FleetProfileApplication => f.write_str("FleetProfileApplication"),
+        }
+    }
+}
+impl ::std::str::FromStr for LifecycleSubject {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "Job" => Ok(Self::Job),
+            "JobAttempt" => Ok(Self::JobAttempt),
+            "AgentOperation" => Ok(Self::AgentOperation),
+            "AgentOperationAttempt" => Ok(Self::AgentOperationAttempt),
+            "ModelCacheOperation" => Ok(Self::ModelCacheOperation),
+            "ArtifactJob" => Ok(Self::ArtifactJob),
+            "FleetProfileApplication" => Ok(Self::FleetProfileApplication),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LifecycleSubject {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LifecycleSubject {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct LifecycleVocabulary {
+    pub agent_result_state: AgentResultState,
+    pub blocker_category: BlockerCategory,
+    pub effect: LifecycleEffect,
+    pub error_category: ErrorCategory,
+    pub event_kind: LifecycleEventKind,
+    pub failure_code: FailureCode,
+    pub invalid_request_reason: InvalidRequestReason,
+    pub lifecycle_subject: LifecycleSubject,
+    pub migration_step: MigrationStep,
+    pub operator_action: OperatorActionName,
+    pub operator_surface: OperatorSurface,
+    pub outcome_kind: OutcomeKind,
+    pub security_refusal_reason: SecurityRefusalReason,
+    pub state: LifecycleState,
+    pub state_write_kind: StateWriteKind,
+    pub stop_outcome: StopOutcome,
+    pub wait_reason: WaitReason,
+    pub wait_verdict: WaitVerdict,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum MigrationStep {
+    #[serde(rename = "step-2")]
+    Step2,
+    #[serde(rename = "step-3")]
+    Step3,
+    #[serde(rename = "step-4")]
+    Step4,
+    #[serde(rename = "step-5")]
+    Step5,
+    #[serde(rename = "step-6")]
+    Step6,
+    #[serde(rename = "step-7")]
+    Step7,
+}
+impl ::std::fmt::Display for MigrationStep {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Step2 => f.write_str("step-2"),
+            Self::Step3 => f.write_str("step-3"),
+            Self::Step4 => f.write_str("step-4"),
+            Self::Step5 => f.write_str("step-5"),
+            Self::Step6 => f.write_str("step-6"),
+            Self::Step7 => f.write_str("step-7"),
+        }
+    }
+}
+impl ::std::str::FromStr for MigrationStep {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "step-2" => Ok(Self::Step2),
+            "step-3" => Ok(Self::Step3),
+            "step-4" => Ok(Self::Step4),
+            "step-5" => Ok(Self::Step5),
+            "step-6" => Ok(Self::Step6),
+            "step-7" => Ok(Self::Step7),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for MigrationStep {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for MigrationStep {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -2317,6 +2986,445 @@ impl ::std::convert::TryFrom<&str> for OperationProgressActivity {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for OperationProgressActivity {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum OperatorActionName {
+    #[serde(rename = "resume")]
+    Resume,
+    #[serde(rename = "retire")]
+    Retire,
+    #[serde(rename = "retry")]
+    Retry,
+    #[serde(rename = "stop")]
+    Stop,
+}
+impl ::std::fmt::Display for OperatorActionName {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Resume => f.write_str("resume"),
+            Self::Retire => f.write_str("retire"),
+            Self::Retry => f.write_str("retry"),
+            Self::Stop => f.write_str("stop"),
+        }
+    }
+}
+impl ::std::str::FromStr for OperatorActionName {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "resume" => Ok(Self::Resume),
+            "retire" => Ok(Self::Retire),
+            "retry" => Ok(Self::Retry),
+            "stop" => Ok(Self::Stop),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for OperatorActionName {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for OperatorActionName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum OperatorSurface {
+    #[serde(rename = "resume")]
+    Resume,
+    #[serde(rename = "retire")]
+    Retire,
+    #[serde(rename = "retry")]
+    Retry,
+    #[serde(rename = "stop")]
+    Stop,
+    #[serde(rename = "automatic")]
+    Automatic,
+}
+impl ::std::fmt::Display for OperatorSurface {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Resume => f.write_str("resume"),
+            Self::Retire => f.write_str("retire"),
+            Self::Retry => f.write_str("retry"),
+            Self::Stop => f.write_str("stop"),
+            Self::Automatic => f.write_str("automatic"),
+        }
+    }
+}
+impl ::std::str::FromStr for OperatorSurface {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "resume" => Ok(Self::Resume),
+            "retire" => Ok(Self::Retire),
+            "retry" => Ok(Self::Retry),
+            "stop" => Ok(Self::Stop),
+            "automatic" => Ok(Self::Automatic),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for OperatorSurface {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for OperatorSurface {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct OutcomeCatalog {
+    pub outcome: OutcomeCatalogOutcome,
+}
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
+#[derive(Eq)]
+pub enum OutcomeCatalogOutcome {
+    Done(OutcomeDone),
+    Failed(OutcomeFailed),
+    Unknown(OutcomeUnknown),
+}
+impl ::std::convert::From<OutcomeDone> for OutcomeCatalogOutcome {
+    fn from(value: OutcomeDone) -> Self {
+        Self::Done(value)
+    }
+}
+impl ::std::convert::From<OutcomeFailed> for OutcomeCatalogOutcome {
+    fn from(value: OutcomeFailed) -> Self {
+        Self::Failed(value)
+    }
+}
+impl ::std::convert::From<OutcomeUnknown> for OutcomeCatalogOutcome {
+    fn from(value: OutcomeUnknown) -> Self {
+        Self::Unknown(value)
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct OutcomeDone {
+    pub kind: OutcomeDoneKind,
+    pub result: OutcomeDoneResult,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum OutcomeDoneKind {
+    #[serde(rename = "done")]
+    Done,
+}
+impl ::std::fmt::Display for OutcomeDoneKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Done => f.write_str("done"),
+        }
+    }
+}
+impl ::std::str::FromStr for OutcomeDoneKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "done" => Ok(Self::Done),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for OutcomeDoneKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for OutcomeDoneKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
+#[derive(Eq)]
+pub enum OutcomeDoneResult {
+    RuntimePreflightResult(RuntimePreflightResult),
+    AgentInstallResult(AgentInstallResult),
+    RecipeStartResult(RecipeStartResult),
+    RecipeStopResult(RecipeStopResult),
+    RecipeReconcileResult(RecipeReconcileResult),
+    RecipeUninstallResult(RecipeUninstallResult),
+    RecipeBuildEvidence(RecipeBuildEvidence),
+    RecipeBuildCleanupEvidence(RecipeBuildCleanupEvidence),
+    RecipeJobRunResult(RecipeJobRunResult),
+    ArtifactDistributionResult(ArtifactDistributionResult),
+    AgentUpgradeResult(AgentUpgradeResult),
+}
+impl ::std::convert::From<RuntimePreflightResult> for OutcomeDoneResult {
+    fn from(value: RuntimePreflightResult) -> Self {
+        Self::RuntimePreflightResult(value)
+    }
+}
+impl ::std::convert::From<AgentInstallResult> for OutcomeDoneResult {
+    fn from(value: AgentInstallResult) -> Self {
+        Self::AgentInstallResult(value)
+    }
+}
+impl ::std::convert::From<RecipeStartResult> for OutcomeDoneResult {
+    fn from(value: RecipeStartResult) -> Self {
+        Self::RecipeStartResult(value)
+    }
+}
+impl ::std::convert::From<RecipeStopResult> for OutcomeDoneResult {
+    fn from(value: RecipeStopResult) -> Self {
+        Self::RecipeStopResult(value)
+    }
+}
+impl ::std::convert::From<RecipeReconcileResult> for OutcomeDoneResult {
+    fn from(value: RecipeReconcileResult) -> Self {
+        Self::RecipeReconcileResult(value)
+    }
+}
+impl ::std::convert::From<RecipeUninstallResult> for OutcomeDoneResult {
+    fn from(value: RecipeUninstallResult) -> Self {
+        Self::RecipeUninstallResult(value)
+    }
+}
+impl ::std::convert::From<RecipeBuildEvidence> for OutcomeDoneResult {
+    fn from(value: RecipeBuildEvidence) -> Self {
+        Self::RecipeBuildEvidence(value)
+    }
+}
+impl ::std::convert::From<RecipeBuildCleanupEvidence> for OutcomeDoneResult {
+    fn from(value: RecipeBuildCleanupEvidence) -> Self {
+        Self::RecipeBuildCleanupEvidence(value)
+    }
+}
+impl ::std::convert::From<RecipeJobRunResult> for OutcomeDoneResult {
+    fn from(value: RecipeJobRunResult) -> Self {
+        Self::RecipeJobRunResult(value)
+    }
+}
+impl ::std::convert::From<ArtifactDistributionResult> for OutcomeDoneResult {
+    fn from(value: ArtifactDistributionResult) -> Self {
+        Self::ArtifactDistributionResult(value)
+    }
+}
+impl ::std::convert::From<AgentUpgradeResult> for OutcomeDoneResult {
+    fn from(value: AgentUpgradeResult) -> Self {
+        Self::AgentUpgradeResult(value)
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct OutcomeEvidence {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub diagnostic: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub diagnostics: ::std::option::Option<FailureDiagnostics>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub helper_error_code: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub helper_exit_code: ::std::option::Option<u32>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub package_activation: ::std::option::Option<PackageActivationReceipt>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub stage: ::std::option::Option<::std::string::String>,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct OutcomeFailed {
+    pub code: FailureCode,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub evidence: ::std::option::Option<OutcomeEvidence>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub failure_kind: ::std::option::Option<AgentFailureKind>,
+    pub kind: OutcomeFailedKind,
+    pub reason: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub receipt: ::std::option::Option<RecipeJobRunResult>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub retry_after_seconds: ::std::option::Option<u32>,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum OutcomeFailedKind {
+    #[serde(rename = "failed")]
+    Failed,
+}
+impl ::std::fmt::Display for OutcomeFailedKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Failed => f.write_str("failed"),
+        }
+    }
+}
+impl ::std::str::FromStr for OutcomeFailedKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "failed" => Ok(Self::Failed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for OutcomeFailedKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for OutcomeFailedKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum OutcomeKind {
+    #[serde(rename = "done")]
+    Done,
+    #[serde(rename = "failed")]
+    Failed,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+impl ::std::fmt::Display for OutcomeKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Done => f.write_str("done"),
+            Self::Failed => f.write_str("failed"),
+            Self::Cancelled => f.write_str("cancelled"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for OutcomeKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "done" => Ok(Self::Done),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for OutcomeKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for OutcomeKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct OutcomeUnknown {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub evidence: ::std::option::Option<OutcomeEvidence>,
+    pub kind: OutcomeUnknownKind,
+    pub reason: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub receipt: ::std::option::Option<RecipeJobRunResult>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub retry_after_seconds: ::std::option::Option<u32>,
+    pub wait_reason: WaitReason,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum OutcomeUnknownKind {
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+impl ::std::fmt::Display for OutcomeUnknownKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for OutcomeUnknownKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for OutcomeUnknownKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for OutcomeUnknownKind {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -3177,6 +4285,310 @@ pub struct RuntimePreflightResult {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct SecurityRefusal {
+    pub category: SecurityRefusalCategory,
+    pub reason: SecurityRefusalReason,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum SecurityRefusalCategory {
+    #[serde(rename = "security-refusal")]
+    SecurityRefusal,
+}
+impl ::std::fmt::Display for SecurityRefusalCategory {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::SecurityRefusal => f.write_str("security-refusal"),
+        }
+    }
+}
+impl ::std::str::FromStr for SecurityRefusalCategory {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "security-refusal" => Ok(Self::SecurityRefusal),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for SecurityRefusalCategory {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for SecurityRefusalCategory {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SecurityRefusalReason {
+    #[serde(rename = "401")]
+    X401,
+    #[serde(rename = "403")]
+    X403,
+    #[serde(rename = "agent.certificate.rotation.conflict")]
+    AgentCertificateRotationConflict,
+    #[serde(rename = "agent.enrollment.submit.rejected")]
+    AgentEnrollmentSubmitRejected,
+    #[serde(rename = "agent.identity_mismatch")]
+    AgentIdentityMismatch,
+    #[serde(rename = "agent.tombstone_fenced")]
+    AgentTombstoneFenced,
+    #[serde(rename = "catalog.authentication_required")]
+    CatalogAuthenticationRequired,
+    #[serde(rename = "controller.authentication_required")]
+    ControllerAuthenticationRequired,
+    #[serde(rename = "controller.fleet.enrollment_denied")]
+    ControllerFleetEnrollmentDenied,
+    #[serde(rename = "controller.request_rejected")]
+    ControllerRequestRejected,
+    #[serde(rename = "distribution.revoked")]
+    DistributionRevoked,
+    #[serde(rename = "forbidden")]
+    Forbidden,
+    #[serde(rename = "grant_invalid")]
+    GrantInvalid,
+    #[serde(rename = "grant_node_mismatch")]
+    GrantNodeMismatch,
+    #[serde(rename = "grant_unauthorized")]
+    GrantUnauthorized,
+    #[serde(rename = "helper.authorization_invalid")]
+    HelperAuthorizationInvalid,
+    #[serde(rename = "helper_grant_invalid")]
+    HelperGrantInvalid,
+    #[serde(rename = "helper_grant_node_mismatch")]
+    HelperGrantNodeMismatch,
+    #[serde(rename = "helper_grant_unauthorized")]
+    HelperGrantUnauthorized,
+    #[serde(rename = "helper_operation_invalid_artifact")]
+    HelperOperationInvalidArtifact,
+    #[serde(rename = "helper_peer_identity_invalid")]
+    HelperPeerIdentityInvalid,
+    #[serde(rename = "helper_request_installation_identity_invalid")]
+    HelperRequestInstallationIdentityInvalid,
+    #[serde(rename = "helper_request_plan_binding_invalid")]
+    HelperRequestPlanBindingInvalid,
+    #[serde(rename = "helper_request_replayed")]
+    HelperRequestReplayed,
+    #[serde(rename = "helper_runtime_image_identity_invalid")]
+    HelperRuntimeImageIdentityInvalid,
+    #[serde(rename = "host_helper.authority_denied")]
+    HostHelperAuthorityDenied,
+    #[serde(rename = "local.identity_expired")]
+    LocalIdentityExpired,
+    #[serde(rename = "local.identity_failed")]
+    LocalIdentityFailed,
+    #[serde(rename = "model_cache.credentials_denied")]
+    ModelCacheCredentialsDenied,
+    #[serde(rename = "model_cache.credentials_invalid")]
+    ModelCacheCredentialsInvalid,
+    #[serde(rename = "model_cache.source_access_denied")]
+    ModelCacheSourceAccessDenied,
+    #[serde(rename = "operation_invalid_artifact")]
+    OperationInvalidArtifact,
+    #[serde(rename = "peer_identity_invalid")]
+    PeerIdentityInvalid,
+    #[serde(rename = "permission_denied")]
+    PermissionDenied,
+    #[serde(rename = "recipe_update.authority_denied")]
+    RecipeUpdateAuthorityDenied,
+    #[serde(rename = "request_replayed")]
+    RequestReplayed,
+    #[serde(rename = "run-switch.artifact-digest-verification-failed")]
+    RunSwitchArtifactDigestVerificationFailed,
+    #[serde(rename = "run-switch.cleanup-nas-eviction-forbidden")]
+    RunSwitchCleanupNasEvictionForbidden,
+    #[serde(rename = "run-switch.cleanup-reclaimed-digest-not-planned")]
+    RunSwitchCleanupReclaimedDigestNotPlanned,
+    #[serde(rename = "run-switch.runtime-image-preparation-digest-mismatch")]
+    RunSwitchRuntimeImagePreparationDigestMismatch,
+    #[serde(rename = "runtime_image.authorization_invalid")]
+    RuntimeImageAuthorizationInvalid,
+    #[serde(rename = "runtime_image.authorization_revoked")]
+    RuntimeImageAuthorizationRevoked,
+    #[serde(rename = "runtime_image_identity_invalid")]
+    RuntimeImageIdentityInvalid,
+    #[serde(rename = "tuf.metadata_invalid")]
+    TufMetadataInvalid,
+    #[serde(rename = "tuf.signature_invalid")]
+    TufSignatureInvalid,
+    #[serde(rename = "unauthorized")]
+    Unauthorized,
+}
+impl ::std::fmt::Display for SecurityRefusalReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::X401 => f.write_str("401"),
+            Self::X403 => f.write_str("403"),
+            Self::AgentCertificateRotationConflict => {
+                f.write_str("agent.certificate.rotation.conflict")
+            }
+            Self::AgentEnrollmentSubmitRejected => f.write_str("agent.enrollment.submit.rejected"),
+            Self::AgentIdentityMismatch => f.write_str("agent.identity_mismatch"),
+            Self::AgentTombstoneFenced => f.write_str("agent.tombstone_fenced"),
+            Self::CatalogAuthenticationRequired => f.write_str("catalog.authentication_required"),
+            Self::ControllerAuthenticationRequired => {
+                f.write_str("controller.authentication_required")
+            }
+            Self::ControllerFleetEnrollmentDenied => {
+                f.write_str("controller.fleet.enrollment_denied")
+            }
+            Self::ControllerRequestRejected => f.write_str("controller.request_rejected"),
+            Self::DistributionRevoked => f.write_str("distribution.revoked"),
+            Self::Forbidden => f.write_str("forbidden"),
+            Self::GrantInvalid => f.write_str("grant_invalid"),
+            Self::GrantNodeMismatch => f.write_str("grant_node_mismatch"),
+            Self::GrantUnauthorized => f.write_str("grant_unauthorized"),
+            Self::HelperAuthorizationInvalid => f.write_str("helper.authorization_invalid"),
+            Self::HelperGrantInvalid => f.write_str("helper_grant_invalid"),
+            Self::HelperGrantNodeMismatch => f.write_str("helper_grant_node_mismatch"),
+            Self::HelperGrantUnauthorized => f.write_str("helper_grant_unauthorized"),
+            Self::HelperOperationInvalidArtifact => {
+                f.write_str("helper_operation_invalid_artifact")
+            }
+            Self::HelperPeerIdentityInvalid => f.write_str("helper_peer_identity_invalid"),
+            Self::HelperRequestInstallationIdentityInvalid => {
+                f.write_str("helper_request_installation_identity_invalid")
+            }
+            Self::HelperRequestPlanBindingInvalid => {
+                f.write_str("helper_request_plan_binding_invalid")
+            }
+            Self::HelperRequestReplayed => f.write_str("helper_request_replayed"),
+            Self::HelperRuntimeImageIdentityInvalid => {
+                f.write_str("helper_runtime_image_identity_invalid")
+            }
+            Self::HostHelperAuthorityDenied => f.write_str("host_helper.authority_denied"),
+            Self::LocalIdentityExpired => f.write_str("local.identity_expired"),
+            Self::LocalIdentityFailed => f.write_str("local.identity_failed"),
+            Self::ModelCacheCredentialsDenied => f.write_str("model_cache.credentials_denied"),
+            Self::ModelCacheCredentialsInvalid => f.write_str("model_cache.credentials_invalid"),
+            Self::ModelCacheSourceAccessDenied => f.write_str("model_cache.source_access_denied"),
+            Self::OperationInvalidArtifact => f.write_str("operation_invalid_artifact"),
+            Self::PeerIdentityInvalid => f.write_str("peer_identity_invalid"),
+            Self::PermissionDenied => f.write_str("permission_denied"),
+            Self::RecipeUpdateAuthorityDenied => f.write_str("recipe_update.authority_denied"),
+            Self::RequestReplayed => f.write_str("request_replayed"),
+            Self::RunSwitchArtifactDigestVerificationFailed => {
+                f.write_str("run-switch.artifact-digest-verification-failed")
+            }
+            Self::RunSwitchCleanupNasEvictionForbidden => {
+                f.write_str("run-switch.cleanup-nas-eviction-forbidden")
+            }
+            Self::RunSwitchCleanupReclaimedDigestNotPlanned => {
+                f.write_str("run-switch.cleanup-reclaimed-digest-not-planned")
+            }
+            Self::RunSwitchRuntimeImagePreparationDigestMismatch => {
+                f.write_str("run-switch.runtime-image-preparation-digest-mismatch")
+            }
+            Self::RuntimeImageAuthorizationInvalid => {
+                f.write_str("runtime_image.authorization_invalid")
+            }
+            Self::RuntimeImageAuthorizationRevoked => {
+                f.write_str("runtime_image.authorization_revoked")
+            }
+            Self::RuntimeImageIdentityInvalid => f.write_str("runtime_image_identity_invalid"),
+            Self::TufMetadataInvalid => f.write_str("tuf.metadata_invalid"),
+            Self::TufSignatureInvalid => f.write_str("tuf.signature_invalid"),
+            Self::Unauthorized => f.write_str("unauthorized"),
+        }
+    }
+}
+impl ::std::str::FromStr for SecurityRefusalReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "401" => Ok(Self::X401),
+            "403" => Ok(Self::X403),
+            "agent.certificate.rotation.conflict" => Ok(Self::AgentCertificateRotationConflict),
+            "agent.enrollment.submit.rejected" => Ok(Self::AgentEnrollmentSubmitRejected),
+            "agent.identity_mismatch" => Ok(Self::AgentIdentityMismatch),
+            "agent.tombstone_fenced" => Ok(Self::AgentTombstoneFenced),
+            "catalog.authentication_required" => Ok(Self::CatalogAuthenticationRequired),
+            "controller.authentication_required" => Ok(Self::ControllerAuthenticationRequired),
+            "controller.fleet.enrollment_denied" => Ok(Self::ControllerFleetEnrollmentDenied),
+            "controller.request_rejected" => Ok(Self::ControllerRequestRejected),
+            "distribution.revoked" => Ok(Self::DistributionRevoked),
+            "forbidden" => Ok(Self::Forbidden),
+            "grant_invalid" => Ok(Self::GrantInvalid),
+            "grant_node_mismatch" => Ok(Self::GrantNodeMismatch),
+            "grant_unauthorized" => Ok(Self::GrantUnauthorized),
+            "helper.authorization_invalid" => Ok(Self::HelperAuthorizationInvalid),
+            "helper_grant_invalid" => Ok(Self::HelperGrantInvalid),
+            "helper_grant_node_mismatch" => Ok(Self::HelperGrantNodeMismatch),
+            "helper_grant_unauthorized" => Ok(Self::HelperGrantUnauthorized),
+            "helper_operation_invalid_artifact" => Ok(Self::HelperOperationInvalidArtifact),
+            "helper_peer_identity_invalid" => Ok(Self::HelperPeerIdentityInvalid),
+            "helper_request_installation_identity_invalid" => {
+                Ok(Self::HelperRequestInstallationIdentityInvalid)
+            }
+            "helper_request_plan_binding_invalid" => Ok(Self::HelperRequestPlanBindingInvalid),
+            "helper_request_replayed" => Ok(Self::HelperRequestReplayed),
+            "helper_runtime_image_identity_invalid" => Ok(Self::HelperRuntimeImageIdentityInvalid),
+            "host_helper.authority_denied" => Ok(Self::HostHelperAuthorityDenied),
+            "local.identity_expired" => Ok(Self::LocalIdentityExpired),
+            "local.identity_failed" => Ok(Self::LocalIdentityFailed),
+            "model_cache.credentials_denied" => Ok(Self::ModelCacheCredentialsDenied),
+            "model_cache.credentials_invalid" => Ok(Self::ModelCacheCredentialsInvalid),
+            "model_cache.source_access_denied" => Ok(Self::ModelCacheSourceAccessDenied),
+            "operation_invalid_artifact" => Ok(Self::OperationInvalidArtifact),
+            "peer_identity_invalid" => Ok(Self::PeerIdentityInvalid),
+            "permission_denied" => Ok(Self::PermissionDenied),
+            "recipe_update.authority_denied" => Ok(Self::RecipeUpdateAuthorityDenied),
+            "request_replayed" => Ok(Self::RequestReplayed),
+            "run-switch.artifact-digest-verification-failed" => {
+                Ok(Self::RunSwitchArtifactDigestVerificationFailed)
+            }
+            "run-switch.cleanup-nas-eviction-forbidden" => {
+                Ok(Self::RunSwitchCleanupNasEvictionForbidden)
+            }
+            "run-switch.cleanup-reclaimed-digest-not-planned" => {
+                Ok(Self::RunSwitchCleanupReclaimedDigestNotPlanned)
+            }
+            "run-switch.runtime-image-preparation-digest-mismatch" => {
+                Ok(Self::RunSwitchRuntimeImagePreparationDigestMismatch)
+            }
+            "runtime_image.authorization_invalid" => Ok(Self::RuntimeImageAuthorizationInvalid),
+            "runtime_image.authorization_revoked" => Ok(Self::RuntimeImageAuthorizationRevoked),
+            "runtime_image_identity_invalid" => Ok(Self::RuntimeImageIdentityInvalid),
+            "tuf.metadata_invalid" => Ok(Self::TufMetadataInvalid),
+            "tuf.signature_invalid" => Ok(Self::TufSignatureInvalid),
+            "unauthorized" => Ok(Self::Unauthorized),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for SecurityRefusalReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for SecurityRefusalReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct SignedHostHelperGrant {
     pub claims: HostHelperGrantClaims,
     pub schema_version: u8,
@@ -3241,6 +4653,96 @@ pub struct SourceBundleManifest {
     pub schema_version: u8,
     pub sha256: ::std::string::String,
     pub total_bytes: u32,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum StateWriteKind {
+    #[serde(rename = "attribute")]
+    Attribute,
+    #[serde(rename = "dict-item")]
+    DictItem,
+    #[serde(rename = "bulk-update")]
+    BulkUpdate,
+    #[serde(rename = "constructor")]
+    Constructor,
+    #[serde(rename = "helper-call")]
+    HelperCall,
+}
+impl ::std::fmt::Display for StateWriteKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Attribute => f.write_str("attribute"),
+            Self::DictItem => f.write_str("dict-item"),
+            Self::BulkUpdate => f.write_str("bulk-update"),
+            Self::Constructor => f.write_str("constructor"),
+            Self::HelperCall => f.write_str("helper-call"),
+        }
+    }
+}
+impl ::std::str::FromStr for StateWriteKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "attribute" => Ok(Self::Attribute),
+            "dict-item" => Ok(Self::DictItem),
+            "bulk-update" => Ok(Self::BulkUpdate),
+            "constructor" => Ok(Self::Constructor),
+            "helper-call" => Ok(Self::HelperCall),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for StateWriteKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for StateWriteKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum StopOutcome {
+    #[serde(rename = "confirmed")]
+    Confirmed,
+    #[serde(rename = "unconfirmed")]
+    Unconfirmed,
+}
+impl ::std::fmt::Display for StopOutcome {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Confirmed => f.write_str("confirmed"),
+            Self::Unconfirmed => f.write_str("unconfirmed"),
+        }
+    }
+}
+impl ::std::str::FromStr for StopOutcome {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "confirmed" => Ok(Self::Confirmed),
+            "unconfirmed" => Ok(Self::Unconfirmed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for StopOutcome {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for StopOutcome {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -3340,6 +4842,209 @@ pub struct TelemetrySample {
         deserialize_with = "crate::wire_datetime::deserialize"
     )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct UnknownError {
+    pub category: UnknownErrorCategory,
+    pub reason: WaitReason,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum UnknownErrorCategory {
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+impl ::std::fmt::Display for UnknownErrorCategory {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for UnknownErrorCategory {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for UnknownErrorCategory {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for UnknownErrorCategory {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum WaitReason {
+    #[serde(rename = "operation-not-enabled")]
+    OperationNotEnabled,
+    #[serde(rename = "agent-upgrade-awaiting-identity")]
+    AgentUpgradeAwaitingIdentity,
+    #[serde(rename = "agent-restart-interrupted")]
+    AgentRestartInterrupted,
+    #[serde(rename = "stop-unconfirmed")]
+    StopUnconfirmed,
+    #[serde(rename = "cleanup-unconfirmed")]
+    CleanupUnconfirmed,
+    #[serde(rename = "stop-metadata-unconfirmed")]
+    StopMetadataUnconfirmed,
+    #[serde(rename = "retained-identity-mismatch")]
+    RetainedIdentityMismatch,
+    #[serde(rename = "model-custody-unconfirmed")]
+    ModelCustodyUnconfirmed,
+    #[serde(rename = "runtime-effect-unconfirmed")]
+    RuntimeEffectUnconfirmed,
+    #[serde(rename = "job-stop-unconfirmed")]
+    JobStopUnconfirmed,
+    #[serde(rename = "job-state-uncertain")]
+    JobStateUncertain,
+    #[serde(rename = "lease-lapsed")]
+    LeaseLapsed,
+    #[serde(rename = "report-uncertain")]
+    ReportUncertain,
+    #[serde(rename = "observation-unavailable")]
+    ObservationUnavailable,
+    #[serde(rename = "receipt-missing")]
+    ReceiptMissing,
+    #[serde(rename = "stale-plan")]
+    StalePlan,
+    #[serde(rename = "scope-changed")]
+    ScopeChanged,
+    #[serde(rename = "legacy-unclassified")]
+    LegacyUnclassified,
+}
+impl ::std::fmt::Display for WaitReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::OperationNotEnabled => f.write_str("operation-not-enabled"),
+            Self::AgentUpgradeAwaitingIdentity => f.write_str("agent-upgrade-awaiting-identity"),
+            Self::AgentRestartInterrupted => f.write_str("agent-restart-interrupted"),
+            Self::StopUnconfirmed => f.write_str("stop-unconfirmed"),
+            Self::CleanupUnconfirmed => f.write_str("cleanup-unconfirmed"),
+            Self::StopMetadataUnconfirmed => f.write_str("stop-metadata-unconfirmed"),
+            Self::RetainedIdentityMismatch => f.write_str("retained-identity-mismatch"),
+            Self::ModelCustodyUnconfirmed => f.write_str("model-custody-unconfirmed"),
+            Self::RuntimeEffectUnconfirmed => f.write_str("runtime-effect-unconfirmed"),
+            Self::JobStopUnconfirmed => f.write_str("job-stop-unconfirmed"),
+            Self::JobStateUncertain => f.write_str("job-state-uncertain"),
+            Self::LeaseLapsed => f.write_str("lease-lapsed"),
+            Self::ReportUncertain => f.write_str("report-uncertain"),
+            Self::ObservationUnavailable => f.write_str("observation-unavailable"),
+            Self::ReceiptMissing => f.write_str("receipt-missing"),
+            Self::StalePlan => f.write_str("stale-plan"),
+            Self::ScopeChanged => f.write_str("scope-changed"),
+            Self::LegacyUnclassified => f.write_str("legacy-unclassified"),
+        }
+    }
+}
+impl ::std::str::FromStr for WaitReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "operation-not-enabled" => Ok(Self::OperationNotEnabled),
+            "agent-upgrade-awaiting-identity" => Ok(Self::AgentUpgradeAwaitingIdentity),
+            "agent-restart-interrupted" => Ok(Self::AgentRestartInterrupted),
+            "stop-unconfirmed" => Ok(Self::StopUnconfirmed),
+            "cleanup-unconfirmed" => Ok(Self::CleanupUnconfirmed),
+            "stop-metadata-unconfirmed" => Ok(Self::StopMetadataUnconfirmed),
+            "retained-identity-mismatch" => Ok(Self::RetainedIdentityMismatch),
+            "model-custody-unconfirmed" => Ok(Self::ModelCustodyUnconfirmed),
+            "runtime-effect-unconfirmed" => Ok(Self::RuntimeEffectUnconfirmed),
+            "job-stop-unconfirmed" => Ok(Self::JobStopUnconfirmed),
+            "job-state-uncertain" => Ok(Self::JobStateUncertain),
+            "lease-lapsed" => Ok(Self::LeaseLapsed),
+            "report-uncertain" => Ok(Self::ReportUncertain),
+            "observation-unavailable" => Ok(Self::ObservationUnavailable),
+            "receipt-missing" => Ok(Self::ReceiptMissing),
+            "stale-plan" => Ok(Self::StalePlan),
+            "scope-changed" => Ok(Self::ScopeChanged),
+            "legacy-unclassified" => Ok(Self::LegacyUnclassified),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for WaitReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for WaitReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum WaitVerdict {
+    #[serde(rename = "KEEP")]
+    Keep,
+    #[serde(rename = "SELF-HEAL")]
+    SelfHeal,
+    #[serde(rename = "FIX-ACTION")]
+    FixAction,
+    #[serde(rename = "DERIVED")]
+    Derived,
+}
+impl ::std::fmt::Display for WaitVerdict {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Keep => f.write_str("KEEP"),
+            Self::SelfHeal => f.write_str("SELF-HEAL"),
+            Self::FixAction => f.write_str("FIX-ACTION"),
+            Self::Derived => f.write_str("DERIVED"),
+        }
+    }
+}
+impl ::std::str::FromStr for WaitVerdict {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "KEEP" => Ok(Self::Keep),
+            "SELF-HEAL" => Ok(Self::SelfHeal),
+            "FIX-ACTION" => Ok(Self::FixAction),
+            "DERIVED" => Ok(Self::Derived),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for WaitVerdict {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for WaitVerdict {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 /// Error types.
 pub mod error {
@@ -3611,6 +5316,8 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
             pub summary: ::std::option::Option<::std::string::String>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub uncertain: ::std::option::Option<bool>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub wait_reason: ::std::option::Option<WaitReason>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -3630,6 +5337,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
             status: raw.status,
             summary: raw.summary,
             uncertain: raw.uncertain,
+            wait_reason: raw.wait_reason,
         })
     }
 }
@@ -3838,6 +5546,43 @@ impl ::std::cmp::PartialEq<&str> for AgentResultState {
         self.as_str() == *other
     }
 }
+impl<'de> ::serde::Deserialize<'de> for AgentResultState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("AgentResultState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "succeeded")]
+            Succeeded,
+            #[serde(rename = "failed")]
+            Failed,
+            #[serde(rename = "cancelled")]
+            Cancelled,
+            #[serde(rename = "waiting-for-operator")]
+            WaitingForOperator,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Succeeded => Self::Succeeded,
+            Raw::Failed => Self::Failed,
+            Raw::Cancelled => Self::Cancelled,
+            Raw::WaitingForOperator => Self::WaitingForOperator,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for AgentRuntimeIdentity {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -4016,6 +5761,69 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionResult {
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             downloaded_bytes: raw.downloaded_bytes,
+        })
+    }
+}
+impl BlockerCategory {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SecurityEdge => "security-edge",
+            Self::InputValidation => "input-validation",
+            Self::AlreadyRetried => "already-retried",
+            Self::BookkeepingDebt => "bookkeeping-debt",
+        }
+    }
+}
+impl ::std::ops::Deref for BlockerCategory {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for BlockerCategory {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for BlockerCategory {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for BlockerCategory {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("BlockerCategory", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "security-edge")]
+            SecurityEdge,
+            #[serde(rename = "input-validation")]
+            InputValidation,
+            #[serde(rename = "already-retried")]
+            AlreadyRetried,
+            #[serde(rename = "bookkeeping-debt")]
+            BookkeepingDebt,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::SecurityEdge => Self::SecurityEdge,
+            Raw::InputValidation => Self::InputValidation,
+            Raw::AlreadyRetried => Self::AlreadyRetried,
+            Raw::BookkeepingDebt => Self::BookkeepingDebt,
         })
     }
 }
@@ -4723,6 +6531,81 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentSubmitRequest {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for ErrorCatalog {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ErrorCatalog", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub error: ErrorCatalogError,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self { error: raw.error })
+    }
+}
+impl ErrorCategory {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SecurityRefusal => "security-refusal",
+            Self::InvalidRequest => "invalid-request",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for ErrorCategory {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ErrorCategory {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ErrorCategory {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ErrorCategory {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ErrorCategory", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "security-refusal")]
+            SecurityRefusal,
+            #[serde(rename = "invalid-request")]
+            InvalidRequest,
+            #[serde(rename = "unknown")]
+            Unknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::SecurityRefusal => Self::SecurityRefusal,
+            Raw::InvalidRequest => Self::InvalidRequest,
+            Raw::Unknown => Self::Unknown,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for ErrorContextResponse {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -4889,6 +6772,117 @@ impl ::std::cmp::PartialEq<str> for ExecuteContainerRuntimeRequestOperationActio
 impl ::std::cmp::PartialEq<&str> for ExecuteContainerRuntimeRequestOperationAction {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+impl FailureCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OperationFailed => "operation_failed",
+            Self::OperationCancelled => "operation_cancelled",
+            Self::AgentUpgradeFailed => "agent_upgrade_failed",
+            Self::ArtifactDistributionFailed => "artifact_distribution_failed",
+            Self::RecipeBuildFailed => "recipe_build_failed",
+            Self::RecipeJobRunFailed => "recipe_job_run_failed",
+            Self::RecipeInstallFailed => "recipe_install_failed",
+            Self::RecipeStartFailed => "recipe_start_failed",
+            Self::RecipeStopFailed => "recipe_stop_failed",
+            Self::RecipeUninstallFailed => "recipe_uninstall_failed",
+            Self::RuntimeObservationUnavailable => "runtime_observation_unavailable",
+            Self::InstallationReconciliationBusy => "installation_reconciliation_busy",
+            Self::InstallationStorageTemporarilyUnavailable => {
+                "installation_storage_temporarily_unavailable"
+            }
+            Self::RecipeReconciliationDependencyUnavailable => {
+                "recipe_reconciliation_dependency_unavailable"
+            }
+        }
+    }
+}
+impl ::std::ops::Deref for FailureCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for FailureCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for FailureCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for FailureCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("FailureCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "operation_failed")]
+            OperationFailed,
+            #[serde(rename = "operation_cancelled")]
+            OperationCancelled,
+            #[serde(rename = "agent_upgrade_failed")]
+            AgentUpgradeFailed,
+            #[serde(rename = "artifact_distribution_failed")]
+            ArtifactDistributionFailed,
+            #[serde(rename = "recipe_build_failed")]
+            RecipeBuildFailed,
+            #[serde(rename = "recipe_job_run_failed")]
+            RecipeJobRunFailed,
+            #[serde(rename = "recipe_install_failed")]
+            RecipeInstallFailed,
+            #[serde(rename = "recipe_start_failed")]
+            RecipeStartFailed,
+            #[serde(rename = "recipe_stop_failed")]
+            RecipeStopFailed,
+            #[serde(rename = "recipe_uninstall_failed")]
+            RecipeUninstallFailed,
+            #[serde(rename = "runtime_observation_unavailable")]
+            RuntimeObservationUnavailable,
+            #[serde(rename = "installation_reconciliation_busy")]
+            InstallationReconciliationBusy,
+            #[serde(rename = "installation_storage_temporarily_unavailable")]
+            InstallationStorageTemporarilyUnavailable,
+            #[serde(rename = "recipe_reconciliation_dependency_unavailable")]
+            RecipeReconciliationDependencyUnavailable,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::OperationFailed => Self::OperationFailed,
+            Raw::OperationCancelled => Self::OperationCancelled,
+            Raw::AgentUpgradeFailed => Self::AgentUpgradeFailed,
+            Raw::ArtifactDistributionFailed => Self::ArtifactDistributionFailed,
+            Raw::RecipeBuildFailed => Self::RecipeBuildFailed,
+            Raw::RecipeJobRunFailed => Self::RecipeJobRunFailed,
+            Raw::RecipeInstallFailed => Self::RecipeInstallFailed,
+            Raw::RecipeStartFailed => Self::RecipeStartFailed,
+            Raw::RecipeStopFailed => Self::RecipeStopFailed,
+            Raw::RecipeUninstallFailed => Self::RecipeUninstallFailed,
+            Raw::RuntimeObservationUnavailable => Self::RuntimeObservationUnavailable,
+            Raw::InstallationReconciliationBusy => Self::InstallationReconciliationBusy,
+            Raw::InstallationStorageTemporarilyUnavailable => {
+                Self::InstallationStorageTemporarilyUnavailable
+            }
+            Raw::RecipeReconciliationDependencyUnavailable => {
+                Self::RecipeReconciliationDependencyUnavailable
+            }
+        })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for FailureDiagnostics {
@@ -5730,6 +7724,147 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseObject {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for InvalidRequest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InvalidRequest", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub category: InvalidRequestCategory,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub field: ::std::option::Option<::std::string::String>,
+            pub reason: InvalidRequestReason,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            category: raw.category,
+            field: raw.field,
+            reason: raw.reason,
+        })
+    }
+}
+impl InvalidRequestCategory {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "invalid-request",
+        }
+    }
+}
+impl ::std::ops::Deref for InvalidRequestCategory {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for InvalidRequestCategory {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for InvalidRequestCategory {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl InvalidRequestReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Malformed => "malformed",
+            Self::OutOfRange => "out-of-range",
+            Self::LimitExceeded => "limit-exceeded",
+            Self::UnknownField => "unknown-field",
+            Self::Incomplete => "incomplete",
+            Self::Immutable => "immutable",
+            Self::Duplicate => "duplicate",
+            Self::Conflict => "conflict",
+            Self::NotFound => "not-found",
+            Self::NotReady => "not-ready",
+            Self::Superseded => "superseded",
+            Self::Unsupported => "unsupported",
+        }
+    }
+}
+impl ::std::ops::Deref for InvalidRequestReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for InvalidRequestReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for InvalidRequestReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InvalidRequestReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InvalidRequestReason", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "malformed")]
+            Malformed,
+            #[serde(rename = "out-of-range")]
+            OutOfRange,
+            #[serde(rename = "limit-exceeded")]
+            LimitExceeded,
+            #[serde(rename = "unknown-field")]
+            UnknownField,
+            #[serde(rename = "incomplete")]
+            Incomplete,
+            #[serde(rename = "immutable")]
+            Immutable,
+            #[serde(rename = "duplicate")]
+            Duplicate,
+            #[serde(rename = "conflict")]
+            Conflict,
+            #[serde(rename = "not-found")]
+            NotFound,
+            #[serde(rename = "not-ready")]
+            NotReady,
+            #[serde(rename = "superseded")]
+            Superseded,
+            #[serde(rename = "unsupported")]
+            Unsupported,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Malformed => Self::Malformed,
+            Raw::OutOfRange => Self::OutOfRange,
+            Raw::LimitExceeded => Self::LimitExceeded,
+            Raw::UnknownField => Self::UnknownField,
+            Raw::Incomplete => Self::Incomplete,
+            Raw::Immutable => Self::Immutable,
+            Raw::Duplicate => Self::Duplicate,
+            Raw::Conflict => Self::Conflict,
+            Raw::NotFound => Self::NotFound,
+            Raw::NotReady => Self::NotReady,
+            Raw::Superseded => Self::Superseded,
+            Raw::Unsupported => Self::Unsupported,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for InventoryRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -5843,6 +7978,426 @@ impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
             not_after: raw.not_after,
             not_before: raw.not_before,
             serial: raw.serial,
+        })
+    }
+}
+impl LifecycleEffect {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::None => "none",
+            Self::Issued => "issued",
+            Self::Established => "established",
+            Self::Stopped => "stopped",
+        }
+    }
+}
+impl ::std::ops::Deref for LifecycleEffect {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for LifecycleEffect {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for LifecycleEffect {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LifecycleEffect {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("LifecycleEffect", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "unknown")]
+            Unknown,
+            #[serde(rename = "none")]
+            None,
+            #[serde(rename = "issued")]
+            Issued,
+            #[serde(rename = "established")]
+            Established,
+            #[serde(rename = "stopped")]
+            Stopped,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Unknown => Self::Unknown,
+            Raw::None => Self::None,
+            Raw::Issued => Self::Issued,
+            Raw::Established => Self::Established,
+            Raw::Stopped => Self::Stopped,
+        })
+    }
+}
+impl LifecycleEventKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Submitted => "submitted",
+            Self::Claimed => "claimed",
+            Self::Heartbeat => "heartbeat",
+            Self::Reported => "reported",
+            Self::LeaseLapsed => "lease-lapsed",
+            Self::CancelRequested => "cancel-requested",
+            Self::Observed => "observed",
+            Self::OperatorAction => "operator-action",
+            Self::Tick => "tick",
+        }
+    }
+}
+impl ::std::ops::Deref for LifecycleEventKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for LifecycleEventKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for LifecycleEventKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LifecycleEventKind {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("LifecycleEventKind", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "submitted")]
+            Submitted,
+            #[serde(rename = "claimed")]
+            Claimed,
+            #[serde(rename = "heartbeat")]
+            Heartbeat,
+            #[serde(rename = "reported")]
+            Reported,
+            #[serde(rename = "lease-lapsed")]
+            LeaseLapsed,
+            #[serde(rename = "cancel-requested")]
+            CancelRequested,
+            #[serde(rename = "observed")]
+            Observed,
+            #[serde(rename = "operator-action")]
+            OperatorAction,
+            #[serde(rename = "tick")]
+            Tick,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Submitted => Self::Submitted,
+            Raw::Claimed => Self::Claimed,
+            Raw::Heartbeat => Self::Heartbeat,
+            Raw::Reported => Self::Reported,
+            Raw::LeaseLapsed => Self::LeaseLapsed,
+            Raw::CancelRequested => Self::CancelRequested,
+            Raw::Observed => Self::Observed,
+            Raw::OperatorAction => Self::OperatorAction,
+            Raw::Tick => Self::Tick,
+        })
+    }
+}
+impl LifecycleState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Observing => "observing",
+            Self::Backoff => "backoff",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::NeedsOperator => "needs-operator",
+        }
+    }
+}
+impl ::std::ops::Deref for LifecycleState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for LifecycleState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for LifecycleState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LifecycleState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("LifecycleState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "queued")]
+            Queued,
+            #[serde(rename = "running")]
+            Running,
+            #[serde(rename = "observing")]
+            Observing,
+            #[serde(rename = "backoff")]
+            Backoff,
+            #[serde(rename = "succeeded")]
+            Succeeded,
+            #[serde(rename = "failed")]
+            Failed,
+            #[serde(rename = "cancelled")]
+            Cancelled,
+            #[serde(rename = "needs-operator")]
+            NeedsOperator,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Queued => Self::Queued,
+            Raw::Running => Self::Running,
+            Raw::Observing => Self::Observing,
+            Raw::Backoff => Self::Backoff,
+            Raw::Succeeded => Self::Succeeded,
+            Raw::Failed => Self::Failed,
+            Raw::Cancelled => Self::Cancelled,
+            Raw::NeedsOperator => Self::NeedsOperator,
+        })
+    }
+}
+impl LifecycleSubject {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Job => "Job",
+            Self::JobAttempt => "JobAttempt",
+            Self::AgentOperation => "AgentOperation",
+            Self::AgentOperationAttempt => "AgentOperationAttempt",
+            Self::ModelCacheOperation => "ModelCacheOperation",
+            Self::ArtifactJob => "ArtifactJob",
+            Self::FleetProfileApplication => "FleetProfileApplication",
+        }
+    }
+}
+impl ::std::ops::Deref for LifecycleSubject {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for LifecycleSubject {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for LifecycleSubject {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LifecycleSubject {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("LifecycleSubject", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            Job,
+            JobAttempt,
+            AgentOperation,
+            AgentOperationAttempt,
+            ModelCacheOperation,
+            ArtifactJob,
+            FleetProfileApplication,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Job => Self::Job,
+            Raw::JobAttempt => Self::JobAttempt,
+            Raw::AgentOperation => Self::AgentOperation,
+            Raw::AgentOperationAttempt => Self::AgentOperationAttempt,
+            Raw::ModelCacheOperation => Self::ModelCacheOperation,
+            Raw::ArtifactJob => Self::ArtifactJob,
+            Raw::FleetProfileApplication => Self::FleetProfileApplication,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("LifecycleVocabulary", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub agent_result_state: AgentResultState,
+            pub blocker_category: BlockerCategory,
+            pub effect: LifecycleEffect,
+            pub error_category: ErrorCategory,
+            pub event_kind: LifecycleEventKind,
+            pub failure_code: FailureCode,
+            pub invalid_request_reason: InvalidRequestReason,
+            pub lifecycle_subject: LifecycleSubject,
+            pub migration_step: MigrationStep,
+            pub operator_action: OperatorActionName,
+            pub operator_surface: OperatorSurface,
+            pub outcome_kind: OutcomeKind,
+            pub security_refusal_reason: SecurityRefusalReason,
+            pub state: LifecycleState,
+            pub state_write_kind: StateWriteKind,
+            pub stop_outcome: StopOutcome,
+            pub wait_reason: WaitReason,
+            pub wait_verdict: WaitVerdict,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            agent_result_state: raw.agent_result_state,
+            blocker_category: raw.blocker_category,
+            effect: raw.effect,
+            error_category: raw.error_category,
+            event_kind: raw.event_kind,
+            failure_code: raw.failure_code,
+            invalid_request_reason: raw.invalid_request_reason,
+            lifecycle_subject: raw.lifecycle_subject,
+            migration_step: raw.migration_step,
+            operator_action: raw.operator_action,
+            operator_surface: raw.operator_surface,
+            outcome_kind: raw.outcome_kind,
+            security_refusal_reason: raw.security_refusal_reason,
+            state: raw.state,
+            state_write_kind: raw.state_write_kind,
+            stop_outcome: raw.stop_outcome,
+            wait_reason: raw.wait_reason,
+            wait_verdict: raw.wait_verdict,
+        })
+    }
+}
+impl MigrationStep {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Step2 => "step-2",
+            Self::Step3 => "step-3",
+            Self::Step4 => "step-4",
+            Self::Step5 => "step-5",
+            Self::Step6 => "step-6",
+            Self::Step7 => "step-7",
+        }
+    }
+}
+impl ::std::ops::Deref for MigrationStep {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for MigrationStep {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for MigrationStep {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for MigrationStep {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("MigrationStep", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "step-2")]
+            Step2,
+            #[serde(rename = "step-3")]
+            Step3,
+            #[serde(rename = "step-4")]
+            Step4,
+            #[serde(rename = "step-5")]
+            Step5,
+            #[serde(rename = "step-6")]
+            Step6,
+            #[serde(rename = "step-7")]
+            Step7,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Step2 => Self::Step2,
+            Raw::Step3 => Self::Step3,
+            Raw::Step4 => Self::Step4,
+            Raw::Step5 => Self::Step5,
+            Raw::Step6 => Self::Step6,
+            Raw::Step7 => Self::Step7,
         })
     }
 }
@@ -6089,6 +8644,405 @@ impl ::std::cmp::PartialEq<str> for OperationProgressActivity {
     }
 }
 impl ::std::cmp::PartialEq<&str> for OperationProgressActivity {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl OperatorActionName {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Resume => "resume",
+            Self::Retire => "retire",
+            Self::Retry => "retry",
+            Self::Stop => "stop",
+        }
+    }
+}
+impl ::std::ops::Deref for OperatorActionName {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for OperatorActionName {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for OperatorActionName {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for OperatorActionName {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("OperatorActionName", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "resume")]
+            Resume,
+            #[serde(rename = "retire")]
+            Retire,
+            #[serde(rename = "retry")]
+            Retry,
+            #[serde(rename = "stop")]
+            Stop,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Resume => Self::Resume,
+            Raw::Retire => Self::Retire,
+            Raw::Retry => Self::Retry,
+            Raw::Stop => Self::Stop,
+        })
+    }
+}
+impl OperatorSurface {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Resume => "resume",
+            Self::Retire => "retire",
+            Self::Retry => "retry",
+            Self::Stop => "stop",
+            Self::Automatic => "automatic",
+        }
+    }
+}
+impl ::std::ops::Deref for OperatorSurface {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for OperatorSurface {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for OperatorSurface {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for OperatorSurface {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("OperatorSurface", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "resume")]
+            Resume,
+            #[serde(rename = "retire")]
+            Retire,
+            #[serde(rename = "retry")]
+            Retry,
+            #[serde(rename = "stop")]
+            Stop,
+            #[serde(rename = "automatic")]
+            Automatic,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Resume => Self::Resume,
+            Raw::Retire => Self::Retire,
+            Raw::Retry => Self::Retry,
+            Raw::Stop => Self::Stop,
+            Raw::Automatic => Self::Automatic,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for OutcomeCatalog {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("OutcomeCatalog", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub outcome: OutcomeCatalogOutcome,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            outcome: raw.outcome,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for OutcomeDone {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("OutcomeDone", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub kind: OutcomeDoneKind,
+            pub result: OutcomeDoneResult,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            kind: raw.kind,
+            result: raw.result,
+        })
+    }
+}
+impl OutcomeDoneKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Done => "done",
+        }
+    }
+}
+impl ::std::ops::Deref for OutcomeDoneKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for OutcomeDoneKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for OutcomeDoneKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for OutcomeEvidence {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("OutcomeEvidence", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub diagnostic: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub diagnostics: ::std::option::Option<FailureDiagnostics>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub helper_error_code: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub helper_exit_code: ::std::option::Option<u32>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub package_activation: ::std::option::Option<PackageActivationReceipt>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub stage: ::std::option::Option<::std::string::String>,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            diagnostic: raw.diagnostic,
+            diagnostics: raw.diagnostics,
+            helper_error_code: raw.helper_error_code,
+            helper_exit_code: raw.helper_exit_code,
+            package_activation: raw.package_activation,
+            stage: raw.stage,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for OutcomeFailed {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("OutcomeFailed", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub code: FailureCode,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub evidence: ::std::option::Option<OutcomeEvidence>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub failure_kind: ::std::option::Option<AgentFailureKind>,
+            pub kind: OutcomeFailedKind,
+            pub reason: ::std::string::String,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub receipt: ::std::option::Option<RecipeJobRunResult>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub retry_after_seconds: ::std::option::Option<u32>,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            code: raw.code,
+            evidence: raw.evidence,
+            failure_kind: raw.failure_kind,
+            kind: raw.kind,
+            reason: raw.reason,
+            receipt: raw.receipt,
+            retry_after_seconds: raw.retry_after_seconds,
+        })
+    }
+}
+impl OutcomeFailedKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Failed => "failed",
+        }
+    }
+}
+impl ::std::ops::Deref for OutcomeFailedKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for OutcomeFailedKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for OutcomeFailedKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl OutcomeKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Done => "done",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for OutcomeKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for OutcomeKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for OutcomeKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for OutcomeKind {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("OutcomeKind", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "done")]
+            Done,
+            #[serde(rename = "failed")]
+            Failed,
+            #[serde(rename = "cancelled")]
+            Cancelled,
+            #[serde(rename = "unknown")]
+            Unknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Done => Self::Done,
+            Raw::Failed => Self::Failed,
+            Raw::Cancelled => Self::Cancelled,
+            Raw::Unknown => Self::Unknown,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for OutcomeUnknown {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("OutcomeUnknown", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub evidence: ::std::option::Option<OutcomeEvidence>,
+            pub kind: OutcomeUnknownKind,
+            pub reason: ::std::string::String,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub receipt: ::std::option::Option<RecipeJobRunResult>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub retry_after_seconds: ::std::option::Option<u32>,
+            pub wait_reason: WaitReason,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            evidence: raw.evidence,
+            kind: raw.kind,
+            reason: raw.reason,
+            receipt: raw.receipt,
+            retry_after_seconds: raw.retry_after_seconds,
+            wait_reason: raw.wait_reason,
+        })
+    }
+}
+impl OutcomeUnknownKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for OutcomeUnknownKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for OutcomeUnknownKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for OutcomeUnknownKind {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
     }
@@ -7411,6 +10365,298 @@ impl<'de> ::serde::Deserialize<'de> for RuntimePreflightResult {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for SecurityRefusal {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SecurityRefusal", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub category: SecurityRefusalCategory,
+            pub reason: SecurityRefusalReason,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            category: raw.category,
+            reason: raw.reason,
+        })
+    }
+}
+impl SecurityRefusalCategory {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SecurityRefusal => "security-refusal",
+        }
+    }
+}
+impl ::std::ops::Deref for SecurityRefusalCategory {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for SecurityRefusalCategory {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for SecurityRefusalCategory {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl SecurityRefusalReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::X401 => "401",
+            Self::X403 => "403",
+            Self::AgentCertificateRotationConflict => "agent.certificate.rotation.conflict",
+            Self::AgentEnrollmentSubmitRejected => "agent.enrollment.submit.rejected",
+            Self::AgentIdentityMismatch => "agent.identity_mismatch",
+            Self::AgentTombstoneFenced => "agent.tombstone_fenced",
+            Self::CatalogAuthenticationRequired => "catalog.authentication_required",
+            Self::ControllerAuthenticationRequired => "controller.authentication_required",
+            Self::ControllerFleetEnrollmentDenied => "controller.fleet.enrollment_denied",
+            Self::ControllerRequestRejected => "controller.request_rejected",
+            Self::DistributionRevoked => "distribution.revoked",
+            Self::Forbidden => "forbidden",
+            Self::GrantInvalid => "grant_invalid",
+            Self::GrantNodeMismatch => "grant_node_mismatch",
+            Self::GrantUnauthorized => "grant_unauthorized",
+            Self::HelperAuthorizationInvalid => "helper.authorization_invalid",
+            Self::HelperGrantInvalid => "helper_grant_invalid",
+            Self::HelperGrantNodeMismatch => "helper_grant_node_mismatch",
+            Self::HelperGrantUnauthorized => "helper_grant_unauthorized",
+            Self::HelperOperationInvalidArtifact => "helper_operation_invalid_artifact",
+            Self::HelperPeerIdentityInvalid => "helper_peer_identity_invalid",
+            Self::HelperRequestInstallationIdentityInvalid => {
+                "helper_request_installation_identity_invalid"
+            }
+            Self::HelperRequestPlanBindingInvalid => "helper_request_plan_binding_invalid",
+            Self::HelperRequestReplayed => "helper_request_replayed",
+            Self::HelperRuntimeImageIdentityInvalid => "helper_runtime_image_identity_invalid",
+            Self::HostHelperAuthorityDenied => "host_helper.authority_denied",
+            Self::LocalIdentityExpired => "local.identity_expired",
+            Self::LocalIdentityFailed => "local.identity_failed",
+            Self::ModelCacheCredentialsDenied => "model_cache.credentials_denied",
+            Self::ModelCacheCredentialsInvalid => "model_cache.credentials_invalid",
+            Self::ModelCacheSourceAccessDenied => "model_cache.source_access_denied",
+            Self::OperationInvalidArtifact => "operation_invalid_artifact",
+            Self::PeerIdentityInvalid => "peer_identity_invalid",
+            Self::PermissionDenied => "permission_denied",
+            Self::RecipeUpdateAuthorityDenied => "recipe_update.authority_denied",
+            Self::RequestReplayed => "request_replayed",
+            Self::RunSwitchArtifactDigestVerificationFailed => {
+                "run-switch.artifact-digest-verification-failed"
+            }
+            Self::RunSwitchCleanupNasEvictionForbidden => {
+                "run-switch.cleanup-nas-eviction-forbidden"
+            }
+            Self::RunSwitchCleanupReclaimedDigestNotPlanned => {
+                "run-switch.cleanup-reclaimed-digest-not-planned"
+            }
+            Self::RunSwitchRuntimeImagePreparationDigestMismatch => {
+                "run-switch.runtime-image-preparation-digest-mismatch"
+            }
+            Self::RuntimeImageAuthorizationInvalid => "runtime_image.authorization_invalid",
+            Self::RuntimeImageAuthorizationRevoked => "runtime_image.authorization_revoked",
+            Self::RuntimeImageIdentityInvalid => "runtime_image_identity_invalid",
+            Self::TufMetadataInvalid => "tuf.metadata_invalid",
+            Self::TufSignatureInvalid => "tuf.signature_invalid",
+            Self::Unauthorized => "unauthorized",
+        }
+    }
+}
+impl ::std::ops::Deref for SecurityRefusalReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for SecurityRefusalReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for SecurityRefusalReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SecurityRefusalReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SecurityRefusalReason", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "401")]
+            X401,
+            #[serde(rename = "403")]
+            X403,
+            #[serde(rename = "agent.certificate.rotation.conflict")]
+            AgentCertificateRotationConflict,
+            #[serde(rename = "agent.enrollment.submit.rejected")]
+            AgentEnrollmentSubmitRejected,
+            #[serde(rename = "agent.identity_mismatch")]
+            AgentIdentityMismatch,
+            #[serde(rename = "agent.tombstone_fenced")]
+            AgentTombstoneFenced,
+            #[serde(rename = "catalog.authentication_required")]
+            CatalogAuthenticationRequired,
+            #[serde(rename = "controller.authentication_required")]
+            ControllerAuthenticationRequired,
+            #[serde(rename = "controller.fleet.enrollment_denied")]
+            ControllerFleetEnrollmentDenied,
+            #[serde(rename = "controller.request_rejected")]
+            ControllerRequestRejected,
+            #[serde(rename = "distribution.revoked")]
+            DistributionRevoked,
+            #[serde(rename = "forbidden")]
+            Forbidden,
+            #[serde(rename = "grant_invalid")]
+            GrantInvalid,
+            #[serde(rename = "grant_node_mismatch")]
+            GrantNodeMismatch,
+            #[serde(rename = "grant_unauthorized")]
+            GrantUnauthorized,
+            #[serde(rename = "helper.authorization_invalid")]
+            HelperAuthorizationInvalid,
+            #[serde(rename = "helper_grant_invalid")]
+            HelperGrantInvalid,
+            #[serde(rename = "helper_grant_node_mismatch")]
+            HelperGrantNodeMismatch,
+            #[serde(rename = "helper_grant_unauthorized")]
+            HelperGrantUnauthorized,
+            #[serde(rename = "helper_operation_invalid_artifact")]
+            HelperOperationInvalidArtifact,
+            #[serde(rename = "helper_peer_identity_invalid")]
+            HelperPeerIdentityInvalid,
+            #[serde(rename = "helper_request_installation_identity_invalid")]
+            HelperRequestInstallationIdentityInvalid,
+            #[serde(rename = "helper_request_plan_binding_invalid")]
+            HelperRequestPlanBindingInvalid,
+            #[serde(rename = "helper_request_replayed")]
+            HelperRequestReplayed,
+            #[serde(rename = "helper_runtime_image_identity_invalid")]
+            HelperRuntimeImageIdentityInvalid,
+            #[serde(rename = "host_helper.authority_denied")]
+            HostHelperAuthorityDenied,
+            #[serde(rename = "local.identity_expired")]
+            LocalIdentityExpired,
+            #[serde(rename = "local.identity_failed")]
+            LocalIdentityFailed,
+            #[serde(rename = "model_cache.credentials_denied")]
+            ModelCacheCredentialsDenied,
+            #[serde(rename = "model_cache.credentials_invalid")]
+            ModelCacheCredentialsInvalid,
+            #[serde(rename = "model_cache.source_access_denied")]
+            ModelCacheSourceAccessDenied,
+            #[serde(rename = "operation_invalid_artifact")]
+            OperationInvalidArtifact,
+            #[serde(rename = "peer_identity_invalid")]
+            PeerIdentityInvalid,
+            #[serde(rename = "permission_denied")]
+            PermissionDenied,
+            #[serde(rename = "recipe_update.authority_denied")]
+            RecipeUpdateAuthorityDenied,
+            #[serde(rename = "request_replayed")]
+            RequestReplayed,
+            #[serde(rename = "run-switch.artifact-digest-verification-failed")]
+            RunSwitchArtifactDigestVerificationFailed,
+            #[serde(rename = "run-switch.cleanup-nas-eviction-forbidden")]
+            RunSwitchCleanupNasEvictionForbidden,
+            #[serde(rename = "run-switch.cleanup-reclaimed-digest-not-planned")]
+            RunSwitchCleanupReclaimedDigestNotPlanned,
+            #[serde(rename = "run-switch.runtime-image-preparation-digest-mismatch")]
+            RunSwitchRuntimeImagePreparationDigestMismatch,
+            #[serde(rename = "runtime_image.authorization_invalid")]
+            RuntimeImageAuthorizationInvalid,
+            #[serde(rename = "runtime_image.authorization_revoked")]
+            RuntimeImageAuthorizationRevoked,
+            #[serde(rename = "runtime_image_identity_invalid")]
+            RuntimeImageIdentityInvalid,
+            #[serde(rename = "tuf.metadata_invalid")]
+            TufMetadataInvalid,
+            #[serde(rename = "tuf.signature_invalid")]
+            TufSignatureInvalid,
+            #[serde(rename = "unauthorized")]
+            Unauthorized,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::X401 => Self::X401,
+            Raw::X403 => Self::X403,
+            Raw::AgentCertificateRotationConflict => Self::AgentCertificateRotationConflict,
+            Raw::AgentEnrollmentSubmitRejected => Self::AgentEnrollmentSubmitRejected,
+            Raw::AgentIdentityMismatch => Self::AgentIdentityMismatch,
+            Raw::AgentTombstoneFenced => Self::AgentTombstoneFenced,
+            Raw::CatalogAuthenticationRequired => Self::CatalogAuthenticationRequired,
+            Raw::ControllerAuthenticationRequired => Self::ControllerAuthenticationRequired,
+            Raw::ControllerFleetEnrollmentDenied => Self::ControllerFleetEnrollmentDenied,
+            Raw::ControllerRequestRejected => Self::ControllerRequestRejected,
+            Raw::DistributionRevoked => Self::DistributionRevoked,
+            Raw::Forbidden => Self::Forbidden,
+            Raw::GrantInvalid => Self::GrantInvalid,
+            Raw::GrantNodeMismatch => Self::GrantNodeMismatch,
+            Raw::GrantUnauthorized => Self::GrantUnauthorized,
+            Raw::HelperAuthorizationInvalid => Self::HelperAuthorizationInvalid,
+            Raw::HelperGrantInvalid => Self::HelperGrantInvalid,
+            Raw::HelperGrantNodeMismatch => Self::HelperGrantNodeMismatch,
+            Raw::HelperGrantUnauthorized => Self::HelperGrantUnauthorized,
+            Raw::HelperOperationInvalidArtifact => Self::HelperOperationInvalidArtifact,
+            Raw::HelperPeerIdentityInvalid => Self::HelperPeerIdentityInvalid,
+            Raw::HelperRequestInstallationIdentityInvalid => {
+                Self::HelperRequestInstallationIdentityInvalid
+            }
+            Raw::HelperRequestPlanBindingInvalid => Self::HelperRequestPlanBindingInvalid,
+            Raw::HelperRequestReplayed => Self::HelperRequestReplayed,
+            Raw::HelperRuntimeImageIdentityInvalid => Self::HelperRuntimeImageIdentityInvalid,
+            Raw::HostHelperAuthorityDenied => Self::HostHelperAuthorityDenied,
+            Raw::LocalIdentityExpired => Self::LocalIdentityExpired,
+            Raw::LocalIdentityFailed => Self::LocalIdentityFailed,
+            Raw::ModelCacheCredentialsDenied => Self::ModelCacheCredentialsDenied,
+            Raw::ModelCacheCredentialsInvalid => Self::ModelCacheCredentialsInvalid,
+            Raw::ModelCacheSourceAccessDenied => Self::ModelCacheSourceAccessDenied,
+            Raw::OperationInvalidArtifact => Self::OperationInvalidArtifact,
+            Raw::PeerIdentityInvalid => Self::PeerIdentityInvalid,
+            Raw::PermissionDenied => Self::PermissionDenied,
+            Raw::RecipeUpdateAuthorityDenied => Self::RecipeUpdateAuthorityDenied,
+            Raw::RequestReplayed => Self::RequestReplayed,
+            Raw::RunSwitchArtifactDigestVerificationFailed => {
+                Self::RunSwitchArtifactDigestVerificationFailed
+            }
+            Raw::RunSwitchCleanupNasEvictionForbidden => Self::RunSwitchCleanupNasEvictionForbidden,
+            Raw::RunSwitchCleanupReclaimedDigestNotPlanned => {
+                Self::RunSwitchCleanupReclaimedDigestNotPlanned
+            }
+            Raw::RunSwitchRuntimeImagePreparationDigestMismatch => {
+                Self::RunSwitchRuntimeImagePreparationDigestMismatch
+            }
+            Raw::RuntimeImageAuthorizationInvalid => Self::RuntimeImageAuthorizationInvalid,
+            Raw::RuntimeImageAuthorizationRevoked => Self::RuntimeImageAuthorizationRevoked,
+            Raw::RuntimeImageIdentityInvalid => Self::RuntimeImageIdentityInvalid,
+            Raw::TufMetadataInvalid => Self::TufMetadataInvalid,
+            Raw::TufSignatureInvalid => Self::TufSignatureInvalid,
+            Raw::Unauthorized => Self::Unauthorized,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for SignedHostHelperGrant {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -7500,6 +10746,128 @@ impl<'de> ::serde::Deserialize<'de> for SourceBundleManifest {
             schema_version: raw.schema_version,
             sha256: raw.sha256,
             total_bytes: raw.total_bytes,
+        })
+    }
+}
+impl StateWriteKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Attribute => "attribute",
+            Self::DictItem => "dict-item",
+            Self::BulkUpdate => "bulk-update",
+            Self::Constructor => "constructor",
+            Self::HelperCall => "helper-call",
+        }
+    }
+}
+impl ::std::ops::Deref for StateWriteKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for StateWriteKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for StateWriteKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for StateWriteKind {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("StateWriteKind", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "attribute")]
+            Attribute,
+            #[serde(rename = "dict-item")]
+            DictItem,
+            #[serde(rename = "bulk-update")]
+            BulkUpdate,
+            #[serde(rename = "constructor")]
+            Constructor,
+            #[serde(rename = "helper-call")]
+            HelperCall,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Attribute => Self::Attribute,
+            Raw::DictItem => Self::DictItem,
+            Raw::BulkUpdate => Self::BulkUpdate,
+            Raw::Constructor => Self::Constructor,
+            Raw::HelperCall => Self::HelperCall,
+        })
+    }
+}
+impl StopOutcome {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Confirmed => "confirmed",
+            Self::Unconfirmed => "unconfirmed",
+        }
+    }
+}
+impl ::std::ops::Deref for StopOutcome {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for StopOutcome {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for StopOutcome {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for StopOutcome {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("StopOutcome", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "confirmed")]
+            Confirmed,
+            #[serde(rename = "unconfirmed")]
+            Unconfirmed,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Confirmed => Self::Confirmed,
+            Raw::Unconfirmed => Self::Unconfirmed,
         })
     }
 }
@@ -7627,6 +10995,231 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             memory_available_bytes: raw.memory_available_bytes,
             memory_total_bytes: raw.memory_total_bytes,
             observed_at: raw.observed_at,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for UnknownError {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("UnknownError", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub category: UnknownErrorCategory,
+            pub reason: WaitReason,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            category: raw.category,
+            reason: raw.reason,
+        })
+    }
+}
+impl UnknownErrorCategory {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for UnknownErrorCategory {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for UnknownErrorCategory {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for UnknownErrorCategory {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl WaitReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OperationNotEnabled => "operation-not-enabled",
+            Self::AgentUpgradeAwaitingIdentity => "agent-upgrade-awaiting-identity",
+            Self::AgentRestartInterrupted => "agent-restart-interrupted",
+            Self::StopUnconfirmed => "stop-unconfirmed",
+            Self::CleanupUnconfirmed => "cleanup-unconfirmed",
+            Self::StopMetadataUnconfirmed => "stop-metadata-unconfirmed",
+            Self::RetainedIdentityMismatch => "retained-identity-mismatch",
+            Self::ModelCustodyUnconfirmed => "model-custody-unconfirmed",
+            Self::RuntimeEffectUnconfirmed => "runtime-effect-unconfirmed",
+            Self::JobStopUnconfirmed => "job-stop-unconfirmed",
+            Self::JobStateUncertain => "job-state-uncertain",
+            Self::LeaseLapsed => "lease-lapsed",
+            Self::ReportUncertain => "report-uncertain",
+            Self::ObservationUnavailable => "observation-unavailable",
+            Self::ReceiptMissing => "receipt-missing",
+            Self::StalePlan => "stale-plan",
+            Self::ScopeChanged => "scope-changed",
+            Self::LegacyUnclassified => "legacy-unclassified",
+        }
+    }
+}
+impl ::std::ops::Deref for WaitReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for WaitReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for WaitReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for WaitReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("WaitReason", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "operation-not-enabled")]
+            OperationNotEnabled,
+            #[serde(rename = "agent-upgrade-awaiting-identity")]
+            AgentUpgradeAwaitingIdentity,
+            #[serde(rename = "agent-restart-interrupted")]
+            AgentRestartInterrupted,
+            #[serde(rename = "stop-unconfirmed")]
+            StopUnconfirmed,
+            #[serde(rename = "cleanup-unconfirmed")]
+            CleanupUnconfirmed,
+            #[serde(rename = "stop-metadata-unconfirmed")]
+            StopMetadataUnconfirmed,
+            #[serde(rename = "retained-identity-mismatch")]
+            RetainedIdentityMismatch,
+            #[serde(rename = "model-custody-unconfirmed")]
+            ModelCustodyUnconfirmed,
+            #[serde(rename = "runtime-effect-unconfirmed")]
+            RuntimeEffectUnconfirmed,
+            #[serde(rename = "job-stop-unconfirmed")]
+            JobStopUnconfirmed,
+            #[serde(rename = "job-state-uncertain")]
+            JobStateUncertain,
+            #[serde(rename = "lease-lapsed")]
+            LeaseLapsed,
+            #[serde(rename = "report-uncertain")]
+            ReportUncertain,
+            #[serde(rename = "observation-unavailable")]
+            ObservationUnavailable,
+            #[serde(rename = "receipt-missing")]
+            ReceiptMissing,
+            #[serde(rename = "stale-plan")]
+            StalePlan,
+            #[serde(rename = "scope-changed")]
+            ScopeChanged,
+            #[serde(rename = "legacy-unclassified")]
+            LegacyUnclassified,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::OperationNotEnabled => Self::OperationNotEnabled,
+            Raw::AgentUpgradeAwaitingIdentity => Self::AgentUpgradeAwaitingIdentity,
+            Raw::AgentRestartInterrupted => Self::AgentRestartInterrupted,
+            Raw::StopUnconfirmed => Self::StopUnconfirmed,
+            Raw::CleanupUnconfirmed => Self::CleanupUnconfirmed,
+            Raw::StopMetadataUnconfirmed => Self::StopMetadataUnconfirmed,
+            Raw::RetainedIdentityMismatch => Self::RetainedIdentityMismatch,
+            Raw::ModelCustodyUnconfirmed => Self::ModelCustodyUnconfirmed,
+            Raw::RuntimeEffectUnconfirmed => Self::RuntimeEffectUnconfirmed,
+            Raw::JobStopUnconfirmed => Self::JobStopUnconfirmed,
+            Raw::JobStateUncertain => Self::JobStateUncertain,
+            Raw::LeaseLapsed => Self::LeaseLapsed,
+            Raw::ReportUncertain => Self::ReportUncertain,
+            Raw::ObservationUnavailable => Self::ObservationUnavailable,
+            Raw::ReceiptMissing => Self::ReceiptMissing,
+            Raw::StalePlan => Self::StalePlan,
+            Raw::ScopeChanged => Self::ScopeChanged,
+            Raw::LegacyUnclassified => Self::LegacyUnclassified,
+        })
+    }
+}
+impl WaitVerdict {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Keep => "KEEP",
+            Self::SelfHeal => "SELF-HEAL",
+            Self::FixAction => "FIX-ACTION",
+            Self::Derived => "DERIVED",
+        }
+    }
+}
+impl ::std::ops::Deref for WaitVerdict {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for WaitVerdict {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for WaitVerdict {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for WaitVerdict {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("WaitVerdict", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "KEEP")]
+            Keep,
+            #[serde(rename = "SELF-HEAL")]
+            SelfHeal,
+            #[serde(rename = "FIX-ACTION")]
+            FixAction,
+            #[serde(rename = "DERIVED")]
+            Derived,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Keep => Self::Keep,
+            Raw::SelfHeal => Self::SelfHeal,
+            Raw::FixAction => Self::FixAction,
+            Raw::Derived => Self::Derived,
         })
     }
 }

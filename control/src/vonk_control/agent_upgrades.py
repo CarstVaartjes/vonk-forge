@@ -843,7 +843,7 @@ class AgentUpgradeService:
                 None,
                 parent,
                 Reported(
-                    Outcome.OK,
+                    Outcome.DONE,
                     reason="Spark reports it already runs the requested agent build",
                 ),
                 now,

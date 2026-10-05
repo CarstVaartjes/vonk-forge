@@ -53,6 +53,7 @@ from typing import Any
 from sqlalchemy import update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import LEGACY_WAIT_STATE
 
 from ..agent_operation_facts import aware
 from ..logging import redact_text
@@ -77,7 +78,7 @@ from .types import (
 )
 
 KIND = "job"
-WAITING = "waiting-for-operator"
+WAITING = LEGACY_WAIT_STATE
 _MAX_REASON = 1024
 _STORED = {
     State.QUEUED: "queued",
@@ -337,7 +338,7 @@ class JobAdapter:
 
         row = self.lifecycle(job, attempt)
         event = Reported(
-            Outcome.OK if succeeded else Outcome.FAILED,
+            Outcome.DONE if succeeded else Outcome.FAILED,
             fence=attempt.fence,
             retryable=False,
             reason=reason,

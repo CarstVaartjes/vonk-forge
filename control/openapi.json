@@ -194,6 +194,16 @@
               }
             ],
             "title": "Uncertain"
+          },
+          "wait_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WaitReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "AgentFailureResult",
@@ -323,6 +333,17 @@
         ],
         "title": "AgentOperationPayload",
         "type": "object"
+      },
+      "AgentResultState": {
+        "description": "The state words of an agent result on the wire.\n\nThe wire keeps four words, shared with agents already deployed.  A typed\noutcome decides which one is truthful (``done`` is ``succeeded``, a\nconfirmed cancellation is ``cancelled``, any other definite failure is\n``failed`` and ``unknown`` is the legacy ``waiting-for-operator``); the\nController maps them onto its stored state values unchanged.",
+        "enum": [
+          "succeeded",
+          "failed",
+          "cancelled",
+          "waiting-for-operator"
+        ],
+        "title": "AgentResultState",
+        "type": "string"
       },
       "AgentUpgradeDiagnosticsResponse": {
         "additionalProperties": false,
@@ -1583,6 +1604,17 @@
           "inspect"
         ],
         "title": "AvailabilityRecoveryAction",
+        "type": "string"
+      },
+      "BlockerCategory": {
+        "description": "The categories of the blocker allowlist (fail-closed raises).",
+        "enum": [
+          "security-edge",
+          "input-validation",
+          "already-retried",
+          "bookkeeping-debt"
+        ],
+        "title": "BlockerCategory",
         "type": "string"
       },
       "BooleanParameter": {
@@ -2972,6 +3004,49 @@
         "title": "EnumParameter",
         "type": "object"
       },
+      "ErrorCatalog": {
+        "additionalProperties": false,
+        "description": "Carrier that publishes the error-category union into every generated surface.\n\nNever sent: the wire schema, OpenAPI and the TypeScript client all emit the\ntagged union as one ``OperationError``.",
+        "properties": {
+          "error": {
+            "discriminator": {
+              "mapping": {
+                "invalid-request": "#/components/schemas/InvalidRequest",
+                "security-refusal": "#/components/schemas/SecurityRefusal",
+                "unknown": "#/components/schemas/UnknownError"
+              },
+              "propertyName": "category"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SecurityRefusal"
+              },
+              {
+                "$ref": "#/components/schemas/InvalidRequest"
+              },
+              {
+                "$ref": "#/components/schemas/UnknownError"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorCatalog",
+        "type": "object"
+      },
+      "ErrorCategory": {
+        "description": "The only three things a lifecycle adapter may raise or report.\n\n``security-refusal`` and ``invalid-request`` are decided at submit time and\nfail closed.  Everything else is ``unknown``: it is observed and reconciled,\nnever parked.  The blocker allowlist's ``already-retried`` and\n``bookkeeping-debt`` families are both ``unknown`` (see\n:func:`error_category_of`).",
+        "enum": [
+          "security-refusal",
+          "invalid-request",
+          "unknown"
+        ],
+        "title": "ErrorCategory",
+        "type": "string"
+      },
       "ErrorContextResponse": {
         "additionalProperties": false,
         "description": "Safe context shared by public errors and generated clients.",
@@ -3123,6 +3198,27 @@
         ],
         "title": "EvidenceContext",
         "type": "object"
+      },
+      "FailureCode": {
+        "description": "Closed codes of a definite failed outcome reported by the agent.",
+        "enum": [
+          "operation_failed",
+          "operation_cancelled",
+          "agent_upgrade_failed",
+          "artifact_distribution_failed",
+          "recipe_build_failed",
+          "recipe_job_run_failed",
+          "recipe_install_failed",
+          "recipe_start_failed",
+          "recipe_stop_failed",
+          "recipe_uninstall_failed",
+          "runtime_observation_unavailable",
+          "installation_reconciliation_busy",
+          "installation_storage_temporarily_unavailable",
+          "recipe_reconciliation_dependency_unavailable"
+        ],
+        "title": "FailureCode",
+        "type": "string"
       },
       "FailureDiagnostics": {
         "additionalProperties": false,
@@ -7923,6 +8019,60 @@
         "title": "IntegerParameter",
         "type": "object"
       },
+      "InvalidRequest": {
+        "additionalProperties": false,
+        "description": "A malformed or out-of-contract request; it fails closed at submit time.",
+        "properties": {
+          "category": {
+            "const": "invalid-request",
+            "title": "Category",
+            "type": "string",
+            "x-vonk-typed-tag": true
+          },
+          "field": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Field"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/InvalidRequestReason"
+          }
+        },
+        "required": [
+          "category",
+          "reason"
+        ],
+        "title": "InvalidRequest",
+        "type": "object"
+      },
+      "InvalidRequestReason": {
+        "description": "Closed reason codes of an invalid request (submit-time input validation).",
+        "enum": [
+          "malformed",
+          "out-of-range",
+          "limit-exceeded",
+          "unknown-field",
+          "incomplete",
+          "immutable",
+          "duplicate",
+          "conflict",
+          "not-found",
+          "not-ready",
+          "superseded",
+          "unsupported"
+        ],
+        "title": "InvalidRequestReason",
+        "type": "string"
+      },
       "InventoryState": {
         "additionalProperties": false,
         "properties": {
@@ -9382,6 +9532,34 @@
         "title": "LifecycleCodeFailureResult",
         "type": "object"
       },
+      "LifecycleEffect": {
+        "description": "What is known about the real-world effect of the work.",
+        "enum": [
+          "unknown",
+          "none",
+          "issued",
+          "established",
+          "stopped"
+        ],
+        "title": "LifecycleEffect",
+        "type": "string"
+      },
+      "LifecycleEventKind": {
+        "description": "The kinds of event the pure transition function accepts.",
+        "enum": [
+          "submitted",
+          "claimed",
+          "heartbeat",
+          "reported",
+          "lease-lapsed",
+          "cancel-requested",
+          "observed",
+          "operator-action",
+          "tick"
+        ],
+        "title": "LifecycleEventKind",
+        "type": "string"
+      },
       "LifecyclePreflightCheckpoint": {
         "additionalProperties": false,
         "properties": {
@@ -9475,6 +9653,117 @@
           "phase_index"
         ],
         "title": "LifecyclePreflightCheckpoint",
+        "type": "object"
+      },
+      "LifecycleState": {
+        "description": "The eight lifecycle states.\n\n``waiting``, ``partial``, ``cancelling`` and ``expired`` of the legacy kinds\nmap onto these: waiting and partial work is ``backoff`` or ``observing``, a\ncancelling row is a non-terminal row with ``cancel_requested_at`` set.",
+        "enum": [
+          "queued",
+          "running",
+          "observing",
+          "backoff",
+          "succeeded",
+          "failed",
+          "cancelled",
+          "needs-operator"
+        ],
+        "title": "LifecycleState",
+        "type": "string"
+      },
+      "LifecycleSubject": {
+        "description": "The persisted models whose ``state`` the lifecycle core owns.",
+        "enum": [
+          "Job",
+          "JobAttempt",
+          "AgentOperation",
+          "AgentOperationAttempt",
+          "ModelCacheOperation",
+          "ArtifactJob",
+          "FleetProfileApplication"
+        ],
+        "title": "LifecycleSubject",
+        "type": "string"
+      },
+      "LifecycleVocabulary": {
+        "additionalProperties": false,
+        "description": "Carrier that publishes every vocabulary enum into the wire schema.\n\nThe model is never sent: it exists so the schema exporter, the Rust\ngenerator and the OpenAPI/TypeScript generators emit each closed word set\nfrom this one module.",
+        "properties": {
+          "agent_result_state": {
+            "$ref": "#/components/schemas/AgentResultState"
+          },
+          "blocker_category": {
+            "$ref": "#/components/schemas/BlockerCategory"
+          },
+          "effect": {
+            "$ref": "#/components/schemas/LifecycleEffect"
+          },
+          "error_category": {
+            "$ref": "#/components/schemas/ErrorCategory"
+          },
+          "event_kind": {
+            "$ref": "#/components/schemas/LifecycleEventKind"
+          },
+          "failure_code": {
+            "$ref": "#/components/schemas/FailureCode"
+          },
+          "invalid_request_reason": {
+            "$ref": "#/components/schemas/InvalidRequestReason"
+          },
+          "lifecycle_subject": {
+            "$ref": "#/components/schemas/LifecycleSubject"
+          },
+          "migration_step": {
+            "$ref": "#/components/schemas/MigrationStep"
+          },
+          "operator_action": {
+            "$ref": "#/components/schemas/OperatorActionName"
+          },
+          "operator_surface": {
+            "$ref": "#/components/schemas/OperatorSurface"
+          },
+          "outcome_kind": {
+            "$ref": "#/components/schemas/OutcomeKind"
+          },
+          "security_refusal_reason": {
+            "$ref": "#/components/schemas/SecurityRefusalReason"
+          },
+          "state": {
+            "$ref": "#/components/schemas/LifecycleState"
+          },
+          "state_write_kind": {
+            "$ref": "#/components/schemas/StateWriteKind"
+          },
+          "stop_outcome": {
+            "$ref": "#/components/schemas/StopOutcome"
+          },
+          "wait_reason": {
+            "$ref": "#/components/schemas/WaitReason"
+          },
+          "wait_verdict": {
+            "$ref": "#/components/schemas/WaitVerdict"
+          }
+        },
+        "required": [
+          "state",
+          "agent_result_state",
+          "effect",
+          "outcome_kind",
+          "stop_outcome",
+          "event_kind",
+          "operator_action",
+          "operator_surface",
+          "blocker_category",
+          "wait_verdict",
+          "lifecycle_subject",
+          "state_write_kind",
+          "migration_step",
+          "error_category",
+          "wait_reason",
+          "invalid_request_reason",
+          "security_refusal_reason",
+          "failure_code"
+        ],
+        "title": "LifecycleVocabulary",
         "type": "object"
       },
       "LoginRequest": {
@@ -9954,6 +10243,19 @@
         ],
         "title": "MemoryUsageUncertainty",
         "type": "object"
+      },
+      "MigrationStep": {
+        "description": "The migration steps of the blocker audit (section 5.6) that retire a writer.",
+        "enum": [
+          "step-2",
+          "step-3",
+          "step-4",
+          "step-5",
+          "step-6",
+          "step-7"
+        ],
+        "title": "MigrationStep",
+        "type": "string"
       },
       "ModelArtifactIdentity": {
         "additionalProperties": false,
@@ -12179,6 +12481,40 @@
         ],
         "title": "OperationsResponse",
         "type": "object"
+      },
+      "OperatorActionName": {
+        "description": "The operator actions a row can advertise and the core accepts.",
+        "enum": [
+          "resume",
+          "retire",
+          "retry",
+          "stop"
+        ],
+        "title": "OperatorActionName",
+        "type": "string"
+      },
+      "OperatorSurface": {
+        "description": "The real surfaces behind an advertised action in the blocker allowlist.",
+        "enum": [
+          "resume",
+          "retire",
+          "retry",
+          "stop",
+          "automatic"
+        ],
+        "title": "OperatorSurface",
+        "type": "string"
+      },
+      "OutcomeKind": {
+        "description": "What an executor reported, as the lifecycle core sees it.\n\n``done``, ``cancelled`` and a ``failed`` that is not retryable are\n*definite*: the executor says what happened, and the row ends there.\n``unknown`` (and a retryable failure) says the effect may or may not have\nhappened, which the core resolves by observing it.  On the agent wire a\ncancellation is a definite ``failed`` outcome with the\n``operation_cancelled`` code.",
+        "enum": [
+          "done",
+          "failed",
+          "cancelled",
+          "unknown"
+        ],
+        "title": "OutcomeKind",
+        "type": "string"
       },
       "OutputLimits": {
         "additionalProperties": false,
@@ -20705,6 +21041,80 @@
         "title": "RuntimePreflightResult",
         "type": "object"
       },
+      "SecurityRefusal": {
+        "additionalProperties": false,
+        "description": "A refused request at a security boundary; it fails closed.",
+        "properties": {
+          "category": {
+            "const": "security-refusal",
+            "title": "Category",
+            "type": "string",
+            "x-vonk-typed-tag": true
+          },
+          "reason": {
+            "$ref": "#/components/schemas/SecurityRefusalReason"
+          }
+        },
+        "required": [
+          "category",
+          "reason"
+        ],
+        "title": "SecurityRefusal",
+        "type": "object"
+      },
+      "SecurityRefusalReason": {
+        "description": "Closed reason codes of a security refusal: a real security boundary.\n\nAuthentication and authorization, identity and certificate expiry, node\nrevocation, enrollment, signed package metadata, host-helper authority,\ntombstone fencing, credential denial and the digest-bound destructive-effect\nchecks of Run/Switch.  ``failure_classification`` derives its code set from\nthis enum, so the Controller and the contract cannot disagree.",
+        "enum": [
+          "401",
+          "403",
+          "agent.certificate.rotation.conflict",
+          "agent.enrollment.submit.rejected",
+          "agent.identity_mismatch",
+          "agent.tombstone_fenced",
+          "catalog.authentication_required",
+          "controller.authentication_required",
+          "controller.fleet.enrollment_denied",
+          "controller.request_rejected",
+          "distribution.revoked",
+          "forbidden",
+          "grant_invalid",
+          "grant_node_mismatch",
+          "grant_unauthorized",
+          "helper.authorization_invalid",
+          "helper_grant_invalid",
+          "helper_grant_node_mismatch",
+          "helper_grant_unauthorized",
+          "helper_operation_invalid_artifact",
+          "helper_peer_identity_invalid",
+          "helper_request_installation_identity_invalid",
+          "helper_request_plan_binding_invalid",
+          "helper_request_replayed",
+          "helper_runtime_image_identity_invalid",
+          "host_helper.authority_denied",
+          "local.identity_expired",
+          "local.identity_failed",
+          "model_cache.credentials_denied",
+          "model_cache.credentials_invalid",
+          "model_cache.source_access_denied",
+          "operation_invalid_artifact",
+          "peer_identity_invalid",
+          "permission_denied",
+          "recipe_update.authority_denied",
+          "request_replayed",
+          "run-switch.artifact-digest-verification-failed",
+          "run-switch.cleanup-nas-eviction-forbidden",
+          "run-switch.cleanup-reclaimed-digest-not-planned",
+          "run-switch.runtime-image-preparation-digest-mismatch",
+          "runtime_image.authorization_invalid",
+          "runtime_image.authorization_revoked",
+          "runtime_image_identity_invalid",
+          "tuf.metadata_invalid",
+          "tuf.signature_invalid",
+          "unauthorized"
+        ],
+        "title": "SecurityRefusalReason",
+        "type": "string"
+      },
       "SparkFit": {
         "additionalProperties": false,
         "properties": {
@@ -21004,6 +21414,18 @@
         "title": "SparkGroupNode",
         "type": "object"
       },
+      "StateWriteKind": {
+        "description": "The shapes of a lifecycle state write the writers ratchet recognises.",
+        "enum": [
+          "attribute",
+          "dict-item",
+          "bulk-update",
+          "constructor",
+          "helper-call"
+        ],
+        "title": "StateWriteKind",
+        "type": "string"
+      },
       "StopImpact": {
         "additionalProperties": false,
         "properties": {
@@ -21062,6 +21484,15 @@
         ],
         "title": "StopImpact",
         "type": "object"
+      },
+      "StopOutcome": {
+        "description": "Whether an idempotent stop confirmed that the effect is gone.",
+        "enum": [
+          "confirmed",
+          "unconfirmed"
+        ],
+        "title": "StopOutcome",
+        "type": "string"
       },
       "StringParameter": {
         "additionalProperties": false,
@@ -21437,6 +21868,63 @@
         ],
         "title": "TelemetryState",
         "type": "object"
+      },
+      "UnknownError": {
+        "additionalProperties": false,
+        "description": "Anything else: observed and reconciled, never parked.",
+        "properties": {
+          "category": {
+            "const": "unknown",
+            "title": "Category",
+            "type": "string",
+            "x-vonk-typed-tag": true
+          },
+          "reason": {
+            "$ref": "#/components/schemas/WaitReason"
+          }
+        },
+        "required": [
+          "category",
+          "reason"
+        ],
+        "title": "UnknownError",
+        "type": "object"
+      },
+      "WaitReason": {
+        "description": "Typed reason codes for an effect that cannot be confirmed (the *unknown* kind).\n\nEach code names the one fact the executor could not establish.  The free\ntext of a report is for people; the Controller decides on this code.",
+        "enum": [
+          "operation-not-enabled",
+          "agent-upgrade-awaiting-identity",
+          "agent-restart-interrupted",
+          "stop-unconfirmed",
+          "cleanup-unconfirmed",
+          "stop-metadata-unconfirmed",
+          "retained-identity-mismatch",
+          "model-custody-unconfirmed",
+          "runtime-effect-unconfirmed",
+          "job-stop-unconfirmed",
+          "job-state-uncertain",
+          "lease-lapsed",
+          "report-uncertain",
+          "observation-unavailable",
+          "receipt-missing",
+          "stale-plan",
+          "scope-changed",
+          "legacy-unclassified"
+        ],
+        "title": "WaitReason",
+        "type": "string"
+      },
+      "WaitVerdict": {
+        "description": "The verdicts of the blocker allowlist for an operator wait.",
+        "enum": [
+          "KEEP",
+          "SELF-HEAL",
+          "FIX-ACTION",
+          "DERIVED"
+        ],
+        "title": "WaitVerdict",
+        "type": "string"
       }
     },
     "securitySchemes": {

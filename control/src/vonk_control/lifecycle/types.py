@@ -12,59 +12,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import StrEnum
+from typing import ClassVar
 
+from vonk_agent_protocol import (
+    LifecycleEffect,
+    LifecycleEventKind,
+    LifecycleState,
+    OperatorActionName,
+    OutcomeKind,
+    StopOutcome,
+)
 
-class State(StrEnum):
-    """The eight lifecycle states.
-
-    ``waiting``, ``partial``, ``cancelling`` and ``expired`` of the legacy
-    kinds map onto these: waiting and partial work is ``backoff`` or
-    ``observing``, a cancelling row is a non-terminal row with
-    ``cancel_requested_at`` set.
-    """
-
-    QUEUED = "queued"
-    RUNNING = "running"
-    OBSERVING = "observing"
-    BACKOFF = "backoff"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    NEEDS_OPERATOR = "needs-operator"
-
+#: The closed vocabulary is defined once, in the shared contract
+#: (``vonk_agent_protocol.lifecycle_vocabulary``), and generated for Rust and
+#: TypeScript from it.  The core uses it under its own short names.
+State = LifecycleState
+Effect = LifecycleEffect
+Outcome = OutcomeKind
+StopResult = StopOutcome
+EventKind = LifecycleEventKind
+ActionName = OperatorActionName
 
 TERMINAL_STATES = frozenset({State.SUCCEEDED, State.FAILED, State.CANCELLED})
-
-
-class Effect(StrEnum):
-    """What is known about the real-world effect of the work."""
-
-    UNKNOWN = "unknown"
-    NONE = "none"
-    ISSUED = "issued"
-    ESTABLISHED = "established"
-    STOPPED = "stopped"
-
-
-class Outcome(StrEnum):
-    """What an executor reported.
-
-    ``ok``, ``cancelled`` and a ``failed`` that is not ``retryable`` are
-    *definite*: the executor says what happened, and the row ends there.
-    ``uncertain`` (and a retryable failure) says the effect may or may not have
-    happened, which rules 1 and 2 resolve.
-    """
-
-    OK = "ok"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    UNCERTAIN = "uncertain"
-
-
-class StopResult(StrEnum):
-    CONFIRMED = "confirmed"
-    UNCONFIRMED = "unconfirmed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,10 +77,14 @@ class Lifecycle:
 class Submitted:
     """The subject was created."""
 
+    kind: ClassVar[EventKind] = EventKind.SUBMITTED
+
 
 @dataclass(frozen=True, slots=True)
 class Claimed:
     """An executor took the work: a new attempt under a new fence and lease."""
+
+    kind: ClassVar[EventKind] = EventKind.CLAIMED
 
     attempt: int
     fence: str
@@ -120,6 +93,8 @@ class Claimed:
 
 @dataclass(frozen=True, slots=True)
 class Heartbeat:
+    kind: ClassVar[EventKind] = EventKind.HEARTBEAT
+
     fence: str | None
     lease_deadline: datetime
 
@@ -134,6 +109,8 @@ class Reported:
     ``fence`` is not the row's is stale and dropped (rule 7).
     """
 
+    kind: ClassVar[EventKind] = EventKind.REPORTED
+
     outcome: Outcome
     fence: str | None = None
     retryable: bool = False
@@ -147,12 +124,16 @@ class Reported:
 class LeaseLapsed:
     """The running attempt can no longer report."""
 
+    kind: ClassVar[EventKind] = EventKind.LEASE_LAPSED
+
     reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class CancelRequested:
     """Cancel, or a newer intent superseding this one (rule 6)."""
+
+    kind: ClassVar[EventKind] = EventKind.CANCEL_REQUESTED
 
     request_key: str | None = None
     reason: str | None = None
@@ -162,6 +143,8 @@ class CancelRequested:
 class Observed:
     """The result of ``adapter.observe`` or ``adapter.stop``."""
 
+    kind: ClassVar[EventKind] = EventKind.OBSERVED
+
     effect: Effect
     reason: str | None = None
 
@@ -170,6 +153,8 @@ class Observed:
 class OperatorAction:
     """A person chose an advertised action (``resume``, ``retire``, ``stop``)."""
 
+    kind: ClassVar[EventKind] = EventKind.OPERATOR_ACTION
+
     name: str
     reason: str | None = None
 
@@ -177,6 +162,8 @@ class OperatorAction:
 @dataclass(frozen=True, slots=True)
 class Tick:
     """The clock reached ``next_action_at``."""
+
+    kind: ClassVar[EventKind] = EventKind.TICK
 
 
 Event = (

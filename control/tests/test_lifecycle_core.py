@@ -108,7 +108,7 @@ EVENTS: tuple[Event, ...] = (
         for retryable in (False, True)
         for effect in (None, Effect.NONE, Effect.STOPPED, Effect.ESTABLISHED)
     ),
-    Reported(Outcome.UNCERTAIN, fence="other"),
+    Reported(Outcome.UNKNOWN, fence="other"),
     LeaseLapsed(),
     CancelRequested(request_key="k"),
     *(Observed(effect) for effect in Effect),
@@ -217,7 +217,7 @@ def test_never_executed_or_idempotent_work_is_always_retried() -> None:
 
     uncertain: tuple[Event, ...] = (
         LeaseLapsed(),
-        Reported(Outcome.UNCERTAIN, fence="f1"),
+        Reported(Outcome.UNKNOWN, fence="f1"),
         Reported(Outcome.FAILED, fence="f1", retryable=True),
     )
     checked = 0
@@ -333,12 +333,12 @@ def test_an_operator_chooses_among_the_advertised_actions() -> None:
 def test_a_stale_fence_is_dropped_and_the_current_one_is_accepted() -> None:
     adapter = FakeAdapter()
     running = _row(state=State.RUNNING)
-    stale = Reported(Outcome.OK, fence="old")
+    stale = Reported(Outcome.DONE, fence="old")
     assert transition(running, stale, adapter, NOW) == Decision(running)
     assert transition(running, Heartbeat("old", LATER), adapter, NOW) == Decision(
         running
     )
-    fresh = transition(running, Reported(Outcome.OK, fence="f1"), adapter, NOW)
+    fresh = transition(running, Reported(Outcome.DONE, fence="f1"), adapter, NOW)
     assert fresh.row.state is State.SUCCEEDED and fresh.row.effect is Effect.ESTABLISHED
     renewed = transition(running, Heartbeat("f1", LATER), adapter, NOW).row
     assert renewed.lease_deadline == LATER and renewed.next_action_at == LATER
@@ -558,16 +558,14 @@ def test_a_definite_report_ends_the_row_even_when_a_cancel_is_pending() -> None:
     adapter = FakeAdapter(is_irreversible=True, advertised=("stop",))
     running = _row(state=State.RUNNING, cancel_requested_at=NOW, cancel_request_key="k")
     for outcome, expected in (
-        (Outcome.OK, State.SUCCEEDED),
+        (Outcome.DONE, State.SUCCEEDED),
         (Outcome.CANCELLED, State.CANCELLED),
         (Outcome.FAILED, State.FAILED),
     ):
         decision = transition(running, Reported(outcome, fence="f1"), adapter, NOW)
         assert decision.row.state is expected and decision.commands == ()
         assert decision.row.cancel_requested_at == NOW
-    uncertain = transition(
-        running, Reported(Outcome.UNCERTAIN, fence="f1"), adapter, NOW
-    )
+    uncertain = transition(running, Reported(Outcome.UNKNOWN, fence="f1"), adapter, NOW)
     assert uncertain.row.state is State.OBSERVING  # the cancel path, not a retry
 
 

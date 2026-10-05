@@ -54,6 +54,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LEGACY_WAIT_STATE
 
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..fleet_profile_contract import FleetProfileApplicationProgress
@@ -80,7 +81,7 @@ from .types import (
 )
 
 KIND = "fleet-profile"
-WAITING = "waiting-for-operator"
+WAITING = LEGACY_WAIT_STATE
 KEEP: Any = object()
 #: How long a cancel may spend stopping and observing its children before it ends
 #: with their effect recorded as unknown: the authority an agent cancellation of a
@@ -602,7 +603,7 @@ class FleetProfileAdapter:
         session: Session | None = None,
     ) -> Lifecycle:
         return self.settled(
-            application, Reported(Outcome.OK), now, session=session, reason=reason
+            application, Reported(Outcome.DONE), now, session=session, reason=reason
         ).row
 
     def fail(

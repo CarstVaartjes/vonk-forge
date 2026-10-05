@@ -91,7 +91,7 @@ def test_no_event_leaves_a_batch_waiting_for_an_operator(stored) -> None:
     for event in (
         Tick(),
         CancelRequested("k"),
-        Reported(Outcome.UNCERTAIN),
+        Reported(Outcome.UNKNOWN),
         Reported(Outcome.FAILED, retryable=True),
     ):
         after = transition(row, event, adapter, NOW).row

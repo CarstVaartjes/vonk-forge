@@ -33,6 +33,7 @@ PROBES = {
     "VONK_RESTART_RECOVERY_PROBE": ("vonk-agent", "restart_recovery_probe"),
     "VONK_CANONICAL_WIRE_PROBE": ("vonk-agent-protocol", "canonical_wire_probe"),
     "VONK_PROGRESS_WIRE_PROBE": ("vonk-agent-protocol", "progress_wire_probe"),
+    "VONK_OUTCOME_WIRE_PROBE": ("vonk-agent-protocol", "outcome_wire_probe"),
     "VONK_RUNTIME_PREFLIGHT_WIRE_PROBE": (
         "vonk-agent-protocol",
         "runtime_preflight_wire_probe",

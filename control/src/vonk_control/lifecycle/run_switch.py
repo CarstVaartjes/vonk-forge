@@ -55,6 +55,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LEGACY_WAIT_STATE
 
 from ..agent_operation_facts import aware
 from ..models import AgentOperation as StoredOperation
@@ -81,7 +82,7 @@ from .types import (
 )
 
 KIND = "run-switch"
-WAITING = "waiting-for-operator"
+WAITING = LEGACY_WAIT_STATE
 _MAX_REASON = 512
 #: Stored states an operation can still advance from.
 LIVE_STATES = frozenset({"queued", "running", "waiting", WAITING})
@@ -579,7 +580,7 @@ class RunSwitchAdapter:
         self, job: Job, progress: MutableMapping[str, object], now: datetime
     ) -> Lifecycle:
         return self.settle(
-            job, progress, Reported(Outcome.OK), now, reason=None, retry_reason=None
+            job, progress, Reported(Outcome.DONE), now, reason=None, retry_reason=None
         )
 
     def request_cancel(

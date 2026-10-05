@@ -1523,7 +1523,7 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
         attempt_row.state = "expired"
         parked.state = "waiting-for-operator"
         AgentOperationAdapter(session).settle(
-            parked, attempt_row, None, Reported(Outcome.UNCERTAIN), clock.now
+            parked, attempt_row, None, Reported(Outcome.UNKNOWN), clock.now
         )
     with sessions.begin() as session:
         authorize_operator_resume_in_session(
@@ -2134,6 +2134,12 @@ def test_start_failure_after_the_deadline_is_not_retried(service) -> None:
             "reason": "workload stop remains unconfirmed",
             "failure_kind": "invalid-authority",
         },
+        # What a typed agent sends: the same fact, as an unknown outcome.
+        {
+            "kind": "unknown",
+            "wait_reason": "stop-unconfirmed",
+            "reason": "workload stop remains unconfirmed",
+        },
     ],
 )
 def test_an_agent_reported_waiting_body_is_retried_not_parked(service, body) -> None:
@@ -2163,6 +2169,74 @@ def test_an_agent_reported_waiting_body_is_retried_not_parked(service, body) -> 
     assert retried is not None
     assert fenced_operation(sessions, retried).id == operation.id
     assert fenced_attempt(sessions, retried).attempt == 2
+
+
+@pytest.mark.parametrize(
+    ("state", "body"),
+    [
+        (
+            "waiting-for-operator",
+            {"reason": "workload stop remains unconfirmed"},
+        ),
+        (
+            "waiting-for-operator",
+            {
+                "kind": "unknown",
+                "wait_reason": "stop-unconfirmed",
+                "reason": "workload stop remains unconfirmed",
+            },
+        ),
+    ],
+)
+def test_a_typed_and_a_legacy_unknown_store_the_same_order(
+    service, state, body
+) -> None:
+    """Compatibility: both spellings park the order identically and keep its
+    stored state word, so a Controller can serve typed and legacy agents at once."""
+
+    jobs, sessions, clock = service
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.record_result(
+        AgentResult.model_validate(
+            {"fence": claim.fence, "state": state, "result": body}
+        )
+    )
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None
+        assert stored.state == "waiting-for-operator"
+        attempt = fenced_attempt(sessions, claim)
+        assert attempt.state == "waiting-for-operator"
+        # The attempt stores the legacy-shaped body whichever way it arrived.
+        assert attempt.result is not None
+        assert attempt.result["reason"] == "workload stop remains unconfirmed"
+        assert "kind" not in attempt.result
+
+
+def test_a_typed_done_and_cancel_close_their_orders(service) -> None:
+    jobs, sessions, clock = service
+    first = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.record_result(
+        AgentResult.model_validate(
+            {
+                "fence": claim.fence,
+                "state": "succeeded",
+                "result": {"kind": "done", "result": {}},
+            }
+        )
+    )
+    with sessions() as session:
+        stored = session.get(AgentOperation, first.id)
+        assert stored is not None and stored.state == "succeeded"
+        assert fenced_attempt(sessions, claim).result == {}
 
 
 def test_a_waiting_report_of_a_cancelled_parent_ends_instead_of_waiting(

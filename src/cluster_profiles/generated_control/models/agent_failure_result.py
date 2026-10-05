@@ -12,6 +12,8 @@ from ..models.agent_failure_kind import AgentFailureKind
 from ..models.agent_failure_kind import check_agent_failure_kind
 from ..models.agent_operation import AgentOperation
 from ..models.agent_operation import check_agent_operation
+from ..models.wait_reason import check_wait_reason
+from ..models.wait_reason import WaitReason
 from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
@@ -47,6 +49,7 @@ class AgentFailureResult:
             status (Literal['failed'] | None | Unset):
             summary (None | str | Unset):
             uncertain (bool | None | Unset):
+            wait_reason (None | Unset | WaitReason):
      """
 
     diagnostic: None | str | Unset = UNSET
@@ -64,6 +67,7 @@ class AgentFailureResult:
     status: Literal['failed'] | None | Unset = UNSET
     summary: None | str | Unset = UNSET
     uncertain: bool | None | Unset = UNSET
+    wait_reason: None | Unset | WaitReason = UNSET
 
 
 
@@ -170,6 +174,14 @@ class AgentFailureResult:
         else:
             uncertain = self.uncertain
 
+        wait_reason: None | str | Unset
+        if isinstance(self.wait_reason, Unset):
+            wait_reason = UNSET
+        elif isinstance(self.wait_reason, str):
+            wait_reason = self.wait_reason
+        else:
+            wait_reason = self.wait_reason
+
 
         field_dict: dict[str, Any] = {}
 
@@ -205,6 +217,8 @@ class AgentFailureResult:
             field_dict["summary"] = summary
         if uncertain is not UNSET:
             field_dict["uncertain"] = uncertain
+        if wait_reason is not UNSET:
+            field_dict["wait_reason"] = wait_reason
 
         return field_dict
 
@@ -409,6 +423,26 @@ class AgentFailureResult:
         uncertain = _parse_uncertain(d.pop("uncertain", UNSET))
 
 
+        def _parse_wait_reason(data: object) -> None | Unset | WaitReason:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                wait_reason_type_0 = check_wait_reason(data)
+
+
+
+                return wait_reason_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | Unset | WaitReason, data)
+
+        wait_reason = _parse_wait_reason(d.pop("wait_reason", UNSET))
+
+
         agent_failure_result = cls(
             diagnostic=diagnostic,
             diagnostics=diagnostics,
@@ -425,6 +459,7 @@ class AgentFailureResult:
             status=status,
             summary=summary,
             uncertain=uncertain,
+            wait_reason=wait_reason,
         )
 
         return agent_failure_result

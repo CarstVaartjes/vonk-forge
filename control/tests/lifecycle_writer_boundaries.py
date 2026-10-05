@@ -40,33 +40,23 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from vonk_agent_protocol import LifecycleSubject, MigrationStep, StateWriteKind
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
 ALLOWLIST_PATH = REPO_ROOT / "tools" / "lifecycle-writers-allowlist.json"
 CORE_PREFIX = "control/src/vonk_control/lifecycle/"
 MODELS_MODULE = "control/src/vonk_control/models.py"
 
-LIFECYCLE_MODELS = frozenset(
-    {
-        "Job",
-        "JobAttempt",
-        "AgentOperation",
-        "AgentOperationAttempt",
-        "ModelCacheOperation",
-        "ArtifactJob",
-        "FleetProfileApplication",
-    }
-)
-ATTRIBUTE = "attribute"
-DICT_ITEM = "dict-item"
-BULK_UPDATE = "bulk-update"
-CONSTRUCTOR = "constructor"
-HELPER_CALL = "helper-call"
-KINDS = frozenset({ATTRIBUTE, DICT_ITEM, BULK_UPDATE, CONSTRUCTOR, HELPER_CALL})
+LIFECYCLE_MODELS = frozenset(subject.value for subject in LifecycleSubject)
+ATTRIBUTE = StateWriteKind.ATTRIBUTE.value
+DICT_ITEM = StateWriteKind.DICT_ITEM.value
+BULK_UPDATE = StateWriteKind.BULK_UPDATE.value
+CONSTRUCTOR = StateWriteKind.CONSTRUCTOR.value
+HELPER_CALL = StateWriteKind.HELPER_CALL.value
+KINDS = frozenset(kind.value for kind in StateWriteKind)
 #: The steps of the migration in the blocker audit, section 5.6.
-MIGRATION_STEPS = frozenset(
-    {"step-2", "step-3", "step-4", "step-5", "step-6", "step-7"}
-)
+MIGRATION_STEPS = frozenset(step.value for step in MigrationStep)
 #: Modules that store a lifecycle ``state`` inside a progress or application
 #: document; a ``["state"] =`` store elsewhere is not a lifecycle write.
 DICT_STATE_OWNERS = frozenset(

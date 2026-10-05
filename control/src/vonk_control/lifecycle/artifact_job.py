@@ -52,6 +52,7 @@ from typing import Any
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LEGACY_WAIT_STATE
 
 from ..agent_operation_facts import aware
 from ..models import AgentOperation as StoredOperation
@@ -78,7 +79,7 @@ from .types import (
 )
 
 KIND = "artifact-job"
-WAITING = "waiting-for-operator"
+WAITING = LEGACY_WAIT_STATE
 TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
 #: Stored states of a submitted job that still depends on its order.
 LIVE_STATES = frozenset({"queued", "running", "cancelling", WAITING})

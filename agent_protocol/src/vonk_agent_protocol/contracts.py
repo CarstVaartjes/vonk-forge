@@ -24,6 +24,7 @@ from pydantic import (
 )
 
 from .failure_evidence import FailureDiagnostics
+from .lifecycle_vocabulary import AgentResultState, WaitReason
 from .wire_model import ErrorCode, OperationProgress, WireModel
 
 # Backstop above a full 4096-object distribution assignment (~0.5 MiB); the
@@ -205,6 +206,7 @@ class AgentFailureResult(WireModel):
     summary: str | None = Field(default=None, min_length=1, max_length=1024)
     uncertain: bool | None = None
     recovery: str | None = Field(default=None, min_length=1, max_length=128)
+    wait_reason: WaitReason | None = None
     status: Literal["failed"] | None = None
     operation: AgentOperation | None = None
     stage: str | None = Field(default=None, min_length=1, max_length=128)
@@ -744,6 +746,16 @@ from .build_import import (
     RecipeBuildEvidence,
     RecipeBuildRequest,
 )
+from .outcome import (
+    OUTCOME_ARMS,
+    OUTCOME_KINDS,
+    OperationOutcome,
+    OutcomeDone,
+    OutcomeFailed,
+    OutcomeUnknown,
+    outcome_body,
+    outcome_state,
+)
 from .recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from .recipe_operations import (
     RecipeInstallPayload,
@@ -783,6 +795,9 @@ AgentResultPayload = (
     | ArtifactDistributionResult
     | AgentFailureResult
     | AgentUpgradeResult
+    | OutcomeDone
+    | OutcomeFailed
+    | OutcomeUnknown
 )
 PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.RUNTIME_PREFLIGHT: RuntimePreflightRequest,
@@ -857,6 +872,22 @@ def validate_result_for_operation(
         operation_kind = AgentOperation(operation)
     except (TypeError, ValueError) as error:
         raise AgentProtocolError("agent result operation is invalid") from error
+    if isinstance(result, Mapping) and result.get("kind") in OUTCOME_KINDS:
+        try:
+            result = TypeAdapter(OperationOutcome).validate_json(
+                canonical_message(result)
+            )
+        except ValidationError as error:
+            raise AgentProtocolError(
+                f"{operation_kind.value} outcome does not match its typed model: "
+                f"{_validation_locations(error)}"
+            ) from error
+    if isinstance(result, OUTCOME_ARMS):
+        if outcome_state(result) != state:
+            raise AgentProtocolError(
+                f"{operation_kind.value} outcome does not match its state"
+            )
+        result = outcome_body(result)
     try:
         model = RESULT_MODELS[operation_kind]
     except KeyError as error:
@@ -1082,13 +1113,18 @@ class AgentDirective(_ProtocolEnvelopeModel):
 
 class AgentResult(_ProtocolEnvelopeModel):
     fence: CanonicalUUID
-    state: Literal["succeeded", "failed", "cancelled", "waiting-for-operator"]
+    state: AgentResultState
     result: AgentResultPayload
 
     @model_validator(mode="after")
     def validate_wire(self) -> AgentResult:
         _uuid(self.fence, name="fence")
-        if (
+        if isinstance(self.result, OUTCOME_ARMS):
+            # A typed outcome decides its own state word; the legacy state
+            # field must say the same thing, so the two cannot drift.
+            if outcome_state(self.result) != self.state:
+                raise ValueError("result state does not match its outcome")
+        elif (
             self.state == "failed"
             and isinstance(self.result, AgentFailureResult)
             and (self.result.status != "failed" or self.result.error_code is None)
@@ -1101,12 +1137,7 @@ class AgentResult(_ProtocolEnvelopeModel):
             raise ValueError(
                 "failed result requires status='failed' and a stable error_code"
             )
-        result_document = json.loads(canonical_message(self.result))
-        object.__setattr__(
-            self,
-            "result",
-            self.result,
-        )
+        result_document = json.loads(canonical_message(self.stored_result()))
         _validate_bounded_document(
             result_document,
             name="result",
@@ -1114,10 +1145,26 @@ class AgentResult(_ProtocolEnvelopeModel):
         )
         return self
 
+    def stored_result(self) -> Any:
+        """The result in the shape the Controller stores and reads.
+
+        A typed outcome projects to the success model, failure body or job
+        receipt every stored-row reader already understands; a legacy body is
+        already in that shape.
+        """
+
+        if isinstance(self.result, OUTCOME_ARMS):
+            return outcome_body(self.result)
+        return self.result
+
     @classmethod
     def parse(cls, raw: Any) -> AgentResult:
         try:
-            if isinstance(raw, Mapping) and isinstance(raw.get("result"), Mapping):
+            if (
+                isinstance(raw, Mapping)
+                and isinstance(raw.get("result"), Mapping)
+                and raw["result"].get("kind") not in OUTCOME_KINDS
+            ):
                 _validate_bounded_document(
                     raw["result"],
                     name="result",

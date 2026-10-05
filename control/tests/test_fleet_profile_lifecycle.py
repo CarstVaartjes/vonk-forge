@@ -240,9 +240,9 @@ _SHAPES = {
 }
 _EVENTS = (
     Reported(Outcome.FAILED, retryable=True, reason="x"),
-    Reported(Outcome.UNCERTAIN, reason="x"),
+    Reported(Outcome.UNKNOWN, reason="x"),
     Reported(Outcome.FAILED, retryable=False, reason="x"),
-    Reported(Outcome.OK),
+    Reported(Outcome.DONE),
     LeaseLapsed(),
     Observed(Effect.UNKNOWN),
     Observed(Effect.NONE),

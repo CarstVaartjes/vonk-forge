@@ -6,6 +6,7 @@ import json
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -86,6 +87,36 @@ def _bind_string_enum_values(schema: CoreSchema) -> CoreSchema:
                 for item in nested
             ]
     return schema
+
+
+def typed_tag() -> Any:
+    """Mark a union member's tag so the Rust generator types it.
+
+    A tag is a required ``Literal`` field.  The schema keeps its ``const``; the
+    marker tells ``vonk-wire-codegen`` to declare a one-variant enum for it
+    instead of a free string, so a generated constructor cannot build a member
+    whose tag disagrees with its shape.
+    """
+
+    return Field(json_schema_extra={"x-vonk-typed-tag": True})
+
+
+class WireEnum(StrEnum):
+    """A closed word set that validates from its own member string in every mode.
+
+    :func:`_bind_string_enum_values` completes an enum field only when the
+    field's schema carries the enum inline; a field that refers to an enum
+    already defined elsewhere in the schema graph keeps Pydantic's strict
+    instance-only check, and the Controller's body decoding (which hands the
+    model Python objects) would refuse a member string the wire contract
+    declares valid.  Binding at the enum itself covers every referring field.
+    """
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return _bind_string_enum_values(handler(source_type))
 
 
 class StrictJSONModel(BaseModel):
@@ -275,6 +306,8 @@ __all__ = [
     "OperationMemberProgress",
     "OperationProgress",
     "StrictJSONModel",
+    "WireEnum",
     "WireModel",
     "normalize_operation_progress",
+    "typed_tag",
 ]

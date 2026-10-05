@@ -526,6 +526,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Give a marked union tag a typed, single-variant enum.
+///
+/// Pydantic describes the tag of a union member as a string `const`, which
+/// typify declares as a free `String`: a producer could then build a member
+/// whose tag disagrees with its shape. A tag marked `x-vonk-typed-tag` becomes a
+/// one-variant enum instead, so the generated constructor cannot say anything
+/// else. Tags that are not marked keep their `String` declaration.
+fn typed_tags(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if object.get("x-vonk-typed-tag") == Some(&Value::Bool(true))
+                && let Some(tag) = object.get("const").cloned()
+            {
+                object.remove("const");
+                object.remove("x-vonk-typed-tag");
+                object.insert("type".into(), json!("string"));
+                object.insert("enum".into(), json!([tag]));
+            }
+            for child in object.values_mut() {
+                typed_tags(child);
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                typed_tags(child);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Declare a union of model references exclusive when one variant is an empty
 /// message. typify cannot prove `{}` disjoint from the other variants and would
 /// otherwise flatten the union into a struct of optional parts. Only the Rust
@@ -586,6 +617,7 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
         .get("x-vonk-model-bases")
         .cloned()
         .unwrap_or(json!({}));
+    typed_tags(&mut schema);
     prepare(&mut schema);
     exclusive_empty_unions(&mut schema);
     let defs = schema.get_mut("$defs").ok_or("missing $defs")?.take();

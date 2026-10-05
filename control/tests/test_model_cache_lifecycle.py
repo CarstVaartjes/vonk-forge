@@ -250,7 +250,7 @@ def test_no_event_parks_a_cache_operation_for_an_operator(cache, tmp_path, store
     for event in (
         LeaseLapsed(),
         Tick(),
-        Reported(Outcome.UNCERTAIN),
+        Reported(Outcome.UNKNOWN),
         Reported(Outcome.FAILED, retryable=True),
         Observed(Effect.UNKNOWN),
         Observed(Effect.NONE),

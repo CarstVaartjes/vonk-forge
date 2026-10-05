@@ -6,6 +6,7 @@ from .agent_install_result import AgentInstallResult
 from .agent_operation import AgentOperation
 from .agent_operation_change import AgentOperationChange
 from .agent_operation_payload import AgentOperationPayload
+from .agent_result_state import AgentResultState
 from .agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
 from .agent_upgrade_identity_response import AgentUpgradeIdentityResponse
 from .agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
@@ -34,6 +35,7 @@ from .artifact_storage_impact_spark_coverage import ArtifactStorageImpactSparkCo
 from .artifact_verification_evidence import ArtifactVerificationEvidence
 from .availability_operation_failure import AvailabilityOperationFailure
 from .availability_recovery_action import AvailabilityRecoveryAction
+from .blocker_category import BlockerCategory
 from .boolean_parameter import BooleanParameter
 from .bounded_error_response import BoundedErrorResponse
 from .build_compatibility_evidence import BuildCompatibilityEvidence
@@ -83,11 +85,14 @@ from .enrollment_grant_status import EnrollmentGrantStatus
 from .enrollment_grant_status_purpose import EnrollmentGrantStatusPurpose
 from .enrollment_grant_status_state import EnrollmentGrantStatusState
 from .enum_parameter import EnumParameter
+from .error_catalog import ErrorCatalog
+from .error_category import ErrorCategory
 from .error_context_response import ErrorContextResponse
 from .error_context_response_decision import ErrorContextResponseDecision
 from .error_context_response_source import ErrorContextResponseSource
 from .evidence_context import EvidenceContext
 from .evidence_context_source import EvidenceContextSource
+from .failure_code import FailureCode
 from .failure_diagnostics import FailureDiagnostics
 from .failure_diagnostics_category import FailureDiagnosticsCategory
 from .failure_evidence_bundle import FailureEvidenceBundle
@@ -224,6 +229,8 @@ from .installation_node_change import InstallationNodeChange
 from .installation_node_payload import InstallationNodePayload
 from .installation_reconcile_request import InstallationReconcileRequest
 from .integer_parameter import IntegerParameter
+from .invalid_request import InvalidRequest
+from .invalid_request_reason import InvalidRequestReason
 from .inventory_state import InventoryState
 from .inventory_state_freshness import InventoryStateFreshness
 from .invocation_metadata import InvocationMetadata
@@ -251,9 +258,14 @@ from .library_recipe_projection import LibraryRecipeProjection
 from .library_release import LibraryRelease
 from .library_resource_projection import LibraryResourceProjection
 from .lifecycle_code_failure_result import LifecycleCodeFailureResult
+from .lifecycle_effect import LifecycleEffect
+from .lifecycle_event_kind import LifecycleEventKind
 from .lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint
 from .lifecycle_preflight_checkpoint_attempts import LifecyclePreflightCheckpointAttempts
 from .lifecycle_preflight_checkpoint_receipts import LifecyclePreflightCheckpointReceipts
+from .lifecycle_state import LifecycleState
+from .lifecycle_subject import LifecycleSubject
+from .lifecycle_vocabulary import LifecycleVocabulary
 from .list_model_library_sort import ListModelLibrarySort
 from .list_recipe_library_sort import ListRecipeLibrarySort
 from .managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
@@ -268,6 +280,7 @@ from .mapping_selection_action import MappingSelectionAction
 from .mapping_selection_option_choices import MappingSelectionOptionChoices
 from .mapping_selection_parameters import MappingSelectionParameters
 from .memory_usage_uncertainty import MemoryUsageUncertainty
+from .migration_step import MigrationStep
 from .model_artifact_identity import ModelArtifactIdentity
 from .model_artifact_preparation import ModelArtifactPreparation
 from .model_artifact_preparation_completeness import ModelArtifactPreparationCompleteness
@@ -319,6 +332,9 @@ from .operation_progress_activity_type_0 import OperationProgressActivityType0
 from .operation_recovery import OperationRecovery
 from .operation_recovery_action import OperationRecoveryAction
 from .operations_response import OperationsResponse
+from .operator_action_name import OperatorActionName
+from .operator_surface import OperatorSurface
+from .outcome_kind import OutcomeKind
 from .output_limits import OutputLimits
 from .package_activation_receipt import PackageActivationReceipt
 from .package_activation_receipt_phase import PackageActivationReceiptPhase
@@ -533,19 +549,26 @@ from .runtime_image_storage_impact_spark_coverage import RuntimeImageStorageImpa
 from .runtime_preflight_finding import RuntimePreflightFinding
 from .runtime_preflight_finding_status import RuntimePreflightFindingStatus
 from .runtime_preflight_result import RuntimePreflightResult
+from .security_refusal import SecurityRefusal
+from .security_refusal_reason import SecurityRefusalReason
 from .spark_fit import SparkFit
 from .spark_fit_node import SparkFitNode
 from .spark_fit_node_memory_kind_type_0 import SparkFitNodeMemoryKindType0
 from .spark_fit_node_memory_pool_type_0 import SparkFitNodeMemoryPoolType0
 from .spark_group import SparkGroup
 from .spark_group_node import SparkGroupNode
+from .state_write_kind import StateWriteKind
 from .stop_impact import StopImpact
+from .stop_outcome import StopOutcome
 from .string_parameter import StringParameter
 from .target_asset_state import TargetAssetState
 from .target_asset_state_state import TargetAssetStateState
 from .telemetry_point import TelemetryPoint
 from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
+from .unknown_error import UnknownError
+from .wait_reason import WaitReason
+from .wait_verdict import WaitVerdict
 
 __all__ = (
     "AgentFailureKind",
@@ -554,6 +577,7 @@ __all__ = (
     "AgentOperation",
     "AgentOperationChange",
     "AgentOperationPayload",
+    "AgentResultState",
     "AgentUpgradeDiagnosticsResponse",
     "AgentUpgradeIdentityResponse",
     "AgentUpgradeTargetDiagnosticsResponse",
@@ -582,6 +606,7 @@ __all__ = (
     "ArtifactVerificationEvidence",
     "AvailabilityOperationFailure",
     "AvailabilityRecoveryAction",
+    "BlockerCategory",
     "BooleanParameter",
     "BoundedErrorResponse",
     "BuildCompatibilityEvidence",
@@ -631,11 +656,14 @@ __all__ = (
     "EnrollmentGrantStatusPurpose",
     "EnrollmentGrantStatusState",
     "EnumParameter",
+    "ErrorCatalog",
+    "ErrorCategory",
     "ErrorContextResponse",
     "ErrorContextResponseDecision",
     "ErrorContextResponseSource",
     "EvidenceContext",
     "EvidenceContextSource",
+    "FailureCode",
     "FailureDiagnostics",
     "FailureDiagnosticsCategory",
     "FailureEvidenceBundle",
@@ -772,6 +800,8 @@ __all__ = (
     "InstallPartialEvidenceRankState",
     "InstallPartialEvidenceReason",
     "IntegerParameter",
+    "InvalidRequest",
+    "InvalidRequestReason",
     "InventoryState",
     "InventoryStateFreshness",
     "InvocationMetadata",
@@ -799,9 +829,14 @@ __all__ = (
     "LibraryRelease",
     "LibraryResourceProjection",
     "LifecycleCodeFailureResult",
+    "LifecycleEffect",
+    "LifecycleEventKind",
     "LifecyclePreflightCheckpoint",
     "LifecyclePreflightCheckpointAttempts",
     "LifecyclePreflightCheckpointReceipts",
+    "LifecycleState",
+    "LifecycleSubject",
+    "LifecycleVocabulary",
     "ListModelLibrarySort",
     "ListRecipeLibrarySort",
     "ManagedCatalogStaleRecipe",
@@ -816,6 +851,7 @@ __all__ = (
     "MappingSelectionOptionChoices",
     "MappingSelectionParameters",
     "MemoryUsageUncertainty",
+    "MigrationStep",
     "ModelArtifactIdentity",
     "ModelArtifactPreparation",
     "ModelArtifactPreparationCompleteness",
@@ -867,6 +903,9 @@ __all__ = (
     "OperationRecovery",
     "OperationRecoveryAction",
     "OperationsResponse",
+    "OperatorActionName",
+    "OperatorSurface",
+    "OutcomeKind",
     "OutputLimits",
     "PackageActivationReceipt",
     "PackageActivationReceiptPhase",
@@ -1081,17 +1120,24 @@ __all__ = (
     "RuntimePreflightFinding",
     "RuntimePreflightFindingStatus",
     "RuntimePreflightResult",
+    "SecurityRefusal",
+    "SecurityRefusalReason",
     "SparkFit",
     "SparkFitNode",
     "SparkFitNodeMemoryKindType0",
     "SparkFitNodeMemoryPoolType0",
     "SparkGroup",
     "SparkGroupNode",
+    "StateWriteKind",
     "StopImpact",
+    "StopOutcome",
     "StringParameter",
     "TargetAssetState",
     "TargetAssetStateState",
     "TelemetryPoint",
     "TelemetryState",
     "TelemetryStateFreshness",
+    "UnknownError",
+    "WaitReason",
+    "WaitVerdict",
 )
