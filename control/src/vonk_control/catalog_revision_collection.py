@@ -57,8 +57,9 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from sqlalchemy import delete, exists, or_, select
+from sqlalchemy import Select, delete, exists, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -89,6 +90,9 @@ from .revision_images import revision_images
 _LOGGER = logging.getLogger(__name__)
 GRACE = timedelta(hours=24)
 INTERVAL = timedelta(hours=1)
+# Rows fetched per round trip when scanning stored documents; bounds a scan by
+# the largest few documents instead of the whole table.
+_SCAN_BATCH = 20
 # One sweep stops here and the rest continues on the next worker pass, so a
 # first sweep over a large catalog never holds the worker loop for long.
 SWEEP_BUDGET_SECONDS = 20.0
@@ -499,8 +503,8 @@ class CatalogRevisionCollector:
                 if not old:
                     return 0
                 named = live_tokens(session, now)
-                named = named | tokens(
-                    session.scalars(select(CatalogDocumentRevision.projected))
+                named = named | streamed_tokens(
+                    session, select(CatalogDocumentRevision.projected)
                 )
                 named = named | frozenset(
                     session.scalars(select(RecipeBuild.source_bundle_sha256))
@@ -583,7 +587,7 @@ def operation_tokens(
     )
     found: set[str] = set()
     for statement in sources:
-        found |= tokens(session.scalars(statement))
+        found |= streamed_tokens(session, statement)
     return frozenset(found)
 
 
@@ -599,7 +603,7 @@ def live_tokens(session: Session, now: datetime) -> frozenset[str]:
     )
     found: set[str] = set(operation_tokens(session, now))
     for statement in sources:
-        found |= tokens(session.scalars(statement))
+        found |= streamed_tokens(session, statement)
     return frozenset(found)
 
 
@@ -614,14 +618,25 @@ def pinned_by_heads(session: Session) -> frozenset[str]:
     heads = select(CatalogDocumentHead.active_revision_id).union(
         select(CatalogDocumentHead.candidate_revision_id)
     )
-    return tokens(
-        session.scalars(
-            select(CatalogDocumentRevision.document).where(
-                CatalogDocumentRevision.kind == "recipe",
-                CatalogDocumentRevision.id.in_(heads),
-            )
-        )
+    return streamed_tokens(
+        session,
+        select(CatalogDocumentRevision.document).where(
+            CatalogDocumentRevision.kind == "recipe",
+            CatalogDocumentRevision.id.in_(heads),
+        ),
     )
+
+
+def streamed_tokens(session: Session, statement: Select[Any]) -> frozenset[str]:
+    """Tokens in the JSON column ``statement`` selects, a batch of rows at a time.
+
+    Buffering the whole result held every stored document, its decoded form and
+    its JSON text at once, so each pass cost a multiple of the table; the
+    worker repeats these scans while storage is short.
+    """
+
+    rows = session.scalars(statement.execution_options(yield_per=_SCAN_BATCH))
+    return tokens(rows)
 
 
 def tokens(values: Iterable[object]) -> frozenset[str]:
@@ -648,5 +663,6 @@ __all__ = [
     "live_tokens",
     "operation_tokens",
     "pinned_by_heads",
+    "streamed_tokens",
     "tokens",
 ]
