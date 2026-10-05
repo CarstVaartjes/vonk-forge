@@ -7,6 +7,7 @@ The caller still owns response size, media, and canonical contract validation.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import socket
 import threading
@@ -71,10 +72,12 @@ class HTTPSResponse(io.BufferedIOBase):
         self._pending = b""
         self._ended = False
         self._closed = False
+        self._interrupted = False
         try:
             self._response = self._run(self._open(request, timeout))
         except BaseException:
-            self.close()
+            # Cleanup never replaces the cause: a Ctrl-C must stay a Ctrl-C.
+            self._close_after_failure()
             raise
         assert self._response is not None
         self.status = self._response.status_code
@@ -89,6 +92,11 @@ class HTTPSResponse(io.BufferedIOBase):
 
         try:
             return self._runner.run(bounded())
+        except KeyboardInterrupt:
+            # The runner's SIGINT handler can raise inside the loop's own
+            # bookkeeping, leaving the loop unfit to drive more work.
+            self._interrupted = True
+            raise
         except (httpx2.HTTPError, OSError) as error:
             # Keep the typed cause for safe classification, never its raw text.
             raise urllib.error.URLError(error) from None
@@ -164,6 +172,11 @@ class HTTPSResponse(io.BufferedIOBase):
         self._closed = True
         try:
             self._runner.run(self._close())
+        except Exception:
+            # An interrupted loop may refuse to run its own cleanup. The
+            # interrupt is the real outcome; the sockets die with the process.
+            if not self._interrupted:
+                raise
         finally:
             # Drop every object that references the loop, so the loop is freed
             # here rather than by a later garbage collection, where a Ctrl-C
@@ -173,11 +186,20 @@ class HTTPSResponse(io.BufferedIOBase):
             self._client = None
             self._runner.close()
 
+    def _close_after_failure(self) -> None:
+        """Close while an exception is in flight, without replacing it."""
+
+        with contextlib.suppress(Exception):
+            self.close()
+
     def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *_args: object) -> None:
-        self.close()
+    def __exit__(self, exc_type: object, *_args: object) -> None:
+        if exc_type is None:
+            self.close()
+        else:
+            self._close_after_failure()
 
 
 def open_https(request: urllib.request.Request, *, timeout: float) -> HTTPSResponse:

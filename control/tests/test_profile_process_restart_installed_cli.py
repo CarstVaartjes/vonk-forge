@@ -123,7 +123,9 @@ def _server_process(
         stderr=subprocess.PIPE,
         text=True,
     )
-    deadline = time.monotonic() + 15
+    # A bound on a hang, not a speed claim: a loaded runner imports the whole
+    # Controller before it can answer.
+    deadline = time.monotonic() + 60
     while not ready.exists():
         if process.poll() is not None:
             stdout, stderr = process.communicate(timeout=5)
@@ -175,6 +177,9 @@ def _wait_for_trace(
     )
 
 
+# Two Controller processes, a PostgreSQL server and the installed CLI: on a busy
+# runner the starts alone take longer than the shared installed-CLI allowance.
+@pytest.mark.slow(60)
 @pytest.mark.lane
 def test_installed_cli_follows_same_profile_application_after_api_process_restart(
     installed_vonkctl: Path,

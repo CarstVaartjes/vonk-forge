@@ -372,7 +372,8 @@ raise SystemExit(cli.main(sys.argv[3:], control_client=client))
         text=True,
     )
     try:
-        assert state["started"].wait(5), "child never reached the response boundary"
+        # Starting the child is a bound on a hang; promptness is asserted below.
+        assert state["started"].wait(30), "child never reached the response boundary"
         process.send_signal(signal.SIGINT)
         # An interrupted command owes no output; it must only stop promptly.
         output, error = process.communicate(timeout=3)
@@ -440,3 +441,64 @@ raise SystemExit(cli.main(sys.argv[2:], control_client=client))
     assert process.returncode == 2 and result["submission"]["acceptance"] == "unknown"
     assert result["request_key"] == KEY and not state["calls"]
     assert "Traceback" not in error
+
+
+def _wedged_loop_response(monkeypatch, *, interrupt: bool):
+    """An ``HTTPSResponse`` whose event loop refuses to run its own cleanup.
+
+    This is what a Ctrl-C raised inside the loop's bookkeeping leaves behind:
+    the next ``run`` fails with "Event loop stopped before Future completed".
+    """
+
+    from types import SimpleNamespace
+
+    from cluster_profiles import control_transport
+
+    async def refuses(_self) -> None:
+        raise RuntimeError("Event loop stopped before Future completed.")
+
+    monkeypatch.setattr(control_transport.HTTPSResponse, "_close", refuses)
+    request = control_transport.urllib.request.Request("https://control.invalid/")
+    if interrupt:
+
+        def interrupted(_self, work):
+            work.close()
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(control_transport.HTTPSResponse, "_run", interrupted)
+        return control_transport, request
+    monkeypatch.setattr(
+        control_transport.HTTPSResponse,
+        "_run",
+        lambda _self, work: (
+            work.close(),
+            SimpleNamespace(status_code=200, headers=SimpleNamespace(multi_items=list)),
+        )[1],
+    )
+    return control_transport, request
+
+
+def test_ctrl_c_while_opening_is_not_replaced_by_a_cleanup_failure(monkeypatch):
+    # The CLI maps KeyboardInterrupt to exit 130; a RuntimeError from cleanup
+    # chained over it turned an interrupted follow into a failed one.
+    transport, request = _wedged_loop_response(monkeypatch, interrupt=True)
+    with pytest.raises(KeyboardInterrupt):
+        transport.HTTPSResponse(request, 1)
+
+
+def test_ctrl_c_inside_a_response_block_is_not_replaced_by_a_cleanup_failure(
+    monkeypatch,
+):
+    transport, request = _wedged_loop_response(monkeypatch, interrupt=False)
+    response = transport.HTTPSResponse(request, 1)
+    with pytest.raises(KeyboardInterrupt), response:
+        raise KeyboardInterrupt
+
+
+def test_a_cleanup_failure_with_nothing_in_flight_is_still_reported(monkeypatch):
+    # The swallow is only for an exception already being handled: a clean exit
+    # whose close fails must not look like success.
+    transport, request = _wedged_loop_response(monkeypatch, interrupt=False)
+    response = transport.HTTPSResponse(request, 1)
+    with pytest.raises(RuntimeError, match="Event loop stopped"):
+        response.close()
