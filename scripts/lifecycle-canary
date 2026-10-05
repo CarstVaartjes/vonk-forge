@@ -1,0 +1,296 @@
+#!/usr/bin/env python3
+"""Hardware canary for the lifecycle core. Run by hand after a lifecycle release.
+
+It drives a real Controller through `vonkctl` against one saved profile and
+proves the three things the lifecycle audit promised, on real hardware:
+
+1. load: a profile load reaches a terminal state and succeeds;
+2. cancel during start: a load cancelled right after it was accepted ends
+   terminal (cancelled, or succeeded if the cancel lost the race), never stuck;
+3. Controller-restart-tolerant wait: a load whose Controller restarts while
+   being followed still reaches a terminal state (observation errors during the
+   restart are tolerated; nothing may wait for a person).
+
+Throughout, and once more at the end, it asserts the two lifecycle invariants:
+no operator wait without an operator action, and no admission stuck over N
+minutes (a non-terminal application that did not move before the deadline).
+
+It never runs on its own and never against a Controller you did not choose:
+`--profile` is required and the connection comes from the usual
+VONK_CONTROL_URL / VONK_CONTROL_TOKEN_FILE. See docs/runbooks/lifecycle-canary.md.
+The profile load applies the whole profile, so use a profile you are happy to
+have loaded (for example a disposable one on a canary Spark).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import subprocess
+import sys
+import time
+import uuid
+from collections.abc import Callable, Iterator, Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+#: Terminal states, in the contract vocabulary and the legacy spellings a
+#: release that has not renamed its stored states still reports.
+TERMINAL = frozenset(
+    {"succeeded", "failed", "cancelled", "superseded", "partial", "expired"}
+)
+#: A state in which a person has to act.
+OPERATOR_WAIT = frozenset({"needs-operator", "waiting-for-operator"})
+SUCCESS = frozenset({"succeeded"})
+#: A cancel that arrives after the work finished leaves it succeeded.
+CANCEL_ENDS = frozenset({"cancelled", "succeeded", "superseded"})
+
+
+class CanaryFailure(Exception):
+    """An invariant did not hold."""
+
+
+@dataclass
+class Controller:
+    """`vonkctl` as a subprocess; the one place that spawns it."""
+
+    command: Sequence[str]
+    profile: int
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
+    log: Callable[[str], None] = print
+
+    def call(self, *arguments: str, timeout: float = 600) -> tuple[int, Any]:
+        full = [*self.command, "--profile", str(self.profile), "--json", *arguments]
+        try:
+            done = self.run(
+                full, capture_output=True, text=True, timeout=timeout, check=False
+            )
+        except subprocess.TimeoutExpired:
+            return 124, None
+        try:
+            document = json.loads(done.stdout) if done.stdout.strip() else None
+        except json.JSONDecodeError:
+            document = None
+        return done.returncode, document
+
+
+def walk(document: Any) -> Iterator[dict[str, Any]]:
+    """Every mapping in a JSON document, whatever the response nests."""
+
+    if isinstance(document, dict):
+        yield document
+        for value in document.values():
+            yield from walk(value)
+    elif isinstance(document, list):
+        for value in document:
+            yield from walk(value)
+
+
+def application_of(document: Any) -> tuple[str | None, str | None]:
+    """The (id, state) of the application a load/progress/cancel response names."""
+
+    for item in walk(document):
+        identifier = item.get("application_id") or item.get("id")
+        state = item.get("state")
+        if identifier and isinstance(state, str):
+            return str(identifier), state
+    return None, None
+
+
+def operator_waits_without_action(document: Any) -> list[str]:
+    """Rows waiting for a person that advertise no action."""
+
+    problems = []
+    for item in walk(document):
+        state = item.get("state")
+        if state in OPERATOR_WAIT and not item.get("supported_actions"):
+            identifier = item.get("id") or item.get("job_id") or "?"
+            problems.append(f"{identifier} is {state} with no operator action")
+    return problems
+
+
+@dataclass
+class Canary:
+    controller: Controller
+    minutes: float
+    poll_seconds: float
+    restart_command: str | None
+    clock: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], None] = time.sleep
+    log: Callable[[str], None] = print
+    failures: list[str] = field(default_factory=list)
+    tolerated_errors: int = 0
+
+    # ------------------------------------------------------------- helpers
+
+    def say(self, message: str) -> None:
+        self.log(f"lifecycle-canary: {message}")
+
+    def fail(self, message: str) -> None:
+        self.failures.append(message)
+        self.say(f"FAIL {message}")
+
+    def assert_no_operator_wait_without_action(self, where: str) -> None:
+        code, document = self.controller.call("fleet", "activity", "--limit", "100")
+        if code != 0:
+            self.say(f"activity unreadable at {where} (exit {code}); not asserted")
+            return
+        for problem in operator_waits_without_action(document):
+            self.fail(f"{where}: {problem}")
+
+    def start_load(self) -> str:
+        key = str(uuid.uuid4())
+        code, document = self.controller.call(
+            "profile", "load", "--yes", "--detach", "--request-key", key
+        )
+        identifier, state = application_of(document)
+        if code != 0 or identifier is None:
+            raise CanaryFailure(f"profile load was not accepted (exit {code})")
+        self.say(f"load accepted: application {identifier} ({state})")
+        return identifier
+
+    def follow(self, application: str, *, label: str) -> str:
+        """Poll the application to a terminal state, tolerating a Controller outage.
+
+        Returns the terminal state.  An observation error (the Controller is
+        restarting) is counted and retried until the deadline; a non-terminal
+        application at the deadline is a stuck admission.
+        """
+
+        deadline = self.clock() + self.minutes * 60
+        last_state = None
+        while True:
+            code, document = self.controller.call(
+                "profile", "progress", "--application", application, timeout=60
+            )
+            if code != 0:
+                self.tolerated_errors += 1
+            else:
+                _, state = application_of(document)
+                if state != last_state:
+                    self.say(f"{label}: {application} is {state}")
+                    last_state = state
+                for problem in operator_waits_without_action(document):
+                    self.fail(f"{label}: {problem}")
+                if state in TERMINAL:
+                    return state
+                if state in OPERATOR_WAIT and not any(
+                    item.get("supported_actions") for item in walk(document)
+                ):
+                    raise CanaryFailure(f"{label}: operator wait without an action")
+            if self.clock() >= deadline:
+                raise CanaryFailure(
+                    f"{label}: application {application} still {last_state} after "
+                    f"{self.minutes:g} minutes (stuck admission)"
+                )
+            self.sleep(self.poll_seconds)
+
+    # ----------------------------------------------------------- scenarios
+
+    def scenario_load(self) -> None:
+        application = self.start_load()
+        state = self.follow(application, label="load")
+        if state not in SUCCESS:
+            raise CanaryFailure(f"load ended {state}, expected succeeded")
+
+    def scenario_cancel_during_start(self) -> None:
+        application = self.start_load()
+        code, _ = self.controller.call(
+            "profile",
+            "cancel",
+            application,
+            "--yes",
+            "--detach",
+            "--request-key",
+            str(uuid.uuid4()),
+        )
+        if code != 0:
+            self.say(f"cancel returned exit {code}; the application may have ended")
+        state = self.follow(application, label="cancel-during-start")
+        if state not in CANCEL_ENDS:
+            raise CanaryFailure(
+                f"cancel during start ended {state}, expected one of "
+                f"{', '.join(sorted(CANCEL_ENDS))}"
+            )
+
+    def scenario_restart_tolerant_wait(self) -> None:
+        application = self.start_load()
+        if self.restart_command:
+            self.say(f"restarting the Controller: {self.restart_command}")
+            done = subprocess.run(shlex.split(self.restart_command), check=False)
+            if done.returncode != 0:
+                raise CanaryFailure(f"restart command failed (exit {done.returncode})")
+        else:
+            self.say(
+                "no --restart-command: restart the Controller now; this wait "
+                "tolerates it"
+            )
+        before = self.tolerated_errors
+        state = self.follow(application, label="restart-wait")
+        self.say(
+            f"restart-wait: {self.tolerated_errors - before} observation errors "
+            "tolerated"
+        )
+        if state not in SUCCESS:
+            raise CanaryFailure(f"restart-wait load ended {state}, expected succeeded")
+
+    # ---------------------------------------------------------------- main
+
+    def run_all(self) -> int:
+        code, _ = self.controller.call("--check-connection", timeout=60)
+        if code != 0:
+            self.say("connection check failed; nothing was started")
+            return 2
+        for name, scenario in (
+            ("load", self.scenario_load),
+            ("cancel-during-start", self.scenario_cancel_during_start),
+            ("restart-tolerant-wait", self.scenario_restart_tolerant_wait),
+        ):
+            self.say(f"scenario {name}")
+            try:
+                scenario()
+            except CanaryFailure as error:
+                self.fail(f"{name}: {error}")
+            self.assert_no_operator_wait_without_action(f"after {name}")
+        if self.failures:
+            self.say(f"{len(self.failures)} failure(s)")
+            return 1
+        self.say("all scenarios passed")
+        return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
+    parser.add_argument("--profile", type=int, required=True)
+    parser.add_argument(
+        "--minutes",
+        type=float,
+        default=20,
+        help="N: an application not terminal after this long is a stuck admission",
+    )
+    parser.add_argument("--poll-seconds", type=float, default=5)
+    parser.add_argument(
+        "--restart-command",
+        help="command that restarts the Controller (run once during the wait)",
+    )
+    parser.add_argument(
+        "--vonkctl", default=os.environ.get("VONKCTL", "vonkctl"), help="the CLI"
+    )
+    arguments = parser.parse_args(argv)
+    for name in ("VONK_CONTROL_URL", "VONK_CONTROL_TOKEN_FILE"):
+        if not os.environ.get(name):
+            print(f"lifecycle-canary: {name} is not set", file=sys.stderr)
+            return 2
+    canary = Canary(
+        Controller(shlex.split(arguments.vonkctl), arguments.profile),
+        minutes=arguments.minutes,
+        poll_seconds=arguments.poll_seconds,
+        restart_command=arguments.restart_command,
+    )
+    return canary.run_all()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
