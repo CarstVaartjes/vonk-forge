@@ -207,6 +207,11 @@ pub enum PodmanBuildDiagnostic {
     MemoryLimitExceeded,
     StorageDriverFailure,
     SystemdScopeFailure,
+    /// A recipe's own `patch` step rejected a hunk or found it already applied:
+    /// the base image drifted from what the recipe's patch was written against.
+    PatchRejected,
+    /// A Dockerfile `RUN` step exited nonzero for a reason no class above names.
+    BuildStepFailed,
     NonzeroWithoutOutput,
     Unknown,
 }
@@ -222,6 +227,8 @@ impl fmt::Display for PodmanBuildDiagnostic {
             Self::MemoryLimitExceeded => "memory-limit-exceeded",
             Self::StorageDriverFailure => "storage-driver-failure",
             Self::SystemdScopeFailure => "systemd-scope-failure",
+            Self::PatchRejected => "patch-rejected",
+            Self::BuildStepFailed => "build-step-failed",
             Self::NonzeroWithoutOutput => "nonzero-without-output",
             Self::Unknown => "unclassified-podman-build-failure",
         })
@@ -995,6 +1002,16 @@ pub(crate) fn podman_build_diagnostic(
         || evidence.contains("failed with result")
     {
         PodmanBuildDiagnostic::SystemdScopeFailure
+    } else if evidence.contains("previously applied) patch detected")
+        || evidence.contains("hunk failed")
+        || evidence.contains("hunks failed")
+        || evidence.contains("hunk ignored")
+        || evidence.contains("hunks ignored")
+    {
+        // `patch` names the drift itself; the build step it ran in is incidental.
+        PodmanBuildDiagnostic::PatchRejected
+    } else if evidence.contains("building at step") && evidence.contains("exit status") {
+        PodmanBuildDiagnostic::BuildStepFailed
     } else {
         PodmanBuildDiagnostic::Unknown
     }
@@ -1919,6 +1936,25 @@ mod tests {
                 b"".as_slice(),
                 b"open /private/secret: permission denied".as_slice(),
                 "permission-denied",
+            ),
+            (
+                b"patching file a.py\nHunk #1 FAILED at 628.\n1 out of 1 hunk FAILED -- saving rejects to file a.py.rej\n"
+                    .as_slice(),
+                b"Error: building at STEP \"RUN patch -p1\": while running runtime: exit status 1"
+                    .as_slice(),
+                "patch-rejected",
+            ),
+            (
+                b"Reversed (or previously applied) patch detected!  Assume -R? [n]\nSkipping patch.\n"
+                    .as_slice(),
+                b"".as_slice(),
+                "patch-rejected",
+            ),
+            (
+                b"".as_slice(),
+                b"Error: building at STEP \"RUN make\": while running runtime: exit status 2"
+                    .as_slice(),
+                "build-step-failed",
             ),
             (
                 b"opaque /private/secret".as_slice(),
