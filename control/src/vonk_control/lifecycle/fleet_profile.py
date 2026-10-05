@@ -658,6 +658,12 @@ class FleetProfileAdapter:
             reason=reason,
         ).row
 
+    @staticmethod
+    def retry_pending(application: FleetProfileApplication) -> bool:
+        """An application that ended (or waits) while a retry is still scheduled."""
+
+        return application.state in {State.FAILED.value, WAITING}
+
     def supersede(
         self,
         application: FleetProfileApplication,
@@ -673,6 +679,24 @@ class FleetProfileAdapter:
         work over.  Terminal ``superseded``, never ``failed``: the client follows
         ``superseded_by`` instead of reporting a fault."""
 
+        now = aware(now)
+        before = self.lifecycle(application, _progress(application), now)
+        if before.state is State.FAILED:
+            # The core absorbs events on an ended row; a failed one that a retry
+            # was still scheduled for is relabelled (nothing is issued or stopped).
+            document = dict(application.progress or {})
+            document["supersede_code"] = code
+            document["superseded_by"] = by
+            document["retry_due_at"] = None
+            document["blockers"] = []
+            application.progress = document
+            application.state = SUPERSEDED
+            application.status_reason = reason[:_MAX_REASON]
+            application.updated_at = now
+            hook_session = session or self._session
+            if self._after_state is not None and hook_session is not None:
+                self._after_state(hook_session, application)
+            return replace(before, state=State.CANCELLED, reason=reason)
         return self.settled(
             application,
             Reported(Outcome.CANCELLED, effect=effect, reason=reason),

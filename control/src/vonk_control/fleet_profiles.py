@@ -2008,7 +2008,9 @@ class RunSwitchFleetProfileAdapter:
             else {node.node_id for node in child.spark_group.nodes}
         )
         if not child_targets <= execution_nodes:
-            raise FleetProfileConflict("Profile child exceeds its reviewed Spark scope")
+            raise FleetProfileReviewStale(
+                "Profile child exceeds its reviewed Spark scope"
+            )
         stops = {
             effect.run_id: effect
             for effect in reviewed.effects.runs
@@ -2017,7 +2019,7 @@ class RunSwitchFleetProfileAdapter:
         for stop in child.stops:
             expected = stops.get(stop.run_id)
             if expected is None or expected.alias != stop.alias:
-                raise FleetProfileConflict(
+                raise FleetProfileReviewStale(
                     "Profile child would stop an unreviewed workload; review again"
                 )
             if expected.profile_stop_scope is None:
@@ -2030,7 +2032,7 @@ class RunSwitchFleetProfileAdapter:
                     and stop.node_ids == expected.profile_stop_scope.target_node_ids
                 )
             if not valid_stop_scope:
-                raise FleetProfileConflict(
+                raise FleetProfileReviewStale(
                     "Profile child changed its reviewed Stop target scope"
                 )
         if child.action == "cleanup" and not any(
@@ -2040,7 +2042,7 @@ class RunSwitchFleetProfileAdapter:
             == sorted(node.node_id for node in child.spark_group.nodes)
             for effect in reviewed.effects.installations
         ):
-            raise FleetProfileConflict(
+            raise FleetProfileReviewStale(
                 "Profile child would remove an unreviewed installation; review again"
             )
 
@@ -2829,14 +2831,14 @@ def _validate_remaining_effects(
         effect.action == "stop" and _digest(effect) not in reviewed_stops
         for effect in remaining.runs
     ):
-        raise FleetProfileConflict(
+        raise FleetProfileReviewStale(
             "Recovery would stop an unreviewed workload; review and load the current profile again"
         )
     if any(
         effect.action == "remove" and _digest(effect) not in reviewed_removals
         for effect in remaining.installations
     ):
-        raise FleetProfileConflict(
+        raise FleetProfileReviewStale(
             "Recovery would remove an unreviewed installation; review and load the current profile again"
         )
 
@@ -7185,6 +7187,21 @@ class FleetProfileService:
                     )
                     if (
                         row is not None
+                        and isinstance(error, FleetProfileReviewStale)
+                        and self._lifecycle.retry_pending(row)
+                    ):
+                        # A stale review never becomes valid by waiting: end the
+                        # application so the client re-reviews and re-submits.
+                        self._lifecycle.supersede(
+                            row,
+                            str(error),
+                            _aware(self._clock()),
+                            code="effects-changed-during-admission",
+                            session=session,
+                        )
+                        recovery_deferred = True
+                    elif (
+                        row is not None
                         and not isinstance(error, FleetProfilePermissionDenied)
                         and not is_security_failure(error_code(error))
                         and self._retry_eligible(session, row)
@@ -7485,6 +7502,17 @@ class FleetProfileService:
                             "Cancellation is reconciling the profile child: "
                             + (str(error)[:360] or "child start was interrupted")
                         )[:512]
+                    elif isinstance(error, FleetProfileReviewStale):
+                        # The reviewed plan no longer matches what the child
+                        # would do: retrying can never succeed. End it so the
+                        # client reviews and submits again.
+                        self._lifecycle.supersede(
+                            failed,
+                            str(error),
+                            _aware(self._clock()),
+                            code="effects-changed-during-admission",
+                            session=session,
+                        )
                     else:
                         self._lifecycle.fail(
                             failed,
