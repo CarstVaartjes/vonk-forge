@@ -34,6 +34,8 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
+from vonk_agent_protocol import LEGACY_WAIT_STATE
+
 from ..agent_operation_facts import aware
 from ..models import Job
 from .adapter import Dispatch
@@ -51,7 +53,7 @@ from .types import (
 )
 
 KIND = "recipe-operation"
-WAITING = "waiting-for-operator"
+WAITING = LEGACY_WAIT_STATE
 _MAX_REASON = 1024
 _BORN = frozenset({"queued", "running", "succeeded"})
 _STORED = {
@@ -204,7 +206,7 @@ class RecipeOperationAdapter:
         each order was retried by its own core before it reported)."""
 
         before = self.lifecycle(job, issued=True, now=now)
-        outcome = Outcome.FAILED if failed else Outcome.OK
+        outcome = Outcome.FAILED if failed else Outcome.DONE
         decision = transition(
             before, Reported(outcome, retryable=False, reason=reason), self, aware(now)
         )
