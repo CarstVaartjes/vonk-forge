@@ -38,6 +38,8 @@ from .strict_json import StrictJSONModel
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+    from .lifecycle.evidence import Residue
+
 
 def profile_switch_child_request_key(
     application_id: str, position: int, kind: str, owner_id: str
@@ -1001,13 +1003,15 @@ class FleetProfileSwitchAdapter(Protocol):
         scope_node_ids: tuple[str, ...],
         actor: str,
         request_id: str,
-    ) -> FleetProfileChildOperation:
+    ) -> FleetProfileChildOperation | Residue:
         """Reconcile the complete desired assignment set as one child operation.
 
         ``assignments`` is ordered by stable assignment identity and
         ``scope_node_ids`` is the complete sorted profile boundary.  The
         implementation must plan conflicts once and preserve healthy desired
-        assignments while preparing or stopping other members.
+        assignments while preparing or stopping other members.  Evidence it
+        cannot establish (a damaged stored plan or intent) is returned as a
+        ``Residue``: the application retires, it is not refused.
         """
 
         ...

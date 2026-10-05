@@ -32,12 +32,12 @@ from vonk_control.fleet_profile_contract import (
 )
 from vonk_control.fleet_profiles import (
     FleetProfileAdmissionBusy,
-    FleetProfileConflict,
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
     _operation_state,
     build_production_fleet_profile_service,
 )
+from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -227,16 +227,24 @@ def test_profile_progress_and_results_are_closed_nested_contracts() -> None:
         )
 
 
-def test_profile_switch_state_rejects_malformed_persisted_progress() -> None:
-    with pytest.raises(FleetProfileConflict, match="progress is invalid"):
+def test_profile_switch_state_rebuilds_malformed_persisted_progress() -> None:
+    # Damaged progress is rebuilt from the row's own receipt: it names no child
+    # document, so the child is found again through its deterministic key.
+    assert (
         RunSwitchFleetProfileAdapter._state(FleetProfileApplication(progress="invalid"))
-    with pytest.raises(FleetProfileConflict, match="progress is invalid"):
+        is None
+    )
+    assert (
         RunSwitchFleetProfileAdapter._state(
             FleetProfileApplication(progress={"switch_adapter": "invalid"})
         )
+        is None
+    )
 
 
-def test_profile_application_read_rejects_malformed_persisted_plan_and_result() -> None:
+def test_profile_application_read_degrades_for_malformed_persisted_plan_and_result() -> (
+    None
+):
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(
@@ -254,8 +262,11 @@ def test_profile_application_read_rejects_malformed_persisted_plan_and_result() 
         assert row is not None
         admitted_plan = deepcopy(row.plan)
         row.plan = {"steps": []}
-    with pytest.raises(FleetProfileConflict, match="plan is invalid"):
-        service.application(application.id)
+    # A plan that cannot be read degrades the view (the step count the progress
+    # recorded, no cancellation projection); the read is never refused.
+    degraded = service.application(application.id)
+    assert degraded.id == application.id
+    assert degraded.cancellation is None
 
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
@@ -268,11 +279,11 @@ def test_profile_application_read_rejects_malformed_persisted_plan_and_result() 
             .where(FleetProfileApplication.id == application.id)
             .values(result=["malformed"])
         )
-    with pytest.raises(FleetProfileConflict, match="result is invalid"):
-        service.application(application.id)
+    # A damaged result of a load that has not succeeded is retired (no result).
+    assert service.application(application.id).result is None
 
 
-def test_profile_worker_marks_malformed_persisted_plan_failed() -> None:
+def test_profile_worker_retires_malformed_persisted_plan_as_unknown() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(
@@ -292,13 +303,15 @@ def test_profile_worker_marks_malformed_persisted_plan_failed() -> None:
 
     assert service.tick() is True
     with sessions() as session:
-        failed = session.get(FleetProfileApplication, application.id)
-        assert failed is not None
-        assert failed.state == "failed"
-        assert failed.status_reason == "Persisted Fleet profile plan is invalid"
+        retired = session.get(FleetProfileApplication, application.id)
+        assert retired is not None
+        # Retired, not failed for a person: its effect is unknown, and the worker
+        # went on to the next item.
+        assert retired.state == "cancelled"
+        assert "effect is unknown" in (retired.status_reason or "")
 
 
-def test_profile_worker_marks_malformed_persisted_progress_failed() -> None:
+def test_profile_worker_retires_malformed_persisted_progress_as_unknown() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
 
@@ -326,13 +339,13 @@ def test_profile_worker_marks_malformed_persisted_progress_failed() -> None:
 
     assert service.tick() is True
     with sessions() as session:
-        failed = session.get(FleetProfileApplication, application.id)
-        assert failed is not None
-        assert failed.state == "failed"
-        assert failed.status_reason == "Persisted Fleet profile progress is invalid"
+        retired = session.get(FleetProfileApplication, application.id)
+        assert retired is not None
+        assert retired.state == "cancelled"
+        assert "effect is unknown" in (retired.status_reason or "")
 
 
-def test_profile_application_read_requires_result_for_succeeded_state() -> None:
+def test_profile_application_read_rebuilds_result_for_succeeded_state() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(
@@ -349,9 +362,12 @@ def test_profile_application_read_requires_result_for_succeeded_state() -> None:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
         row.state = "succeeded"
+        row.current_step = application.total_steps
         row.result = None
-    with pytest.raises(FleetProfileConflict, match="result is invalid"):
-        service.application(application.id)
+    # The result is rebuilt from the step the receipt reached.
+    rebuilt = service.application(application.id).result
+    assert rebuilt is not None
+    assert rebuilt.completed_steps == application.total_steps
 
 
 def _exact_preparation(
@@ -764,7 +780,7 @@ def _seed_dual_solo_without_runtime_state(
     return dual_revision_id, solo_revision_id
 
 
-def test_profile_admission_refuses_a_missing_exact_build() -> None:
+def test_profile_admission_proceeds_when_the_reviewed_build_record_is_missing() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     preparation = _exact_preparation((_node_id(1),))
@@ -784,14 +800,13 @@ def test_profile_admission_refuses_a_missing_exact_build() -> None:
     profile = service.create(_input(revision_id), actor="admin")
     preview = service.preview(profile.id)
     assert preview.allowed
-    with pytest.raises(FleetProfileConflict, match="build.consumer_invalid"):
-        service.apply(
-            profile.id,
-            request_key=_uuid(40),
-            actor="admin",
-        )
+    # The build record the review named is gone: there is no running build to
+    # protect, so the load is admitted (the exact image identity is the plan's own
+    # and is verified again when its child starts), not refused.
+    application = service.apply(profile.id, request_key=_uuid(40), actor="admin")
+    assert application.state == "queued"
     with sessions() as session:
-        assert session.scalar(select(FleetProfileApplication)) is None
+        assert session.scalar(select(FleetProfileApplication)) is not None
 
 
 def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> None:
@@ -943,8 +958,10 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
             unreadable = service.endpoint_intent(session, profile.number)
             row = session.get(FleetProfileApplication, application.id)
             assert row is not None
-            with pytest.raises(ValidationError):
-                service._intended_profile(row, session=session)
+            # The strict reader names the damaged field and retires the intent
+            # as unknown (a Residue); it never raises into a read.
+            retired = service._intended_profile(row, session=session)
+            assert isinstance(retired, Residue)
 
         assert unreadable.application_id == application.id
         assert unreadable.assignments is None
@@ -970,8 +987,7 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
         unavailable = service.endpoint_intent(session, profile.number)
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
-        with pytest.raises(FleetProfileConflict, match="Persisted Fleet profile plan"):
-            service._intended_profile(row, session=session)
+        assert isinstance(service._intended_profile(row, session=session), Residue)
 
     assert unavailable.application_id == application.id
     assert unavailable.application_state == "succeeded"
@@ -1258,14 +1274,24 @@ def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) 
         old = session.get(FleetProfileApplication, first.id)
         assert old is not None
         assert old.progress == damaged_progress
-        assert old.state == "failed"
-    # Invalid history remains invalid; it is never executed or silently repaired.
-    with pytest.raises(ValidationError):
-        service.load(
-            profile.number,
-            request_key=_uuid(975),
-            actor="admin",
-        )
+        assert old.state == old_state
+    if old_state != "failed":
+        # The damaged order is retired as superseded with its effect unknown by its
+        # own worker pass; the fresh load is not held back by it.
+        assert service.tick() is True
+        with sessions() as session:
+            old = session.get(FleetProfileApplication, first.id)
+            assert old is not None
+            assert old.state == "cancelled"
+            assert old.progress == damaged_progress
+    # Invalid history is never executed or silently repaired: replaying its key
+    # answers with the stored receipt, rebuilt from its own columns.
+    replay = service.load(
+        profile.number,
+        request_key=_uuid(975),
+        actor="admin",
+    )
+    assert replay.id == first.id
 
 
 def test_preview_isolates_an_unreadable_pending_plan() -> None:
@@ -2131,6 +2157,7 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
         actor="admin",
         request_id=_uuid(641),
     )
+    assert not isinstance(replay, Residue)
     assert replay.id == application.id
     assert replay.progress is not None
     assert replay.progress.node_ids == list(nodes)
@@ -3336,10 +3363,8 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
             .where(FleetProfile.id == created.id)
             .values(assignments=assignments)
         )
-    with pytest.raises(
-        FleetProfileConflict, match="persisted Fleet profile choices are invalid"
-    ):
-        service.get(created.id)
+    # The damaged choice is retired (skipped), never a refusal to read the profile.
+    assert service.get(created.id).assignments == []
 
 
 def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -> None:
@@ -3504,20 +3529,17 @@ def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
     )
 
 
-def test_child_operation_state_distinguishes_absence_from_corruption() -> None:
-    """A stored state that no longer validates must not become "running".
+def test_child_operation_state_unknown_is_observed_never_refused() -> None:
+    """A stored state outside the contract is unknown, and unknown is observed.
 
-    The caller's default is only correct for a genuinely absent value; a
-    present but malformed state used to be reported as the default, inventing
-    an execution state.
+    The caller's default is the observing state (``running``): a malformed value
+    never refuses the read and never reads as a terminal state it did not reach.
     """
 
     assert _operation_state(None, default="running") == "running"
     assert _operation_state("succeeded", default="queued") == "succeeded"
-    with pytest.raises(FleetProfileConflict, match="child operation state is invalid"):
-        _operation_state("not-a-state", default="running")
-    with pytest.raises(FleetProfileConflict, match="child operation state is invalid"):
-        _operation_state(7, default="running")
+    assert _operation_state("not-a-state", default="running") == "running"
+    assert _operation_state(7, default="running") == "running"
 
 
 def _exact_cleanup_profile(tmp_path: Path, *, engine=None):

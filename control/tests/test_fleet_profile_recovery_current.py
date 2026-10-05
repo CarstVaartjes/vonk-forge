@@ -188,8 +188,12 @@ def test_retry_rejects_revoked_scope_but_uses_accepted_profile_snapshot(
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         node.revoked_at = lifecycle._clock()
-    with pytest.raises(FleetProfileConflict, match="Fleet scope changed"):
-        service.retry(first.id, request_key=_uuid(804), actor="admin")
+    # The fleet scope no longer matches the accepted intent: the recovery is not
+    # refused, it is declined with the receipt returned (nothing new is issued).
+    declined = service.retry(first.id, request_key=_uuid(804), actor="admin")
+    assert declined.id == first.id
+    assert declined.retry_of_application_id is None
+    assert "scope changed" in (declined.status_reason or "")
 
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])

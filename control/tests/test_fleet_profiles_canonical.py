@@ -270,7 +270,7 @@ def test_competing_profile_saves_accept_only_one_observed_revision(
     assert saved.definition == accepted[0].definition
 
 
-def test_definition_read_refuses_malformed_persisted_assignment():
+def test_definition_read_retires_a_malformed_persisted_assignment():
     from vonk_control.models import FleetProfile
 
     sessions = _sessions()
@@ -280,8 +280,8 @@ def test_definition_read_refuses_malformed_persisted_assignment():
         row = session.get(FleetProfile, created.id)
         assert row is not None
         row.assignments = [{"recipe_selector": "vonk-forge/missing-fields"}]
-    with pytest.raises(ValidationError):
-        service.definition_number(created.number)
+    # The damaged choice is retired (skipped): the profile stays readable.
+    assert service.definition_number(created.number).definition.assignments == []
 
 
 def test_profile_accepts_the_library_publisher_slug_selector() -> None:
@@ -491,11 +491,12 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
     )
 
 
-def test_profile_read_refuses_a_resolver_that_substitutes_an_older_revision() -> None:
+def test_profile_read_ignores_a_resolver_that_substitutes_an_older_revision() -> None:
     # The reported defect: the cache resolver returned the newest *cached*
     # revision even when the profile's head was a newer uncached one, and the
     # profile silently bound the older bytes.  A resolver that still substitutes
-    # must now fail closed instead of retargeting the profile.
+    # is not believed: its evidence is dropped (the cache state is unknown) and
+    # the profile stays on the selected head, never retargeted to the older bytes.
     sessions = _sessions()
     _seed(sessions)
     newer_revision_id = "00000000-0000-4000-8000-000000000022"
@@ -537,20 +538,22 @@ def test_profile_read_refuses_a_resolver_that_substitutes_an_older_revision() ->
         cache_resolver=substitute,
         switch_adapter=_SwitchAdapter(),
     )
-    with pytest.raises(FleetProfileConflict, match="selected recipe revision"):
-        service.create(
-            FleetProfileInput(
-                name="Substituted",
-                assignments=[
-                    FleetProfileAssignmentInput(
-                        recipe_selector="vonk-forge/synthetic-tiny-build",
-                        spark_ids=[NODE_1],
-                        model_variant="fp16",
-                    )
-                ],
-            ),
-            actor="test",
-        )
+    created = service.create(
+        FleetProfileInput(
+            name="Substituted",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector="vonk-forge/synthetic-tiny-build",
+                    spark_ids=[NODE_1],
+                    model_variant="fp16",
+                )
+            ],
+        ),
+        actor="test",
+    )
+    # Bound to the selected head; the substituted cache claim is not shown as cached.
+    assert [item.recipe_id for item in created.assignments] == [RECIPE_DOCUMENT_ID]
+    assert all(not item.recipe.get("cached") for item in created.assignments)
 
 
 def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> None:

@@ -194,6 +194,7 @@ def validate_profile_stop_owner(
         _persisted_profile_plan,
         _persisted_profile_progress,
     )
+    from .lifecycle.evidence import Residue
     from .run_switch_contract import RunSwitchPlan
 
     application = session.get(
@@ -261,6 +262,14 @@ def validate_profile_stop_owner(
         raise ProfileStopAuthorityError(
             "current profile Stop plan is invalid"
         ) from error
+    # A Stop is a destructive effect: evidence that cannot be read proves no
+    # authority, so it is refused here (the load itself retires as unknown).
+    if (
+        isinstance(current_plan, Residue)
+        or isinstance(intended, Residue)
+        or isinstance(reviewed, Residue)
+    ):
+        raise ProfileStopAuthorityError("current profile Stop plan is invalid")
 
     switch_adapter = progress.switch_adapter
     if (
