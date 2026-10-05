@@ -46,6 +46,7 @@ from .library_contract import UuidId
 from .lifecycle import CancelRequested, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter
 from .lifecycle.artifact_job import ArtifactJobAdapter
+from .lifecycle.evidence import retire_as_unknown
 from .models import (
     AgentOperation,
     ArtifactJob,
@@ -1359,6 +1360,13 @@ class ArtifactJobService:
                 path = self._blob_store.resolve(
                     blob.storage_key, sha256, blob.size_bytes
                 )
+            except FileNotFoundError:
+                # Bytes the store no longer holds are unknown, not a refusal: the
+                # reader is told "not found" and the content is re-uploaded.
+                retire_as_unknown(
+                    "artifact-job.blob", sha256, note="stored bytes are absent"
+                )
+                raise KeyError(sha256) from None
             except ArtifactBlobStoreError as error:
                 raise ArtifactJobError(str(error)) from error
             return path, row.media_type, row.size_bytes
@@ -1533,6 +1541,13 @@ class ArtifactJobService:
                 path = self._blob_store.resolve(
                     blob.storage_key, sha256, blob.size_bytes
                 )
+            except FileNotFoundError:
+                # Bytes the store no longer holds are unknown, not a refusal: the
+                # reader is told "not found" and the content is re-uploaded.
+                retire_as_unknown(
+                    "artifact-job.blob", sha256, note="stored bytes are absent"
+                )
+                raise KeyError(sha256) from None
             except ArtifactBlobStoreError as error:
                 raise ArtifactJobError(str(error)) from error
             return path, row.media_type, row.name, row.size_bytes

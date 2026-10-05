@@ -22,7 +22,7 @@
   },
   "max_debt": 12,
   "debt_ceiling": {
-    "total": 303,
+    "total": 285,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "operator_waits": [
@@ -350,7 +350,12 @@
       "sites": [
         ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._digest", "artifact-digest-is-invalid", 1],
         ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_bytes", "artifact-upload-sha-256-does-not-match", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-sha-256-does-not-match", 2]
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-sha-256-does-not-match", 2],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._prepare_root", "artifact-storage-root-is-unsafe", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._prepare_root", "artifact-storage-metadata-path-is-unsafe", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.delete", "artifact-storage-key-is-invalid", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.delete", "artifact-storage-path-is-unsafe", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.resolve", "artifact-storage-key-is-invalid", 1]
       ]
     },
     {
@@ -358,28 +363,13 @@
       "category": "input-validation",
       "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led).",
       "sites": [
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_bytes", "artifact-bytes-exceed-the-limit", 1]
-      ]
-    },
-    {
-      "family": "artifact-blob.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping uncertainty (missing receipt, stale stored plan, persisted state, changed scope) that rule 5 of the lifecycle core turns into unknown-then-reconcile. Debt: the ceiling only falls. Audit notes: Blob store bookkeeping (missing/duplicate/limit state).",
-      "sites": [
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._claim_reference_lock", "artifact-storage-references-are-being-reconciled", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._commit", "artifact-storage-quota-is-exhausted", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._prepare_root", "artifact-storage-metadata-path-is-unsafe", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._prepare_root", "artifact-storage-root-is-unsafe", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._reservation_entries", "artifact-storage-reservation-is-invalid", 2],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._reserve", "artifact-storage-quota-is-exhausted", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.delete", "artifact-storage-key-is-invalid", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.delete", "artifact-storage-path-is-unsafe", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_bytes", "artifact-bytes-exceed-the-limit", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-size-is-outside-its-bound", 1],
         ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-chunk-is-invalid", 2],
         ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-exceeds-its-declared-size", 2],
         ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-size-does-not-match", 2],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-size-is-outside-its-bound", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.resolve", "artifact-storage-key-is-invalid", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.resolve", "stored-artifact-is-unavailable", 1]
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._commit", "artifact-storage-quota-is-exhausted", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._reserve", "artifact-storage-quota-is-exhausted", 1]
       ]
     },
     {
@@ -1275,6 +1265,14 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "message", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "run-switch-retry-runtime-image-reference-is-invalid", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_reserve_run_switch_assets", "message", 1]
+      ]
+    },
+    {
+      "family": "artifact-blob.already-retried",
+      "category": "already-retried",
+      "reason": "The bounded nonblocking claim of the shared reference fence (a kernel file lock shared with other Controller processes) ran out its 30 second budget while another process reconciles. The caller's own operation (an idempotent upload or attachment, or the reconcile sweep) is retried by its requester; nothing in flight is ended by it and no state is recorded wrong.",
+      "sites": [
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._claim_reference_lock", "artifact-storage-references-are-being-reconciled", 1]
       ]
     }
   ]
