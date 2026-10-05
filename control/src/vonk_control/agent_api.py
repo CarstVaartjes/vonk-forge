@@ -86,6 +86,7 @@ from .inventory_repository import (
 )
 from .logging import log_event
 from .models import (
+    STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
     AgentCertificate,
     AgentNode,
@@ -1062,7 +1063,7 @@ def install_agent_routes(
                     if evidence.run_generation != run.run_generation:
                         rejected.append("recipe run observation generation is stale")
                         continue
-                    if run.state != "running":
+                    if run.state in STOPPABLE_NOT_RUNNING_RUN_STATES:
                         # A stoppable run that is not running (a cancelled
                         # start left it lost) can never be advanced by this
                         # report, but the Spark's own current word on its

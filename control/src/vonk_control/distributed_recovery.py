@@ -26,6 +26,7 @@ from .distributed_lifecycle import (
 from .lifecycle.job import JobAdapter
 from .litellm import LiteLlmGeneration
 from .models import (
+    STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
     AgentNode,
     AgentOperation,
@@ -682,7 +683,7 @@ def settle_observed_absent_runs_in_session(session: Session, now: datetime) -> b
     runs = session.scalars(
         select(RecipeRun)
         .where(
-            RecipeRun.state.in_(STOPPABLE_RUN_STATES - {"running"}),
+            RecipeRun.state.in_(STOPPABLE_NOT_RUNNING_RUN_STATES),
             RecipeRun.id.in_(
                 select(ResourceReservation.owner_id).where(
                     ResourceReservation.owner_kind == "run",

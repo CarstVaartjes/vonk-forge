@@ -82,6 +82,7 @@ from .lifecycle.artifact_job import ArtifactJobAdapter
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .logging import redact_text
 from .models import (
+    STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
     AgentNode,
     AgentOperation,
@@ -7562,7 +7563,7 @@ def prepare_exact_recipe_run_observation_nodes(
         for node, run in assigned:
             if _aware(node.updated_at) >= observed_at:
                 continue
-            if run.state == "running":
+            if run.state not in STOPPABLE_NOT_RUNNING_RUN_STATES:
                 node.state = "failed"
                 node.observed_run_generation = None
                 node.observation_process_running = None
