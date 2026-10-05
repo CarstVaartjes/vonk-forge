@@ -191,6 +191,8 @@ from .resource_planning import (
 )
 from .run_admission import (
     PORT_ADMISSION_CODES,
+    RETRYABLE_PLAN_BLOCKERS,
+    RUN_ADMISSION_WAIT_CODES,
     RunAdmissionBusy,
     allocate_service_port,
     run_port_blockers,
@@ -7624,7 +7626,11 @@ class RunSwitchOperationService:
                 RecipeBuildAdmissionBusy,
             ) as busy:
                 return self._hold_capacity_writer(
-                    operation_id, phase_index, item_index, reason=busy.code
+                    operation_id,
+                    phase_index,
+                    item_index,
+                    reason=busy.code,
+                    detail=busy.detail if isinstance(busy, RunAdmissionBusy) else None,
                 )
             except RunSwitchPostStopEvidencePending as pending:
                 return self._hold_capacity_writer(
@@ -7756,6 +7762,8 @@ class RunSwitchOperationService:
                 AdmissionLockBusy.code,
                 InstallAdmissionBusy.code,
                 RunAdmissionBusy.code,
+                *RETRYABLE_PLAN_BLOCKERS,
+                *RUN_ADMISSION_WAIT_CODES,
                 RecipeBuildAdmissionBusy.code,
                 RunSwitchPostStopEvidencePending.code,
                 _RUNTIME_IMAGE_OWNER_CHANGED,
@@ -9178,11 +9186,18 @@ def _wait_blockers(job: Job, progress: Mapping[str, object]) -> list[OperationBl
         and retry_reason
         and progress.get("observation_due_at") is not None
     ):
-        # A phase that will be tried again is waiting, not failed.
+        # A phase that will be tried again is waiting, not failed.  The retry
+        # names its own cause: the underlying typed code first, then the
+        # detail the phase reported (never just a generic busy marker).
+        cause = reason.split("; admission retry", 1)[0].strip()
         return [
             make_blocker(
                 PHASE_RETRY_CODE,
-                retry_reason,
+                cause
+                if cause.startswith(retry_reason)
+                else f"{retry_reason}: {cause}"
+                if cause
+                else retry_reason,
                 node_ids=nodes,
             )
         ]
