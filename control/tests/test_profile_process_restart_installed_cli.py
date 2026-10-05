@@ -179,7 +179,7 @@ def _wait_for_trace(
 
 # Two Controller processes, a PostgreSQL server and the installed CLI: on a busy
 # runner the starts alone take longer than the shared installed-CLI allowance.
-@pytest.mark.slow(90)
+@pytest.mark.slow(60)
 @pytest.mark.lane
 def test_installed_cli_follows_same_profile_application_after_api_process_restart(
     installed_vonkctl: Path,
