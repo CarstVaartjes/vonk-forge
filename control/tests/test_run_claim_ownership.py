@@ -8,6 +8,7 @@ new profile load for the same Sparks stayed Blocked forever.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,8 @@ from sqlalchemy import select
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.models import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models import Job, RecipeRun, ResourceReservation, RunNode
+from vonk_control.recipe_operations import prepare_exact_recipe_run_observation_nodes
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .test_recipe_operations import (
@@ -185,3 +187,111 @@ def _codes(review) -> set[str]:
         for decision in review.admission_decisions
         for blocker in decision.blockers
     }
+
+
+def _cancelled_start_run(tmp_path: Path, *, engine=None):
+    """A run a cancelled start left lost, its nodes stopped, claims kept."""
+
+    sessions, profiles, profile, recovery, run_id = _load_over(
+        tmp_path, state="lost", plan_readable=True, engine=engine
+    )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.updated_at = NOW - timedelta(seconds=60)
+        for node in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            node.state = "stopped"
+            node.updated_at = NOW - timedelta(seconds=60)
+    return sessions, profiles, profile, recovery, run_id
+
+
+def _report_empty(sessions, node_ids) -> None:
+    for node_id in node_ids:
+        with sessions.begin() as session:
+            prepare_exact_recipe_run_observation_nodes(
+                session, node_id, NOW - timedelta(seconds=1), set()
+            )
+
+
+def _node_ids(sessions, run_id: str) -> list[str]:
+    with sessions() as session:
+        return list(
+            session.scalars(select(RunNode.node_id).where(RunNode.run_id == run_id))
+        )
+
+
+def test_a_lost_run_every_spark_reports_absent_releases_its_claims(
+    tmp_path: Path,
+) -> None:
+    _lost_run_absence_releases_claims(tmp_path)
+
+
+def test_a_lost_run_absence_releases_its_claims_on_postgres(
+    tmp_path: Path, postgres_engine
+) -> None:
+    _lost_run_absence_releases_claims(tmp_path, engine=postgres_engine)
+
+
+def _lost_run_absence_releases_claims(tmp_path: Path, *, engine=None) -> None:
+    sessions, profiles, profile, recovery, run_id = _cancelled_start_run(
+        tmp_path, engine=engine
+    )
+    nodes = _node_ids(sessions, run_id)
+    assert _claims(sessions, run_id)
+
+    # No observation yet: unknown stays unknown, the claim is held.
+    recovery.tick()
+    assert _claims(sessions, run_id)
+
+    # One Spark alone is not proof for a distributed run.
+    _report_empty(sessions, nodes[:1])
+    recovery.tick()
+    assert _claims(sessions, run_id)
+
+    _report_empty(sessions, nodes[1:])
+    recovery.tick()
+
+    assert _claims(sessions, run_id) == set()
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == "stopped"
+    review = profiles.preview(profile.id)
+    assert not _codes(review) & _CLAIM_BLOCKERS
+    assert review.allowed, _codes(review)
+
+
+def test_a_lost_run_still_reported_running_keeps_its_claims(tmp_path: Path) -> None:
+    sessions, _, _, recovery, run_id = _cancelled_start_run(tmp_path)
+    with sessions.begin() as session:
+        for node in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            run = session.get(RecipeRun, run_id)
+            assert run is not None
+            node.observed_run_generation = run.run_generation
+            node.observation_process_running = True
+            node.observation_observed_at = NOW - timedelta(seconds=1)
+
+    recovery.tick()
+
+    assert _claims(sessions, run_id)
+
+
+def test_a_run_a_live_operation_owns_is_not_settled_by_absence(
+    tmp_path: Path,
+) -> None:
+    sessions, _, _, recovery, run_id = _cancelled_start_run(tmp_path)
+    with sessions.begin() as session:
+        job = session.scalar(
+            select(Job).where(Job.payload["owner_id"].as_string() == run_id)
+        )
+        assert job is not None
+        job.state = "running"
+
+    _report_empty(sessions, _node_ids(sessions, run_id))
+    recovery.tick()
+
+    assert _claims(sessions, run_id)
+    with sessions() as session:
+        assert all(
+            node.observation_observed_at is None
+            for node in session.scalars(select(RunNode).where(RunNode.run_id == run_id))
+        )

@@ -56,6 +56,7 @@ from .recipe_stop_payloads import (
     RecipeStopAuthorityError,
     durable_run_stop_payloads,
 )
+from .reservation_owners import run_has_live_operation
 from .strict_json import read_stored_model
 
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -377,6 +378,7 @@ class DistributedRecoveryCoordinator:
                 queued = True
                 worked = True
                 break
+            worked = settle_observed_absent_runs_in_session(session, now) or worked
             worked = release_inactive_run_claims_in_session(session, now) or worked
         if queued:
             self._agent_jobs.notify_available()
@@ -663,6 +665,53 @@ def release_inactive_run_claims_in_session(session: Session, now: datetime) -> b
         claim.state = "released"
         claim.released_at = now
     return bool(claims)
+
+
+def settle_observed_absent_runs_in_session(session: Session, now: datetime) -> bool:
+    """Release the claims of a stoppable run every Spark reports absent.
+
+    Unknown resident usage is resolved by observation, never held forever. A
+    run that is not running (a cancelled start leaves it lost) and that no live
+    operation owns, whose every rank's Spark has reported the process absent
+    after the run last changed, occupies nothing the Spark does not already
+    count in its inventory. It is recorded stopped and its claims are released.
+    A run still running, starting or stopping under an operation, or any rank
+    without a fresh absence report, keeps its claims: absence needs proof.
+    """
+
+    runs = session.scalars(
+        select(RecipeRun)
+        .where(
+            RecipeRun.state.in_(STOPPABLE_RUN_STATES - {"running"}),
+            RecipeRun.id.in_(
+                select(ResourceReservation.owner_id).where(
+                    ResourceReservation.owner_kind == "run",
+                    ResourceReservation.state == "active",
+                )
+            ),
+        )
+        .order_by(RecipeRun.created_at, RecipeRun.id)
+        .with_for_update(of=RecipeRun, skip_locked=True)
+    ).all()
+    settled = False
+    for run in runs:
+        nodes = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == run.id)
+                .order_by(RunNode.rank, RunNode.node_id)
+                .with_for_update(of=RunNode)
+            )
+        )
+        if (
+            not nodes
+            or run_has_live_operation(session, run.id)
+            or not all(run_node_reports_absent(run, node, now) for node in nodes)
+        ):
+            continue
+        settle_absent_run_in_session(session, run, nodes, now)
+        settled = True
+    return settled
 
 
 def settle_absent_run_in_session(

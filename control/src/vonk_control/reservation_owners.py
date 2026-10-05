@@ -96,6 +96,12 @@ def _referencing_active_job(session: Session, owner_kind: str, owner_id: str) ->
     )
 
 
+def run_has_live_operation(session: Session, run_id: str) -> bool:
+    """Whether a not-yet-ended operation (a Start, a Stop) still owns this run."""
+
+    return _referencing_active_job(session, "run", run_id)
+
+
 def _effect_is_uncertain(session: Session, installation_id: str) -> bool:
     """Whether the last operation on an installation left its effect unproven.
 

@@ -82,6 +82,7 @@ from .lifecycle.artifact_job import ArtifactJobAdapter
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .logging import redact_text
 from .models import (
+    STOPPABLE_RUN_STATES,
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
@@ -163,6 +164,7 @@ from .recipe_stop_payloads import (
     stop_payload_from_job_run,
 )
 from .recovery_policy import FailureKind
+from .reservation_owners import run_has_live_operation
 from .run_admission import (
     RunAdmissionBusy,
     RunAdmissionService,
@@ -7534,32 +7536,46 @@ def prepare_exact_recipe_run_observation_nodes(
     observed_at: datetime,
     included_run_ids: set[str],
 ) -> tuple[RunNode, ...]:
-    """Lock this node's running ranks; an empty report fails every older one."""
+    """Lock this node's stoppable ranks; an empty report fails running ones.
+
+    A complete empty report is also the Spark's word that no local run exists.
+    For a stoppable run that is not running and owned by no live operation (a
+    cancelled start leaves it lost) that is a fresh absence observation, the
+    evidence that releases its claim.
+    """
 
     assigned = tuple(
-        session.scalars(
-            select(RunNode)
+        session.execute(
+            select(RunNode, RecipeRun)
             .join(RecipeRun, RecipeRun.id == RunNode.run_id)
             .where(
                 RunNode.node_id == node_id,
-                RecipeRun.state == "running",
+                RecipeRun.state.in_(STOPPABLE_RUN_STATES),
             )
             .order_by(RunNode.run_id)
             .with_for_update(of=RunNode)
         )
     )
-    if included_run_ids - {node.run_id for node in assigned}:
+    if included_run_ids - {node.run_id for node, _ in assigned}:
         raise ValueError("recipe run observation is not assigned")
     if not included_run_ids:
-        for node in assigned:
-            if _aware(node.updated_at) < observed_at:
+        for node, run in assigned:
+            if _aware(node.updated_at) >= observed_at:
+                continue
+            if run.state == "running":
                 node.state = "failed"
                 node.observed_run_generation = None
                 node.observation_process_running = None
                 node.observation_observed_at = None
                 node.observation_endpoint_ready = None
                 node.updated_at = observed_at
-    return assigned
+            elif _aware(run.updated_at) < observed_at and not run_has_live_operation(
+                session, run.id
+            ):
+                node.observed_run_generation = run.run_generation
+                node.observation_process_running = False
+                node.observation_observed_at = observed_at
+    return tuple(node for node, _ in assigned)
 
 
 __all__ = [
