@@ -5146,6 +5146,8 @@ class FleetProfileService:
                     + ".",
                     blockers=blockers,
                 )
+            # A review that planned an eviction is admitted: start it now.
+            self._request_storage(preview)
             pending = self._create_pending_application(
                 preview,
                 request_key=request_key,
@@ -6186,8 +6188,9 @@ class FleetProfileService:
             assessment = item.assessment
             refused = {
                 node_id
-                for reason in assessment.blockers
-                if reason.code == "run-switch.insufficient-disk"
+                for reason in (*assessment.blockers, *assessment.warnings)
+                if reason.code
+                in {"run-switch.insufficient-disk", "run-switch.disk-eviction-planned"}
                 for node_id in reason.node_ids
             }
             fit = assessment.fit_after_stop or assessment.fit_current

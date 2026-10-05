@@ -52,6 +52,7 @@ from vonk_control.unused_storage_collection import (
     ACTOR,
     GRACE,
     UnusedStorageCollector,
+    spark_eviction_capacity,
 )
 
 from .runtime_image_fixtures import place_test_image
@@ -414,24 +415,82 @@ def test_the_low_line_is_a_tenth_of_the_disk_or_the_largest_install_known(
     assert lifecycle.removed == [idle]
 
 
-def test_installation_a_profile_points_to_is_kept_even_when_idle(
+def test_installation_a_saved_profile_points_to_goes_after_the_unpointed(
     world: Catalog,
 ) -> None:
-    """Catches removing what a saved profile loads, loaded or not."""
+    """Space-driven cleanup may evict what a saved (not loaded) profile points
+    to, but only after every installation no profile points to."""
 
     old = world.revision("glm", 1)
     head = world.revision("glm", 2, head="active")
-    pointed, _ = world.workload(head, run="stopped")
-    older, _ = world.workload(old, run="stopped")
+    pointed, _ = world.workload(head, run="stopped", touched=NOW - timedelta(days=30))
+    older, _ = world.workload(old, run="stopped", touched=NOW - timedelta(days=2))
     _profile(world, "vonk-forge/glm")
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle).collect()
+
+    # Profiles follow the newest revision: the older installation is no one's, so
+    # it goes first although it was used more recently.
+    assert lifecycle.removed[0] == older
+    assert pointed in lifecycle.removed
+
+
+def test_installation_of_the_loaded_profile_is_never_evicted(
+    world: Catalog,
+) -> None:
+    """The selected (loaded) profile's installations stay, however idle."""
+
+    head = world.revision("glm", 1, head="active")
+    loaded, _ = world.workload(head, run="stopped", touched=NOW - timedelta(days=40))
+    _profile(world, "vonk-forge/glm")
+    _application(world, {}, state="succeeded", selected=True)
     lifecycle = FakeLifecycle(world.sessions)
 
     result = _collector(world, lifecycle).collect()
 
-    # Profiles follow the newest revision: the older installation is no one's.
-    assert lifecycle.removed == [older]
+    assert lifecycle.removed == []
     assert _kept(result, "profile") == 1
-    assert pointed not in lifecycle.removed
+    with world.sessions() as session:
+        assert spark_eviction_capacity(session, NODE, NOW).freeable == 0
+    assert loaded
+
+
+def test_pointed_installations_are_planned_least_recently_used_first(
+    world: Catalog,
+) -> None:
+    """On a Spark where only pointed installations can go, the plan names the
+    profile and takes the least recently used first."""
+
+    head = world.revision("glm", 2, head="active")
+    oldest, _ = world.workload(head, run="stopped", touched=NOW - timedelta(days=20))
+    newer, _ = world.workload(head, run="stopped", touched=NOW - timedelta(days=5))
+    _size(world, oldest, 30 * GIB, model="a" * 64)
+    _size(world, newer, 30 * GIB, model="b" * 64)
+    _profile(world, "vonk-forge/glm")
+
+    with world.sessions() as session:
+        capacity = spark_eviction_capacity(session, NODE, NOW)
+
+    assert capacity.freeable == 60 * GIB
+    assert [item.members for item in capacity.items if item.profiles] == [
+        (oldest,),
+        (newer,),
+    ]
+    from vonk_control.unused_storage_collection import _eviction_order
+
+    assert [item.members[0] for item in _eviction_order(capacity.items)] == [
+        oldest,
+        newer,
+    ]
+    assert (
+        capacity.plan(20 * GIB)
+        == f"evicting {30 * GIB} bytes from saved profile Coding"
+    )
+    assert (
+        capacity.plan(40 * GIB)
+        == f"evicting {60 * GIB} bytes from saved profile Coding"
+    )
 
 
 def test_installation_on_other_sparks_than_the_profile_names_is_not_pointed_to(
@@ -502,10 +561,11 @@ def test_an_installation_of_a_model_a_profile_needs_is_kept(world: Catalog) -> N
     _profile(world, "vonk-forge/glm")
     lifecycle = FakeLifecycle(world.sessions)
 
-    result = _collector(world, lifecycle).collect()
+    _collector(world, lifecycle).collect()
 
-    assert lifecycle.removed == [other]
-    assert _kept(result, "model a profile needs") == 1
+    # Models stay on the NAS, so a profile's shared model copy on the Spark
+    # may go and a later load simply reinstalls it.
+    assert sorted(lifecycle.removed) == sorted([superseded, other])
 
 
 def test_a_profile_edit_or_a_new_revision_alone_removes_nothing(
@@ -683,9 +743,12 @@ def test_a_profile_saved_before_the_removal_is_queued_stops_the_removal(
 
     head = world.revision("glm", 1, head="active")
     world.workload(head, run="stopped")
-    lifecycle = FakeLifecycle(
-        world.sessions, between=lambda _id: _profile(world, "vonk-forge/glm")
-    )
+
+    def load_profile(_id: str) -> None:
+        _profile(world, "vonk-forge/glm")
+        _application(world, {}, state="succeeded", selected=True)
+
+    lifecycle = FakeLifecycle(world.sessions, between=load_profile)
 
     result = _collector(world, lifecycle).collect()
 
@@ -1729,6 +1792,7 @@ def test_a_refusal_says_what_stays_and_why(world: Catalog) -> None:
     pointed, _ = world.workload(head, run="stopped")
     _size(world, pointed, 80 * GIB)
     _profile(world, "vonk-forge/glm")
+    _application(world, {}, state="succeeded", selected=True)
     collector = _collector(
         world, free=400 * GIB, demands=StorageDemands(lambda: world.now)
     )
@@ -1738,5 +1802,45 @@ def test_a_refusal_says_what_stays_and_why(world: Catalog) -> None:
     )
 
     assert relief is not None and relief.code == STORAGE_INSUFFICIENT
-    assert f"{80 * GIB} bytes of installations stay because" in relief.detail
-    assert "saved profile" in relief.detail
+    assert (
+        f"{80 * GIB} bytes of installations stay because the loaded profile uses them"
+        in relief.detail
+    )
+
+
+def test_a_review_counts_every_unused_installation_and_names_what_stays(
+    world: Catalog,
+) -> None:
+    """The read-only capacity a review plans eviction from: every installed but
+    not running installation counts, a running one and a profile's recipe do
+    not, and nothing is requested or removed. Catches a review that refuses a
+    load while hundreds of GiB of unused installations could be evicted."""
+
+    old = world.revision("glm", 1)
+    head = world.revision("glm", 2, head="active")
+    world.revision("llama", 1, head="active")
+    idle = []
+    for age in range(2, 14):
+        installation, _ = world.workload(
+            old, run="stopped", touched=NOW - timedelta(days=age)
+        )
+        _size(world, installation, 20 * GIB, model=f"{age:064x}")
+        idle.append(installation)
+    running, _ = world.workload(old, run="running")
+    _size(world, running, 50 * GIB, model="e" * 64)
+    pointed, _ = world.workload(head, run="stopped")
+    _size(world, pointed, 70 * GIB, model="f" * 64)
+    _profile(world, "vonk-forge/glm")
+    lifecycle = FakeLifecycle(world.sessions)
+
+    with world.sessions() as session:
+        capacity = spark_eviction_capacity(session, NODE, NOW)
+
+    # The profile's own installation may go too, after the 12 unpointed ones.
+    assert capacity.freeable == 12 * 20 * GIB + 70 * GIB
+    assert str(50 * GIB) in capacity.kept
+    assert capacity.plan(13 * 20 * GIB) == (
+        f"evicting {12 * 20 * GIB} bytes from unused installations; "
+        f"evicting {70 * GIB} bytes from saved profile Coding"
+    )
+    assert lifecycle.removed == []
