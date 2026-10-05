@@ -1,39 +1,7 @@
 {
   "schema": 1,
-  "max_writes": 64,
+  "max_writes": 56,
   "writers": [
-    {
-      "path": "control/src/vonk_control/agent_upgrades.py",
-      "function": "AgentUpgradeService._advance",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 5,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/agent_upgrades.py",
-      "function": "AgentUpgradeService.apply",
-      "model": "Job",
-      "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/agent_upgrades.py",
-      "function": "AgentUpgradeService.resume",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/agent_upgrades.py",
-      "function": "AgentUpgradeService.resume",
-      "model": "JobAttempt",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
     {
       "path": "control/src/vonk_control/distributed_recovery.py",
       "function": "_enqueue_recovery_stop",

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import httpx2
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
@@ -28,6 +28,7 @@ from .agent_package_source import load_package_source
 from .bounded_json import require_integer
 from .lifecycle import CancelRequested, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter
+from .lifecycle.agent_upgrade import UNSUPPORTED_DISPATCH, AgentUpgradeAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
 from .strict_json import read_stored_model
 
@@ -162,7 +163,10 @@ class AgentUpgradeService:
         self._sessions = sessions
         self._operations = operations
         self._clock = clock
-        operations.set_rollout_owner(self._advance, self.advance_node)
+        self._rollouts = AgentUpgradeAdapter()
+        operations.set_rollout_owner(
+            self._advance, self.advance_node, reconcile=self.heal_rollouts
+        )
         if channel not in {"dev", "stable"}:
             raise ValueError("agent upgrade channel is invalid")
         self._channel = channel
@@ -398,10 +402,10 @@ class AgentUpgradeService:
         # advisory.  The freshly computed plan for the same intent is applied.
         del plan_digest
         now = self._clock()
-        job = Job(
+        job = AgentUpgradeAdapter.new_rollout(
+            allowed=bool(plan.node_ids),
             request_id=request_id,
             kind="agent-upgrade",
-            state="queued" if plan.node_ids else "succeeded",
             status_reason=None if plan.node_ids else _summary(plan.skipped),
             result={"skipped": dict(plan.skipped)} if plan.skipped else None,
             actor=actor,
@@ -457,8 +461,9 @@ class AgentUpgradeService:
                 raise KeyError(job_id)
             if parent.kind != "agent-upgrade":
                 raise ValueError("job is not a resumable agent upgrade")
-            failed_dispatch = parent.state == "failed" and parent.status_reason == (
-                "unsupported job kind: agent-upgrade"
+            failed_dispatch = (
+                parent.state == "failed"
+                and parent.status_reason == UNSUPPORTED_DISPATCH
             )
             stale_dispatch = parent.state == "running"
             if (
@@ -484,7 +489,7 @@ class AgentUpgradeService:
             if worker_attempt is not None and worker_attempt.state == "running":
                 if _aware(worker_attempt.lease_deadline) > _aware(now):
                     raise ValueError("agent upgrade worker dispatch is still active")
-                worker_attempt.state = "expired"
+                self._rollouts.expire_worker_attempt(worker_attempt)
             if failed_dispatch or stale_dispatch:
                 if failed_dispatch and (
                     worker_attempt is None or worker_attempt.state != "failed"
@@ -623,9 +628,10 @@ class AgentUpgradeService:
                 )
                 if active_attempt is None or active_attempt.state != "running":
                     raise ValueError("stored agent upgrade attempt is invalid")
-            parent.state = "queued"
-            parent.status_reason = None
-            parent.updated_at = now
+            if failed_dispatch:
+                self._rollouts.reopen(parent, now, reason=None)
+            else:
+                self._rollouts.project(parent, now, reason=None)
             if waiting:
                 for operation in waiting:
                     attempt = session.scalar(
@@ -707,6 +713,78 @@ class AgentUpgradeService:
             if detail is not None:
                 operation.status_reason = (f"{detail}; {operation.status_reason}")[:512]
         self._advance(session, parent)
+
+    def heal_rollouts(self, limit: int = 8) -> bool:
+        """Heal legacy rollouts no order change will reach (a periodic tick).
+
+        A rollout that waits for an operator (nothing advertises an action for it),
+        one the generic worker failed as an unsupported kind, and a ``running``
+        worker dispatch whose lease lapsed are projected from their orders again.
+        A dispatch that still holds a live lease is left alone.  Bounded and
+        idempotent: a row another transaction changed meanwhile is left to the
+        next pass.  Returns whether anything changed.
+        """
+
+        now = self._clock()
+        with self._sessions() as session:
+            candidates = list(
+                session.scalars(
+                    select(Job.id)
+                    .where(
+                        Job.kind == "agent-upgrade",
+                        or_(
+                            Job.state.in_(("waiting-for-operator", "running")),
+                            and_(
+                                Job.state == "failed",
+                                Job.status_reason == UNSUPPORTED_DISPATCH,
+                            ),
+                        ),
+                    )
+                    .order_by(Job.updated_at, Job.id)
+                    .limit(limit)
+                )
+            )
+        healed = False
+        for job_id in candidates:
+            with self._sessions.begin() as session:
+                parent = session.scalar(
+                    select(Job).where(Job.id == job_id).with_for_update(of=Job)
+                )
+                if parent is None or parent.kind != "agent-upgrade":
+                    continue
+                if parent.state == "failed":
+                    if parent.status_reason != UNSUPPORTED_DISPATCH:
+                        continue
+                    self._rollouts.reopen(parent, now, reason=None)
+                elif (
+                    parent.state not in _ACTIVE_ROLLOUT_STATES
+                    or parent.state == "running"
+                    and self._dispatch_is_live(session, parent, now)
+                ):
+                    continue
+                self._advance(session, parent)
+                healed = True
+        if healed:
+            self._operations.notify_available()
+        return healed
+
+    @staticmethod
+    def _dispatch_is_live(session: Session, parent: Job, now: datetime) -> bool:
+        attempt = (
+            None
+            if parent.current_attempt == 0
+            else session.scalar(
+                select(JobAttempt).where(
+                    JobAttempt.job_id == parent.id,
+                    JobAttempt.attempt == parent.current_attempt,
+                )
+            )
+        )
+        return (
+            attempt is not None
+            and attempt.state == "running"
+            and _aware(attempt.lease_deadline) > _aware(now)
+        )
 
     def advance_node(self, node_id: str) -> None:
         """Resume every rollout that includes ``node_id`` when that Spark polls."""
@@ -869,13 +947,17 @@ class AgentUpgradeService:
             or agent_upgrade_in_flight(session, operation, now)
             for operation in operations
         ):
+            if parent.state == "waiting-for-operator":
+                # A legacy wait: no action exists for a rollout, and its orders
+                # are moving by themselves.
+                self._rollouts.project(parent, now)
             return
         result = dict(parent.result) if isinstance(parent.result, Mapping) else {}
         superseded = result.get("superseded_by")
         if superseded is not None:
-            parent.state = "cancelled"
-            parent.status_reason = f"superseded by agent upgrade {superseded}"
-            parent.updated_at = now
+            self._rollouts.cancelled(
+                parent, now, f"superseded by agent upgrade {superseded}"
+            )
             return
         stored_skipped = result.get("skipped")
         skipped: dict[str, str] = {
@@ -889,9 +971,7 @@ class AgentUpgradeService:
         order = parent.payload.get("node_order")
         package = parent.payload.get("package")
         if not isinstance(order, list) or not isinstance(package, dict):
-            parent.state = "failed"
-            parent.status_reason = "stored agent upgrade plan is invalid"
-            parent.updated_at = now
+            self._rollouts.fail(parent, now, "stored agent upgrade plan is invalid")
             return
         for node_id in order:
             if not isinstance(node_id, str) or node_id in materialized:
@@ -922,9 +1002,7 @@ class AgentUpgradeService:
                 skipped[node_id] = str(error)
                 continue
             self._record(parent, result, skipped)
-            parent.state = "queued"
-            parent.status_reason = None
-            parent.updated_at = now
+            self._rollouts.project(parent, now, reason=None)
             return
         self._record(parent, result, skipped)
         retrying = [
@@ -934,25 +1012,29 @@ class AgentUpgradeService:
             # longer holds the fleet, but it is not settled either.
             if operation.state in {"waiting-for-operator", "running"}
         ]
-        parent.updated_at = now
         if deferred or retrying:
-            parent.state = "queued"
-            parent.status_reason = (
-                f"Spark {deferred[0]} is not currently online; its upgrade resumes "
-                "automatically when it reconnects"
-                if deferred
-                else retrying[0].status_reason
-                or f"Spark {retrying[0].node_id} upgrade retries automatically"
+            self._rollouts.project(
+                parent,
+                now,
+                reason=(
+                    f"Spark {deferred[0]} is not currently online; its upgrade "
+                    "resumes automatically when it reconnects"
+                    if deferred
+                    else retrying[0].status_reason
+                    or f"Spark {retrying[0].node_id} upgrade retries automatically"
+                ),
             )
             return
         failed = [operation for operation in operations if operation.state == "failed"]
-        parent.state = "failed" if failed else "succeeded"
-        parent.status_reason = (
-            f"Spark {failed[0].node_id} upgrade failed: "
-            f"{failed[0].status_reason or 'see operation evidence'}"
-            if failed
-            else _summary(skipped)
-        )
+        if failed:
+            self._rollouts.fail(
+                parent,
+                now,
+                f"Spark {failed[0].node_id} upgrade failed: "
+                f"{failed[0].status_reason or 'see operation evidence'}",
+            )
+        else:
+            self._rollouts.succeed(parent, now, reason=_summary(skipped))
 
     @staticmethod
     def _record(
