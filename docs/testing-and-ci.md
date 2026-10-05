@@ -331,23 +331,19 @@ the rules of the blocker audit (retry never-executed and idempotent work,
 observe an uncertain effect first, no operator wait without an advertised
 action, a cancel always completes, supersede instead of block, fail open and
 fence closed), one `KindAdapter` protocol per kind, and one reconcile loop that
-is off until a kind has moved onto the core. Two ratchets guard the migration,
-both run by the control suite and both listing what still has to move, so the
-numbers only fall.
+is off until a kind has moved onto the core. Two scanners guard it, both run by the control suite.
 `control/tests/lifecycle_writer_boundaries.py` finds every write to a
 lifecycle state (`x.state = ...` on a lifecycle row, a `["state"]` store in a
 module that owns one, `update(Model).values(state=...)`, a constructor,
-`_set_application_state`) outside the core and compares it with
-`tools/lifecycle-writers-allowlist.json`, where each entry carries the
-migration step (`migrating_in`) that removes it; a new writer, a stale entry, a
-moved count or a higher `max_writes` fails. `control/tests/blocker_boundaries.py`
+`_set_application_state`) outside the core and allows none: there is no
+allowlist, and a new writer fails with the place to move it. `control/tests/blocker_boundaries.py`
 finds every place that produces `waiting-for-operator` (Python and the Rust
 agent) and every fail-closed raise in the audited modules, and compares them
 with `tools/blocker-allowlist.json`: an operator wait needs a verdict and an
 advertised action (`KEEP` needs an irreversible effect), a raise belongs to a
 `security-edge`, `input-validation`, `already-retried` or `bookkeeping-debt`
 family, and `max_debt` / `debt_ceiling.total` only fall. Both scanners take
-`--list`, and `--write-baseline` lowers the recorded counts after a fix; a new
+`--list`; the blocker scanner's `--write-baseline` lowers the recorded counts after a fix; a new
 site always needs a reviewed entry by hand.
 
 A PR that touches lifecycle, raise or allowlist files reports the movement.

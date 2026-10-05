@@ -1,19 +1,10 @@
 """Static ratchet: lifecycle state is written by the shared core, nowhere else.
 
 ``vonk_control/lifecycle`` owns one pure transition function for every lifecycle
-subject (the design is in the blocker audit, section 5).  Until every kind has
-moved onto it, the existing writers are listed in
-``tools/lifecycle-writers-allowlist.json``, each tagged with the migration step
-(``migrating_in``) that removes it.  The gate is a ratchet, like the
-content-identity scanner and its allowlist:
-
-* a write the allowlist does not name fails (a new writer must go through the
-  core, not around it);
-* an entry whose writer is gone fails as stale (delete it);
-* an entry whose count moved fails, up (a second writer hid behind a listed
-  one) and down (lower the recorded count), and the file's ``max_writes``
-  ceiling may only go down;
-* the file is empty when the last kind has migrated.
+subject (the design is in the blocker audit, section 5).  Every kind has moved onto it, so the gate allows **zero** writes outside
+``vonk_control/lifecycle/``: there is no allowlist and nothing to ratchet.  A write
+that is found fails with the place and the rule to follow (add the transition to
+the kind's adapter, or to a new adapter, and call the core).
 
 A *write* is any of: an attribute assignment ``x.state = ...`` where ``x`` is a
 lifecycle row, a ``["state"] = ...`` store into a progress or application
@@ -27,7 +18,7 @@ to a model is invisible to this scan, so ``test_lifecycle_writer_boundaries``
 also checks that no unresolved ``.state`` write sits in a module that owns a
 lifecycle kind unless it is named in ``UNRESOLVED_STATE_WRITE_ALLOWED``.
 
-Writes inside ``vonk_control/lifecycle/`` are the core and are never listed.
+Writes inside ``vonk_control/lifecycle/`` are the core and are allowed.
 """
 
 from __future__ import annotations
@@ -44,7 +35,6 @@ from vonk_agent_protocol import LifecycleSubject, MigrationStep, StateWriteKind
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
-ALLOWLIST_PATH = REPO_ROOT / "tools" / "lifecycle-writers-allowlist.json"
 CORE_PREFIX = "control/src/vonk_control/lifecycle/"
 MODELS_MODULE = "control/src/vonk_control/models.py"
 
@@ -55,8 +45,6 @@ BULK_UPDATE = StateWriteKind.BULK_UPDATE.value
 CONSTRUCTOR = StateWriteKind.CONSTRUCTOR.value
 HELPER_CALL = StateWriteKind.HELPER_CALL.value
 KINDS = frozenset(kind.value for kind in StateWriteKind)
-#: The steps of the migration in the blocker audit, section 5.6.
-MIGRATION_STEPS = frozenset(step.value for step in MigrationStep)
 #: Modules that store a lifecycle ``state`` inside a progress or application
 #: document; a ``["state"] =`` store elsewhere is not a lifecycle write.
 DICT_STATE_OWNERS = frozenset(
@@ -519,153 +507,29 @@ def scan_lifecycle_writes(root: Path = CONTROL_SOURCE_ROOT) -> list[Write]:
     return writes
 
 
-def count_sites(writes: Sequence[Write]) -> Counter[tuple[str, str, str, str]]:
-    return Counter(write.identity for write in writes)
+def evaluate_writer_gate(writes: Sequence[Write]) -> list[str]:
+    """One message per write outside the core; an empty list is a pass."""
 
-
-def _key(entry: dict[str, object]) -> tuple[str, str, str, str]:
-    return (
-        str(entry["path"]),
-        str(entry["function"]),
-        str(entry["model"]),
-        str(entry["kind"]),
-    )
-
-
-def load_allowlist(path: Path = ALLOWLIST_PATH) -> tuple[int, list[dict[str, object]]]:
-    """Read the reviewed allowlist. A malformed entry is a hard failure."""
-
-    document = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or document.get("schema") != 1:
-        raise ValueError(f"{path}: allowlist must be a schema-1 object")
-    ceiling = document.get("max_writes")
-    if not isinstance(ceiling, int) or ceiling < 0:
-        raise ValueError(f"{path}: max_writes must be a non-negative integer")
-    entries = document.get("writers")
-    if not isinstance(entries, list):
-        raise TypeError(f"{path}: allowlist needs a writers array")
-    for index, entry in enumerate(entries):
-        where = f"{path} writers[{index}]"
-        if not isinstance(entry, dict):
-            raise TypeError(f"{where}: entry is not an object")
-        for field in ("path", "function", "model", "kind", "migrating_in"):
-            if not isinstance(entry.get(field), str):
-                raise TypeError(f"{where}: {field} must be a string")
-        if entry["model"] not in LIFECYCLE_MODELS:
-            raise ValueError(f"{where}: unknown lifecycle model {entry['model']!r}")
-        if entry["kind"] not in KINDS:
-            raise ValueError(f"{where}: unknown write kind {entry['kind']!r}")
-        if entry["migrating_in"] not in MIGRATION_STEPS:
-            raise ValueError(
-                f"{where}: migrating_in must be one of {sorted(MIGRATION_STEPS)}"
-            )
-        count = entry.get("count")
-        if not isinstance(count, int) or count < 1:
-            raise ValueError(f"{where}: count must be a positive integer")
-    return ceiling, entries
-
-
-def evaluate_writer_gate(
-    writes: Sequence[Write],
-    allowlist: Sequence[dict[str, object]],
-    ceiling: int,
-) -> list[str]:
-    """Return one message per violation. An empty list is a pass."""
-
-    messages: list[str] = []
-    current = count_sites(writes)
-    first_line = {write.identity: write for write in reversed(writes)}
-    listed = {_key(entry): int(entry["count"]) for entry in allowlist}  # type: ignore[call-overload]
-    for key, count in sorted(current.items()):
-        if key not in listed:
-            messages.append(
-                "lifecycle state written outside vonk_control.lifecycle; move the "
-                f"transition into the core: {first_line[key].render()}"
-            )
-        elif count > listed[key]:
-            messages.append(
-                f"lifecycle writers rose from {listed[key]} to {count}; the "
-                f"ceiling only goes down: {first_line[key].render()}"
-            )
-        elif count < listed[key]:
-            messages.append(
-                f"lifecycle writers fell from {listed[key]} to {count}; lower the "
-                f"recorded count: {key}"
-            )
-    for key in sorted(listed):
-        if key not in current:
-            messages.append(f"allowlist entry no longer occurs; delete it: {key}")
-    total = sum(current.values())
-    if total > ceiling:
-        messages.append(f"lifecycle writers total {total}, above the ceiling {ceiling}")
-    elif total < ceiling:
-        messages.append(
-            f"lifecycle writers total {total}; lower max_writes from {ceiling}"
-        )
-    return messages
-
-
-def migration_step(write: Write) -> str:
-    """The migration step (blocker audit, 5.6) that removes ``write``."""
-
-    if write.model in {"AgentOperation", "AgentOperationAttempt"}:
-        return "step-2"
-    if write.model == "Job" and write.path.endswith("/agent_jobs.py"):
-        return "step-2"
-    if write.model == "ArtifactJob":
-        return "step-3"
-    if write.model == "ModelCacheOperation":
-        return "step-4"
-    if write.model == "Job" and write.path.endswith("/run_switch_operations.py"):
-        return "step-5"
-    if write.model == "FleetProfileApplication":
-        return "step-6"
-    return "step-7"
-
-
-def baseline_document(writes: Sequence[Write]) -> dict[str, object]:
-    """The allowlist that describes exactly the current writers."""
-
-    counts = count_sites(writes)
-    steps = {write.identity: migration_step(write) for write in writes}
-    return {
-        "schema": 1,
-        "max_writes": sum(counts.values()),
-        "writers": [
-            {
-                "path": path,
-                "function": function,
-                "model": model,
-                "kind": kind,
-                "count": count,
-                "migrating_in": steps[(path, function, model, kind)],
-            }
-            for (path, function, model, kind), count in sorted(counts.items())
-        ],
-    }
+    return [
+        "lifecycle state written outside vonk_control.lifecycle; move the "
+        f"transition into the core: {write.render()}"
+        for write in writes
+    ]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     writes = scan_lifecycle_writes()
-    if arguments and arguments[0] == "--write-baseline":
-        document = baseline_document(writes)
-        ALLOWLIST_PATH.write_text(
-            json.dumps(document, indent=2) + "\n", encoding="utf-8"
-        )
-        print(f"wrote {len(document['writers'])} entries")  # type: ignore[arg-type]
-        return 0
     if arguments and arguments[0] == "--list":
         for write in writes:
             print(write.render())
         return 0
-    ceiling, allowlist = load_allowlist()
-    messages = evaluate_writer_gate(writes, allowlist, ceiling)
+    messages = evaluate_writer_gate(writes)
     if messages:
         for message in messages:
             print(message, file=sys.stderr)
         return 1
-    print(f"lifecycle writers hold at {len(writes)} reviewed writes")
+    print("no lifecycle state is written outside vonk_control.lifecycle")
     return 0
 
 

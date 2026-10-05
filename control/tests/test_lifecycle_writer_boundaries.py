@@ -7,13 +7,12 @@ that must stay quiet (a non-lifecycle table, a comparison, the core itself).
 
 from __future__ import annotations
 
-import json
 from textwrap import dedent
 
 import pytest
 
 from .lifecycle_writer_boundaries import (
-    ALLOWLIST_PATH,
+    REPO_ROOT,
     ATTRIBUTE,
     BULK_UPDATE,
     CONSTRUCTOR,
@@ -21,13 +20,9 @@ from .lifecycle_writer_boundaries import (
     DICT_ITEM,
     DICT_STATE_OWNERS,
     HELPER_CALL,
-    MIGRATION_STEPS,
     NON_LIFECYCLE_STATE_VARIABLES,
     Write,
-    baseline_document,
     evaluate_writer_gate,
-    load_allowlist,
-    migration_step,
     scan_lifecycle_writes,
     scan_source,
     scan_unresolved,
@@ -167,67 +162,20 @@ def _write(function: str = "f", model: str = "Job", kind: str = ATTRIBUTE) -> Wr
     return Write(OTHER, function, model, kind, 1)
 
 
-def _entry(function: str = "f", count: int = 1) -> dict[str, object]:
-    return {
-        "path": OTHER,
-        "function": function,
-        "model": "Job",
-        "kind": ATTRIBUTE,
-        "count": count,
-        "migrating_in": "step-7",
-    }
+def test_the_gate_allows_no_write_outside_the_core() -> None:
+    assert evaluate_writer_gate([]) == []
+
+    found = evaluate_writer_gate([_write(), _write("g")])
+    assert len(found) == 2
+    assert all("outside vonk_control.lifecycle" in message for message in found)
 
 
-def test_the_gate_fails_on_a_new_a_stale_and_a_moved_writer() -> None:
-    clean = evaluate_writer_gate([_write()], [_entry()], 1)
-    assert clean == []
-
-    new = evaluate_writer_gate([_write(), _write("g")], [_entry()], 1)
-    assert any("outside vonk_control.lifecycle" in message for message in new)
-
-    stale = evaluate_writer_gate([], [_entry()], 1)
-    assert any("no longer occurs" in message for message in stale)
-
-    risen = evaluate_writer_gate([_write(), _write()], [_entry()], 1)
-    assert any("rose from 1 to 2" in message for message in risen)
-
-    fallen = evaluate_writer_gate([_write()], [_entry(count=2)], 2)
-    assert any("fell from 2 to 1" in message for message in fallen)
-
-    ceiling_up = evaluate_writer_gate([_write()], [_entry()], 3)
-    assert any("lower max_writes" in message for message in ceiling_up)
-    ceiling_down = evaluate_writer_gate([_write()], [_entry()], 0)
-    assert any("above the ceiling" in message for message in ceiling_down)
+def test_the_repository_writes_no_lifecycle_state_outside_the_core() -> None:
+    assert evaluate_writer_gate(scan_lifecycle_writes()) == []
 
 
-def test_the_repository_holds_at_its_reviewed_writers() -> None:
-    ceiling, allowlist = load_allowlist()
-    writes = scan_lifecycle_writes()
-    assert evaluate_writer_gate(writes, allowlist, ceiling) == []
-
-
-def test_every_entry_names_the_migration_step_that_removes_it() -> None:
-    _, allowlist = load_allowlist()
-    assert {entry["migrating_in"] for entry in allowlist} <= MIGRATION_STEPS
-    document = json.loads(ALLOWLIST_PATH.read_text(encoding="utf-8"))
-    assert document == baseline_document(scan_lifecycle_writes()), (
-        "regenerate with python -m control.tests.lifecycle_writer_boundaries "
-        "--write-baseline"
-    )
-
-
-def test_the_migration_steps_follow_the_audit_order() -> None:
-    def step(path: str, model: str) -> str:
-        return migration_step(Write(path, "f", model, ATTRIBUTE, 1))
-
-    base = "control/src/vonk_control/"
-    assert step(base + "agent_jobs.py", "AgentOperation") == "step-2"
-    assert step(base + "agent_jobs.py", "Job") == "step-2"
-    assert step(base + "artifact_jobs.py", "ArtifactJob") == "step-3"
-    assert step(base + "model_cache.py", "ModelCacheOperation") == "step-4"
-    assert step(base + "run_switch_operations.py", "Job") == "step-5"
-    assert step(base + "fleet_profiles.py", "FleetProfileApplication") == "step-6"
-    assert step(base + "recipe_operations.py", "Job") == "step-7"
+def test_no_allowlist_file_is_left_to_grow_back() -> None:
+    assert not (REPO_ROOT / "tools" / "lifecycle-writers-allowlist.json").exists()
 
 
 def test_no_unresolved_state_write_hides_in_a_lifecycle_module() -> None:
