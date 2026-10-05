@@ -1,0 +1,1254 @@
+{
+  "schema": 1,
+  "max_writes": 228,
+  "writers": [
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._aggregate_parent",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 3,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._cancel_superseded_operation",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._claim_has_authority",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._claim_once",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 3,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._claim_once",
+      "model": "AgentOperationAttempt",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._claim_once",
+      "model": "AgentOperationAttempt",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._fail_spent_start_budgets",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._fail_spent_start_budgets",
+      "model": "AgentOperationAttempt",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._finish",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._finish",
+      "model": "AgentOperationAttempt",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._project_artifact_job_expiry",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._project_artifact_job_expiry",
+      "model": "ArtifactJob",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-3"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._reconcile_agent_upgrade",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._reconcile_agent_upgrade",
+      "model": "AgentOperationAttempt",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._reconcile_dead_running_operation",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._reconcile_dead_running_operation",
+      "model": "AgentOperationAttempt",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._reject_recipe_build_claim",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService._reject_recipe_build_claim",
+      "model": "AgentOperationAttempt",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService.enqueue_in_session",
+      "model": "AgentOperation",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService.record_late_result",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService.record_late_result",
+      "model": "AgentOperationAttempt",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService.request_superseded_workload_cancellation_in_session",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService.request_superseded_workload_cancellation_in_session",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 3,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "_abandon_operation",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "_release_retired_owner_in_session",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "abandon_idempotent_job_in_session",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "abandon_idempotent_job_in_session",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "retire_exhausted_operations_in_session",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "retire_exhausted_operations_in_session",
+      "model": "AgentOperationAttempt",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "retire_exhausted_operations_in_session",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "schedule_agent_upgrade_retry",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "schedule_agent_upgrade_retry",
+      "model": "AgentOperationAttempt",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_upgrades.py",
+      "function": "AgentUpgradeService._advance",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 5,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/agent_upgrades.py",
+      "function": "AgentUpgradeService._retry_parked",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_upgrades.py",
+      "function": "AgentUpgradeService._settle_at_target",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_upgrades.py",
+      "function": "AgentUpgradeService._supersede_older",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_upgrades.py",
+      "function": "AgentUpgradeService.apply",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/agent_upgrades.py",
+      "function": "AgentUpgradeService.consume_agent_result",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/agent_upgrades.py",
+      "function": "AgentUpgradeService.resume",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/agent_upgrades.py",
+      "function": "AgentUpgradeService.resume",
+      "model": "JobAttempt",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/artifact_jobs.py",
+      "function": "ArtifactJobService._create_in_session",
+      "model": "ArtifactJob",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-3"
+    },
+    {
+      "path": "control/src/vonk_control/artifact_jobs.py",
+      "function": "ArtifactJobService.cancel",
+      "model": "ArtifactJob",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-3"
+    },
+    {
+      "path": "control/src/vonk_control/artifact_jobs.py",
+      "function": "ArtifactJobService.consume_agent_result",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/artifact_jobs.py",
+      "function": "ArtifactJobService.consume_agent_result",
+      "model": "ArtifactJob",
+      "kind": "attribute",
+      "count": 4,
+      "migrating_in": "step-3"
+    },
+    {
+      "path": "control/src/vonk_control/artifact_jobs.py",
+      "function": "ArtifactJobService.finalize",
+      "model": "ArtifactJob",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-3"
+    },
+    {
+      "path": "control/src/vonk_control/artifact_jobs.py",
+      "function": "ArtifactJobService.submit",
+      "model": "ArtifactJob",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-3"
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery.py",
+      "function": "_enqueue_recovery_stop",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/distribution_executor.py",
+      "function": "DurableDistributionPhaseExecutor._ensure_child",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/distribution_executor.py",
+      "function": "DurableDistributionPhaseExecutor.get",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._advance_cancellation_in_session",
+      "model": "FleetProfileApplication",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._create_pending_application",
+      "model": "FleetProfileApplication",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._defer_pending_application",
+      "model": "FleetProfileApplication",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._finish_pending_admission",
+      "model": "FleetProfileApplication",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._finish_profile_cancellation",
+      "model": "FleetProfileApplication",
+      "kind": "helper-call",
+      "count": 1,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._follow_newest_recipe_revisions",
+      "model": "FleetProfileApplication",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._observe_parked_applications",
+      "model": "FleetProfileApplication",
+      "kind": "attribute",
+      "count": 7,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._prepare_pending_admission",
+      "model": "FleetProfileApplication",
+      "kind": "helper-call",
+      "count": 2,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._queue_application",
+      "model": "FleetProfileApplication",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._queue_application",
+      "model": "FleetProfileApplication",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._queue_application",
+      "model": "FleetProfileApplication",
+      "kind": "helper-call",
+      "count": 3,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._resume_live_child",
+      "model": "FleetProfileApplication",
+      "kind": "helper-call",
+      "count": 1,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._set_application_state",
+      "model": "FleetProfileApplication",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService.cancel",
+      "model": "FleetProfileApplication",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService.tick",
+      "model": "FleetProfileApplication",
+      "kind": "helper-call",
+      "count": 12,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "RunSwitchFleetProfileAdapter._advance_in_session",
+      "model": "FleetProfileApplication",
+      "kind": "dict-item",
+      "count": 4,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "RunSwitchFleetProfileAdapter._failed_in_session",
+      "model": "FleetProfileApplication",
+      "kind": "dict-item",
+      "count": 1,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "RunSwitchFleetProfileAdapter._finish_cancelled_in_session",
+      "model": "FleetProfileApplication",
+      "kind": "dict-item",
+      "count": 2,
+      "migrating_in": "step-6"
+    },
+    {
+      "path": "control/src/vonk_control/jobs.py",
+      "function": "JobService._finish",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/jobs.py",
+      "function": "JobService._finish",
+      "model": "JobAttempt",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/jobs.py",
+      "function": "JobService.claim",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/jobs.py",
+      "function": "JobService.claim",
+      "model": "JobAttempt",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/jobs.py",
+      "function": "JobService.claim",
+      "model": "JobAttempt",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/jobs.py",
+      "function": "JobService.enqueue",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/jobs.py",
+      "function": "JobService.enqueue_guarded",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/jobs.py",
+      "function": "JobService.resume",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/jobs.py",
+      "function": "JobService.resume",
+      "model": "Job",
+      "kind": "bulk-update",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle_preflight.py",
+      "function": "LifecyclePreflight.ensure",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._accept_model_removal",
+      "model": "ModelCacheOperation",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._checkpoint_artifact",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._claim_operations",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._defer_artifact_writer",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._defer_model_removal",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._finish_failed",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._finish_model_removal_in_session",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._finish_partial",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._persist_model_removal_checkpoint",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._resume_after_credential_change",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._set_operation_progress",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._set_operation_state",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._try_settle_cancellation",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.advance_removals",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.check_access_and_resume",
+      "model": "ModelCacheOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.check_access_and_resume",
+      "model": "ModelCacheOperation",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.retry",
+      "model": "ModelCacheOperation",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.start_download",
+      "model": "ModelCacheOperation",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.start_repair",
+      "model": "ModelCacheOperation",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-4"
+    },
+    {
+      "path": "control/src/vonk_control/operation_api.py",
+      "function": "_DurableOperationProjection.resume_job",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/operation_api.py",
+      "function": "_DurableOperationProjection.resume_job",
+      "model": "Job",
+      "kind": "bulk-update",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/prebuilt_images.py",
+      "function": "PrebuiltImageImporter._finish",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._cancel_superseded_operation",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._checkpoint_recipe_image_removal",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._complete_recipe_image_removal",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._complete_recipe_model_child",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._defer_for_model",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._fail",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._finish_recipe_removal",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._reconcile_availability_cancellation",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._record_recipe_removal_failure",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._request_cancellation",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._run",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._start_request",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService.claim_pending",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService.remove_selector",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService.retry",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._cancel_current_build",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._cancel_current_build",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._cancel_prebuilt_build",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._complete_absent_stop_in_session",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._complete_profile_jobrun_stop_in_session",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._complete_profile_jobrun_stop_in_session",
+      "model": "ArtifactJob",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-3"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._complete_profile_jobrun_stop_in_session",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._one_shot_stop_prerequisite",
+      "model": "ArtifactJob",
+      "kind": "attribute",
+      "count": 3,
+      "migrating_in": "step-3"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._profile_jobrun_stop_in_session",
+      "model": "ArtifactJob",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-3"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._project_node_result",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 3,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._project_node_result",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 7,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._queue_in_session",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._queue_prebuilt_build_in_session",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._stop_logical_job_run",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._stop_logical_job_run",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 2,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.activate_job_run",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.build",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.cancel",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.cancel",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.reconcile_superseded_unissued",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.reconcile_superseded_unissued",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.record_node_result",
+      "model": "AgentOperation",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-2"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_update_batches.py",
+      "function": "RecipeUpdateBatches.claim",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_update_batches.py",
+      "function": "RecipeUpdateBatches.reconcile_cancellations",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_update_batches.py",
+      "function": "RecipeUpdateBatches.run",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/recipe_update_batches.py",
+      "function": "RecipeUpdateBatches.start",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-7"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._advance",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 13,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._apply_plan",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._hold_after_advance_failure",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._hold_capacity_writer",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._hold_issued_observation",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._hold_start_observation",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._mark_failed",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._refresh_blocked_plan",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 2,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._schedule_checkpoint_retry",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService.cancel",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService.retry",
+      "model": "Job",
+      "kind": "constructor",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "_complete_cancellation",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "_complete_operation_progress",
+      "model": "Job",
+      "kind": "dict-item",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "_complete_phase_progress",
+      "model": "Job",
+      "kind": "dict-item",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "_merge_progress_evidence",
+      "model": "Job",
+      "kind": "dict-item",
+      "count": 1,
+      "migrating_in": "step-5"
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "_reject_invalid_operation",
+      "model": "Job",
+      "kind": "attribute",
+      "count": 1,
+      "migrating_in": "step-5"
+    }
+  ]
+}
