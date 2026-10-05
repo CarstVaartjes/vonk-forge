@@ -17,7 +17,7 @@ already deployed; :data:`LEGACY_WAIT_STATE` is the wire spelling of "unknown".
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import NamedTuple
 
 from .wire_model import WireEnum, WireModel
@@ -209,9 +209,13 @@ _ATTEMPT_EXPIRED = AdoptedState(LifecycleState.OBSERVING)
 #: keeps on purpose (``draft``) are not here, and a subject does not adopt a word
 #: it never stored.
 STATE_ALIASES: Mapping[LifecycleSubject, Mapping[StateAlias, AdoptedState]] = {
+    # The generic job table is shared by many kinds, each of which spelled
+    # "waiting to retry" or "being cancelled" its own way.
     LifecycleSubject.JOB: {
         StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
         StateAlias.WAITING: _WAITING,
+        StateAlias.CANCELLING: _CANCELLING,
+        StateAlias.PARTIAL: _PARTIAL,
         StateAlias.EXPIRED: _JOB_EXPIRED,
     },
     LifecycleSubject.JOB_ATTEMPT: {
@@ -276,6 +280,66 @@ def adopt_state(subject: LifecycleSubject, stored: str) -> AdoptedState | None:
     except ValueError:
         return None
     return STATE_ALIASES.get(subject, {}).get(alias)
+
+
+#: The states of a row that has not ended.
+LIVE_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(LifecycleState) - (
+    TERMINAL_LIFECYCLE_STATES
+)
+
+
+def stored_words(
+    subject: LifecycleSubject, states: Iterable[LifecycleState]
+) -> tuple[str, ...]:
+    """Every word a row of ``subject`` may carry for any of ``states``.
+
+    The core words themselves, then the retired spellings that adopt into them.
+    A query that selects rows by state uses this, so a row written before the
+    rename is found as well as one written after it, and nothing spells a word.
+    """
+
+    wanted = frozenset(states)
+    words = [state.value for state in LifecycleState if state in wanted]
+    words.extend(
+        alias.value
+        for alias, adopted in STATE_ALIASES.get(subject, {}).items()
+        if adopted.state in wanted
+    )
+    return tuple(words)
+
+
+def live_words(subject: LifecycleSubject) -> tuple[str, ...]:
+    """Every stored word of a row of ``subject`` that has not ended."""
+
+    return stored_words(subject, LIVE_LIFECYCLE_STATES)
+
+
+def is_state(
+    subject: LifecycleSubject, stored: str | None, *states: LifecycleState
+) -> bool:
+    """Whether a stored word means one of ``states`` (adopting an old spelling)."""
+
+    if stored is None:
+        return False
+    adopted = adopt_state(subject, stored)
+    return adopted is not None and adopted.state in states
+
+
+def is_live(subject: LifecycleSubject, stored: str | None) -> bool:
+    """Whether a stored word means a row that has not ended."""
+
+    if stored is None:
+        return False
+    adopted = adopt_state(subject, stored)
+    return adopted is not None and adopted.state in LIVE_LIFECYCLE_STATES
+
+
+def check_words(
+    subject: LifecycleSubject, states: Iterable[LifecycleState]
+) -> tuple[str, ...]:
+    """The words a subject's CHECK constraint admits: its states and their aliases."""
+
+    return stored_words(subject, states)
 
 
 def input_state(word: str) -> LifecycleState | None:
@@ -521,6 +585,7 @@ class LifecycleVocabulary(WireModel):
 __all__ = [
     "INPUT_ALIASES",
     "LEGACY_WAIT_STATE",
+    "LIVE_LIFECYCLE_STATES",
     "SECURITY_REFUSAL_SUFFIXES",
     "STATE_ALIASES",
     "TERMINAL_LIFECYCLE_STATES",
@@ -546,6 +611,11 @@ __all__ = [
     "WaitReason",
     "WaitVerdict",
     "adopt_state",
+    "check_words",
     "error_category_of",
     "input_state",
+    "is_live",
+    "is_state",
+    "live_words",
+    "stored_words",
 ]

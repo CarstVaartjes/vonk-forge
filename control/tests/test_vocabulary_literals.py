@@ -156,6 +156,8 @@ def test_typescript_sources_may_not_spell_the_words(tmp_path: Path) -> None:
     assert counts == Counter({"control/web/src/pages/example.tsx": 2})
 
 
+# Parses and walks every Python module of the repository three times over.
+@pytest.mark.slow(30)
 def test_the_repository_holds_the_python_ratchet() -> None:
     assert scan.problems(scan.scan_python(), scan.load_baseline()) == []
 
@@ -214,5 +216,6 @@ def test_only_the_alias_table_may_spell_the_retired_words(tmp_path: Path) -> Non
     assert _python(tmp_path, 'STORED_STATE = "waiting"\n')
 
 
+@pytest.mark.slow(30)
 def test_the_non_lifecycle_floors_match_the_repository() -> None:
     assert scan.floor_problems(scan.scan_python()) == []

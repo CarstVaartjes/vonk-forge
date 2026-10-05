@@ -102,3 +102,22 @@ def test_the_generated_typescript_carries_the_same_aliases() -> None:
     assert block
     pairs = dict(re.findall(r'"([^"]+)": LifecycleState\.([A-Z_]+)', block.group(1)))
     assert pairs == {alias.value: state.name for alias, state in INPUT_ALIASES.items()}
+
+
+def test_a_query_finds_old_and_new_rows_by_meaning() -> None:
+    from vonk_agent_protocol import is_live, is_state, live_words, stored_words
+
+    cache = LifecycleSubject.MODEL_CACHE_OPERATION
+    assert "partial" in live_words(cache) and "backoff" in live_words(cache)
+    assert "succeeded" not in live_words(cache)
+    assert stored_words(cache, [LifecycleState.BACKOFF]) == ("backoff", "partial")
+    assert is_live(cache, "partial") and is_live(cache, "backoff")
+    assert not is_live(cache, "failed") and not is_live(cache, None)
+    assert is_state(cache, "partial", LifecycleState.BACKOFF)
+    assert not is_state(cache, "unheard-of", LifecycleState.BACKOFF)
+    job = LifecycleSubject.JOB
+    assert stored_words(job, [LifecycleState.OBSERVING]) == (
+        "observing",
+        "waiting",
+        "cancelling",
+    )

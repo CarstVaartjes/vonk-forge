@@ -284,7 +284,8 @@ def scan_python(
         relative = path.relative_to(root).as_posix()
         if relative in ALLOWED_FILES or relative.startswith(PYTHON_EXCLUDED_PREFIXES):
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=relative)
         docstrings = _docstring_ids(tree)
         for node in ast.walk(tree):
             if (
@@ -294,7 +295,14 @@ def scan_python(
                 and (tier := tier_of(node.value)) is not None
             ):
                 counts[(tier, relative)] += 1
-        found = sum(1 for _ in _legacy_state_literals(tree, docstrings))
+        found = (
+            sum(1 for _ in _legacy_state_literals(tree, docstrings))
+            if any(
+                f'"{word}"' in source or f"'{word}'" in source
+                for word in LEGACY_STATE_WORDS
+            )
+            else 0
+        )
         if found:
             counts[(LEGACY_STATE, relative)] += found
     return counts
