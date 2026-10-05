@@ -13,6 +13,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
+
 # The reference fence is a short critical section around one blob verification
 # and its durable attachment, so a bounded nonblocking claim is enough: the
 # caller retries its own operation rather than parking on another process'
@@ -190,7 +192,9 @@ class ArtifactBlobStore:
             raise ArtifactBlobStoreError("artifact storage key is invalid")
         path = self._root / sha256[:2] / sha256
         if path.is_symlink() or not path.is_file() or path.stat().st_size != size_bytes:
-            raise ArtifactBlobStoreError("stored artifact is unavailable")
+            # Absent or damaged bytes are unknown, not a refusal: the reader
+            # sees "not found" and the next identical upload replaces them.
+            raise FileNotFoundError("stored artifact is unavailable")
         # Bytes are hashed once, on upload; the file is named by that digest.
         return path
 
@@ -377,8 +381,10 @@ class ArtifactBlobStore:
         storage_key = f"{sha256[:2]}/{sha256}"
         with self._quota_lock():
             if destination.exists():
-                resolved = self.resolve(storage_key, sha256, size_bytes)
-                return StoredArtifactBlob(sha256, size_bytes, storage_key, resolved)
+                intact = self._intact(storage_key, sha256, size_bytes)
+                if intact is not None:
+                    return StoredArtifactBlob(sha256, size_bytes, storage_key, intact)
+                # Damaged bytes are replaced by the verified upload below.
             reservations = self._reservation_entries()
             accounted = (
                 self._stored_bytes()
@@ -394,6 +400,20 @@ class ArtifactBlobStore:
             finally:
                 os.close(descriptor)
         return StoredArtifactBlob(sha256, size_bytes, storage_key, destination)
+
+    def _intact(self, storage_key: str, sha256: str, size_bytes: int) -> Path | None:
+        """The stored object when it is present and of the recorded size."""
+
+        try:
+            return self.resolve(storage_key, sha256, size_bytes)
+        except FileNotFoundError:
+            retire_as_unknown(
+                "artifact-blob.object",
+                sha256,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                "stored object is absent or of another size",
+            )
+            return None
 
     def _prepare_root(self) -> None:
         self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -426,12 +446,13 @@ class ArtifactBlobStore:
         destination = self._root / storage_key
         with self._quota_lock():
             if destination.exists():
-                return None, StoredArtifactBlob(
-                    sha256,
-                    size_bytes,
-                    storage_key,
-                    self.resolve(storage_key, sha256, size_bytes),
-                )
+                intact = self._intact(storage_key, sha256, size_bytes)
+                if intact is not None:
+                    return None, StoredArtifactBlob(
+                        sha256, size_bytes, storage_key, intact
+                    )
+                # Rebuild from evidence: the incoming bytes are verified against
+                # the digest and replace the damaged stored object.
             reservations = self._reservation_entries()
             accounted = (
                 self._stored_bytes()
@@ -477,11 +498,22 @@ class ArtifactBlobStore:
             try:
                 value = int(path.read_text(encoding="ascii"))
             except (OSError, UnicodeError, ValueError) as error:
-                raise ArtifactBlobStoreError(
-                    "artifact storage reservation is invalid"
-                ) from error
-            if not 0 <= value <= self._max_stored_bytes:
-                raise ArtifactBlobStoreError("artifact storage reservation is invalid")
+                value = None
+                note = f"{type(error).__name__}: {error}"
+            else:
+                note = "reservation size is outside the quota"
+            if value is None or not 0 <= value <= self._max_stored_bytes:
+                # A reservation file that cannot be read (half-written by a live
+                # holder, or damaged) is unknown, not a refusal: its bytes are
+                # counted from the temporary file it guards, and the reconcile
+                # sweep removes it once no holder has it locked.
+                retire_as_unknown(
+                    "artifact-blob.reservation",
+                    path.name,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    note,
+                )
+                continue
             values[path.name.removesuffix(".reserve")] = value
         return values
 
