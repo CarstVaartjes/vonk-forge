@@ -2442,6 +2442,10 @@ export interface components {
             step_results?: {
                 [key: string]: components["schemas"]["FleetProfileStepResult"];
             };
+            /** Supersede Code */
+            supersede_code?: ("superseded-by-retry" | "superseded-by-intent" | "effects-changed-during-admission") | null;
+            /** Superseded By */
+            superseded_by?: string | null;
             switch_adapter?: components["schemas"]["FleetProfileSwitchAdapterState"] | null;
             /**
              * Total Steps
@@ -2491,6 +2495,8 @@ export interface components {
             /** Profile Id */
             profile_id: string;
             progress: components["schemas"]["FleetProfileApplicationProgress"];
+            /** Reason Code */
+            reason_code?: ("superseded-by-retry" | "superseded-by-intent" | "effects-changed-during-admission") | null;
             /** Request Key */
             request_key: string;
             result: components["schemas"]["FleetProfileApplicationResult"] | null;
@@ -2500,9 +2506,11 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
             /** Status Reason */
             status_reason: string | null;
+            /** Superseded By */
+            superseded_by?: string | null;
             /** Total Steps */
             total_steps: number;
             /**
@@ -2800,7 +2808,7 @@ export interface components {
             /** Application Id */
             application_id?: string | null;
             /** Application State */
-            application_state?: ("queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled") | null;
+            application_state?: ("queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded") | null;
             /** Assignments */
             assignments: components["schemas"]["FleetProfileEndpointAssignmentView"][] | null;
             /** Number */
@@ -3185,7 +3193,7 @@ export interface components {
              * @default queued
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
             /** Status Reason */
             status_reason?: string | null;
             /**

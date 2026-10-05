@@ -4420,6 +4420,34 @@
             "title": "Step Results",
             "type": "object"
           },
+          "supersede_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "superseded-by-retry",
+                  "superseded-by-intent",
+                  "effects-changed-during-admission"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersede Code"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          },
           "switch_adapter": {
             "anyOf": [
               {
@@ -4560,6 +4588,22 @@
           "progress": {
             "$ref": "#/components/schemas/FleetProfileApplicationProgress"
           },
+          "reason_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "superseded-by-retry",
+                  "superseded-by-intent",
+                  "effects-changed-during-admission"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
           "request_key": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Request Key",
@@ -4594,7 +4638,8 @@
               "waiting-for-operator",
               "succeeded",
               "failed",
-              "cancelled"
+              "cancelled",
+              "superseded"
             ],
             "title": "State",
             "type": "string"
@@ -4610,6 +4655,18 @@
               }
             ],
             "title": "Status Reason"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
           },
           "total_steps": {
             "maximum": 1024.0,
@@ -5539,7 +5596,8 @@
                   "waiting-for-operator",
                   "succeeded",
                   "failed",
-                  "cancelled"
+                  "cancelled",
+                  "superseded"
                 ],
                 "type": "string"
               },
@@ -6742,7 +6800,8 @@
               "waiting-for-operator",
               "succeeded",
               "failed",
-              "cancelled"
+              "cancelled",
+              "superseded"
             ],
             "title": "State",
             "type": "string"

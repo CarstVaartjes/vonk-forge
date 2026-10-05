@@ -335,7 +335,7 @@ def test_new_intent_supersedes_a_parked_exhausted_application(tmp_path: Path) ->
     assert second.id != first.id
     assert second.state == "queued"
     ended = service.application(first.id)
-    assert ended.state == "cancelled"
+    assert ended.state == "superseded"
     assert "replaced by a later scoped intent" in (ended.status_reason or "")
 
 
@@ -1174,3 +1174,63 @@ def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
         ).intended_profile
         assert intended is not None
         assert {item.recipe_revision_id for item in intended.assignments} == {newer_id}
+
+
+def test_an_automatic_retry_supersedes_its_predecessor_instead_of_failing_it(
+    tmp_path: Path,
+) -> None:
+    """The Controller's own retry ends the tracked application ``superseded``.
+
+    A client following the original id must see the successor, never a failure
+    with the continuation lost; the earlier failure stays in the reason.
+    """
+
+    sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    later = lifecycle._clock() + timedelta(hours=2)
+    service._clock = lambda: later
+    for _ in range(6):
+        service.tick()
+    with sessions() as session:
+        successors = tuple(
+            session.scalars(
+                select(FleetProfileApplication).where(
+                    FleetProfileApplication.id != first.id
+                )
+            )
+        )
+    assert len(successors) == 1
+    ended = service.application(first.id)
+    assert ended.state == "superseded"
+    assert ended.reason_code == "superseded-by-retry"
+    assert ended.superseded_by == successors[0].id
+    assert "earlier failure: " in (ended.status_reason or "")
+    assert ended.blockers == [] and ended.next_attempt_at is None
+    # The ended receipt neither holds claims nor is retried again.
+    assert not service.retry_eligible(first.id)
+
+
+def test_a_legacy_failed_retry_parent_is_relabelled_superseded(
+    tmp_path: Path,
+) -> None:
+    sessions, _lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    successor = _uuid(990)
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        row.state = "failed"
+        row.status_reason = f"Automatically reconciled by profile retry {successor}"
+        progress = dict(row.progress)
+        progress["retry_due_at"] = None
+        row.progress = progress
+
+    assert service._heal_legacy_applications(_lifecycle._clock())
+
+    view = service.application(first.id)
+    assert view.state == "superseded"
+    assert view.superseded_by == successor
+    assert view.reason_code == "superseded-by-retry"
+    assert not service._heal_legacy_applications(_lifecycle._clock())

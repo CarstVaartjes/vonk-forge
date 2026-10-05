@@ -88,6 +88,7 @@ from .fleet_profile_contract import (
     FleetProfileScope,
     FleetProfileScopePreview,
     FleetProfileStepResult,
+    FleetProfileSupersedeCode,
     FleetProfileSwitchAdapter,
     FleetProfileSwitchAdapterResult,
     FleetProfileSwitchAdapterState,
@@ -96,6 +97,7 @@ from .fleet_profile_contract import (
     profile_switch_child_request_key,
 )
 from .lifecycle.fleet_profile import (
+    LEGACY_SUPERSEDED_PREFIXES,
     FleetProfileAdapter,
     cancellation_state,
     doc_state,
@@ -3776,7 +3778,7 @@ class FleetProfileService:
                 elif application_state == "succeeded":
                     state = "withdrawn"
                     run_id = None
-                elif application_state in {"failed", "cancelled"}:
+                elif application_state in {"failed", "cancelled", "superseded"}:
                     state = "unavailable"
                     run_id = None
                 else:
@@ -5053,22 +5055,26 @@ class FleetProfileService:
                             prior_ordinal = prior_progress.workload_intent_ordinal
                             if prior_ordinal is None or prior_ordinal >= ordinal:
                                 continue
-                        self._lifecycle.cancelled(
+                        self._lifecycle.supersede(
                             prior,
                             "Profile order was replaced before admission by a later "
                             "scoped intent",
                             now,
+                            code="superseded-by-intent",
+                            by=application_id,
                             session=session,
                         )
                         continue
                     prior_ordinal = prior_progress.workload_intent_ordinal
                     if prior_ordinal is None or prior_ordinal >= ordinal:
                         continue
-                    self._lifecycle.cancelled(
+                    self._lifecycle.supersede(
                         prior,
                         "Profile order was replaced before admission by a later "
                         "scoped intent",
                         now,
+                        code="superseded-by-intent",
+                        by=application_id,
                         session=session,
                     )
                 progress_data = progress.model_dump(mode="json")
@@ -5195,8 +5201,9 @@ class FleetProfileService:
                 if isinstance(error, _FleetProfileSupersededIntentConflict):
                     self._finish_pending_admission(
                         pending.id,
-                        state="cancelled",
+                        state="superseded",
                         reason=str(error),
+                        code="superseded-by-intent",
                     )
                 else:
                     self._discard_pending_application(pending.id)
@@ -5300,7 +5307,7 @@ class FleetProfileService:
                 )
                 if pending and existing_progress is not None:
                     pending_ordinal = existing_progress.workload_intent_ordinal
-                if pending and existing.state == "cancelled":
+                if pending and existing.state in {"cancelled", "superseded"}:
                     raise FleetProfileConflict(
                         "Profile application was superseded by a later intent"
                     )
@@ -5703,11 +5710,13 @@ class FleetProfileService:
                         # parked; an older one is superseded by this acceptance.
                         if prior_order > intent_order:
                             continue
-                        self._lifecycle.cancelled(
+                        self._lifecycle.supersede(
                             prior_application,
                             "Profile order was replaced before admission by a later "
                             "scoped intent",
                             now,
+                            code="superseded-by-intent",
+                            by=application_id,
                             session=session,
                         )
                         continue
@@ -5727,11 +5736,13 @@ class FleetProfileService:
                         or prior_ordinal >= workload_intent_ordinal
                     ):
                         continue
-                    self._lifecycle.cancelled(
+                    self._lifecycle.supersede(
                         prior_application,
                         "Profile order was replaced by a later scoped intent; "
                         "issued effects retain their own cancellation receipts",
                         now,
+                        code="superseded-by-intent",
+                        by=application_id,
                         effect=_LifecycleEffect.UNKNOWN,
                         session=session,
                     )
@@ -5793,11 +5804,20 @@ class FleetProfileService:
                 if retry_parent is not None and automatic_cache_recovery:
                     # An ended parent absorbs the event; the reason is still the
                     # record of why no attempt is scheduled for it.
+                    # The earlier failure stays in the reason: it is what the
+                    # operator needs, and the successor carries the continuation.
+                    earlier = (retry_parent.status_reason or "").strip()
                     superseded_by = (
                         f"Automatically reconciled by profile retry {row.id}"
+                        + (f"; earlier failure: {earlier}" if earlier else "")
                     )[:512]
-                    self._lifecycle.fail(
-                        retry_parent, superseded_by, now, session=session
+                    self._lifecycle.supersede(
+                        retry_parent,
+                        superseded_by,
+                        now,
+                        code="superseded-by-retry",
+                        by=row.id,
+                        session=session,
                     )
                     retry_parent.status_reason = superseded_by
                     # Superseded by its retry: no attempt is scheduled for it.
@@ -6593,6 +6613,12 @@ class FleetProfileService:
                 "request_id": row.request_key,
             },
             "failure": failure,
+            "superseded_by": (
+                typed_progress.superseded_by if state == "superseded" else None
+            ),
+            "reason_code": (
+                typed_progress.supersede_code if state == "superseded" else None
+            ),
             "result": result.model_dump(mode="json") if result is not None else None,
             "cancellation": (
                 cancellation.model_dump(mode="json")
@@ -6601,7 +6627,7 @@ class FleetProfileService:
             ),
             "status_reason": (
                 redact_text(row.status_reason)
-                if (cancellation is not None or state == "queued")
+                if (cancellation is not None or state in {"queued", "superseded"})
                 and row.status_reason is not None
                 else None
             ),
@@ -7091,7 +7117,10 @@ class FleetProfileService:
             if pending is None:
                 raise
             self._finish_pending_admission(
-                pending.id, state="cancelled", reason=str(error)
+                pending.id,
+                state="superseded",
+                reason=str(error),
+                code="superseded-by-intent",
             )
         except FleetProfileConflict as error:
             if pending is None:
@@ -7236,21 +7265,23 @@ class FleetProfileService:
                 # malformed query or dialect quirk monopolize ordinary work.
                 return cancellation_observed
             if not self._application_is_current_selection(session, row, progress):
-                self._lifecycle.cancelled(
+                self._lifecycle.supersede(
                     row,
                     "Profile order was replaced by a newer fleet profile load; "
                     "issued effects retain their cancellation receipts",
                     now,
+                    code="superseded-by-intent",
                     effect=_LifecycleEffect.UNKNOWN,
                     session=session,
                 )
                 return True
             if self._superseding_intent(session, row, progress):
-                self._lifecycle.cancelled(
+                self._lifecycle.supersede(
                     row,
                     "Profile order was replaced by a changed profile or later "
                     "scoped intent; issued effects retain their own cancellation receipts",
                     now,
+                    code="superseded-by-intent",
                     effect=_LifecycleEffect.UNKNOWN,
                     session=session,
                 )
@@ -7832,8 +7863,9 @@ class FleetProfileService:
         except FleetProfileStalePlanConflict as error:
             self._finish_pending_admission(
                 application_id,
-                state="cancelled",
+                state="superseded",
                 reason=f"Pending profile intent was superseded: {error}",
+                code="effects-changed-during-admission",
             )
             return True
         except (FleetProfileConflict, FleetProfilePermissionDenied, KeyError) as error:
@@ -7851,6 +7883,7 @@ class FleetProfileService:
         *,
         state: FleetProfileOperationState,
         reason: str,
+        code: FleetProfileSupersedeCode | None = None,
     ) -> None:
         now = _aware(self._clock())
         with self._sessions.begin() as session:
@@ -7868,7 +7901,10 @@ class FleetProfileService:
                 admission_pending=False,
                 admission_retry_at=None,
             )
-            if state == "cancelled":
+            if state == "superseded":
+                assert code is not None
+                self._lifecycle.supersede(row, reason, now, code=code, session=session)
+            elif state == "cancelled":
                 self._lifecycle.cancelled(row, reason, now, session=session)
             else:
                 self._lifecycle.fail(row, reason, now, session=session)
@@ -7910,7 +7946,28 @@ class FleetProfileService:
             )
             for row in rows:
                 self._lifecycle.heal(row, now, session=session)
-            return bool(rows)
+            legacy = tuple(
+                session.scalars(
+                    select(FleetProfileApplication)
+                    .where(
+                        or_(
+                            *(
+                                FleetProfileApplication.status_reason.startswith(prefix)
+                                for prefix in LEGACY_SUPERSEDED_PREFIXES
+                            )
+                        ),
+                        FleetProfileApplication.state.in_(("failed", "cancelled")),
+                    )
+                    .order_by(
+                        FleetProfileApplication.created_at,
+                        FleetProfileApplication.id,
+                    )
+                    .with_for_update(skip_locked=True)
+                    .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
+                )
+            )
+            relabelled = [self._lifecycle.heal_superseded(row, now) for row in legacy]
+            return bool(rows) or any(relabelled)
 
     @staticmethod
     def _defer_cancellation_observation(
@@ -9159,6 +9216,8 @@ class FleetProfileService:
             retry_of_application_id=_canonical_progress(
                 row.progress
             ).retry_of_application_id,
+            superseded_by=progress.superseded_by if state == "superseded" else None,
+            reason_code=progress.supersede_code if state == "superseded" else None,
             current_step=row.current_step,
             total_steps=len(plan.steps),
             current_operation_id=row.current_operation_id,

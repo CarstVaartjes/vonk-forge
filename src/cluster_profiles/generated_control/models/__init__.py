@@ -122,8 +122,10 @@ from .fleet_profile_application_effect_kind import FleetProfileApplicationEffect
 from .fleet_profile_application_effect_outcome import FleetProfileApplicationEffectOutcome
 from .fleet_profile_application_progress import FleetProfileApplicationProgress
 from .fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
+from .fleet_profile_application_progress_supersede_code_type_0 import FleetProfileApplicationProgressSupersedeCodeType0
 from .fleet_profile_application_result import FleetProfileApplicationResult
 from .fleet_profile_application_view import FleetProfileApplicationView
+from .fleet_profile_application_view_reason_code_type_0 import FleetProfileApplicationViewReasonCodeType0
 from .fleet_profile_application_view_state import FleetProfileApplicationViewState
 from .fleet_profile_assignment import FleetProfileAssignment
 from .fleet_profile_assignment_assessment import FleetProfileAssignmentAssessment
@@ -693,8 +695,10 @@ __all__ = (
     "FleetProfileApplicationEffectOutcome",
     "FleetProfileApplicationProgress",
     "FleetProfileApplicationProgressStepResults",
+    "FleetProfileApplicationProgressSupersedeCodeType0",
     "FleetProfileApplicationResult",
     "FleetProfileApplicationView",
+    "FleetProfileApplicationViewReasonCodeType0",
     "FleetProfileApplicationViewState",
     "FleetProfileAssignment",
     "FleetProfileAssignmentAssessment",

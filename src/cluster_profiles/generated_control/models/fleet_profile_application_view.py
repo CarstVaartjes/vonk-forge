@@ -8,6 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.fleet_profile_application_view_reason_code_type_0 import check_fleet_profile_application_view_reason_code_type_0
+from ..models.fleet_profile_application_view_reason_code_type_0 import FleetProfileApplicationViewReasonCodeType0
 from ..models.fleet_profile_application_view_state import check_fleet_profile_application_view_state
 from ..models.fleet_profile_application_view_state import FleetProfileApplicationViewState
 from ..types import UNSET, Unset
@@ -50,7 +52,9 @@ class FleetProfileApplicationView:
             blockers (list[OperationBlocker] | Unset):
             cancellation (FleetProfileApplicationCancellationView | None | Unset):
             next_attempt_at (datetime.datetime | None | Unset):
+            reason_code (FleetProfileApplicationViewReasonCodeType0 | None | Unset):
             retry_of_application_id (None | str | Unset):
+            superseded_by (None | str | Unset):
      """
 
     created_at: datetime.datetime
@@ -71,7 +75,9 @@ class FleetProfileApplicationView:
     blockers: list[OperationBlocker] | Unset = UNSET
     cancellation: FleetProfileApplicationCancellationView | None | Unset = UNSET
     next_attempt_at: datetime.datetime | None | Unset = UNSET
+    reason_code: FleetProfileApplicationViewReasonCodeType0 | None | Unset = UNSET
     retry_of_application_id: None | str | Unset = UNSET
+    superseded_by: None | str | Unset = UNSET
 
 
 
@@ -143,11 +149,25 @@ class FleetProfileApplicationView:
         else:
             next_attempt_at = self.next_attempt_at
 
+        reason_code: None | str | Unset
+        if isinstance(self.reason_code, Unset):
+            reason_code = UNSET
+        elif isinstance(self.reason_code, str):
+            reason_code = self.reason_code
+        else:
+            reason_code = self.reason_code
+
         retry_of_application_id: None | str | Unset
         if isinstance(self.retry_of_application_id, Unset):
             retry_of_application_id = UNSET
         else:
             retry_of_application_id = self.retry_of_application_id
+
+        superseded_by: None | str | Unset
+        if isinstance(self.superseded_by, Unset):
+            superseded_by = UNSET
+        else:
+            superseded_by = self.superseded_by
 
 
         field_dict: dict[str, Any] = {}
@@ -176,8 +196,12 @@ class FleetProfileApplicationView:
             field_dict["cancellation"] = cancellation
         if next_attempt_at is not UNSET:
             field_dict["next_attempt_at"] = next_attempt_at
+        if reason_code is not UNSET:
+            field_dict["reason_code"] = reason_code
         if retry_of_application_id is not UNSET:
             field_dict["retry_of_application_id"] = retry_of_application_id
+        if superseded_by is not UNSET:
+            field_dict["superseded_by"] = superseded_by
 
         return field_dict
 
@@ -312,6 +336,26 @@ class FleetProfileApplicationView:
         next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
 
 
+        def _parse_reason_code(data: object) -> FleetProfileApplicationViewReasonCodeType0 | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                reason_code_type_0 = check_fleet_profile_application_view_reason_code_type_0(data)
+
+
+
+                return reason_code_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(FleetProfileApplicationViewReasonCodeType0 | None | Unset, data)
+
+        reason_code = _parse_reason_code(d.pop("reason_code", UNSET))
+
+
         def _parse_retry_of_application_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -320,6 +364,16 @@ class FleetProfileApplicationView:
             return cast(None | str | Unset, data)
 
         retry_of_application_id = _parse_retry_of_application_id(d.pop("retry_of_application_id", UNSET))
+
+
+        def _parse_superseded_by(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        superseded_by = _parse_superseded_by(d.pop("superseded_by", UNSET))
 
 
         fleet_profile_application_view = cls(
@@ -341,7 +395,9 @@ class FleetProfileApplicationView:
             blockers=blockers,
             cancellation=cancellation,
             next_attempt_at=next_attempt_at,
+            reason_code=reason_code,
             retry_of_application_id=retry_of_application_id,
+            superseded_by=superseded_by,
         )
 
         return fleet_profile_application_view

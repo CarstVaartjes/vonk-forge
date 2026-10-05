@@ -1448,7 +1448,7 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
     latest_id = applications[2][1].id
     assert selected.generation == 3
     assert selected.application_id == latest_id
-    assert [row.state for row in rows] == ["cancelled", "cancelled", "running"]
+    assert [row.state for row in rows] == ["superseded", "superseded", "running"]
     assert [row.selection_generation for row in rows] == [1, 2, 3]
     assert [row.current_operation_id for row in rows] == [None, None, latest_id]
 

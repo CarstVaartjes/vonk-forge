@@ -91,6 +91,7 @@ test("uses honest status labels for active and operator-blocked operations", () 
   expect(activityStatus({...base, action: "operation.reconcile.failed"})).toBe("unsuccessful");
   expect(activityStatus({...base, action: "operation.reconcile.expired"})).toBe("unsuccessful");
   expect(activityStatus({...base, action: "operation.reconcile.succeeded"})).toBe("recorded");
+  expect(activityStatus({...base, action: "operation.reconcile.superseded"})).toBe("recorded");
   expect(activityStatus({...base, action: "operation.reconcile.future-state"})).toBe("unknown");
 });
 
