@@ -134,7 +134,8 @@ def test_installed_recipe_cancel_recovers_dropped_acceptance_and_settles(
         assert not cancelled.stderr
         acceptance = json.loads(cancelled.stdout)
         assert acceptance["id"] == operation.id
-        assert acceptance["state"] == "cancelling"
+        # The preparation never ran: the cancel ends it at once (rule 4).
+        assert acceptance["state"] == "cancelled"
         cancellation = acceptance.get("cancellation")
         assert isinstance(cancellation, dict)
         assert cancellation["cancel_request_id"] == CANCEL_REQUEST_KEY
@@ -151,11 +152,11 @@ def test_installed_recipe_cancel_recovers_dropped_acceptance_and_settles(
         }
         observed = service.get_operator_operation(operation.id)
         assert not isinstance(observed, dict)
-        assert observed.state == "cancelling"
+        assert observed.state == "cancelled"
         assert observed.cancellation is not None
         assert observed.cancellation.cancel_request_id == CANCEL_REQUEST_KEY
 
-        assert service.reconcile_cancellations() == 1
+        assert service.reconcile_cancellations() == 0
         assert service.get(operation.id).state == "cancelled"
         settled = subprocess.run(
             [
