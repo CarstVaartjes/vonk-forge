@@ -1070,6 +1070,7 @@ export interface components {
             summary?: string | null;
             /** Uncertain */
             uncertain?: boolean | null;
+            wait_reason?: components["schemas"]["WaitReason"] | null;
         };
         /** AgentInstallResult */
         AgentInstallResult: {
@@ -1119,6 +1120,18 @@ export interface components {
             /** State */
             state: string;
         };
+        /**
+         * AgentResultState
+         * @description The state words of an agent result on the wire.
+         *
+         *     The wire keeps four words, shared with agents already deployed.  A typed
+         *     outcome decides which one is truthful (``done`` is ``succeeded``, a
+         *     confirmed cancellation is ``cancelled``, any other definite failure is
+         *     ``failed`` and ``unknown`` is the legacy ``waiting-for-operator``); the
+         *     Controller maps them onto its stored state values unchanged.
+         * @enum {string}
+         */
+        AgentResultState: "succeeded" | "failed" | "cancelled" | "waiting-for-operator";
         /** AgentUpgradeDiagnosticsResponse */
         AgentUpgradeDiagnosticsResponse: {
             expected_identity: components["schemas"]["AgentUpgradeIdentityResponse"];
@@ -1505,6 +1518,12 @@ export interface components {
          * @enum {string}
          */
         AvailabilityRecoveryAction: "retry" | "resume" | "download_again" | "force_rebuild" | "open_model_access" | "configure_hf_token" | "check_access_and_resume" | "free_space" | "inspect";
+        /**
+         * BlockerCategory
+         * @description The categories of the blocker allowlist (fail-closed raises).
+         * @enum {string}
+         */
+        BlockerCategory: "security-edge" | "input-validation" | "already-retried" | "bookkeeping-debt";
         /** BooleanParameter */
         BooleanParameter: {
             /** Allowed Values */
@@ -1986,6 +2005,29 @@ export interface components {
             type: "enum";
         };
         /**
+         * ErrorCatalog
+         * @description Carrier that publishes the error-category union into every generated surface.
+         *
+         *     Never sent: the wire schema, OpenAPI and the TypeScript client all emit the
+         *     tagged union as one ``OperationError``.
+         */
+        ErrorCatalog: {
+            /** Error */
+            error: components["schemas"]["SecurityRefusal"] | components["schemas"]["InvalidRequest"] | components["schemas"]["UnknownError"];
+        };
+        /**
+         * ErrorCategory
+         * @description The only three things a lifecycle adapter may raise or report.
+         *
+         *     ``security-refusal`` and ``invalid-request`` are decided at submit time and
+         *     fail closed.  Everything else is ``unknown``: it is observed and reconciled,
+         *     never parked.  The blocker allowlist's ``already-retried`` and
+         *     ``bookkeeping-debt`` families are both ``unknown`` (see
+         *     :func:`error_category_of`).
+         * @enum {string}
+         */
+        ErrorCategory: "security-refusal" | "invalid-request" | "unknown";
+        /**
          * ErrorContextResponse
          * @description Safe context shared by public errors and generated clients.
          */
@@ -2036,6 +2078,12 @@ export interface components {
             /** Updated At */
             updated_at: string;
         };
+        /**
+         * FailureCode
+         * @description Closed codes of a definite failed outcome reported by the agent.
+         * @enum {string}
+         */
+        FailureCode: "operation_failed" | "operation_cancelled" | "agent_upgrade_failed" | "artifact_distribution_failed" | "recipe_build_failed" | "recipe_job_run_failed" | "recipe_install_failed" | "recipe_start_failed" | "recipe_stop_failed" | "recipe_uninstall_failed" | "runtime_observation_unavailable" | "installation_reconciliation_busy" | "installation_storage_temporarily_unavailable" | "recipe_reconciliation_dependency_unavailable";
         /** FailureDiagnostics */
         FailureDiagnostics: {
             /**
@@ -3558,6 +3606,29 @@ export interface components {
              */
             type: "integer";
         };
+        /**
+         * InvalidRequest
+         * @description A malformed or out-of-contract request; it fails closed at submit time.
+         */
+        InvalidRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            category: "invalid-request";
+            /**
+             * Field
+             * @default null
+             */
+            field: string | null;
+            reason: components["schemas"]["InvalidRequestReason"];
+        };
+        /**
+         * InvalidRequestReason
+         * @description Closed reason codes of an invalid request (submit-time input validation).
+         * @enum {string}
+         */
+        InvalidRequestReason: "malformed" | "out-of-range" | "limit-exceeded" | "unknown-field" | "incomplete" | "immutable" | "duplicate" | "conflict" | "not-found" | "not-ready" | "superseded" | "unsupported";
         /** InventoryState */
         InventoryState: {
             /** Age Seconds */
@@ -3986,6 +4057,18 @@ export interface components {
             /** Detail */
             detail?: string | null;
         };
+        /**
+         * LifecycleEffect
+         * @description What is known about the real-world effect of the work.
+         * @enum {string}
+         */
+        LifecycleEffect: "unknown" | "none" | "issued" | "established" | "stopped";
+        /**
+         * LifecycleEventKind
+         * @description The kinds of event the pure transition function accepts.
+         * @enum {string}
+         */
+        LifecycleEventKind: "submitted" | "claimed" | "heartbeat" | "reported" | "lease-lapsed" | "cancel-requested" | "observed" | "operator-action" | "tick";
         /** LifecyclePreflightCheckpoint */
         LifecyclePreflightCheckpoint: {
             /** Attempts */
@@ -4008,6 +4091,50 @@ export interface components {
             receipts?: {
                 [key: string]: components["schemas"]["RuntimePreflightResult"];
             };
+        };
+        /**
+         * LifecycleState
+         * @description The eight lifecycle states.
+         *
+         *     ``waiting``, ``partial``, ``cancelling`` and ``expired`` of the legacy kinds
+         *     map onto these: waiting and partial work is ``backoff`` or ``observing``, a
+         *     cancelling row is a non-terminal row with ``cancel_requested_at`` set.
+         * @enum {string}
+         */
+        LifecycleState: "queued" | "running" | "observing" | "backoff" | "succeeded" | "failed" | "cancelled" | "needs-operator";
+        /**
+         * LifecycleSubject
+         * @description The persisted models whose ``state`` the lifecycle core owns.
+         * @enum {string}
+         */
+        LifecycleSubject: "Job" | "JobAttempt" | "AgentOperation" | "AgentOperationAttempt" | "ModelCacheOperation" | "ArtifactJob" | "FleetProfileApplication";
+        /**
+         * LifecycleVocabulary
+         * @description Carrier that publishes every vocabulary enum into the wire schema.
+         *
+         *     The model is never sent: it exists so the schema exporter, the Rust
+         *     generator and the OpenAPI/TypeScript generators emit each closed word set
+         *     from this one module.
+         */
+        LifecycleVocabulary: {
+            agent_result_state: components["schemas"]["AgentResultState"];
+            blocker_category: components["schemas"]["BlockerCategory"];
+            effect: components["schemas"]["LifecycleEffect"];
+            error_category: components["schemas"]["ErrorCategory"];
+            event_kind: components["schemas"]["LifecycleEventKind"];
+            failure_code: components["schemas"]["FailureCode"];
+            invalid_request_reason: components["schemas"]["InvalidRequestReason"];
+            lifecycle_subject: components["schemas"]["LifecycleSubject"];
+            migration_step: components["schemas"]["MigrationStep"];
+            operator_action: components["schemas"]["OperatorActionName"];
+            operator_surface: components["schemas"]["OperatorSurface"];
+            outcome_kind: components["schemas"]["OutcomeKind"];
+            security_refusal_reason: components["schemas"]["SecurityRefusalReason"];
+            state: components["schemas"]["LifecycleState"];
+            state_write_kind: components["schemas"]["StateWriteKind"];
+            stop_outcome: components["schemas"]["StopOutcome"];
+            wait_reason: components["schemas"]["WaitReason"];
+            wait_verdict: components["schemas"]["WaitVerdict"];
         };
         /** LoginRequest */
         LoginRequest: {
@@ -4163,6 +4290,12 @@ export interface components {
              */
             source: "aggregate_inventory_without_run_usage";
         };
+        /**
+         * MigrationStep
+         * @description The migration steps of the blocker audit (section 5.6) that retire a writer.
+         * @enum {string}
+         */
+        MigrationStep: "step-2" | "step-3" | "step-4" | "step-5" | "step-6" | "step-7";
         /**
          * ModelArtifactIdentity
          * @description Exact model set, independent of transfer progress and verification time.
@@ -4843,6 +4976,31 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * OperatorActionName
+         * @description The operator actions a row can advertise and the core accepts.
+         * @enum {string}
+         */
+        OperatorActionName: "resume" | "retire" | "retry" | "stop";
+        /**
+         * OperatorSurface
+         * @description The real surfaces behind an advertised action in the blocker allowlist.
+         * @enum {string}
+         */
+        OperatorSurface: "resume" | "retire" | "retry" | "stop" | "automatic";
+        /**
+         * OutcomeKind
+         * @description What an executor reported, as the lifecycle core sees it.
+         *
+         *     ``done``, ``cancelled`` and a ``failed`` that is not retryable are
+         *     *definite*: the executor says what happened, and the row ends there.
+         *     ``unknown`` (and a retryable failure) says the effect may or may not have
+         *     happened, which the core resolves by observing it.  On the agent wire a
+         *     cancellation is a definite ``failed`` outcome with the
+         *     ``operation_cancelled`` code.
+         * @enum {string}
+         */
+        OutcomeKind: "done" | "failed" | "cancelled" | "unknown";
         /** OutputLimits */
         OutputLimits: {
             /** Allowed Media Types */
@@ -7487,6 +7645,30 @@ export interface components {
             /** Observed At */
             observed_at: number;
         };
+        /**
+         * SecurityRefusal
+         * @description A refused request at a security boundary; it fails closed.
+         */
+        SecurityRefusal: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            category: "security-refusal";
+            reason: components["schemas"]["SecurityRefusalReason"];
+        };
+        /**
+         * SecurityRefusalReason
+         * @description Closed reason codes of a security refusal: a real security boundary.
+         *
+         *     Authentication and authorization, identity and certificate expiry, node
+         *     revocation, enrollment, signed package metadata, host-helper authority,
+         *     tombstone fencing, credential denial and the digest-bound destructive-effect
+         *     checks of Run/Switch.  ``failure_classification`` derives its code set from
+         *     this enum, so the Controller and the contract cannot disagree.
+         * @enum {string}
+         */
+        SecurityRefusalReason: "401" | "403" | "agent.certificate.rotation.conflict" | "agent.enrollment.submit.rejected" | "agent.identity_mismatch" | "agent.tombstone_fenced" | "catalog.authentication_required" | "controller.authentication_required" | "controller.fleet.enrollment_denied" | "controller.request_rejected" | "distribution.revoked" | "forbidden" | "grant_invalid" | "grant_node_mismatch" | "grant_unauthorized" | "helper.authorization_invalid" | "helper_grant_invalid" | "helper_grant_node_mismatch" | "helper_grant_unauthorized" | "helper_operation_invalid_artifact" | "helper_peer_identity_invalid" | "helper_request_installation_identity_invalid" | "helper_request_plan_binding_invalid" | "helper_request_replayed" | "helper_runtime_image_identity_invalid" | "host_helper.authority_denied" | "local.identity_expired" | "local.identity_failed" | "model_cache.credentials_denied" | "model_cache.credentials_invalid" | "model_cache.source_access_denied" | "operation_invalid_artifact" | "peer_identity_invalid" | "permission_denied" | "recipe_update.authority_denied" | "request_replayed" | "run-switch.artifact-digest-verification-failed" | "run-switch.cleanup-nas-eviction-forbidden" | "run-switch.cleanup-reclaimed-digest-not-planned" | "run-switch.runtime-image-preparation-digest-mismatch" | "runtime_image.authorization_invalid" | "runtime_image.authorization_revoked" | "runtime_image_identity_invalid" | "tuf.metadata_invalid" | "tuf.signature_invalid" | "unauthorized";
         /** SparkFit */
         SparkFit: {
             /** Allowed */
@@ -7559,6 +7741,12 @@ export interface components {
             /** Role */
             role: string;
         };
+        /**
+         * StateWriteKind
+         * @description The shapes of a lifecycle state write the writers ratchet recognises.
+         * @enum {string}
+         */
+        StateWriteKind: "attribute" | "dict-item" | "bulk-update" | "constructor" | "helper-call";
         /** StopImpact */
         StopImpact: {
             /** Alias */
@@ -7576,6 +7764,12 @@ export interface components {
             /** State */
             state: string;
         };
+        /**
+         * StopOutcome
+         * @description Whether an idempotent stop confirmed that the effect is gone.
+         * @enum {string}
+         */
+        StopOutcome: "confirmed" | "unconfirmed";
         /** StringParameter */
         StringParameter: {
             /** Allowed Values */
@@ -7678,6 +7872,33 @@ export interface components {
             freshness: "live" | "delayed" | "stale";
             sample: components["schemas"]["TelemetryPoint"];
         };
+        /**
+         * UnknownError
+         * @description Anything else: observed and reconciled, never parked.
+         */
+        UnknownError: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            category: "unknown";
+            reason: components["schemas"]["WaitReason"];
+        };
+        /**
+         * WaitReason
+         * @description Typed reason codes for an effect that cannot be confirmed (the *unknown* kind).
+         *
+         *     Each code names the one fact the executor could not establish.  The free
+         *     text of a report is for people; the Controller decides on this code.
+         * @enum {string}
+         */
+        WaitReason: "operation-not-enabled" | "agent-upgrade-awaiting-identity" | "agent-restart-interrupted" | "stop-unconfirmed" | "cleanup-unconfirmed" | "stop-metadata-unconfirmed" | "retained-identity-mismatch" | "model-custody-unconfirmed" | "runtime-effect-unconfirmed" | "job-stop-unconfirmed" | "job-state-uncertain" | "lease-lapsed" | "report-uncertain" | "observation-unavailable" | "receipt-missing" | "stale-plan" | "scope-changed" | "legacy-unclassified";
+        /**
+         * WaitVerdict
+         * @description The verdicts of the blocker allowlist for an operator wait.
+         * @enum {string}
+         */
+        WaitVerdict: "KEEP" | "SELF-HEAL" | "FIX-ACTION" | "DERIVED";
     };
     responses: never;
     parameters: never;

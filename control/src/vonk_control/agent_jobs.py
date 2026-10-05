@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import Boolean, and_, or_, select, update
@@ -26,7 +26,12 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentProgress,
     AgentResult,
+    FailureCode,
+    OutcomeDone,
+    OutcomeFailed,
+    OutcomeUnknown,
     canonical_message,
+    outcome_state,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
@@ -63,6 +68,7 @@ from .agent_operation_facts import (
 from .agent_operation_facts import (
     operation_start_deadline as _operation_start_deadline,
 )
+from .agent_outcome import stored_report
 from .agent_upgrade_status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_REASONS,
     operator_agent_upgrade_reason,
@@ -135,7 +141,6 @@ ResultConsumer = Callable[
 ContactConsumer = Callable[[Session, AgentSource], None]
 # The protocol owns this closed set; the Controller aliases it locally so
 # ``_finish`` cannot be handed any string.
-AgentResultState = Literal["succeeded", "failed", "cancelled", "waiting-for-operator"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -2649,7 +2654,9 @@ class AgentJobService:
                 "elapsed before the start completed; it never ran to readiness "
                 "and is not retried"
             )
-            result = _failure_result("recipe_start_failed", reason, uncertain=False)
+            result = _failure_result(
+                FailureCode.RECIPE_START_FAILED.value, reason, uncertain=False
+            )
             message = AgentResult.model_validate_json(
                 canonical_message(
                     {"fence": attempt.fence, "state": "failed", "result": result}
@@ -2823,7 +2830,7 @@ class AgentJobService:
                         attempt,
                         session.get(Job, parked.parent_job_id),
                         Reported(
-                            Outcome.UNCERTAIN,
+                            Outcome.UNKNOWN,
                             retry_after=(
                                 _aware(now) + timedelta(seconds=retry_after)
                                 if type(retry_after) is int
@@ -3150,7 +3157,7 @@ class AgentJobService:
                             Outcome.FAILED, retryable=False, reason=settled_reason
                         )
                     elif operation.current_attempt >= 1:
-                        settle_event = Reported(Outcome.OK, reason=settled_reason)
+                        settle_event = Reported(Outcome.DONE, reason=settled_reason)
                     else:
                         settle_event = CancelRequested(reason=settled_reason)
                     AgentOperationAdapter(session).settle(
@@ -3324,7 +3331,7 @@ class AgentJobService:
                 attempt, "succeeded", _document(evidence)
             )
         AgentOperationAdapter(session).settle(
-            operation, attempt, None, Reported(Outcome.OK), now
+            operation, attempt, None, Reported(Outcome.DONE), now
         )
         if self._result_consumer is not None:
             self._result_consumer(session, operation, attempt, message)
@@ -3360,7 +3367,7 @@ class AgentJobService:
         now: datetime,
     ) -> None:
         reason = _failure_result(
-            "recipe_build_failed",
+            FailureCode.RECIPE_BUILD_FAILED.value,
             "builder runtime identity changed before claim",
             uncertain=False,
         )
@@ -3776,7 +3783,9 @@ class AgentJobService:
         self._finish(
             fence,
             "failed",
-            result=_failure_result("operation_failed", reason, uncertain=False),
+            result=_failure_result(
+                FailureCode.OPERATION_FAILED.value, reason, uncertain=False
+            ),
             reason=None,
         )
 
@@ -3861,6 +3870,7 @@ class AgentJobService:
                 raise StaleAgentAttempt(
                     "agent operation authority or expired attempt is stale"
                 )
+            message, _outcome = stored_report(operation.kind, message)
             validate_result_for_operation(
                 operation.kind, message.result, state=message.state
             )
@@ -3894,7 +3904,8 @@ class AgentJobService:
                     )
                     or (
                         operation.kind != AgentOperation.RECIPE_JOB_RUN.value
-                        and evidence.get("error_code") == "operation_cancelled"
+                        and evidence.get("error_code")
+                        == FailureCode.OPERATION_CANCELLED.value
                         and evidence.get("uncertain") is not True
                     )
                 )
@@ -3968,7 +3979,7 @@ class AgentJobService:
     def _finish(
         self,
         fence: AgentFence,
-        state: AgentResultState,
+        state: str,
         *,
         result: Mapping[str, object] | None,
         reason: str | None,
@@ -4030,6 +4041,9 @@ class AgentJobService:
                         }
                     )
                 )
+            # One reading of the report: a typed outcome is projected to the
+            # stored body shape, a legacy body goes through the legacy adapter.
+            message, outcome = stored_report(operation.kind, message)
             validate_result_for_operation(
                 operation.kind,
                 message.result,
@@ -4102,7 +4116,7 @@ class AgentJobService:
                 attempt,
                 parent,
                 self._report_event(
-                    operation, attempt, parent, state, message_result, now
+                    operation, attempt, parent, outcome, message_result, now
                 ),
                 now,
             )
@@ -4118,22 +4132,24 @@ class AgentJobService:
         operation: StoredOperation,
         attempt: AgentOperationAttempt,
         parent: Job,
-        state: str,
+        outcome: OutcomeDone | OutcomeFailed | OutcomeUnknown,
         result: Mapping[str, object],
         now: datetime,
     ) -> Reported:
         """What an agent's report tells the lifecycle core.
 
-        ``waiting-for-operator`` is the agent's word for "I could not confirm the
-        effect", whatever failure kind (or none) its body carries: it is an
-        uncertain effect, which the core retries for restart-safe work (after the
-        exact-resume inspection) and observes for the rest.  A cancel the parent
-        asked for, and a spent start budget, end a retry before it starts.
+        An ``unknown`` outcome (the legacy ``waiting-for-operator``) is the agent
+        saying "I could not confirm the effect", whatever failure kind (or none)
+        its body carries: it is an uncertain effect, which the core retries for
+        restart-safe work (after the exact-resume inspection) and observes for
+        the rest.  A cancel the parent asked for, and a spent start budget, end
+        a retry before it starts.
         """
 
         fence = attempt.fence
-        if state == "succeeded":
-            return Reported(Outcome.OK, fence=fence)
+        state = outcome_state(outcome)
+        if isinstance(outcome, OutcomeDone):
+            return Reported(Outcome.DONE, fence=fence)
         if state == "cancelled":
             return Reported(Outcome.CANCELLED, fence=fence)
         raw_reason = result.get("reason")
@@ -4156,7 +4172,7 @@ class AgentJobService:
             if type(retry_after) is int
             else None
         )
-        if state == "failed":
+        if isinstance(outcome, OutcomeFailed):
             requested, _ = cancel_requested_at(parent, now)
             return Reported(
                 Outcome.FAILED,
@@ -4166,7 +4182,7 @@ class AgentJobService:
                 retry_after=due,
                 reason=reason,
             )
-        return Reported(Outcome.UNCERTAIN, fence=fence, retry_after=due, reason=reason)
+        return Reported(Outcome.UNKNOWN, fence=fence, retry_after=due, reason=reason)
 
     def _active(
         self,

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol import OperationProgress, SecurityRefusalReason
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -134,7 +134,7 @@ class RecipeUpdateBatches:
             or user.role not in MUTATION_ROLES[("POST", "/api/recipe/update")]
         ):
             raise _error(
-                "recipe_update.authority_denied",
+                SecurityRefusalReason.RECIPE_UPDATE_AUTHORITY_DENIED.value,
                 "recipe update authority is no longer available",
             )
 

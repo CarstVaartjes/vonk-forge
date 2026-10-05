@@ -39,7 +39,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import SecurityRefusalReason, canonical_message
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -174,7 +174,7 @@ _ARTIFACT_OUTPUT_UPLOAD = re.compile(
 
 _CATALOG_HTTP_ERROR_CODES = {
     400: "catalog.invalid_request",
-    401: "catalog.authentication_required",
+    401: SecurityRefusalReason.CATALOG_AUTHENTICATION_REQUIRED.value,
     403: "catalog.insufficient_role",
     404: "catalog.not_found",
     409: "catalog.conflict",
@@ -261,12 +261,12 @@ def _http_error_code(status_code: int) -> str:
     """Return a stable, secret-free code for an HTTP boundary failure."""
 
     if status_code == 401:
-        return "controller.authentication_required"
+        return SecurityRefusalReason.CONTROLLER_AUTHENTICATION_REQUIRED.value
     if status_code == 403:
         # Middleware cannot reliably recover route detail from a wrapped
         # response. Keep the classification generic unless a trusted producer
         # supplies a canonical code directly.
-        return "controller.request_rejected"
+        return SecurityRefusalReason.CONTROLLER_REQUEST_REJECTED.value
     return {
         400: "controller.invalid_request",
         404: "controller.not_found",

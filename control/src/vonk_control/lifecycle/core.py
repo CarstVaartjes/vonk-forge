@@ -42,6 +42,7 @@ from datetime import datetime
 from ..recovery_policy import RecoveryPolicy
 from .adapter import KindAdapter
 from .types import (
+    ActionName,
     CancelRequested,
     Claimed,
     Command,
@@ -75,7 +76,7 @@ STOP_BUDGET = 6
 #: bounded, not the lifetime: work with a current intent is always retried.
 RECOVERY = RecoveryPolicy()
 #: Operator actions that restart work, and the one that abandons the effect.
-_RESUME_ACTIONS = frozenset({"resume", "retry"})
+_RESUME_ACTIONS = frozenset({ActionName.RESUME, ActionName.RETRY})
 
 
 def transition(
@@ -409,7 +410,7 @@ def _reported(
     # A definite report ends the row, cancelled or not: the executor says what
     # happened, and an owner that is waiting for exactly that outcome (a build
     # whose completion raced its cancel) must see it.
-    if event.outcome is Outcome.OK:
+    if event.outcome is Outcome.DONE:
         return _end(row, State.SUCCEEDED, event.effect or Effect.ESTABLISHED, event)
     if event.outcome is Outcome.CANCELLED:
         return _end(row, State.CANCELLED, event.effect or Effect.STOPPED, event)
@@ -496,7 +497,7 @@ def _operator(
 ) -> Decision:
     if event.name not in adapter.actions(row):
         return Decision(row)  # an action the row does not advertise is refused
-    if event.name == "stop":
+    if event.name == ActionName.STOP:
         if row.cancel_requested:
             return Decision(row)
         return _advance_cancel(
@@ -518,7 +519,7 @@ def _operator(
                 reason=event.reason or "resumed by an operator",
             )
         )
-    if event.name == "retire":
+    if event.name == ActionName.RETIRE:
         # The terminal counterpart of ``resume``: the order is failed, and its
         # effect stays unknown for the owner's exact cleanup to resolve.
         return Decision(

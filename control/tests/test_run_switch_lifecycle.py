@@ -195,7 +195,7 @@ _SHAPES: dict[str, dict[str, Any]] = {
 _STORED = ("queued", "running", "waiting", "waiting-for-operator")
 _EVENTS = (
     Reported(Outcome.FAILED, retryable=True, reason="x"),
-    Reported(Outcome.UNCERTAIN, reason="x"),
+    Reported(Outcome.UNKNOWN, reason="x"),
     Reported(Outcome.FAILED, retryable=False, reason="x"),
     LeaseLapsed(),
     Observed(Effect.UNKNOWN),

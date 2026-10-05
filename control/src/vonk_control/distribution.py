@@ -26,6 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionObject,
+    SecurityRefusalReason,
     canonical_message,
 )
 
@@ -850,7 +851,8 @@ class DistributionService:
                     )
                 elif row.state != "active":
                     raise DistributionError(
-                        "distribution.revoked", "assignment is no longer active"
+                        SecurityRefusalReason.DISTRIBUTION_REVOKED.value,
+                        "assignment is no longer active",
                     )
                 else:
                     assignment = self._from_row(row)

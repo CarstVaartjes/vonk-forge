@@ -397,6 +397,17 @@
           ],
           "default": null,
           "title": "Uncertain"
+        },
+        "wait_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaitReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "AgentFailureResult",
@@ -556,19 +567,21 @@
             },
             {
               "$ref": "#/$defs/AgentUpgradeResult"
+            },
+            {
+              "$ref": "#/$defs/OutcomeDone"
+            },
+            {
+              "$ref": "#/$defs/OutcomeFailed"
+            },
+            {
+              "$ref": "#/$defs/OutcomeUnknown"
             }
           ],
           "title": "Result"
         },
         "state": {
-          "enum": [
-            "succeeded",
-            "failed",
-            "cancelled",
-            "waiting-for-operator"
-          ],
-          "title": "State",
-          "type": "string"
+          "$ref": "#/$defs/AgentResultState"
         }
       },
       "required": [
@@ -578,6 +591,17 @@
       ],
       "title": "AgentResult",
       "type": "object"
+    },
+    "AgentResultState": {
+      "description": "The state words of an agent result on the wire.\n\nThe wire keeps four words, shared with agents already deployed.  A typed\noutcome decides which one is truthful (``done`` is ``succeeded``, a\nconfirmed cancellation is ``cancelled``, any other definite failure is\n``failed`` and ``unknown`` is the legacy ``waiting-for-operator``); the\nController maps them onto its stored state values unchanged.",
+      "enum": [
+        "succeeded",
+        "failed",
+        "cancelled",
+        "waiting-for-operator"
+      ],
+      "title": "AgentResultState",
+      "type": "string"
     },
     "AgentRuntimeIdentity": {
       "additionalProperties": false,
@@ -823,6 +847,17 @@
       ],
       "title": "ArtifactDistributionResult",
       "type": "object"
+    },
+    "BlockerCategory": {
+      "description": "The categories of the blocker allowlist (fail-closed raises).",
+      "enum": [
+        "security-edge",
+        "input-validation",
+        "already-retried",
+        "bookkeeping-debt"
+      ],
+      "title": "BlockerCategory",
+      "type": "string"
     },
     "BoundedErrorResponse": {
       "additionalProperties": false,
@@ -1841,6 +1876,49 @@
       "title": "EnrollmentSubmitRequest",
       "type": "object"
     },
+    "ErrorCatalog": {
+      "additionalProperties": false,
+      "description": "Carrier that publishes the error-category union into every generated surface.\n\nNever sent: the wire schema, OpenAPI and the TypeScript client all emit the\ntagged union as one ``OperationError``.",
+      "properties": {
+        "error": {
+          "discriminator": {
+            "mapping": {
+              "invalid-request": "#/$defs/InvalidRequest",
+              "security-refusal": "#/$defs/SecurityRefusal",
+              "unknown": "#/$defs/UnknownError"
+            },
+            "propertyName": "category"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SecurityRefusal"
+            },
+            {
+              "$ref": "#/$defs/InvalidRequest"
+            },
+            {
+              "$ref": "#/$defs/UnknownError"
+            }
+          ],
+          "title": "Error"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "title": "ErrorCatalog",
+      "type": "object"
+    },
+    "ErrorCategory": {
+      "description": "The only three things a lifecycle adapter may raise or report.\n\n``security-refusal`` and ``invalid-request`` are decided at submit time and\nfail closed.  Everything else is ``unknown``: it is observed and reconciled,\nnever parked.  The blocker allowlist's ``already-retried`` and\n``bookkeeping-debt`` families are both ``unknown`` (see\n:func:`error_category_of`).",
+      "enum": [
+        "security-refusal",
+        "invalid-request",
+        "unknown"
+      ],
+      "title": "ErrorCategory",
+      "type": "string"
+    },
     "ErrorContextResponse": {
       "additionalProperties": false,
       "description": "Safe context shared by public errors and generated clients.",
@@ -2075,6 +2153,27 @@
       ],
       "title": "ExecuteContainerRuntimeRequestOperation",
       "type": "object"
+    },
+    "FailureCode": {
+      "description": "Closed codes of a definite failed outcome reported by the agent.",
+      "enum": [
+        "operation_failed",
+        "operation_cancelled",
+        "agent_upgrade_failed",
+        "artifact_distribution_failed",
+        "recipe_build_failed",
+        "recipe_job_run_failed",
+        "recipe_install_failed",
+        "recipe_start_failed",
+        "recipe_stop_failed",
+        "recipe_uninstall_failed",
+        "runtime_observation_unavailable",
+        "installation_reconciliation_busy",
+        "installation_storage_temporarily_unavailable",
+        "recipe_reconciliation_dependency_unavailable"
+      ],
+      "title": "FailureCode",
+      "type": "string"
     },
     "FailureDiagnostics": {
       "additionalProperties": false,
@@ -3153,6 +3252,60 @@
       "title": "InstallerReleaseObject",
       "type": "object"
     },
+    "InvalidRequest": {
+      "additionalProperties": false,
+      "description": "A malformed or out-of-contract request; it fails closed at submit time.",
+      "properties": {
+        "category": {
+          "const": "invalid-request",
+          "title": "Category",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        },
+        "field": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field"
+        },
+        "reason": {
+          "$ref": "#/$defs/InvalidRequestReason"
+        }
+      },
+      "required": [
+        "category",
+        "reason"
+      ],
+      "title": "InvalidRequest",
+      "type": "object"
+    },
+    "InvalidRequestReason": {
+      "description": "Closed reason codes of an invalid request (submit-time input validation).",
+      "enum": [
+        "malformed",
+        "out-of-range",
+        "limit-exceeded",
+        "unknown-field",
+        "incomplete",
+        "immutable",
+        "duplicate",
+        "conflict",
+        "not-found",
+        "not-ready",
+        "superseded",
+        "unsupported"
+      ],
+      "title": "InvalidRequestReason",
+      "type": "string"
+    },
     "InventoryRequest": {
       "additionalProperties": false,
       "description": "Canonical Controller body and Rust agent inventory wire shape.",
@@ -3376,6 +3529,158 @@
       ],
       "title": "IssuedCertificateResponse",
       "type": "object"
+    },
+    "LifecycleEffect": {
+      "description": "What is known about the real-world effect of the work.",
+      "enum": [
+        "unknown",
+        "none",
+        "issued",
+        "established",
+        "stopped"
+      ],
+      "title": "LifecycleEffect",
+      "type": "string"
+    },
+    "LifecycleEventKind": {
+      "description": "The kinds of event the pure transition function accepts.",
+      "enum": [
+        "submitted",
+        "claimed",
+        "heartbeat",
+        "reported",
+        "lease-lapsed",
+        "cancel-requested",
+        "observed",
+        "operator-action",
+        "tick"
+      ],
+      "title": "LifecycleEventKind",
+      "type": "string"
+    },
+    "LifecycleState": {
+      "description": "The eight lifecycle states.\n\n``waiting``, ``partial``, ``cancelling`` and ``expired`` of the legacy kinds\nmap onto these: waiting and partial work is ``backoff`` or ``observing``, a\ncancelling row is a non-terminal row with ``cancel_requested_at`` set.",
+      "enum": [
+        "queued",
+        "running",
+        "observing",
+        "backoff",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "needs-operator"
+      ],
+      "title": "LifecycleState",
+      "type": "string"
+    },
+    "LifecycleSubject": {
+      "description": "The persisted models whose ``state`` the lifecycle core owns.",
+      "enum": [
+        "Job",
+        "JobAttempt",
+        "AgentOperation",
+        "AgentOperationAttempt",
+        "ModelCacheOperation",
+        "ArtifactJob",
+        "FleetProfileApplication"
+      ],
+      "title": "LifecycleSubject",
+      "type": "string"
+    },
+    "LifecycleVocabulary": {
+      "additionalProperties": false,
+      "description": "Carrier that publishes every vocabulary enum into the wire schema.\n\nThe model is never sent: it exists so the schema exporter, the Rust\ngenerator and the OpenAPI/TypeScript generators emit each closed word set\nfrom this one module.",
+      "properties": {
+        "agent_result_state": {
+          "$ref": "#/$defs/AgentResultState"
+        },
+        "blocker_category": {
+          "$ref": "#/$defs/BlockerCategory"
+        },
+        "effect": {
+          "$ref": "#/$defs/LifecycleEffect"
+        },
+        "error_category": {
+          "$ref": "#/$defs/ErrorCategory"
+        },
+        "event_kind": {
+          "$ref": "#/$defs/LifecycleEventKind"
+        },
+        "failure_code": {
+          "$ref": "#/$defs/FailureCode"
+        },
+        "invalid_request_reason": {
+          "$ref": "#/$defs/InvalidRequestReason"
+        },
+        "lifecycle_subject": {
+          "$ref": "#/$defs/LifecycleSubject"
+        },
+        "migration_step": {
+          "$ref": "#/$defs/MigrationStep"
+        },
+        "operator_action": {
+          "$ref": "#/$defs/OperatorActionName"
+        },
+        "operator_surface": {
+          "$ref": "#/$defs/OperatorSurface"
+        },
+        "outcome_kind": {
+          "$ref": "#/$defs/OutcomeKind"
+        },
+        "security_refusal_reason": {
+          "$ref": "#/$defs/SecurityRefusalReason"
+        },
+        "state": {
+          "$ref": "#/$defs/LifecycleState"
+        },
+        "state_write_kind": {
+          "$ref": "#/$defs/StateWriteKind"
+        },
+        "stop_outcome": {
+          "$ref": "#/$defs/StopOutcome"
+        },
+        "wait_reason": {
+          "$ref": "#/$defs/WaitReason"
+        },
+        "wait_verdict": {
+          "$ref": "#/$defs/WaitVerdict"
+        }
+      },
+      "required": [
+        "state",
+        "agent_result_state",
+        "effect",
+        "outcome_kind",
+        "stop_outcome",
+        "event_kind",
+        "operator_action",
+        "operator_surface",
+        "blocker_category",
+        "wait_verdict",
+        "lifecycle_subject",
+        "state_write_kind",
+        "migration_step",
+        "error_category",
+        "wait_reason",
+        "invalid_request_reason",
+        "security_refusal_reason",
+        "failure_code"
+      ],
+      "title": "LifecycleVocabulary",
+      "type": "object"
+    },
+    "MigrationStep": {
+      "description": "The migration steps of the blocker audit (section 5.6) that retire a writer.",
+      "enum": [
+        "step-2",
+        "step-3",
+        "step-4",
+        "step-5",
+        "step-6",
+        "step-7"
+      ],
+      "title": "MigrationStep",
+      "type": "string"
     },
     "NetworkInterface": {
       "additionalProperties": false,
@@ -3882,6 +4187,354 @@
         "phase"
       ],
       "title": "OperationProgress",
+      "type": "object"
+    },
+    "OperatorActionName": {
+      "description": "The operator actions a row can advertise and the core accepts.",
+      "enum": [
+        "resume",
+        "retire",
+        "retry",
+        "stop"
+      ],
+      "title": "OperatorActionName",
+      "type": "string"
+    },
+    "OperatorSurface": {
+      "description": "The real surfaces behind an advertised action in the blocker allowlist.",
+      "enum": [
+        "resume",
+        "retire",
+        "retry",
+        "stop",
+        "automatic"
+      ],
+      "title": "OperatorSurface",
+      "type": "string"
+    },
+    "OutcomeCatalog": {
+      "additionalProperties": false,
+      "description": "Carrier that publishes the outcome union into the wire schema.\n\nNever sent: it lets the schema exporter and the generators emit the tagged\nunion as one ``OperationOutcome``.",
+      "properties": {
+        "outcome": {
+          "discriminator": {
+            "mapping": {
+              "done": "#/$defs/OutcomeDone",
+              "failed": "#/$defs/OutcomeFailed",
+              "unknown": "#/$defs/OutcomeUnknown"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/OutcomeDone"
+            },
+            {
+              "$ref": "#/$defs/OutcomeFailed"
+            },
+            {
+              "$ref": "#/$defs/OutcomeUnknown"
+            }
+          ],
+          "title": "Outcome"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "title": "OutcomeCatalog",
+      "type": "object"
+    },
+    "OutcomeDone": {
+      "additionalProperties": false,
+      "description": "The effect is established; ``result`` is the operation's success body.",
+      "properties": {
+        "kind": {
+          "const": "done",
+          "title": "Kind",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimePreflightResult"
+            },
+            {
+              "$ref": "#/$defs/AgentInstallResult"
+            },
+            {
+              "$ref": "#/$defs/RecipeStartResult"
+            },
+            {
+              "$ref": "#/$defs/RecipeStopResult"
+            },
+            {
+              "$ref": "#/$defs/RecipeReconcileResult"
+            },
+            {
+              "$ref": "#/$defs/RecipeUninstallResult"
+            },
+            {
+              "$ref": "#/$defs/RecipeBuildEvidence"
+            },
+            {
+              "$ref": "#/$defs/RecipeBuildCleanupEvidence"
+            },
+            {
+              "$ref": "#/$defs/RecipeJobRunResult"
+            },
+            {
+              "$ref": "#/$defs/ArtifactDistributionResult"
+            },
+            {
+              "$ref": "#/$defs/AgentUpgradeResult"
+            }
+          ],
+          "title": "Result"
+        }
+      },
+      "required": [
+        "kind",
+        "result"
+      ],
+      "title": "OutcomeDone",
+      "type": "object"
+    },
+    "OutcomeEvidence": {
+      "additionalProperties": false,
+      "description": "Typed facts an executor attaches to a failed or unknown outcome.\n\nEvery field is bounded and already sanitized by the agent; the Controller\nsanitizes again at ingress.  ``diagnostics`` holds the bounded diagnostic\nlogs, ``helper_error_code``/``helper_exit_code`` the privileged helper's own\nverdict, ``stage``/``diagnostic`` the phase and a one-line cause.",
+      "properties": {
+        "diagnostic": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Diagnostic"
+        },
+        "diagnostics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "helper_error_code": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Helper Error Code"
+        },
+        "helper_exit_code": {
+          "anyOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Helper Exit Code"
+        },
+        "package_activation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackageActivationReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        }
+      },
+      "title": "OutcomeEvidence",
+      "type": "object"
+    },
+    "OutcomeFailed": {
+      "additionalProperties": false,
+      "description": "A definite failure.\n\n``receipt`` is the process receipt of a one-shot recipe job whose process\nran and exited nonzero; every other failure reports ``code`` and ``reason``.",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/FailureCode"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutcomeEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failure_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentFailureKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "failed",
+          "title": "Kind",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        },
+        "reason": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "receipt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeJobRunResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "retry_after_seconds": {
+          "anyOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry After Seconds"
+        }
+      },
+      "required": [
+        "kind",
+        "code",
+        "reason"
+      ],
+      "title": "OutcomeFailed",
+      "type": "object"
+    },
+    "OutcomeKind": {
+      "description": "What an executor reported, as the lifecycle core sees it.\n\n``done``, ``cancelled`` and a ``failed`` that is not retryable are\n*definite*: the executor says what happened, and the row ends there.\n``unknown`` (and a retryable failure) says the effect may or may not have\nhappened, which the core resolves by observing it.  On the agent wire a\ncancellation is a definite ``failed`` outcome with the\n``operation_cancelled`` code.",
+      "enum": [
+        "done",
+        "failed",
+        "cancelled",
+        "unknown"
+      ],
+      "title": "OutcomeKind",
+      "type": "string"
+    },
+    "OutcomeUnknown": {
+      "additionalProperties": false,
+      "description": "The executor could not establish the effect.",
+      "properties": {
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutcomeEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "unknown",
+          "title": "Kind",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        },
+        "reason": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "receipt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeJobRunResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "retry_after_seconds": {
+          "anyOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry After Seconds"
+        },
+        "wait_reason": {
+          "$ref": "#/$defs/WaitReason"
+        }
+      },
+      "required": [
+        "kind",
+        "wait_reason",
+        "reason"
+      ],
+      "title": "OutcomeUnknown",
       "type": "object"
     },
     "PackageActivationGrantRequest": {
@@ -5712,6 +6365,80 @@
       "title": "RuntimePreflightResult",
       "type": "object"
     },
+    "SecurityRefusal": {
+      "additionalProperties": false,
+      "description": "A refused request at a security boundary; it fails closed.",
+      "properties": {
+        "category": {
+          "const": "security-refusal",
+          "title": "Category",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        },
+        "reason": {
+          "$ref": "#/$defs/SecurityRefusalReason"
+        }
+      },
+      "required": [
+        "category",
+        "reason"
+      ],
+      "title": "SecurityRefusal",
+      "type": "object"
+    },
+    "SecurityRefusalReason": {
+      "description": "Closed reason codes of a security refusal: a real security boundary.\n\nAuthentication and authorization, identity and certificate expiry, node\nrevocation, enrollment, signed package metadata, host-helper authority,\ntombstone fencing, credential denial and the digest-bound destructive-effect\nchecks of Run/Switch.  ``failure_classification`` derives its code set from\nthis enum, so the Controller and the contract cannot disagree.",
+      "enum": [
+        "401",
+        "403",
+        "agent.certificate.rotation.conflict",
+        "agent.enrollment.submit.rejected",
+        "agent.identity_mismatch",
+        "agent.tombstone_fenced",
+        "catalog.authentication_required",
+        "controller.authentication_required",
+        "controller.fleet.enrollment_denied",
+        "controller.request_rejected",
+        "distribution.revoked",
+        "forbidden",
+        "grant_invalid",
+        "grant_node_mismatch",
+        "grant_unauthorized",
+        "helper.authorization_invalid",
+        "helper_grant_invalid",
+        "helper_grant_node_mismatch",
+        "helper_grant_unauthorized",
+        "helper_operation_invalid_artifact",
+        "helper_peer_identity_invalid",
+        "helper_request_installation_identity_invalid",
+        "helper_request_plan_binding_invalid",
+        "helper_request_replayed",
+        "helper_runtime_image_identity_invalid",
+        "host_helper.authority_denied",
+        "local.identity_expired",
+        "local.identity_failed",
+        "model_cache.credentials_denied",
+        "model_cache.credentials_invalid",
+        "model_cache.source_access_denied",
+        "operation_invalid_artifact",
+        "peer_identity_invalid",
+        "permission_denied",
+        "recipe_update.authority_denied",
+        "request_replayed",
+        "run-switch.artifact-digest-verification-failed",
+        "run-switch.cleanup-nas-eviction-forbidden",
+        "run-switch.cleanup-reclaimed-digest-not-planned",
+        "run-switch.runtime-image-preparation-digest-mismatch",
+        "runtime_image.authorization_invalid",
+        "runtime_image.authorization_revoked",
+        "runtime_image_identity_invalid",
+        "tuf.metadata_invalid",
+        "tuf.signature_invalid",
+        "unauthorized"
+      ],
+      "title": "SecurityRefusalReason",
+      "type": "string"
+    },
     "SignedHostHelperGrant": {
       "additionalProperties": false,
       "properties": {
@@ -5840,6 +6567,27 @@
       ],
       "title": "SourceBundleManifest",
       "type": "object"
+    },
+    "StateWriteKind": {
+      "description": "The shapes of a lifecycle state write the writers ratchet recognises.",
+      "enum": [
+        "attribute",
+        "dict-item",
+        "bulk-update",
+        "constructor",
+        "helper-call"
+      ],
+      "title": "StateWriteKind",
+      "type": "string"
+    },
+    "StopOutcome": {
+      "description": "Whether an idempotent stop confirmed that the effect is gone.",
+      "enum": [
+        "confirmed",
+        "unconfirmed"
+      ],
+      "title": "StopOutcome",
+      "type": "string"
     },
     "SupervisorAcknowledgement": {
       "additionalProperties": false,
@@ -6088,6 +6836,63 @@
       ],
       "title": "TelemetrySample",
       "type": "object"
+    },
+    "UnknownError": {
+      "additionalProperties": false,
+      "description": "Anything else: observed and reconciled, never parked.",
+      "properties": {
+        "category": {
+          "const": "unknown",
+          "title": "Category",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        },
+        "reason": {
+          "$ref": "#/$defs/WaitReason"
+        }
+      },
+      "required": [
+        "category",
+        "reason"
+      ],
+      "title": "UnknownError",
+      "type": "object"
+    },
+    "WaitReason": {
+      "description": "Typed reason codes for an effect that cannot be confirmed (the *unknown* kind).\n\nEach code names the one fact the executor could not establish.  The free\ntext of a report is for people; the Controller decides on this code.",
+      "enum": [
+        "operation-not-enabled",
+        "agent-upgrade-awaiting-identity",
+        "agent-restart-interrupted",
+        "stop-unconfirmed",
+        "cleanup-unconfirmed",
+        "stop-metadata-unconfirmed",
+        "retained-identity-mismatch",
+        "model-custody-unconfirmed",
+        "runtime-effect-unconfirmed",
+        "job-stop-unconfirmed",
+        "job-state-uncertain",
+        "lease-lapsed",
+        "report-uncertain",
+        "observation-unavailable",
+        "receipt-missing",
+        "stale-plan",
+        "scope-changed",
+        "legacy-unclassified"
+      ],
+      "title": "WaitReason",
+      "type": "string"
+    },
+    "WaitVerdict": {
+      "description": "The verdicts of the blocker allowlist for an operator wait.",
+      "enum": [
+        "KEEP",
+        "SELF-HEAL",
+        "FIX-ACTION",
+        "DERIVED"
+      ],
+      "title": "WaitVerdict",
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6159,6 +6964,7 @@
     "EnrollmentBootstrapResponse": "vonk_agent_protocol.enrollment.EnrollmentBootstrapResponse",
     "EnrollmentEvidence": "vonk_agent_protocol.enrollment.EnrollmentEvidence",
     "EnrollmentSubmitRequest": "vonk_agent_protocol.enrollment.EnrollmentSubmitRequest",
+    "ErrorCatalog": "vonk_agent_protocol.outcome.ErrorCatalog",
     "ExecuteContainerRuntimeRequestOperation": "vonk_agent_protocol.host_helper.ExecuteContainerRuntimeRequestOperation",
     "FailureDiagnostics": "vonk_agent_protocol.failure_evidence.FailureDiagnostics",
     "FailureLogTail": "vonk_agent_protocol.failure_evidence.FailureLogTail",
@@ -6182,12 +6988,19 @@
     "InstallerReleaseImages": "vonk_agent_protocol.installer_release.InstallerReleaseImages",
     "InstallerReleaseManifest": "vonk_agent_protocol.installer_release.InstallerReleaseManifest",
     "InstallerReleaseObject": "vonk_agent_protocol.installer_release.InstallerReleaseObject",
+    "InvalidRequest": "vonk_agent_protocol.outcome.InvalidRequest",
     "InventoryRequest": "vonk_agent_protocol.inventory.InventoryRequest",
     "IssuedCertificateResponse": "vonk_agent_protocol.enrollment.IssuedCertificateResponse",
+    "LifecycleVocabulary": "vonk_agent_protocol.lifecycle_vocabulary.LifecycleVocabulary",
     "NetworkInterface": "vonk_agent_protocol.inventory.NetworkInterface",
     "OperationCheckpoint": "vonk_agent_protocol.wire_model.OperationCheckpoint",
     "OperationMemberProgress": "vonk_agent_protocol.wire_model.OperationMemberProgress",
     "OperationProgress": "vonk_agent_protocol.wire_model.OperationProgress",
+    "OutcomeCatalog": "vonk_agent_protocol.outcome.OutcomeCatalog",
+    "OutcomeDone": "vonk_agent_protocol.outcome.OutcomeDone",
+    "OutcomeEvidence": "vonk_agent_protocol.outcome.OutcomeEvidence",
+    "OutcomeFailed": "vonk_agent_protocol.outcome.OutcomeFailed",
+    "OutcomeUnknown": "vonk_agent_protocol.outcome.OutcomeUnknown",
     "PackageActivationGrantRequest": "vonk_control.agent_api.PackageActivationGrantRequest",
     "PackageActivationReceipt": "vonk_agent_protocol.package_upgrade.PackageActivationReceipt",
     "PackageRollbackAuthority": "vonk_agent_protocol.package_upgrade.PackageRollbackAuthority",
@@ -6234,13 +7047,15 @@
     "RuntimePreflightFinding": "vonk_agent_protocol.runtime_preflight.RuntimePreflightFinding",
     "RuntimePreflightRequest": "vonk_agent_protocol.runtime_preflight.RuntimePreflightRequest",
     "RuntimePreflightResult": "vonk_agent_protocol.runtime_preflight.RuntimePreflightResult",
+    "SecurityRefusal": "vonk_agent_protocol.outcome.SecurityRefusal",
     "SignedHostHelperGrant": "vonk_agent_protocol.host_helper.SignedHostHelperGrant",
     "SourceBundleDigestManifest": "vonk_agent_protocol.source_bundles.SourceBundleDigestManifest",
     "SourceBundleFile": "vonk_agent_protocol.source_bundles.SourceBundleFile",
     "SourceBundleManifest": "vonk_agent_protocol.source_bundles.SourceBundleManifest",
     "SupervisorAcknowledgement": "vonk_agent_protocol.route_activation.SupervisorAcknowledgement",
     "TelemetryRequest": "vonk_agent_protocol.telemetry.TelemetryRequest",
-    "TelemetrySample": "vonk_agent_protocol.telemetry.TelemetrySample"
+    "TelemetrySample": "vonk_agent_protocol.telemetry.TelemetrySample",
+    "UnknownError": "vonk_agent_protocol.outcome.UnknownError"
   },
   "x-vonk-models": {
     "ActivateRequest": "#/$defs/ActivateRequest",
@@ -6283,6 +7098,7 @@
     "EnrollmentBootstrapResponse": "#/$defs/EnrollmentBootstrapResponse",
     "EnrollmentEvidence": "#/$defs/EnrollmentEvidence",
     "EnrollmentSubmitRequest": "#/$defs/EnrollmentSubmitRequest",
+    "ErrorCatalog": "#/$defs/ErrorCatalog",
     "ExecuteContainerRuntimeRequestOperation": "#/$defs/ExecuteContainerRuntimeRequestOperation",
     "FailureDiagnostics": "#/$defs/FailureDiagnostics",
     "FailureLogTail": "#/$defs/FailureLogTail",
@@ -6306,12 +7122,19 @@
     "InstallerReleaseImages": "#/$defs/InstallerReleaseImages",
     "InstallerReleaseManifest": "#/$defs/InstallerReleaseManifest",
     "InstallerReleaseObject": "#/$defs/InstallerReleaseObject",
+    "InvalidRequest": "#/$defs/InvalidRequest",
     "InventoryRequest": "#/$defs/InventoryRequest",
     "IssuedCertificateResponse": "#/$defs/IssuedCertificateResponse",
+    "LifecycleVocabulary": "#/$defs/LifecycleVocabulary",
     "NetworkInterface": "#/$defs/NetworkInterface",
     "OperationCheckpoint": "#/$defs/OperationCheckpoint",
     "OperationMemberProgress": "#/$defs/OperationMemberProgress",
     "OperationProgress": "#/$defs/OperationProgress",
+    "OutcomeCatalog": "#/$defs/OutcomeCatalog",
+    "OutcomeDone": "#/$defs/OutcomeDone",
+    "OutcomeEvidence": "#/$defs/OutcomeEvidence",
+    "OutcomeFailed": "#/$defs/OutcomeFailed",
+    "OutcomeUnknown": "#/$defs/OutcomeUnknown",
     "PackageActivationGrantRequest": "#/$defs/PackageActivationGrantRequest",
     "PackageActivationReceipt": "#/$defs/PackageActivationReceipt",
     "PackageRollbackAuthority": "#/$defs/PackageRollbackAuthority",
@@ -6358,12 +7181,14 @@
     "RuntimePreflightFinding": "#/$defs/RuntimePreflightFinding",
     "RuntimePreflightRequest": "#/$defs/RuntimePreflightRequest",
     "RuntimePreflightResult": "#/$defs/RuntimePreflightResult",
+    "SecurityRefusal": "#/$defs/SecurityRefusal",
     "SignedHostHelperGrant": "#/$defs/SignedHostHelperGrant",
     "SourceBundleDigestManifest": "#/$defs/SourceBundleDigestManifest",
     "SourceBundleFile": "#/$defs/SourceBundleFile",
     "SourceBundleManifest": "#/$defs/SourceBundleManifest",
     "SupervisorAcknowledgement": "#/$defs/SupervisorAcknowledgement",
     "TelemetryRequest": "#/$defs/TelemetryRequest",
-    "TelemetrySample": "#/$defs/TelemetrySample"
+    "TelemetrySample": "#/$defs/TelemetrySample",
+    "UnknownError": "#/$defs/UnknownError"
   }
 }

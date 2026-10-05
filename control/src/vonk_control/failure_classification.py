@@ -12,78 +12,17 @@ from __future__ import annotations
 
 import re
 
-# Codes a producer actually emits for a real security refusal, including the
-# agent's `helper_<code>` preflight codes, the helper's un-prefixed wire
-# rejection codes, the agent's `runtime_helper_<cause>` receipt causes, and the
-# controller/agent identity, enrollment and certificate codes.
-_SECURITY_CODES = frozenset(
-    {
-        "401",
-        "403",
-        "agent.certificate.rotation.conflict",
-        "agent.enrollment.submit.rejected",
-        "agent.identity_mismatch",
-        "agent.tombstone_fenced",
-        "catalog.authentication_required",
-        "controller.authentication_required",
-        "controller.fleet.enrollment_denied",
-        "controller.request_rejected",
-        "distribution.revoked",
-        "forbidden",
-        "grant_invalid",
-        "grant_node_mismatch",
-        "grant_unauthorized",
-        "helper.authorization_invalid",
-        "helper_grant_invalid",
-        "helper_grant_node_mismatch",
-        "helper_grant_unauthorized",
-        "helper_operation_invalid_artifact",
-        "helper_peer_identity_invalid",
-        "helper_request_installation_identity_invalid",
-        "helper_request_plan_binding_invalid",
-        "helper_request_replayed",
-        "helper_runtime_image_identity_invalid",
-        "host_helper.authority_denied",
-        "local.identity_expired",
-        "local.identity_failed",
-        "model_cache.credentials_denied",
-        "model_cache.credentials_invalid",
-        "model_cache.source_access_denied",
-        "operation_invalid_artifact",
-        "peer_identity_invalid",
-        "permission_denied",
-        "recipe_update.authority_denied",
-        "request_replayed",
-        # Run/Switch receipt checks that guard a destructive or digest-bound
-        # effect: the executor reported something the plan forbids (a NAS
-        # eviction, a digest the plan never named, bytes whose digest is not the
-        # planned one).  Reviewed in the blocker allowlist as security edges.
-        "run-switch.artifact-digest-verification-failed",
-        "run-switch.cleanup-nas-eviction-forbidden",
-        "run-switch.cleanup-reclaimed-digest-not-planned",
-        "run-switch.runtime-image-preparation-digest-mismatch",
-        "runtime_image.authorization_invalid",
-        "runtime_image.authorization_revoked",
-        "runtime_image_identity_invalid",
-        "tuf.metadata_invalid",
-        "tuf.signature_invalid",
-        "unauthorized",
-    }
-)
+from vonk_agent_protocol import SECURITY_REFUSAL_SUFFIXES, SecurityRefusalReason
+
+# The codes of a real security refusal, including the agent's `helper_<code>`
+# preflight codes, the helper's un-prefixed wire rejection codes, the agent's
+# `runtime_helper_<cause>` receipt causes, and the controller/agent identity,
+# enrollment and certificate codes, are the closed `SecurityRefusalReason` set
+# of the shared contract; this module keeps no second copy.
+_SECURITY_CODES = frozenset(reason.value for reason in SecurityRefusalReason)
 # Suffixes of the same families, so a new producer of an existing boundary is
-# classified without editing this list.
-_SECURITY_SUFFIXES = (
-    ".authentication_required",
-    ".authorization_invalid",
-    ".authorization_revoked",
-    ".authority_denied",
-    ".enrollment_denied",
-    ".identity_expired",
-    ".node_revoked",
-    ".permission_denied",
-    ".signature_invalid",
-    ".tombstone_fenced",
-)
+# classified without editing the contract enum.
+_SECURITY_SUFFIXES = SECURITY_REFUSAL_SUFFIXES
 _REDOWNLOAD_SUFFIXES = (".digest_mismatch", ".archive_mismatch")
 _DOTTED_CODE = re.compile(r"[a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+)+")
 

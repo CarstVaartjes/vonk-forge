@@ -268,6 +268,56 @@ boundaries. The generation check runs in the required Controller/Spark wire CI
 lane; stale schema or Rust output fails that check. Connected producer/consumer
 checks additionally verify semantic validation and signed or hashed bytes.
 
+## Lifecycle vocabulary and the outcome envelope
+
+The closed words of the lifecycle core and of an agent's result have one
+definition: `agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py`
+(states, effects, outcome kinds, event kinds, operator actions, wait reasons,
+failure codes, the security-refusal and invalid-request reason codes, the error
+categories, and the categories the CI ratchets use). `scripts/generate-agent-wire`
+carries them into `wire.json` and the Rust declarations, and
+`scripts/generate-control-clients` into the OpenAPI document, the generated
+TypeScript types and the runtime constants in
+`control/web/src/api/vocabulary.generated.ts`. `vonk_control/lifecycle/types.py`,
+the adapters, `failure_classification` and the allowlist scanners import them;
+none keeps a second list. Add a word to the contract and regenerate; never spell
+one by hand (the vocabulary-literal ratchet in
+[testing and CI](testing-and-ci.md) fails the change).
+
+Every agent operation result is one `OperationOutcome`
+(`agent_protocol/src/vonk_agent_protocol/outcome.py`), tagged by `kind`:
+
+- `done` carries the operation's typed success body;
+- `failed` is a *definite* failure with a closed `FailureCode`, an optional
+  `failure_kind` (the retry class), `retry_after_seconds`, typed
+  `OutcomeEvidence` and, for a one-shot job whose process ran, its receipt. A
+  confirmed cancellation is the `operation_cancelled` code;
+- `unknown` says the effect could not be established. It carries a closed
+  `WaitReason` and the same typed evidence (bounded diagnostic logs, the helper's
+  error and exit code, the stage). The Controller observes the effect; it never
+  parks the work behind a person because of this word.
+
+`AgentResult.state` keeps its four wire words, and the outcome decides which is
+truthful (`done` is `succeeded`, a confirmed cancellation is `cancelled`, any
+other `failed` is `failed`, `unknown` is `waiting-for-operator`); a report whose
+word disagrees with its outcome is refused on both sides. Nothing stored
+changes: the Controller projects a typed outcome back to the body shape every
+stored-row reader already understands.
+
+The Controller reads an agent report through one function,
+`vonk_control/agent_outcome.agent_outcome`. A typed report is the outcome; an
+untyped body from an agent built before the typed contract goes through the
+legacy half of the same function, which is the only code that still interprets
+an untyped agent body. It exists for one release so agents already on the Sparks
+keep working; delete it together with the legacy untyped members of
+`AgentResultPayload` once no deployable agent package predates the typed outcome.
+
+The three error categories, `SecurityRefusal`, `InvalidRequest` and
+`UnknownError`, are the only things a lifecycle adapter may raise or report, each
+with its own closed reason set; the blocker allowlist's `security-edge` and
+`input-validation` families are the first two, and `already-retried` and
+`bookkeeping-debt` are the third (`error_category_of`).
+
 ## Required launch checks
 
 The `Controller and Spark wire contract` CI job checks both sides of the

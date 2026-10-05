@@ -33,6 +33,8 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from vonk_agent_protocol import LEGACY_WAIT_STATE
+
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..models import Job
 from ..recipe_update_contract import RecipeUpdateChild, RecipeUpdateDocument
@@ -57,7 +59,7 @@ from .types import (
 )
 
 KIND = "recipe.cache.update.v2"
-WAITING = "waiting-for-operator"
+WAITING = LEGACY_WAIT_STATE
 _MAX_REASON = 512
 CANCEL_BUDGET = timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
 KEEP: Any = object()
@@ -342,7 +344,7 @@ class RecipeUpdateBatchAdapter:
         if state not in TERMINAL_STATES:
             return None
         if state is State.SUCCEEDED:
-            return self.settled(job, document, Reported(Outcome.OK), now).row
+            return self.settled(job, document, Reported(Outcome.DONE), now).row
         partial = any(child.state is State.SUCCEEDED for child in children)
         return self.settled(
             job,

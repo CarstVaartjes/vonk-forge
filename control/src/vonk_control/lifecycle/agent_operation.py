@@ -50,7 +50,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentOperation
+from vonk_agent_protocol import LEGACY_WAIT_STATE, AgentOperation
 
 from ..agent_operation_facts import (
     AGENT_UPGRADE_RECOVERY_FENCE,
@@ -70,6 +70,7 @@ from .adapter import Dispatch
 from .core import OBSERVE_BUDGET, transition
 from .reconciler import settle
 from .types import (
+    ActionName,
     Claimed,
     Decision,
     Effect,
@@ -93,12 +94,12 @@ IRREVERSIBLE_OPERATIONS = frozenset(
         AgentOperation.RECIPE_BUILD_CLEANUP.value,
     }
 )
-WAITING = "waiting-for-operator"
+WAITING = LEGACY_WAIT_STATE
 JOB_RUN_OPERATION = AgentOperation.RECIPE_JOB_RUN.value
 #: The owner kind a one-shot job's order carries in its parent job's payload.
 OWNER_KIND = "artifact-job"
 #: The one operator action of a one-shot job's order (the artifact job owns it).
-STOP_ACTION = "stop"
+STOP_ACTION = ActionName.STOP.value
 #: A parent in one of these states can no longer claim, resume or retire anything:
 #: its orders end with it instead of waiting.
 ENDED_PARENT_STATES = frozenset({"succeeded", "failed", "cancelled", "expired"})
@@ -108,8 +109,8 @@ AGGREGATE_FINAL_STATES = frozenset(
     {"cancelled", "compensated", "failed", "succeeded", WAITING}
 )
 #: The operator actions of a parked order (the same pair the Job endpoints take).
-OPERATOR_ACTIONS = ("resume", "retire")
-_LEGACY_RETRY = "retry"
+OPERATOR_ACTIONS = (ActionName.RESUME.value, ActionName.RETIRE.value)
+_LEGACY_RETRY = ActionName.RETRY.value
 _MAX_REASON = 512
 
 ResumeCandidates = Callable[[Session, str, datetime], Sequence[StoredOperation]]

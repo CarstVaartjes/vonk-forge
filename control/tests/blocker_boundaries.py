@@ -46,12 +46,24 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from vonk_agent_protocol import (
+    LEGACY_WAIT_STATE,
+    AgentResultState,
+    BlockerCategory,
+    FailureCode,
+    InvalidRequestReason,
+    OperatorSurface,
+    SecurityRefusalReason,
+    WaitReason,
+    WaitVerdict,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
 RUST_SOURCE_ROOT = REPO_ROOT / "rust" / "crates" / "vonk-agent" / "src"
 ALLOWLIST_PATH = REPO_ROOT / "tools" / "blocker-allowlist.json"
 
-WAIT_STATE = "waiting-for-operator"
+WAIT_STATE = LEGACY_WAIT_STATE
 CONTROL_STATE_ASSIGNMENT = "control-state-assignment"
 CONTROL_STATE_ARGUMENT = "control-state-argument"
 #: A ``return`` of the stored wait state inside the lifecycle core: the one place a
@@ -70,16 +82,14 @@ WAIT_KINDS = frozenset(
 #: Entry kinds with no scanned site: they document a verdict about code the
 #: scan cannot see by shape (a projection or a deleted entry point).
 UNSCANNED_KINDS = frozenset({"derived-mirror"})
-VERDICTS = frozenset({"KEEP", "SELF-HEAL", "FIX-ACTION", "DERIVED"})
+VERDICTS = frozenset(verdict.value for verdict in WaitVerdict)
 #: The real operator surfaces: ``resume``/``retire`` (POST /api/jobs/{id}/...),
 #: ``retry`` (fleet profile), ``stop`` (the one-shot stop route) and
 #: ``automatic`` (a scheduled retry the Controller owns).
-ACTION_SURFACES = ("resume", "retire", "retry", "stop", "automatic")
+ACTION_SURFACES = tuple(surface.value for surface in OperatorSurface)
 _STATE_CALLS = frozenset({"_finish", "_set_application_state", "_set_state"})
 
-CATEGORIES = frozenset(
-    {"security-edge", "input-validation", "already-retried", "bookkeeping-debt"}
-)
+CATEGORIES = frozenset(category.value for category in BlockerCategory)
 _RAISE_SUFFIXES = ("Conflict", "Error", "Refused", "Busy", "Invalid", "NotFound")
 #: Fail-closed classes that do not follow the suffix convention.
 _EXTRA_RAISE_CLASSES = frozenset({"StaleAgentAttempt"})
@@ -122,8 +132,24 @@ class RaiseSite:
 # --------------------------------------------------------------------- waits
 
 
+#: The contract names of the stored wait state (``vonk_agent_protocol``):
+#: ``LEGACY_WAIT_STATE`` and ``AgentResultState.WAITING_FOR_OPERATOR[.value]``.
+_WAIT_CONTRACT_NAME = "LEGACY_WAIT_STATE"
+_WAIT_CONTRACT_MEMBER = AgentResultState.WAITING_FOR_OPERATOR.name
+
+
 def _is_wait_literal(node: ast.AST) -> bool:
-    return isinstance(node, ast.Constant) and node.value == WAIT_STATE
+    """The stored wait state, spelled as the literal or as the contract's name."""
+
+    if isinstance(node, ast.Constant):
+        return node.value == WAIT_STATE
+    if isinstance(node, ast.Name):
+        return node.id == _WAIT_CONTRACT_NAME
+    if isinstance(node, ast.Attribute):
+        if node.attr == "value":
+            return _is_wait_literal(node.value)
+        return node.attr == _WAIT_CONTRACT_MEMBER
+    return False
 
 
 def _wait_constant_names(tree: ast.Module) -> frozenset[str]:
@@ -316,7 +342,32 @@ def exception_classes(trees: Sequence[ast.Module]) -> frozenset[str]:
     )
 
 
+#: The closed code sets of the contract a raise may name instead of a literal
+#: (``SecurityRefusalReason.GRANT_INVALID.value``).
+_CONTRACT_CODE_ENUMS = {
+    enum.__name__: enum
+    for enum in (SecurityRefusalReason, FailureCode, WaitReason, InvalidRequestReason)
+}
+
+
+def _contract_word(node: ast.AST) -> str | None:
+    """The word a ``ContractEnum.MEMBER[.value]`` reference names, else ``None``."""
+
+    if isinstance(node, ast.Attribute) and node.attr == "value":
+        node = node.value
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id in _CONTRACT_CODE_ENUMS
+    ):
+        member = _CONTRACT_CODE_ENUMS[node.value.id].__members__.get(node.attr)
+        return None if member is None else str(member.value)
+    return None
+
+
 def _leading_text(node: ast.AST) -> str | None:
+    if (word := _contract_word(node)) is not None:
+        return word
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.JoinedStr):

@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 from pydantic import ConfigDict, Field, TypeAdapter
 from sqlalchemy import String, and_, cast, or_, select
+from vonk_agent_protocol import FailureCode
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 
 from .bounded_json import BoundedJSONError, mapping, require_integer, sequence
@@ -201,10 +202,14 @@ def log_tail(value: str) -> FailureLogTail:
 
 def failure_code(result: Mapping[str, object]) -> tuple[str, str | None]:
     """Return the stable error code and redacted detail a failure result names."""
-    code = result.get("error_code") or result.get("code") or "operation_failed"
+    code = (
+        result.get("error_code")
+        or result.get("code")
+        or FailureCode.OPERATION_FAILED.value
+    )
     code = re.sub(r"[^a-z0-9_]", "_", str(code).lower())[:64]
     if not code or not code[0].isalpha():
-        code = "operation_failed"
+        code = FailureCode.OPERATION_FAILED.value
     detail = (
         result.get("detail")
         or result.get("diagnostic")

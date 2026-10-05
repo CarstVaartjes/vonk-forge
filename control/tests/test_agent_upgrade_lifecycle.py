@@ -81,9 +81,9 @@ def test_every_stored_shape_adopts_and_no_event_waits_for_an_operator(stored) ->
     events = (
         Tick(),
         CancelRequested("newer", "superseded"),
-        Reported(Outcome.UNCERTAIN),
+        Reported(Outcome.UNKNOWN),
         Reported(Outcome.FAILED, retryable=True),
-        Reported(Outcome.OK),
+        Reported(Outcome.DONE),
     )
     for event in events:
         decision = transition(row, event, adapter, NOW)

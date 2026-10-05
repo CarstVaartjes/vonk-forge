@@ -1649,7 +1649,7 @@ class ArtifactJobService:
         adapter.settle(
             artifact_job,
             Reported(
-                Outcome.OK
+                Outcome.DONE
                 if succeeded
                 else Outcome.CANCELLED
                 if cancelled

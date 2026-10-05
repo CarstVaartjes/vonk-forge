@@ -161,7 +161,7 @@ def test_no_event_leaves_a_generic_job_waiting_for_an_operator() -> None:
         LeaseLapsed(),
         CancelRequested(),
         Observed(Effect.UNKNOWN),
-        Reported(Outcome.UNCERTAIN),
+        Reported(Outcome.UNKNOWN),
         Reported(Outcome.FAILED, retryable=True),
         Claimed(2, "f", NOW),
         Heartbeat(None, NOW),

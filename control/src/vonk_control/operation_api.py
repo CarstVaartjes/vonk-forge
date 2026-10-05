@@ -2296,4 +2296,23 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
     components["schemas"] = {
         name: schemas[name] for name in sorted(referenced) if name in schemas
     }
+    # The lifecycle and error vocabulary is one closed set shared with the agent
+    # and the generated clients; no route has to mention a word for it to exist.
+    for name, schema in _contract_component_schemas().items():
+        if components["schemas"].setdefault(name, schema) != schema:
+            raise RuntimeError(
+                f"contract component {name} conflicts with a route model"
+            )
+    components["schemas"] = dict(sorted(components["schemas"].items()))
     return source
+
+
+def _contract_component_schemas() -> dict[str, dict[str, object]]:
+    from pydantic.json_schema import models_json_schema
+    from vonk_agent_protocol import ErrorCatalog, LifecycleVocabulary
+
+    _references, document = models_json_schema(
+        [(LifecycleVocabulary, "validation"), (ErrorCatalog, "validation")],
+        ref_template="#/components/schemas/{model}",
+    )
+    return deepcopy(document["$defs"])

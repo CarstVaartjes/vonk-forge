@@ -76,3 +76,11 @@ def test_control_openapi_documents_are_current() -> None:
         if _stale(path, content)
     ]
     assert stale == [], "run scripts/generate-control-clients"
+
+
+def test_typescript_vocabulary_is_current() -> None:
+    module = _script("generate-control-clients")
+    target = module.TYPESCRIPT_VOCABULARY
+    assert not _stale(target, module.typescript_vocabulary()), (
+        "stale vocabulary.generated.ts; run scripts/generate-control-clients"
+    )

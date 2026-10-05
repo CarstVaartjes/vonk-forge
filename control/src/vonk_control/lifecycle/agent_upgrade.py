@@ -30,6 +30,8 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
+from vonk_agent_protocol import LEGACY_WAIT_STATE
+
 from ..agent_operation_facts import aware
 from ..models import Job, JobAttempt
 from .adapter import Dispatch
@@ -50,7 +52,7 @@ from .types import (
 )
 
 KIND = "agent-upgrade"
-WAITING = "waiting-for-operator"
+WAITING = LEGACY_WAIT_STATE
 _MAX_REASON = 512
 #: Stored states a rollout can still advance from.
 LIVE_STATES = ("queued", "running", WAITING)
@@ -210,7 +212,7 @@ class AgentUpgradeAdapter:
     def succeed(
         self, job: Job, now: datetime, *, reason: str | None = None
     ) -> Lifecycle:
-        return self.settled(job, Reported(Outcome.OK), now, reason=reason).row
+        return self.settled(job, Reported(Outcome.DONE), now, reason=reason).row
 
     def fail(self, job: Job, now: datetime, reason: str) -> Lifecycle:
         """A definite end: a failed order or a stored plan that cannot be read."""
