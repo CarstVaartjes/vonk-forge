@@ -320,14 +320,7 @@
       "path": "control/src/vonk_control/fleet_profiles.py",
       "function": "FleetProfileService._validate_draft_review_identity",
       "kind": "provenance_comparison",
-      "expression": "assignment.recipe_id != document_id",
-      "reason": "Review binding: a profile accepted from a review must still resolve each assignment to the recipe and the head revision that were reviewed; a moved head raises a stale-plan conflict and asks for a new review (revision is the reviewed recipe version, not an image)."
-    },
-    {
-      "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "FleetProfileService._validate_draft_review_identity",
-      "kind": "provenance_comparison",
-      "expression": "assignment.recipe_revision_id != revision_id",
+      "expression": "(assignment.recipe_id, assignment.recipe_revision_id) != tuple(identity)",
       "reason": "Review binding: a profile accepted from a review must still resolve each assignment to the recipe and the head revision that were reviewed; a moved head raises a stale-plan conflict and asks for a new review (revision is the reviewed recipe version, not an image)."
     },
     {
