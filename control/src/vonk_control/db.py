@@ -921,6 +921,11 @@ def adopt_legacy_rows(connection: Connection) -> None:
     adopted = adopt_legacy_orders(connection)
     if adopted:
         _LOGGER.info("Adopted %d Spark orders onto the lifecycle schedule", adopted)
+    from .lifecycle.model_cache import adopt_legacy_operations
+
+    adopted = adopt_legacy_operations(connection)
+    if adopted:
+        _LOGGER.info("Adopted %d cache operations onto the lifecycle schedule", adopted)
 
 
 def initialize_database(

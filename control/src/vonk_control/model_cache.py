@@ -35,7 +35,7 @@ import httpx2
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import OperationMemberProgress, canonical_message
 from vonk_forge_contracts import (
     ModelDefinition,
@@ -45,6 +45,7 @@ from vonk_forge_contracts import (
 )
 from vonk_forge_contracts.model import GitHubReleaseSource, ModelReference
 
+from .agent_operation_facts import aware as _aware
 from .artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactKind,
@@ -83,6 +84,20 @@ from .catalog_revision_contract import (
     read_catalog_document,
 )
 from .failure_classification import is_security_failure
+from .lifecycle import (
+    CancelRequested,
+    Lifecycle,
+    Outcome,
+    Reconciler,
+    Reported,
+    State,
+    Tick,
+)
+from .lifecycle.model_cache import (
+    ModelCacheAdapter,
+    ModelCacheStore,
+    legacy_retry_due,
+)
 from .logging import log_event, redact_text
 from .model_cache_contract import (
     UUID_PATTERN,
@@ -145,7 +160,8 @@ _DEFAULT_MAX_PARALLEL_DOWNLOADS = 16
 _MAX_PARALLEL_DOWNLOADS = 32
 _DEFAULT_MAX_DOWNLOAD_STREAMS = 16
 _RETRY_BASE_SECONDS = 5
-_RETRY_MAX_SECONDS = 300
+#: The actor of a download the cache queues by itself to re-verify a set.
+_REVERIFY_ACTOR = "system:model-cache-reverify"
 _MAX_RETRY_HINT_SECONDS = 365 * 24 * 60 * 60
 _TRANSFER_CLAIM_SECONDS = 120
 _UPSTREAM_CHECK_SECONDS = 8.0
@@ -250,12 +266,6 @@ def _retryable_failure(error: BaseException) -> bool:
     """Classify by typed code: only authorization and source policy are terminal."""
 
     return not model_cache_failure_is_terminal(getattr(error, "code", None))
-
-
-def _retry_delay_seconds(attempts: int) -> int:
-    return min(
-        _RETRY_MAX_SECONDS, _RETRY_BASE_SECONDS * (2 ** min(16, max(0, attempts - 1)))
-    )
 
 
 def _retry_after_seconds(headers: Mapping[str, str], *, now: datetime) -> int | None:
@@ -1529,6 +1539,26 @@ class ModelCacheService:
         self._progress_checkpoint_at: dict[str, datetime] = {}
         self._cancel_events: dict[str, threading.Event] = {}
         self._range_reserved_bytes = 0
+        self._reverified_at: dict[str, datetime] = {}
+        # The lifecycle core decides every recovery outcome of an operation; this
+        # adapter is the only writer of its stored ``state`` (see the module
+        # docstring of ``lifecycle/model_cache.py``).
+        self._lifecycle = ModelCacheAdapter(
+            self._session,
+            clock=lambda: self._clock(),
+            effects=self,
+            read_payload=_validated_operation_payload,
+            store_payload=lambda operation, payload: _store_operation_payload(
+                operation, operation.kind, payload
+            ),
+            on_end=self._project_end,
+        )
+        self._reconciler = Reconciler(
+            ModelCacheStore(self._session, self._lifecycle, self),
+            {kind: self._lifecycle for kind in ("download", "repair", "remove")},
+            clock=lambda: self._clock(),
+            enabled=True,
+        )
 
     def close(self) -> None:
         """Stop the Controller-wide transfer pool during service shutdown."""
@@ -1564,6 +1594,128 @@ class ModelCacheService:
         else:
             with self._sessions() as session:
                 yield session
+
+    # ---------------------------------------------- lifecycle core: what it asks
+
+    def running_here(self) -> frozenset[str]:
+        """Operations this process is transferring right now (``CacheEffects``)."""
+
+        return frozenset(list(self._background_operations))
+
+    def objects_present(self, payload: Mapping[str, object]) -> bool | None:
+        """Whether every object of the operation's set has a storage receipt."""
+
+        try:
+            manifest = ArtifactSetManifest.from_document(payload["manifest"])
+            return self._managed_cached_objects(manifest) == frozenset(
+                spec.sha256 for spec in manifest.artifacts
+            )
+        except (KeyError, TypeError, ValueError, OSError, ModelCacheError):
+            return None
+
+    def set_is_cached(self, set_digest: str | None) -> bool:
+        if set_digest is None:
+            return False
+        with self._session() as session:
+            row = session.get(ModelCacheSet, set_digest)
+            return row is not None and row.state == "cached"
+
+    def effects_settled(self, operation_id: str, payload: Mapping[str, object]) -> bool:
+        """Signal the operation's transfers to stop; whether none is still writing."""
+
+        self._transfer_stop(operation_id).set()
+        try:
+            manifest = ArtifactSetManifest.from_document(payload["manifest"])
+        except (KeyError, TypeError, ValueError):
+            return False  # unreadable: a writer may still be active
+        return self._artifact_effects_settled(operation_id, manifest)
+
+    def cooldown_until(self, payload: Mapping[str, object]) -> datetime | None:
+        """The provider cooldown (rate limit) the operation's sources are under."""
+
+        until = self._hf_cooldown_until
+        if until is None or until <= self._clock():
+            return None
+        try:
+            return until if self._payload_has_huggingface_source(payload) else None
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _project_end(
+        self, operation: ModelCacheOperation, before: Lifecycle, after: Lifecycle
+    ) -> None:
+        """What a cancelled download leaves behind, in the transaction that ends it.
+
+        The set's row follows what storage proves (cached when every object has a
+        receipt, else incomplete) unless a sibling operation still works on it.
+        """
+
+        if after.state is not State.CANCELLED or operation.kind != "download":
+            return
+        set_digest = operation.artifact_set_sha256
+        now = self._clock()
+        payload = _validated_operation_payload(operation)
+        payload.pop("failure", None)
+        _store_operation_payload(operation, operation.kind, payload)
+        operation.progress = cache_phase(
+            _validated_operation_progress(operation).model_dump(mode="json"),
+            "completed",
+            now,
+        )
+        operation.current_artifact_key = None
+        if set_digest is None:
+            return
+        manifest = ArtifactSetManifest.from_document(payload["manifest"])
+        unique_specs = _unique_artifacts(manifest.artifacts)
+        stored_bytes = {
+            digest: self._stored_object(digest, spec.expected_bytes)
+            for digest, spec in unique_specs.items()
+        }
+        verified_bytes = sum(value or 0 for value in stored_bytes.values())
+        coverage_complete = all(
+            stored_bytes[digest] == spec.expected_bytes
+            for digest, spec in unique_specs.items()
+        )
+        # The operation's own transaction: the set projection commits with it.
+        session = object_session(operation)
+        assert session is not None
+        self._project_cancelled_set(
+            session,
+            set_digest,
+            exclude_operation_id=operation.id,
+            verified_bytes=verified_bytes,
+            coverage_complete=coverage_complete,
+            now=now,
+        )
+
+    @staticmethod
+    def _project_cancelled_set(
+        session: Session,
+        set_digest: str,
+        *,
+        exclude_operation_id: str,
+        verified_bytes: int,
+        coverage_complete: bool,
+        now: datetime,
+    ) -> None:
+        sibling_work = session.scalar(
+            select(func.count())
+            .select_from(ModelCacheOperation)
+            .where(
+                ModelCacheOperation.artifact_set_sha256 == set_digest,
+                ModelCacheOperation.id != exclude_operation_id,
+                ModelCacheOperation.kind.in_(["download", "repair"]),
+                ModelCacheOperation.state.in_(["queued", "running", "partial"]),
+            )
+        )
+        row = session.get(ModelCacheSet, set_digest)
+        if row is not None and not sibling_work:
+            row.state = "cached" if coverage_complete else "incomplete"
+            row.verified_bytes = verified_bytes
+            row.updated_at = now
+            if coverage_complete:
+                row.verified_at = now
+                row.last_error = None
 
     def resolve_artifact_set(
         self,
@@ -2134,16 +2286,8 @@ class ModelCacheService:
         digest = self._resolve_model_selector(selector)
         manifest = self.resolve_artifact_set(model_content_sha256=digest)
         preview = self._download_preview_for_manifest(manifest)
-        if preview["blockers"]:
-            raise ModelCacheConflict(
-                "model_cache.download_blocked",
-                "; ".join(
-                    str(item)
-                    for item in require_sequence(
-                        preview["blockers"], "download blockers"
-                    )
-                ),
-            )
+        # A capacity blocker is a wait, not a refusal: start_download queues the
+        # operation, which is claimed once the space it needs exists.
         return self.start_download(
             actor=actor,
             request_key=request_key,
@@ -3039,12 +3183,11 @@ class ModelCacheService:
             previous=None,
             now=now,
         )
-        operation = ModelCacheOperation(
+        operation = ModelCacheAdapter.new_operation(
             id=operation_id,
             request_key=request_key,
             schema_version=SCHEMA_VERSION,
             kind="remove",
-            state="queued",
             attempt=1,
             artifact_set_sha256=None,
             plan_digest=_model_removal_intent_digest(
@@ -3350,10 +3493,10 @@ class ModelCacheService:
                 previous=previous,
                 now=now,
             )
-            operation.state = "running"
-            operation.last_error = None
-            operation.updated_at = now
             _store_operation_payload(operation, "remove", payload)
+            self._lifecycle.renew(
+                operation, self._claim_owner, _TRANSFER_CLAIM_SECONDS, now
+            )
         return True
 
     def _defer_model_removal(
@@ -3374,21 +3517,27 @@ class ModelCacheService:
             if operation is None:
                 return
             payload = _validated_operation_payload(operation)
-            retry = payload["retry"]
-            if not isinstance(retry, Mapping):
+            if not isinstance(payload["retry"], Mapping):
                 raise ModelCacheStorageError(
                     "model_cache.payload_invalid",
                     "model removal retry state is missing",
                 )
-            attempts = int(retry["automatic_attempts"]) + 1
-            delay = min(60, max(retry_after_seconds, 2 ** min(attempts, 6)))
-            retry_document = dict(retry)
-            retry_document.update(
-                automatic_attempts=attempts,
-                next_retry_at=_iso(now + timedelta(seconds=delay)),
-                retry_after_seconds=delay,
+            # The dependency's own hint is a floor; the core's bounded backoff
+            # is the schedule (one policy for every kind, one clock).
+            self._lifecycle.settle(
+                operation,
+                Reported(
+                    Outcome.UNCERTAIN,
+                    retry_after=now + timedelta(seconds=retry_after_seconds),
+                    reason=detail,
+                ),
+                now,
+                interrupted=True,
             )
-            payload["retry"] = retry_document
+            next_retry = operation.next_action_at
+            assert next_retry is not None
+            delay = max(1, round((_aware(next_retry) - now).total_seconds()))
+            payload = _validated_operation_payload(operation)
             checkpoint = _removal_document(payload)
             artifact_key = (
                 f"object:{checkpoint.delete_objects[checkpoint.object_index]}"
@@ -3403,15 +3552,13 @@ class ModelCacheService:
                 "ownership dependency clears. " + detail,
                 retryable=True,
                 recovery="inspect",
-                retry_time=_iso(now + timedelta(seconds=delay)),
+                retry_time=_iso(next_retry),
                 retry_after_seconds=delay,
                 artifact_key=artifact_key,
             )
             previous = _validated_operation_progress(operation).model_dump(mode="json")
             operation.progress = cache_phase(previous, "reclaiming", now, waiting=True)
-            operation.state = "partial"
             operation.last_error = redact_text(detail)[:512]
-            operation.updated_at = now
             _store_operation_payload(operation, "remove", payload)
 
     def advance_removals(self, *, limit: int = 1) -> int:
@@ -3430,13 +3577,8 @@ class ModelCacheService:
                     )
                     .where(
                         or_(
-                            ModelCacheOperation.payload["retry"]["next_retry_at"]
-                            .as_string()
-                            .is_(None),
-                            ModelCacheOperation.payload["retry"][
-                                "next_retry_at"
-                            ].as_string()
-                            <= _iso(now),
+                            ModelCacheOperation.next_action_at.is_(None),
+                            ModelCacheOperation.next_action_at <= now,
                         )
                     )
                     .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
@@ -3471,9 +3613,9 @@ class ModelCacheService:
                         .with_for_update(skip_locked=True)
                     )
                     if row is not None:
-                        row.state = "failed"
-                        row.last_error = f"{error.code}: {error.detail}"[:512]
-                        row.updated_at = now
+                        self._lifecycle.fail_corrupt(
+                            row, f"{error.code}: {error.detail}", now
+                        )
                 log_event(
                     _LOGGER,
                     "model_cache.removal_invalid",
@@ -3519,14 +3661,15 @@ class ModelCacheService:
             if operation.state not in {"queued", "running", "partial"}:
                 return False
             payload = _validated_operation_payload(operation)
-            retry = payload["retry"]
-            if not isinstance(retry, Mapping):
+            if not isinstance(payload["retry"], Mapping):
                 raise ModelCacheStorageError(
                     "model_cache.payload_invalid",
                     "model removal retry state is missing",
                 )
-            retry_at = retry.get("next_retry_at")
-            if isinstance(retry_at, str) and datetime.fromisoformat(retry_at) > now:
+            # One clock: the column (a legacy payload clock is adopted by the
+            # adapter, so a row the startup adoption missed is still honoured).
+            due = self._lifecycle.lifecycle(operation, now).next_action_at
+            if due is not None and due > _aware(now):
                 return False
             checkpoint = _removal_document(payload)
             fence = checkpoint.removal_fence
@@ -3751,10 +3894,8 @@ class ModelCacheService:
         previous = _validated_operation_progress(operation).model_dump(mode="json")
         operation.progress = cache_phase(previous, "completed", now)
         _store_operation_payload(operation, "remove", payload)
-        operation.state = "succeeded"
         operation.last_error = None
-        operation.updated_at = now
-        operation.completed_at = now
+        self._lifecycle.complete(operation, Reported(Outcome.OK), now)
 
     @staticmethod
     def _newest_readable_revision(
@@ -4131,16 +4272,10 @@ class ModelCacheService:
             raise ModelCacheConflict(
                 "model_cache.stale_plan", "download preview is stale"
             )
-        if preview["blockers"]:
-            raise ModelCacheConflict(
-                "model_cache.download_blocked",
-                "; ".join(
-                    str(item)
-                    for item in require_sequence(
-                        preview["blockers"], "download blockers"
-                    )
-                ),
-            )
+        waiting_for = "; ".join(
+            str(item)
+            for item in require_sequence(preview["blockers"], "download blockers")
+        )
         transfer = None if force else preview.get("_transfer")
         if not isinstance(transfer, Mapping):
             transfer = self._transfer_state_for_manifest(manifest, force=force)
@@ -4157,6 +4292,7 @@ class ModelCacheService:
         if selector is not None:
             payload["selector"] = selector
             payload["operator_action"] = "download-model"
+        wait_until = self._capacity_wait(payload, waiting_for)
         payload = _write_operation_payload("download", payload)
         try:
             with self._lock, self._session(write=True) as session:
@@ -4182,11 +4318,11 @@ class ModelCacheService:
                         ),
                     )
                     self._ensure_set(session, manifest)
-                    operation = ModelCacheOperation(
+                    operation = ModelCacheAdapter.new_operation(
                         request_key=request_key,
                         schema_version=SCHEMA_VERSION,
                         kind="download",
-                        state="queued",
+                        next_action_at=wait_until,
                         attempt=1,
                         artifact_set_sha256=set_digest,
                         plan_digest=requested_plan,
@@ -4687,7 +4823,7 @@ class ModelCacheService:
         planned_total = (
             planned_total if type(planned_total) is int and planned_total >= 0 else None
         )
-        self._set_operation_state(operation_id, "running")
+        self._mark_running(operation_id)
         completed = 0
         try:
             with self._lock:
@@ -4742,10 +4878,9 @@ class ModelCacheService:
                     row.updated_at = self._clock()
                     row.last_accessed_at = row.updated_at
                     row.last_error = None
-            self._set_operation_state(
+            self._finish_succeeded(
                 operation_id,
-                "succeeded",
-                result={
+                {
                     "schema_version": SCHEMA_VERSION,
                     "artifact_set_sha256": set_digest,
                     "coverage": "complete",
@@ -6113,20 +6248,19 @@ class ModelCacheService:
                 if newer:
                     # A later request owns this artifact set now.
                     continue
-                retry.update(next_retry_at=None, retry_after_seconds=None)
                 retry.pop("credential_fingerprint", None)
                 payload["retry"] = retry
-                payload.pop("claim", None)
                 _store_operation_payload(operation, operation.kind, payload)
-                operation.state = "queued"
-                operation.completed_at = None
+                # The credential changed: withdraw the end and let the core decide
+                # again (a queued, immediately claimable operation).
+                self._lifecycle.reopen(operation, now)
+                self._lifecycle.settle(operation, Tick(), now)
                 operation.attempt = int(operation.attempt) + 1
                 operation.progress = cache_phase(
                     _validated_operation_progress(operation).model_dump(mode="json"),
                     "queued",
                     now,
                 )
-                operation.updated_at = now
                 resumed += 1
         self._observed_credential_fingerprint = current
         return resumed
@@ -6308,23 +6442,20 @@ class ModelCacheService:
                         and value.get("received_bytes", 0) >= 0
                     )
                     payload["transfer"] = transfer
-                    claim = payload.get("claim")
-                    if (
-                        isinstance(claim, Mapping)
-                        and claim.get("owner") == self._claim_owner
-                    ):
-                        payload["claim"] = dict(claim) | {
-                            "expires_at": _iso(
-                                now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)
-                            )
-                        }
                     _store_operation_payload(operation, operation.kind, payload)
                     old_progress = _validated_operation_progress(operation)
                     old_downloaded = old_progress.downloaded_bytes
                     old_completed = old_progress.completed_artifacts
-                    # A partial file is an active download checkpoint. Only an
-                    # interrupted operation should enter the resumable partial state.
-                    operation.state = "running"
+                    # A checkpoint is a heartbeat: it renews this process's lease;
+                    # under another fence, or after the core put the operation
+                    # back to wait, it changes nothing (rule 7).
+                    self._lifecycle.renew(
+                        operation,
+                        self._claim_owner,
+                        _TRANSFER_CLAIM_SECONDS,
+                        now,
+                        take=False,
+                    )
                     operation.progress = self._progress(
                         manifest,
                         previous=old_progress.model_dump(mode="json"),
@@ -6428,8 +6559,20 @@ class ModelCacheService:
                     row.updated_at = now
                     row.last_error = detail[:512]
                 if operation is not None:
-                    operation.state = "partial"
                     operation.last_error = detail[:512]
+                    # Interrupted work is uncertain, not failed: the core retries
+                    # the exact transfer (nothing here is irreversible).
+                    self._lifecycle.complete(
+                        operation,
+                        Reported(
+                            Outcome.UNCERTAIN,
+                            fence=self._claim_owner,
+                            reason=detail[:512],
+                        ),
+                        now,
+                        interrupted=True,
+                        consume_retry=False,
+                    )
                     payload = _validated_operation_payload(operation) | {
                         "failure": _cache_failure(
                             "model_cache.interrupted",
@@ -6438,7 +6581,6 @@ class ModelCacheService:
                             recovery="resume",
                         )
                     }
-                    payload.pop("claim", None)
                     _store_operation_payload(operation, operation.kind, payload)
                     _total, received = self._transfer_totals(payload)
                     previous_progress = _validated_operation_progress(operation)
@@ -6466,7 +6608,6 @@ class ModelCacheService:
         artifact_key: str | None,
     ) -> None:
         now = self._clock()
-        next_retry = now + timedelta(seconds=_RETRY_BASE_SECONDS)
         with self._session(write=True) as session:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update={"nowait": True}
@@ -6477,32 +6618,45 @@ class ModelCacheService:
             if payload.get("cancellation") is not None:
                 self._transfer_stop(operation_id).set()
                 return
-            claim = payload.get("claim")
-            if isinstance(claim, Mapping) and (
-                claim.get("owner") != self._claim_owner
-                or _parse_iso(cast(str, claim["expires_at"])) <= now
+            row = self._lifecycle.lifecycle(operation, now)
+            if (
+                row.state is not State.RUNNING
+                or row.fence not in (None, self._claim_owner)
+                or (
+                    row.lease_deadline is not None and row.lease_deadline <= _aware(now)
+                )
             ):
-                return
-            retry = dict(require_mapping(payload["retry"], "cache retry"))
-            retry.update(
-                next_retry_at=_iso(next_retry), retry_after_seconds=_RETRY_BASE_SECONDS
+                return  # the lease is another process's (or has lapsed): not ours
+            # A dependency wait, not a consumed attempt: the owner of the busy
+            # lock releases it and the same attempt resumes.
+            self._lifecycle.complete(
+                operation,
+                Reported(
+                    Outcome.UNCERTAIN,
+                    fence=self._claim_owner,
+                    retry_after=now + timedelta(seconds=_RETRY_BASE_SECONDS),
+                    reason=error.detail,
+                ),
+                now,
+                interrupted=False,
+                consume_retry=False,
             )
-            payload.update(
-                retry=retry,
-                failure=_cache_failure(
+            next_retry = operation.next_action_at
+            if next_retry is None:
+                return
+            delay = max(1, round((_aware(next_retry) - now).total_seconds()))
+            payload = _validated_operation_payload(operation) | {
+                "failure": _cache_failure(
                     error.code,
                     error.detail,
                     retryable=True,
                     recovery="resume",
                     retry_time=_iso(next_retry),
-                    retry_after_seconds=_RETRY_BASE_SECONDS,
+                    retry_after_seconds=delay,
                     artifact_key=artifact_key,
-                ),
-            )
-            payload.pop("claim", None)
+                )
+            }
             _store_operation_payload(operation, operation.kind, payload)
-            operation.state = "queued"
-            operation.completed_at = None
             operation.last_error = error.detail
             operation.progress = cache_phase(
                 _validated_operation_progress(operation).model_dump(mode="json"),
@@ -6510,7 +6664,6 @@ class ModelCacheService:
                 now,
                 waiting=True,
             )
-            operation.updated_at = now
 
     def _finish_failed(
         self,
@@ -6590,31 +6743,51 @@ class ModelCacheService:
                 operation_payload = _validated_operation_payload(operation)
                 raw_retry = operation_payload["retry"]
                 retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
-                automatic_attempts = retry.get("automatic_attempts")
-                automatic_attempts = (
-                    automatic_attempts
-                    if type(automatic_attempts) is int and automatic_attempts >= 1
-                    else int(operation.attempt)
-                )
                 operator_retries = retry.get("operator_retries")
                 operator_retries = (
                     operator_retries
                     if type(operator_retries) is int and operator_retries >= 0
                     else 0
                 )
-                bounded_retry = retryable
-                operation.state = "queued" if bounded_retry else "failed"
+                if operation.state == "failed":
+                    # A recheck that finds the failure transient: withdraw the
+                    # end, and let the core decide again (retry, with backoff).
+                    self._lifecycle.reopen(operation, now)
+                provider_hint = getattr(error, "retry_after_seconds", None)
                 operation.last_error = detail[:512]
-                retry_delay = getattr(error, "retry_after_seconds", None)
-                if type(retry_delay) is not int or retry_delay < 0:
-                    retry_delay = _retry_delay_seconds(automatic_attempts)
-                next_retry = now + timedelta(seconds=retry_delay)
-                retry.update(
-                    automatic_attempts=automatic_attempts,
-                    operator_retries=operator_retries,
-                    next_retry_at=_iso(next_retry) if bounded_retry else None,
-                    retry_after_seconds=retry_delay if bounded_retry else None,
+                # The core owns the schedule (bounded backoff, never earlier than
+                # the provider's own hint) and the end of a terminal failure.
+                settled = self._lifecycle.complete(
+                    operation,
+                    Reported(
+                        Outcome.FAILED,
+                        fence=self._claim_owner,
+                        retryable=retryable,
+                        retry_after=(
+                            now + timedelta(seconds=provider_hint)
+                            if retryable
+                            and type(provider_hint) is int
+                            and provider_hint >= 0
+                            else None
+                        ),
+                        reason=detail[:512],
+                    ),
+                    now,
+                    interrupted=False,
                 )
+                if settled.state not in (State.BACKOFF, State.FAILED):
+                    return  # a report under a fence that is not this worker's
+                bounded_retry = settled.state is State.BACKOFF
+                next_retry = operation.next_action_at if bounded_retry else None
+                retry_delay = (
+                    max(1, round((_aware(next_retry) - now).total_seconds()))
+                    if next_retry is not None
+                    else None
+                )
+                payload_after = _validated_operation_payload(operation)
+                retry = dict(require_mapping(payload_after["retry"], "cache retry")) | {
+                    "operator_retries": operator_retries
+                }
                 if failure_code in _CREDENTIAL_FAILURE_CODES:
                     # The worker resumes this exact transfer once the
                     # configured credential file changes.
@@ -6627,7 +6800,9 @@ class ModelCacheService:
                 if provider_rate_limited and self._manifest_has_huggingface_source(
                     manifest
                 ):
-                    self._record_huggingface_cooldown(next_retry)
+                    self._record_huggingface_cooldown(
+                        next_retry or now + timedelta(seconds=_RETRY_BASE_SECONDS)
+                    )
                 failure_payload = _cache_failure(
                     failure_code,
                     detail,
@@ -6635,38 +6810,23 @@ class ModelCacheService:
                     recovery=getattr(error, "recovery", None)
                     or ("capacity" if failure_code == "model_cache.capacity" else None)
                     or ("resume" if bounded_retry else "retry"),
-                    retry_time=_iso(next_retry)
-                    if bounded_retry or provider_rate_limited
-                    else None,
-                    retry_after_seconds=retry_delay
-                    if bounded_retry or provider_rate_limited
-                    else None,
+                    retry_time=_iso(next_retry) if bounded_retry else None,
+                    retry_after_seconds=retry_delay if bounded_retry else None,
                     required_bytes=required_bytes,
                     free_bytes=free_bytes,
                     shortfall_bytes=shortfall_bytes,
                     artifact_key=failed_artifact_key,
                 )
-                operation_payload = operation_payload | {
+                operation_payload = payload_after | {
                     "failure": failure_payload,
                     "retry": retry,
                 }
-                if bounded_retry:
-                    # The queued row represents the next bounded attempt.  Its
-                    # manifest, plan digest, and transfer ledger remain intact.
-                    operation.attempt = int(operation.attempt) + 1
-                    retry["automatic_attempts"] = automatic_attempts + 1
-                    operation_payload = operation_payload | {"retry": retry}
-                    operation.completed_at = None
-                else:
-                    operation.completed_at = now
-                operation_payload.pop("claim", None)
                 _store_operation_payload(operation, operation.kind, operation_payload)
                 operation.progress = cache_phase(
                     _validated_operation_progress(operation).model_dump(mode="json"),
                     "queued" if bounded_retry else "failed",
                     now,
                 )
-                operation.updated_at = now
         if cancellation_pending:
             self._try_settle_cancellation(operation_id)
 
@@ -6732,11 +6892,10 @@ class ModelCacheService:
             retry.update(automatic_attempts=1, operator_retries=operator_retries + 1)
             payload = previous_payload | {"retry": retry, "retry_of": previous.id}
             previous_progress = _validated_operation_progress(previous)
-            operation = ModelCacheOperation(
+            operation = ModelCacheAdapter.new_operation(
                 request_key=request_key,
                 schema_version=2,
                 kind=previous.kind,
-                state="queued",
                 attempt=1,
                 artifact_set_sha256=previous.artifact_set_sha256,
                 plan_digest=previous.plan_digest,
@@ -6884,10 +7043,12 @@ class ModelCacheService:
                     raise ModelCacheNotFound(
                         "model_cache.operation_missing", "cache operation was not found"
                     )
-                previous.state = "failed"
                 previous.last_error = safe_detail
-                previous.completed_at = now
-                previous.updated_at = now
+                self._lifecycle.complete(
+                    previous,
+                    Reported(Outcome.FAILED, retryable=False, reason=safe_detail),
+                    now,
+                )
                 payload = _validated_operation_payload(previous) | {
                     "failure": failure_payload,
                     "access_recheck": {
@@ -6896,7 +7057,6 @@ class ModelCacheService:
                         "authorized": False,
                     },
                 }
-                payload.pop("claim", None)
                 _store_operation_payload(previous, previous.kind, payload)
                 return self._operation_view(previous)
 
@@ -6947,11 +7107,10 @@ class ModelCacheService:
                 ),
                 transfer=mapping(payload.get("transfer")),
             )
-            operation = ModelCacheOperation(
+            operation = ModelCacheAdapter.new_operation(
                 request_key=request_key,
                 schema_version=SCHEMA_VERSION,
                 kind=previous.kind,
-                state="queued",
                 attempt=1,
                 artifact_set_sha256=previous.artifact_set_sha256,
                 plan_digest=previous.plan_digest,
@@ -7019,51 +7178,50 @@ class ModelCacheService:
             if owns_client:
                 client.close()
 
-    def _set_operation_state(
-        self,
-        operation_id: str,
-        state: str,
-        *,
-        result: Mapping[str, object] | None = None,
+    def _mark_running(self, operation_id: str) -> None:
+        """The worker starts (or resumes) the transfer: claim or renew, then run."""
+
+        now = self._clock()
+        with self._session(write=True) as session:
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update=True
+            )
+            if operation is None or operation.state == "cancelled":
+                return  # gone or cancelled: nothing left to record (rule 5)
+            payload = _validated_operation_payload(operation)
+            if payload.get("cancellation") is not None:
+                return
+            if self._lifecycle.renew(
+                operation, self._claim_owner, _TRANSFER_CLAIM_SECONDS, now
+            ):
+                payload.pop("failure", None)
+                _store_operation_payload(operation, operation.kind, payload)
+
+    def _finish_succeeded(
+        self, operation_id: str, result: Mapping[str, object]
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
             )
-            if operation is None:
-                raise ModelCacheNotFound(
-                    "model_cache.operation_missing", "cache operation was not found"
-                )
-            if operation.state == "cancelled":
-                return
+            if operation is None or operation.state == "cancelled":
+                return  # gone or cancelled: nothing left to record (rule 5)
             payload = _validated_operation_payload(operation)
-            if payload.get("cancellation") is not None and state != "cancelled":
+            if payload.get("cancellation") is not None:
                 return
-            if state == "running":
-                if operation.state in {"partial", "failed"}:
-                    operation.attempt = int(operation.attempt) + 1
-                else:
-                    operation.attempt = max(1, int(operation.attempt))
-            operation.state = state
-            if state in {"succeeded", "failed", "cancelled"}:
-                operation.progress = cache_phase(
-                    _validated_operation_progress(operation).model_dump(mode="json"),
-                    "completed" if state == "succeeded" else "failed",
-                    now,
-                )
-            operation.updated_at = now
-            if state == "running":
-                payload.pop("failure", None)
-            if result is not None:
-                parsed_result = parse_model_cache_result(operation.kind, result)
-                payload["result"] = parsed_result.model_dump(mode="json")
-                payload.pop("failure", None)
-            if state in {"succeeded", "failed", "cancelled"}:
-                payload.pop("claim", None)
+            parsed_result = parse_model_cache_result(operation.kind, result)
+            payload["result"] = parsed_result.model_dump(mode="json")
+            payload.pop("failure", None)
             _store_operation_payload(operation, operation.kind, payload)
-            if state in {"succeeded", "failed", "cancelled"}:
-                operation.completed_at = now
+            operation.progress = cache_phase(
+                _validated_operation_progress(operation).model_dump(mode="json"),
+                "completed",
+                now,
+            )
+            self._lifecycle.complete(
+                operation, Reported(Outcome.OK, fence=self._claim_owner), now
+            )
 
     def _set_operation_progress(
         self,
@@ -7110,8 +7268,9 @@ class ModelCacheService:
                 ),
             )
             operation.current_artifact_key = current_artifact_key
-            operation.state = "running"
-            operation.updated_at = now
+            self._lifecycle.renew(
+                operation, self._claim_owner, _TRANSFER_CLAIM_SECONDS, now, take=False
+            )
 
     def _artifact_effects_settled(
         self, operation_id: str, manifest: ArtifactSetManifest
@@ -7145,11 +7304,27 @@ class ModelCacheService:
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
         return True
 
-    def _try_settle_cancellation(self, operation_id: str) -> bool:
-        """Finalize a durable cancel intent only after its effects are idle."""
+    def _try_settle_cancellation(
+        self, operation_id: str, *, forced: bool = True
+    ) -> bool:
+        """Drive a durable cancel intent through the core; ``True`` once it ended.
 
-        with self._session() as session:
-            operation = session.get(ModelCacheOperation, operation_id)
+        The core stops the transfer (idempotently), observes until no writer of
+        the operation's objects is active, and ends the cancel as ``cancelled``
+        (rule 4).  A stop that stays unconfirmed past its budget ends it anyway
+        with the effect unknown and a residue note: a cancel never waits for an
+        operator.  ``forced`` (the cancel itself and a worker that just ended)
+        decides now; the reconciler's pass decides when the core's clock says.
+        """
+
+        now = self._clock()
+        with self._session(write=True) as session:
+            operation = session.scalar(
+                select(ModelCacheOperation)
+                .where(ModelCacheOperation.id == operation_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
             if operation is None:
                 raise ModelCacheNotFound(
                     "model_cache.operation_missing", "cache operation was not found"
@@ -7161,89 +7336,32 @@ class ModelCacheService:
                 return False
             if operation.kind != "download" or operation.artifact_set_sha256 is None:
                 return False
-            payload = _validated_operation_payload(operation)
-            manifest = ArtifactSetManifest.from_document(payload["manifest"])
-            set_digest = operation.artifact_set_sha256
-
-        if not self._artifact_effects_settled(operation_id, manifest):
-            return False
-
-        unique_specs = _unique_artifacts(manifest.artifacts)
-        stored_bytes = {
-            digest: self._stored_object(digest, spec.expected_bytes)
-            for digest, spec in unique_specs.items()
-        }
-        verified_bytes = sum(value or 0 for value in stored_bytes.values())
-        coverage_complete = all(
-            stored_bytes[digest] == spec.expected_bytes
-            for digest, spec in unique_specs.items()
-        )
-        now = self._clock()
-        with self._session(write=True) as session:
-            operation = session.get(
-                ModelCacheOperation, operation_id, with_for_update=True
+            row = self._lifecycle.lifecycle(operation, now)
+            when = (
+                max(_aware(now), row.next_action_at)
+                if forced and row.next_action_at is not None
+                else now
             )
-            if operation is None:
-                raise ModelCacheNotFound(
-                    "model_cache.operation_missing", "cache operation was not found"
+            event = (
+                CancelRequested(
+                    str(cancellation["request_key"]), str(cancellation["reason"])
                 )
-            if operation.state == "cancelled":
-                return True
-            current_cancellation = _operation_cancellation(operation)
-            if current_cancellation != cancellation:
-                return False
-            payload = _validated_operation_payload(operation)
-            payload.pop("claim", None)
-            payload.pop("failure", None)
-            _store_operation_payload(operation, operation.kind, payload)
-            operation.state = "cancelled"
-            operation.completed_at = now
-            operation.updated_at = now
-            operation.progress = cache_phase(
-                _validated_operation_progress(operation).model_dump(mode="json"),
-                "completed",
-                now,
+                if row.state is not State.OBSERVING
+                else Tick()
             )
-            operation.current_artifact_key = None
-            sibling_work = session.scalar(
-                select(func.count())
-                .select_from(ModelCacheOperation)
-                .where(
-                    ModelCacheOperation.artifact_set_sha256 == set_digest,
-                    ModelCacheOperation.id != operation_id,
-                    ModelCacheOperation.kind.in_(["download", "repair"]),
-                    ModelCacheOperation.state.in_(["queued", "running", "partial"]),
-                )
-            )
-            row = session.get(ModelCacheSet, set_digest)
-            if row is not None and not sibling_work:
-                row.state = "cached" if coverage_complete else "incomplete"
-                row.verified_bytes = verified_bytes
-                row.updated_at = now
-                if coverage_complete:
-                    row.verified_at = now
-                    row.last_error = None
-        return True
+            settled = self._lifecycle.settle(operation, event, when)
+            return settled.state is State.CANCELLED
 
     def _reconcile_pending_cancellations(self) -> int:
-        """Resume cancellation settlement after a Controller process restart."""
+        """The reconcile pass over active operations (cancels, lapsed leases).
 
-        with self._session() as session:
-            operation_ids = list(
-                session.scalars(
-                    select(ModelCacheOperation.id)
-                    .where(
-                        ModelCacheOperation.kind == "download",
-                        ModelCacheOperation.state.in_(["queued", "running", "partial"]),
-                    )
-                    .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
-                )
-            )
-        settled = 0
-        for operation_id in operation_ids:
-            if self._operation_cancellation_pending(operation_id):
-                settled += int(self._try_settle_cancellation(operation_id))
-        return settled
+        One loop decides what is due: a cancel whose stop is still unconfirmed, a
+        transfer whose process is gone (its lease lapsed), and cancellation
+        settlement after a Controller restart.
+        """
+
+        report = self._reconciler.reconcile()
+        return report.changed
 
     def _cancellation_intent(
         self, *, actor: str, request_key: str, reason: str
@@ -7506,12 +7624,11 @@ class ModelCacheService:
         stored_review_digest = payload.get("review_digest")
         waiting = operation.state in {"queued", "partial", "failed"}
         blockers = tuple(read_blockers(payload.get("blockers"))) if waiting else ()
-        retry = payload.get("retry")
+        # The one retry clock is the column; a row written before the core still
+        # carries it in the payload until its next transition.
         next_attempt = (
-            retry.get("next_retry_at")
-            if blockers
-            and operation.state in {"queued", "partial"}
-            and isinstance(retry, Mapping)
+            _iso(operation.next_action_at or legacy_retry_due(payload))
+            if blockers and operation.state in {"queued", "partial"}
             else None
         )
         view = CacheOperationView(
@@ -7746,7 +7863,7 @@ class ModelCacheService:
         )
         with self._session(write=True) as session:
             self._ensure_set(session, manifest)
-        self._set_operation_state(operation_id, "running")
+        self._mark_running(operation_id)
         specs = list(_unique_artifacts(manifest.artifacts).values())
         record: dict[str, object] = {
             "kind": "repair" if force else "download",
@@ -7931,20 +8048,16 @@ class ModelCacheService:
                         "model download cancellation was accepted"
                     )
                     continue
-                claim = operation_payload.get("claim")
-                if (
-                    isinstance(claim, Mapping)
-                    and claim.get("owner") == self._claim_owner
-                ):
-                    operation_payload["claim"] = dict(claim) | {
-                        "expires_at": _iso(
-                            now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)
-                        )
-                    }
-                    _store_operation_payload(
-                        operation, operation.kind, operation_payload
-                    )
-                    operation.updated_at = now
+                # The heartbeat of every transfer this process runs: one Heartbeat
+                # per operation renews its lease (a fence that is not ours is
+                # left alone).
+                self._lifecycle.renew(
+                    operation,
+                    self._claim_owner,
+                    _TRANSFER_CLAIM_SECONDS,
+                    now,
+                    take=False,
+                )
 
     def _finish_background_success(
         self,
@@ -7986,10 +8099,9 @@ class ModelCacheService:
         if not publication_allowed:
             self._try_settle_cancellation(operation_id)
             return
-        self._set_operation_state(
+        self._finish_succeeded(
             operation_id,
-            "succeeded",
-            result={
+            {
                 "schema_version": SCHEMA_VERSION,
                 "artifact_set_sha256": set_digest,
                 "coverage": "complete",
@@ -8047,54 +8159,43 @@ class ModelCacheService:
                 payload = _validated_operation_payload(operation)
                 if payload.get("cancellation") is not None:
                     continue
-                retry = payload.get("retry")
-                retry = dict(retry) if isinstance(retry, Mapping) else None
-                if retry is None and operation.kind in {"download", "repair"}:
+                if not isinstance(payload.get("retry"), Mapping):
                     raise ModelCacheStorageError(
                         "model_cache.payload_invalid", "cache retry state is missing"
                     )
-                if respect_backoff and operation.kind in {"download", "repair"}:
-                    assert retry is not None
-                    retry_at = retry.get("next_retry_at")
-                    if isinstance(retry_at, str):
-                        try:
-                            if datetime.fromisoformat(retry_at) > now:
-                                continue
-                        except ValueError:
-                            continue
+                row = self._lifecycle.lifecycle(operation, now)
+                if row.state is State.OBSERVING:
+                    continue  # a cancel is being settled
+                if row.state is State.RUNNING:
+                    if row.lease_deadline is not None and row.lease_deadline > _aware(
+                        now
+                    ):
+                        continue  # a live lease: ours, or another process's
+                    # The attempt can no longer report: the core decides (rule 1:
+                    # nothing here is irreversible, so it is retried with backoff)
+                    # instead of the next claimant stealing the claim.
+                    row = self._lifecycle.lapse(operation, now)
+                if respect_backoff:
+                    if row.next_action_at is not None and row.next_action_at > _aware(
+                        now
+                    ):
+                        continue
                     if (
                         self._hf_cooldown_until is not None
                         and self._hf_cooldown_until > now
                         and self._payload_has_huggingface_source(payload)
                     ):
                         continue
-                claim = payload.get("claim")
-                claim = dict(claim) if isinstance(claim, Mapping) else None
-                if claim is not None:
-                    owner = claim.get("owner")
-                    expires = claim.get("expires_at")
-                    active_background = self._background_operations.get(operation.id)
-                    if owner == self._claim_owner and active_background is not None:
-                        continue
-                    if owner != self._claim_owner:
-                        try:
-                            if (
-                                isinstance(expires, str)
-                                and datetime.fromisoformat(expires) > now
-                            ):
-                                continue
-                        except ValueError:
-                            pass
-                        if operation.state == "running":
-                            operation.state = "partial"
-                payload["claim"] = {
-                    "owner": self._claim_owner,
-                    "expires_at": _iso(
-                        now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)
-                    ),
-                }
-                _store_operation_payload(operation, operation.kind, payload)
-                operation.updated_at = now
+                if self._capacity_holds(operation, payload, now):
+                    continue
+                if not self._lifecycle.claim(
+                    operation,
+                    self._claim_owner,
+                    _TRANSFER_CLAIM_SECONDS,
+                    now,
+                    ignore_backoff=not respect_backoff,
+                ):
+                    continue
                 claimed.append((operation.id, operation.kind))
         return claimed
 
@@ -8213,11 +8314,10 @@ class ModelCacheService:
         transfer = self._transfer_state_for_manifest(manifest, force=True)
         repair_bytes = require_integer(transfer["total_bytes"], "transfer total bytes")
         repair_bytes += _split_transient_bytes(manifest, None)
+        waiting_for = ""
         if repair_bytes > self.free_bytes():
             self._request_storage(repair_bytes, "insufficient-reserved-storage")
-            raise ModelCacheConflict(
-                "model_cache.download_blocked", "insufficient-reserved-storage"
-            )
+            waiting_for = "insufficient-reserved-storage"
         payload = {
             "repair_checkpoint": ModelCacheRepairCheckpoint(
                 transfer_id=uuid.uuid4().hex, completed_objects=[]
@@ -8230,6 +8330,7 @@ class ModelCacheService:
             "transfer": transfer,
             "retry": {"automatic_attempts": 1, "operator_retries": 0},
         }
+        wait_until = self._capacity_wait(payload, waiting_for)
         payload = _write_operation_payload("repair", payload)
         with self._lock, self._session(write=True) as session:
             existing = session.scalar(
@@ -8247,11 +8348,11 @@ class ModelCacheService:
             else:
                 now = self._clock()
                 self._require_model_sets_open(session, (digest,), now=now)
-                operation = ModelCacheOperation(
+                operation = ModelCacheAdapter.new_operation(
                     request_key=request_key,
                     schema_version=SCHEMA_VERSION,
                     kind="repair",
-                    state="queued",
+                    next_action_at=wait_until,
                     attempt=1,
                     artifact_set_sha256=digest,
                     plan_digest=requested_plan,
@@ -8271,6 +8372,72 @@ class ModelCacheService:
                 session.flush()
                 operation_id = operation.id
         return self.get_operation(operation_id)
+
+    def _capacity_wait(
+        self, payload: dict[str, object], waiting_for: str
+    ) -> datetime | None:
+        """Make a capacity blocker a wait on the new operation, not a refusal.
+
+        The storage demand is already filed (the retention sweep frees space);
+        the operation is queued with a retryable ``download_blocked`` failure and
+        the shared retry clock.  The claim loop re-checks the space when the
+        clock is due (:meth:`_capacity_holds`), so nothing is downloaded into a
+        full disk and nothing is left for a person to resubmit.
+        """
+
+        if not waiting_for:
+            return None
+        due = self._clock() + timedelta(seconds=_RETRY_BASE_SECONDS)
+        payload["failure"] = _cache_failure(
+            "model_cache.download_blocked",
+            waiting_for,
+            retryable=True,
+            recovery="capacity",
+            retry_time=_iso(due),
+            retry_after_seconds=_RETRY_BASE_SECONDS,
+        )
+        return due
+
+    def _capacity_holds(
+        self,
+        operation: ModelCacheOperation,
+        payload: Mapping[str, object],
+        now: datetime,
+    ) -> bool:
+        """Whether a capacity-blocked operation still lacks the space it needs.
+
+        If so the core reschedules it (bounded backoff, never an operator wait).
+        """
+
+        failure = payload.get("failure")
+        if not isinstance(failure, Mapping) or failure.get("code") not in {
+            "model_cache.download_blocked",
+            "model_cache.capacity",
+        }:
+            return False
+        try:
+            manifest = ArtifactSetManifest.from_document(payload["manifest"])
+            transfer = require_mapping(payload["transfer"], "cache transfer")
+            needed = require_integer(
+                transfer["total_bytes"], "transfer total bytes"
+            ) + _split_transient_bytes(manifest, None)
+        except (KeyError, TypeError, ValueError, ModelCacheError):
+            return False
+        if needed <= self.free_bytes():
+            return False
+        self._request_storage(needed, "insufficient-reserved-storage")
+        self._lifecycle.complete(
+            operation,
+            Reported(
+                Outcome.UNCERTAIN,
+                retry_after=now + timedelta(seconds=_RETRY_BASE_SECONDS),
+                reason="insufficient-reserved-storage",
+            ),
+            now,
+            interrupted=False,
+            consume_retry=False,
+        )
+        return True
 
     def _manifest_for_set(self, digest: str) -> ArtifactSetManifest:
         with self._session() as session:
@@ -8446,9 +8613,69 @@ class ModelCacheService:
         if self._managed_cached_objects(manifest) != frozenset(
             spec.sha256 for spec in manifest.artifacts
         ):
+            self._reverify_set(manifest)
             raise ModelCacheConflict(
                 "model_cache.coverage_incomplete",
-                "cache artifact set is not completely verified",
+                "cache artifact set is not completely verified; it is being "
+                "verified again and the request can be retried",
+                retry_after_seconds=_RETRY_BASE_SECONDS,
+                recovery="reverify",
+            )
+
+    def _reverify_set(self, manifest: ArtifactSetManifest) -> None:
+        """A missing receipt is unknown, not final: look again, then repair.
+
+        The receipts beside the bytes own availability, so the set's row follows
+        them: complete coverage heals a row that said otherwise; incomplete
+        coverage marks the set ``needs-repair`` and queues one download of the
+        missing objects (a normal download fetches only what has no receipt).
+        Throttled per set: a consumer retrying every few seconds costs one scan.
+        Best effort by design: the caller still gets its (retryable) refusal.
+        """
+
+        now = self._clock()
+        with self._lock:
+            last = self._reverified_at.get(manifest.digest)
+            if last is not None and 0 <= (now - last).total_seconds() < 30:
+                return
+            self._reverified_at[manifest.digest] = now
+        try:
+            present = self.objects_present({"manifest": manifest.document()})
+            if present is None:
+                return
+            with self._session(write=True) as session:
+                row = session.get(ModelCacheSet, manifest.digest)
+                if row is not None:
+                    row.verified_bytes = self._verified_bytes(session, manifest.digest)
+                    if present and row.state in {"needs-repair", "incomplete"}:
+                        row.state = "cached"
+                        row.verified_at = now
+                        row.last_error = None
+                    elif not present and row.state == "cached":
+                        row.state = "needs-repair"
+                        row.last_error = "a stored object lost its receipt"
+                    row.updated_at = now
+                active = session.scalar(
+                    select(func.count())
+                    .select_from(ModelCacheOperation)
+                    .where(
+                        ModelCacheOperation.artifact_set_sha256 == manifest.digest,
+                        ModelCacheOperation.kind.in_(["download", "repair"]),
+                        ModelCacheOperation.state.in_(["queued", "running", "partial"]),
+                    )
+                )
+            if present or active or row is None:
+                return
+            preview = self._download_preview_for_manifest(manifest)
+            self.start_download(
+                actor=_REVERIFY_ACTOR,
+                request_key=str(uuid.uuid4()),
+                plan_digest=str(preview["plan_digest"]),
+                artifact_set_sha256=manifest.digest,
+            )
+        except Exception as error:  # noqa: BLE001 - re-verification is best effort
+            _LOGGER.warning(
+                "re-verifying cache set %s failed: %s", manifest.digest, error
             )
 
     def cached_artifact_file(
@@ -8498,9 +8725,13 @@ class ModelCacheService:
             or path.is_symlink()
             or not path.is_file()
         ):
+            self._reverify_set(manifest)
             raise ModelCacheConflict(
                 "model_cache.artifact_unverified",
-                "cache artifact is no longer verified",
+                "cache artifact is no longer verified; it is being verified "
+                "again and the request can be retried",
+                retry_after_seconds=_RETRY_BASE_SECONDS,
+                recovery="reverify",
             )
         return path, spec.expected_bytes, spec.sha256
 
