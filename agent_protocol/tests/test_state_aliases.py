@@ -70,15 +70,22 @@ def test_old_rows_are_adopted_on_read() -> None:
     assert adopt_state(
         LifecycleSubject.MODEL_CACHE_OPERATION, "partial"
     ) == AdoptedState(LifecycleState.BACKOFF)
+    # An expired attempt was interrupted (observed); an expired job is over.
     assert adopt_state(
         LifecycleSubject.AGENT_OPERATION_ATTEMPT, "expired"
-    ) == AdoptedState(LifecycleState.FAILED)
+    ) == AdoptedState(LifecycleState.OBSERVING)
+    assert adopt_state(LifecycleSubject.JOB, "expired") == AdoptedState(
+        LifecycleState.FAILED
+    )
 
 
 def test_a_word_the_subject_keeps_outside_the_vocabulary_is_left_to_its_owner() -> None:
     assert adopt_state(LifecycleSubject.ARTIFACT_JOB, "draft") is None
     # A subject that never used a retired word does not adopt it silently.
     assert adopt_state(LifecycleSubject.JOB_ATTEMPT, "partial") is None
+    # Its CHECK constraint never admitted these.
+    for word in ("waiting", "cancelling", "expired"):
+        assert adopt_state(LifecycleSubject.FLEET_PROFILE_APPLICATION, word) is None
 
 
 def test_callers_may_still_send_a_retired_word_as_input() -> None:

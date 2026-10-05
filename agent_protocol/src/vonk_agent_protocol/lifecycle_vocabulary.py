@@ -195,39 +195,38 @@ _CANCELLING = AdoptedState(LifecycleState.OBSERVING, cancel_requested=True)
 _WAITING = AdoptedState(LifecycleState.OBSERVING)
 #: Work that stopped part-way and is retried by itself, not yet settled.
 _PARTIAL = AdoptedState(LifecycleState.BACKOFF)
-#: An attempt whose lease lapsed: the attempt ended, the operation decides next.
-_EXPIRED = AdoptedState(LifecycleState.FAILED)
+#: A job that lapsed without an answer is over: nothing will report for it.
+_JOB_EXPIRED = AdoptedState(LifecycleState.FAILED)
+#: An attempt whose lease lapsed was interrupted, not refused: what it did is
+#: unknown, so it is observed, and the operation decides what happens next.
+_ATTEMPT_EXPIRED = AdoptedState(LifecycleState.OBSERVING)
 
 #: What each retired spelling means, per subject whose stored ``state`` the core
-#: owns.  One subject may not use every word (a job never lapses a lease), and a
-#: word two subjects share may mean different things (``partial`` work in the
-#: model cache backs off); that is why the table is per subject.  Words outside
-#: the core vocabulary that a kind keeps on purpose (``draft``) are not here.
+#: owns, and only for the words that subject has ever stored (its CHECK
+#: constraint or its writers).  A word two subjects share may mean different
+#: things (an expired *attempt* is observed, an expired *job* is over), which is
+#: why the table is per subject.  Words outside the core vocabulary that a kind
+#: keeps on purpose (``draft``) are not here, and a subject does not adopt a word
+#: it never stored.
 STATE_ALIASES: Mapping[LifecycleSubject, Mapping[StateAlias, AdoptedState]] = {
     LifecycleSubject.JOB: {
         StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
         StateAlias.WAITING: _WAITING,
-        StateAlias.CANCELLING: _CANCELLING,
-        StateAlias.EXPIRED: _EXPIRED,
+        StateAlias.EXPIRED: _JOB_EXPIRED,
     },
     LifecycleSubject.JOB_ATTEMPT: {
         StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
-        StateAlias.EXPIRED: _EXPIRED,
+        StateAlias.EXPIRED: _ATTEMPT_EXPIRED,
     },
     LifecycleSubject.AGENT_OPERATION: {
         StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
-        StateAlias.WAITING: _WAITING,
-        StateAlias.CANCELLING: _CANCELLING,
-        StateAlias.EXPIRED: _EXPIRED,
     },
     LifecycleSubject.AGENT_OPERATION_ATTEMPT: {
         StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
-        StateAlias.EXPIRED: _EXPIRED,
+        StateAlias.EXPIRED: _ATTEMPT_EXPIRED,
     },
     LifecycleSubject.MODEL_CACHE_OPERATION: {
         StateAlias.PARTIAL: _PARTIAL,
-        StateAlias.CANCELLING: _CANCELLING,
-        StateAlias.WAITING: _WAITING,
     },
     LifecycleSubject.ARTIFACT_JOB: {
         StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
@@ -235,14 +234,11 @@ STATE_ALIASES: Mapping[LifecycleSubject, Mapping[StateAlias, AdoptedState]] = {
     },
     LifecycleSubject.FLEET_PROFILE_APPLICATION: {
         StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
-        StateAlias.WAITING: _WAITING,
-        StateAlias.CANCELLING: _CANCELLING,
-        StateAlias.EXPIRED: _EXPIRED,
     },
 }
 
 #: What an alias means when the subject is not known (an API filter, a CLI
-#: argument): the same word, the same meaning, for every subject that uses it.
+#: argument).  Activity lists jobs, so ``expired`` means what it means for a job.
 INPUT_ALIASES: Mapping[StateAlias, LifecycleState] = {
     StateAlias.WAITING_FOR_OPERATOR: LifecycleState.NEEDS_OPERATOR,
     StateAlias.CANCELLING: LifecycleState.OBSERVING,
