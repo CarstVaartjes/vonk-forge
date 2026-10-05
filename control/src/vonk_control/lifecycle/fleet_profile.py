@@ -55,7 +55,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..agent_operation_facts import aware
+from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..fleet_profile_contract import FleetProfileApplicationProgress
 from ..models import FleetProfileApplication, Job
 from .adapter import Dispatch
@@ -83,10 +83,9 @@ KIND = "fleet-profile"
 WAITING = "waiting-for-operator"
 KEEP: Any = object()
 #: How long a cancel may spend stopping and observing its children before it ends
-#: with their effect recorded as unknown.  The same authority an agent
-#: cancellation of a superseded workload is given (``agent_jobs``), so the profile
-#: never outlives the order it is waiting for.
-CANCEL_BUDGET = timedelta(seconds=660)
+#: with their effect recorded as unknown: the authority an agent cancellation of a
+#: superseded workload is already given (one constant, in ``agent_operation_facts``).
+CANCEL_BUDGET = timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
 _MAX_REASON = 512
 _STORED = {
     State.QUEUED: "queued",
@@ -398,6 +397,7 @@ class FleetProfileAdapter:
         *,
         reason: str | None = KEEP,
         terminal_reason: str | None = KEEP,
+        visible: str | None = None,
         session: Session | None = None,
     ) -> None:
         """Project a core decision onto the stored application; the only such writer.
@@ -419,6 +419,8 @@ class FleetProfileAdapter:
                 if application.state in {"queued", "running"}
                 else state
             )
+        if visible is not None and not after.terminal:
+            state = visible
         application.state = state
         progress = _progress(application)
         if after.terminal and terminal_reason is not KEEP:
@@ -509,7 +511,7 @@ class FleetProfileAdapter:
             # The cancel gave up confirming the stop: the residue record is the
             # reason (and the pending operation ids stay in the cancellation).
             application.status_reason = self.residue_reason(
-                application.status_reason or "Profile application cancelled", pending
+                "Profile application cancelled", pending
             )
 
         bound = self if session is None else self.bound(session)
@@ -679,8 +681,9 @@ class FleetProfileAdapter:
         decision = transition(before, event, self, now)
         row = decision.row
         if not row.terminal:
-            # The first stop belongs to the worker's next pass, which is due now.
-            row = replace(row, next_action_at=now)
+            # The first stop belongs to the worker's next pass, which is due now
+            # (no stored clock: an instant spelled two ways compares as later).
+            row = replace(row, next_action_at=None)
         self.apply(application, before, row, now, reason=reason, session=session)
         return row
 
@@ -740,19 +743,16 @@ class FleetProfileAdapter:
         row = self.lifecycle(application, progress, now)
         if row.state is not State.NEEDS_OPERATOR:
             return row
-        after = replace(
+        admitting = progress is not None and progress.admission_pending
+        after = replace(row, state=State.BACKOFF if admitting else State.RUNNING)
+        self.apply(
+            application,
             row,
-            state=State.BACKOFF
-            if progress is not None and progress.admission_pending
-            else State.RUNNING,
+            after,
+            now,
+            visible="queued" if admitting else "running",
+            session=session,
         )
-        label = (
-            "queued"
-            if progress is not None and progress.admission_pending
-            else "running"
-        )
-        self.apply(application, row, after, now, session=session)
-        application.state = label
         return after
 
 

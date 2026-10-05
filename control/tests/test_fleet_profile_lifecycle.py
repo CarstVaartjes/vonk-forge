@@ -475,3 +475,127 @@ def test_an_application_row_is_written_only_through_the_adapter() -> None:
         if write.path.endswith("fleet_profiles.py")
     ]
     assert writes == []
+
+
+# ----------------------------------------- the exact rows an older Controller left
+
+
+def _legacy_cancel_parking(world: _World) -> None:
+    """Audit C9: a cancel parked as ``waiting-for-operator`` because it "cannot
+    reconcile" its child: the load, its cancellation and the document all wait."""
+
+    requested = world.now[0].isoformat()
+
+    def legacy(progress) -> None:
+        progress["cancellation"] = {
+            "request_key": _uuid(720),
+            "actor": "admin",
+            "requested_at": requested,
+            "state": "cancelling",
+            "cause": "operator",
+            "workload_intent_ordinal": (progress.get("workload_intent_ordinal") or 0)
+            + 1,
+        }
+        progress["switch_adapter"]["state"] = "waiting-for-operator"
+        progress["switch_adapter"]["status_reason"] = (
+            "Cancellation cannot reconcile Run/Switch child state unknown"
+        )
+
+    world.edit_progress(legacy)
+    world.edit(
+        state="waiting-for-operator",
+        status_reason="Cancellation cannot reconcile Run/Switch child state unknown",
+    )
+
+
+def test_a_legacy_parked_cancel_leaves_the_wait_and_completes(tmp_path) -> None:
+    world = _World(tmp_path)
+    _stuck_child(world)
+    _legacy_cancel_parking(world)
+    assert world.row().state == "waiting-for-operator"
+
+    world.now[0] += timedelta(seconds=6)
+    world.service.tick()
+    assert world.row().state != "waiting-for-operator"  # on the first pass
+    states = []
+    for _ in range(200):
+        world.now[0] += timedelta(seconds=15)
+        world.service.tick()
+        states.append(world.row().state)
+        if states[-1] == "cancelled":
+            break
+    assert states[-1] == "cancelled"
+    assert "waiting-for-operator" not in states
+    final = world.service.application(world.id)
+    assert final.cancellation is not None and final.cancellation.state == "cancelled"
+    assert final.status_reason is not None and "effect unknown" in final.status_reason
+    assert (
+        "its stop" not in final.status_reason
+        or final.status_reason.count("cancelled") == 1
+    )
+
+
+def test_a_legacy_parked_cancel_ends_as_soon_as_its_child_does(tmp_path) -> None:
+    world = _World(tmp_path)
+    _legacy_cancel_parking(world)
+    for _ in range(12):
+        world.now[0] += timedelta(seconds=10)
+        world.service.tick()
+        world.run_switch.tick()
+        if world.row().state == "cancelled":
+            break
+    assert world.row().state == "cancelled"
+    assert "effect unknown" not in (world.row().status_reason or "")
+
+
+def test_a_legacy_wait_whose_child_already_ended_records_that_ending(tmp_path) -> None:
+    """Audit C10, the terminal-child shape the old parked-application observer
+    handled: the parent heals, and the ordinary tick records what its child did."""
+
+    world = _World(tmp_path)
+    child_id = world.child_id()
+    with world.sessions.begin() as session:
+        child = session.get(Job, child_id)
+        assert child is not None
+        child.state = "failed"
+        child.status_reason = "run-switch.the-child-ended"
+    world.edit(state="waiting-for-operator", status_reason="the child is parked")
+
+    for _ in range(4):
+        world.service.tick()
+        if world.row().state == "failed":
+            break
+    ended = world.row()
+    assert ended.state == "failed"  # (shown as queued while a retry is due)
+    assert "run-switch.the-child-ended" in (ended.status_reason or "")
+
+
+def test_a_child_that_is_a_legacy_wait_is_mirrored_as_running_not_as_a_wait(
+    tmp_path,
+) -> None:
+    """Audit C10, the mirror itself: a Run/Switch child an older Controller left in
+    ``waiting-for-operator``.  The profile never mirrors that wait; its child is
+    healed by its own tick, and the load follows."""
+
+    world = _World(tmp_path)
+    child_id = world.child_id()
+    with world.sessions.begin() as session:
+        child = session.get(Job, child_id)
+        assert child is not None and isinstance(child.result, dict)
+        result = dict(child.result)
+        result.pop("observation_due_at", None)
+        child.result = result
+        child.state = "waiting-for-operator"
+    for _ in range(3):
+        world.service.tick()
+        view = world.service.application(world.id)
+        assert view.state != "waiting-for-operator"
+        assert view.progress.switch_adapter is not None
+        assert view.progress.switch_adapter.state != "waiting-for-operator"
+    world.run_switch.tick()  # the child's own tick heals it
+    world.now[0] += timedelta(seconds=10)
+    world.service.tick()
+    with world.sessions() as session:
+        healed = session.get(Job, child_id)
+        assert healed is not None and healed.state != "waiting-for-operator"
+    assert world.service.application(world.id).state != "waiting-for-operator"
