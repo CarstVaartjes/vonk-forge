@@ -82,6 +82,7 @@ from .lifecycle_vocabulary import (
     is_live,
     is_state,
     live_words,
+    state_adopter,
     stored_words,
 )
 from .outcome import (
@@ -314,6 +315,7 @@ __all__ = [
     "recipe_job_manifest_document",
     "recipe_job_manifest_sha256",
     "schema_validator",
+    "state_adopter",
     "stored_words",
     "validate_compiled_execution_plan",
     "validate_result_for_operation",

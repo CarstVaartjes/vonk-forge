@@ -121,3 +121,24 @@ def test_a_query_finds_old_and_new_rows_by_meaning() -> None:
         "waiting",
         "cancelling",
     )
+
+
+def test_a_model_validates_an_old_row_as_the_word_it_means_now() -> None:
+    from typing import Annotated, Literal
+
+    from pydantic import BaseModel, BeforeValidator, ConfigDict
+    from vonk_agent_protocol import state_adopter
+
+    class View(BaseModel):
+        model_config = ConfigDict(strict=True, extra="forbid")
+        state: Annotated[
+            Literal[LifecycleState.QUEUED, LifecycleState.BACKOFF],
+            BeforeValidator(state_adopter(LifecycleSubject.MODEL_CACHE_OPERATION)),
+        ]
+
+    assert View(state="partial").state is LifecycleState.BACKOFF
+    assert View.model_validate_json('{"state": "backoff"}').state is (
+        LifecycleState.BACKOFF
+    )
+    with pytest.raises(ValueError):
+        View(state="succeeded")

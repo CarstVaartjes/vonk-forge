@@ -17,8 +17,8 @@ already deployed; :data:`LEGACY_WAIT_STATE` is the wire spelling of "unknown".
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from typing import NamedTuple
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, NamedTuple
 
 from .wire_model import WireEnum, WireModel
 
@@ -342,6 +342,24 @@ def check_words(
     return stored_words(subject, states)
 
 
+def state_adopter(subject: LifecycleSubject) -> Callable[[Any], Any]:
+    """A pydantic ``BeforeValidator`` that adopts a retired spelling of ``subject``.
+
+    A contract model that carries a stored state (a persisted document, an API
+    view built from a row) validates a row written before the rename as the
+    word it means now; anything else passes through for the field to judge.
+    """
+
+    def adopt(value: Any) -> Any:
+        if isinstance(value, str):
+            adopted = adopt_state(subject, value)
+            if adopted is not None:
+                return adopted.state
+        return value
+
+    return adopt
+
+
 def input_state(word: str) -> LifecycleState | None:
     """A state named by a caller: a core word, or a retired spelling (one release)."""
 
@@ -617,5 +635,6 @@ __all__ = [
     "is_live",
     "is_state",
     "live_words",
+    "state_adopter",
     "stored_words",
 ]
