@@ -98,6 +98,7 @@ function job(input: Partial<ArtifactJob> = {}): ArtifactJob {
     timeout_seconds: 3600,
     created_at: "2026-08-28T12:00:00Z",
     updated_at: "2026-08-28T12:01:00Z",
+    supported_actions: [],
     ...input,
   };
 }
