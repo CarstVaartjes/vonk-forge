@@ -133,6 +133,7 @@ from .storage_demands import (
     StorageRelief,
     spark_scope,
 )
+from .worker_memory_contract import WorkerMemoryComponent
 
 _LOGGER = logging.getLogger(__name__)
 ACTOR = "system:storage-sweep"
@@ -523,6 +524,9 @@ class UnusedStorageCollector:
         self._rounds: dict[str, _Round] = {}
         self._paused_until: dict[str, datetime] = {}
         self._last_outcome: dict[str, str] = {}
+
+    def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
+        return {WorkerMemoryComponent.STORAGE_COLLECTION_ROUNDS: len(self._rounds)}
 
     def tick(self) -> bool:
         """Look at free space at most once per scan; True when anything was removed."""

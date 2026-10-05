@@ -73,6 +73,7 @@ from .runtime_image_preparation import (
     OciLayoutImageTransport,
 )
 from .strict_json import read_stored_model
+from .worker_memory_contract import WorkerMemoryComponent
 
 # An availability operation whose image is the catalog's prebuilt one: the
 # Controller pulls it, so it holds no Spark and takes no builder slot while it
@@ -171,6 +172,10 @@ class RecipeImageAvailabilityScheduler:
 
     def _run(self, claim: Any) -> None:
         self._service.run_claim(claim)
+
+    def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
+        with self._lock:
+            return {WorkerMemoryComponent.IMAGE_PREPARATION_FUTURES: len(self._futures)}
 
     def close(self) -> None:
         """Stop dispatch and release threads; durable claims remain restartable."""

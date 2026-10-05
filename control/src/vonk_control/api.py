@@ -144,6 +144,7 @@ from .settings import (
     RECIPE_LIBRARY_API_URL,
     RECIPE_LIBRARY_ASSET_URL,
     RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
+    WORKER_MEMORY_REPORT_MAX_AGE_SECONDS,
     Settings,
 )
 from .source_bundles import DatabaseSourceBundleStore
@@ -1253,6 +1254,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         stored_runtime_image_resolver,
     )
     from .telemetry import TelemetryRepository
+    from .worker_memory import read_worker_memory_report, worker_memory_report_path
 
     if settings is None:
         settings = Settings.from_env_and_secrets()
@@ -1426,6 +1428,15 @@ def production_app(settings: Settings | None = None) -> FastAPI:
 
     def refresh_metrics() -> None:
         operational_metrics.refresh()
+        now = datetime.now(UTC)
+        metrics.set_worker_memory(
+            read_worker_memory_report(
+                worker_memory_report_path(settings.state_path),
+                now=now,
+                max_age_seconds=WORKER_MEMORY_REPORT_MAX_AGE_SECONDS,
+            ),
+            now,
+        )
         refresh_fleet_metrics(metrics, visual_fleet.read())
         now = datetime.now(UTC)
         with sessions() as session:

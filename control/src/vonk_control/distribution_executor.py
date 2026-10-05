@@ -57,6 +57,7 @@ from .runtime_image_preparation import (
     RuntimeImageStorage,
 )
 from .strict_json import read_stored_model
+from .worker_memory_contract import WorkerMemoryComponent
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1201,6 +1202,13 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         self._runtime_image_futures: dict[
             tuple[str, int, int], tuple[Future[Mapping[str, object] | None], str]
         ] = {}
+
+    def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
+        return {
+            WorkerMemoryComponent.RUNTIME_IMAGE_FUTURES: len(
+                self._runtime_image_futures
+            )
+        }
 
     def close(self) -> None:
         """Leave image preparation checkpoints resumable during shutdown."""

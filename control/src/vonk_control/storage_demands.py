@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from .worker_memory_contract import WorkerMemoryComponent
+
 _LOGGER = logging.getLogger(__name__)
 
 NAS_MODELS = "nas:model"
@@ -91,6 +93,10 @@ class StorageDemands:
                 self._items[(scope, source, subject)] = demand
         except Exception:  # asking for space is best effort
             _LOGGER.warning("could not record a storage demand", exc_info=True)
+
+    def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
+        with self._lock:
+            return {WorkerMemoryComponent.STORAGE_DEMANDS: len(self._items)}
 
     def active(self) -> list[StorageDemand]:
         now = self._clock()

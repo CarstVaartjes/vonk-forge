@@ -144,6 +144,7 @@ from .revision_images import revision_images
 from .runtime_init import RuntimeSecretError, read_runtime_secret
 from .storage_demands import NAS_MODELS, StorageDemands
 from .strict_json import read_stored_model, serialize_json_value
+from .worker_memory_contract import WorkerMemoryComponent
 
 SCHEMA_VERSION = 2
 SOURCE_POLICY = "nas-first"
@@ -5181,6 +5182,20 @@ class ModelCacheService:
             )
         # The part's bytes are durably in the assembled file: free the space now.
         part.unlink(missing_ok=True)
+
+    def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
+        """Entry counts of the service's long-lived collections, for the worker report."""
+
+        return {
+            WorkerMemoryComponent.MODEL_CACHE_BACKGROUND_OPERATIONS: len(
+                self._background_operations
+            ),
+            WorkerMemoryComponent.MODEL_CACHE_CANCEL_EVENTS: len(self._cancel_events),
+            WorkerMemoryComponent.MODEL_CACHE_PROGRESS_CHECKPOINTS: len(
+                self._progress_checkpoint_at
+            ),
+            WorkerMemoryComponent.MODEL_CACHE_REVERIFIED: len(self._reverified_at),
+        }
 
     def _transfer_stop(self, operation_id: str) -> threading.Event:
         with self._lock:
