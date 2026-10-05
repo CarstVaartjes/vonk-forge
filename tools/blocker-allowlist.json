@@ -22,7 +22,7 @@
   },
   "max_debt": 12,
   "debt_ceiling": {
-    "total": 400,
+    "total": 303,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "operator_waits": [
@@ -794,58 +794,13 @@
       ]
     },
     {
-      "family": "model.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping uncertainty (missing receipt, stale stored plan, persisted state, changed scope) that rule 5 of the lifecycle core turns into unknown-then-reconcile. Debt: the ceiling only falls. Audit notes: Catalog/recipe/model resolution failures. Missing or inconsistent catalog bookkeeping fails the whole cache request instead of resolving to unknown and retrying.",
+      "family": "model.artifact-identity",
+      "category": "security-edge",
+      "reason": "Artifact identity and source trust validated before any byte is fetched or served: the digest and size pins that ingress verification relies on must exist, relative paths cannot traverse (no '..', no absolute or backslash path, no NUL), sources must be an allowed scheme with no credentials, the canonical huggingface.co or GitHub API authority, and a mutable (non-pinned) revision is never accepted. Fail closed by design: bytes without a verifiable pin are never downloaded. Damaged persisted copies never reach these checks as a blocker: stored manifests are read through read_or_rebuild.",
       "sites": [
-        ["control/src/vonk_control/model_cache.py", "ArtifactLifecycleError", "ModelCacheService._accept_model_removal", "artifact.deletion_fence_lost", 1],
-        ["control/src/vonk_control/model_cache.py", "ArtifactLifecycleError", "ModelCacheService._finish_model_removal_in_session", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/model_cache.py", "CatalogRevisionContractError", "ModelCacheService._recipe_document", "revision-is-not-active", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService._accept_model_removal", "message", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService._finish_model_removal_in_session", "message", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService._manifest_for_set", "model_cache.identity_conflict", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService._require_model_sets_open", "message", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService._resolve_requested_manifest", "model_cache.pin_mismatch", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService._run_download", "model_cache.set_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService._schedule_background_download", "model_cache.set_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService.check_access_and_resume", "model_cache.access_recheck_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService.check_access_and_resume", "model_cache.set_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService.remove_model_selector", "message", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService.resolve_artifact_set", "model_cache.pin_mismatch", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService.resolve_latest_cached", "model_cache.pin_mismatch", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService.retry", "model_cache.set_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService._ensure_transfer_state", "model_cache.operation_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService._manifest_for_set", "model_cache.entry_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService._operation_transfer_snapshot", "model_cache.operation_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService._persist_cancellation", "model_cache.operation_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService._run_download", "model_cache.operation_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService._schedule_background_download", "model_cache.operation_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService._set_operation_progress", "model_cache.operation_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService._try_settle_cancellation", "model_cache.operation_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.cached_artifact_file", "model_cache.artifact_missing", 2],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.check_access_and_resume", "model_cache.operation_missing", 3],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.get_entry", "model_cache.entry_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.get_operation", "model_cache.operation_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.get_operator_operation", "model_cache.operation_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.get_operator_request", "model_cache.operation_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.resolve_verified_artifact_set", "model_cache.entry_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.retry", "model_cache.operation_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ArtifactSetManifest.from_document", "message", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ArtifactSpec.from_manifest", "model_cache.manifest_invalid", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService._artifact_from_catalog", "model_cache.artifact_invalid", 2],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService._check_upstream_revision", "model_cache.upstream_revision_invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService._collect_model_definitions", "model_cache.model_definition_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService._collect_model_definitions", "model_cache.model_pin_invalid", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService._parts_from_catalog", "model_cache.artifact_invalid", 2],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService._recipe_document", "model_cache.recipe_revision_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService._resolve_model_selector_in_session", "model_cache.identity_invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.preparation_evidence", "model_cache.model_pin_missing", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.resolve_artifact_set", "model_cache.fixture_sources_forbidden", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.resolve_artifact_set", "model_cache.recipe_model_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.resolve_artifact_set", "model_cache.recipe_revision_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.resolve_latest_cached", "model_cache.model_variant_invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.resolve_latest_cached", "model_cache.recipe_identity_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.resolve_latest_cached", "model_cache.recipe_revision_invalid", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_github_release_asset_binding", "model_cache.source_invalid", 3],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_github_repository_parts", "model_cache.source_invalid", 2],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_source_for_catalog_artifact", "model_cache.artifact_invalid", 1],
@@ -853,29 +808,82 @@
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_source_for_catalog_artifact", "model_cache.source_invalid", 5],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_validate_artifact", "model_cache.artifact_invalid", 2],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_validate_artifact", "model_cache.revision_missing", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_validate_manifest", "model_cache.artifact_count", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_validate_manifest", "model_cache.artifact_duplicate", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_validate_parts", "model_cache.artifact_invalid", 2],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_validate_source", "model_cache.source_invalid", 4],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._advance_model_removal_step", "model_cache.payload_invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._claim_operations", "model_cache.payload_invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._defer_model_removal", "model_cache.payload_invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._open_source", "model_cache.source_invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._validate_http_download", "model_cache.source_invalid", 2]
+      ]
+    },
+    {
+      "family": "model.removal-guard",
+      "category": "security-edge",
+      "reason": "Destructive-effect owner guard: removal reservation fences (fence authority) and the in-use refusal of a model removal. Fail closed for destructive effects only: when ownership or references are unknown the object is kept, and the refusal carries recovery=retry where the cause is transient. A changed scope after planning is not here: it defers the removal (unknown, retried by the lifecycle core).",
+      "sites": [
+        ["control/src/vonk_control/model_cache.py", "ArtifactLifecycleError", "ModelCacheService._accept_model_removal", "artifact.deletion_fence_lost", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService._accept_model_removal", "message", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService._require_model_sets_open", "message", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService.remove_model_selector", "message", 1]
+      ]
+    },
+    {
+      "family": "model.served-file-allowlist",
+      "category": "security-edge",
+      "reason": "The Controller-to-agent serving seam: only a file the set's manifest lists, under a validated relative path and exact digests, is served. A path, digest or (object, path) pair the manifest does not list is refused (path safety, no caller-controlled filesystem path).",
+      "sites": [
+        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.cached_artifact_file", "model_cache.artifact_missing", 2]
+      ]
+    },
+    {
+      "family": "model.lookup-by-id",
+      "category": "input-validation",
+      "reason": "A request names an identity the cache or catalog does not hold (operation id, cache entry, selector, recipe revision, model pin, variant): the defined answer is the 404/422 of that request, which its caller (API route, distribution, run/switch, image availability) already translates. Nothing is blocked or stranded: the identity is requested again (download, catalog sync) request-led. Worker-internal lookups of a vanished row return and skip instead (unknown, rule 5); and an entry whose stored manifest is unreadable is rebuilt or listed as unknown. Not convertible without editing in-flight distribution and image-availability callers that rely on NotFound.",
+      "sites": [
+        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService._manifest_for_set", "model_cache.entry_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.check_access_and_resume", "model_cache.operation_missing", 3],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.get_entry", "model_cache.entry_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.get_operation", "model_cache.operation_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.get_operator_operation", "model_cache.operation_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.get_operator_request", "model_cache.operation_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.resolve_verified_artifact_set", "model_cache.entry_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheNotFound", "ModelCacheService.retry", "model_cache.operation_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService._collect_model_definitions", "model_cache.model_definition_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService._collect_model_definitions", "model_cache.model_pin_invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService._recipe_document", "model_cache.recipe_revision_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.resolve_artifact_set", "model_cache.recipe_model_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.resolve_artifact_set", "model_cache.recipe_revision_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.resolve_latest_cached", "model_cache.model_variant_invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.resolve_latest_cached", "model_cache.recipe_identity_missing", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ModelCacheService.resolve_latest_cached", "model_cache.recipe_revision_invalid", 1]
+      ]
+    },
+    {
+      "family": "model.request-shape",
+      "category": "input-validation",
+      "reason": "A malformed or contradictory user request at submit time: a manifest document or write-side envelope that does not satisfy the contract, pins that disagree with each other or with the requested artifact-set identity, an access recheck on an operation that is not in the terminal access-failure state. Refused when the request is accepted, never while reading stored state.",
+      "sites": [
+        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService._resolve_requested_manifest", "model_cache.pin_mismatch", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService.check_access_and_resume", "model_cache.access_recheck_unavailable", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService.resolve_artifact_set", "model_cache.pin_mismatch", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheConflict", "ModelCacheService.resolve_latest_cached", "model_cache.pin_mismatch", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ArtifactSetManifest.from_document", "message", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "ArtifactSpec.from_manifest", "model_cache.manifest_invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_validate_manifest", "model_cache.artifact_count", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionError", "_validate_manifest", "model_cache.artifact_duplicate", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "_write_operation_payload", "model_cache.payload_invalid", 1]
+      ]
+    },
+    {
+      "family": "model.transfer-retried",
+      "category": "already-retried",
+      "reason": "A provider transfer failure (HTTP error, unreachable source, GitHub release transfer) raised with recovery=resume and a retry hint: the transfer boundary (_finish_failed) reports it as a retryable outcome and the lifecycle core reschedules the exact transfer with bounded backoff, resuming the retained bytes. The owner retries it; it never reaches an operator.",
+      "sites": [
         ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._download_parallel_ranges", "model_cache.source_unavailable", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._download_sequential", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._finish_model_removal_in_session", "model_cache.removal_checkpoint_invalid", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._open_github_release_asset", "model_cache.source_unavailable", 2],
         ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._open_http_response", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._open_source", "model_cache.source_invalid", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._open_source", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._persist_model_removal_checkpoint", "model_cache.removal_checkpoint_invalid", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._raise_github_http_status", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._validate_github_release_asset", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._validate_http_download", "model_cache.source_invalid", 2],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "_removal_document", "model_cache.payload_invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "_validated_operation_payload", "model_cache.payload_invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "_validated_operation_payload", "model_cache.removal_plan_changed", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "_validated_operation_progress", "model_cache.progress_invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "_write_operation_payload", "model_cache.payload_invalid", 1]
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageError", "ModelCacheService._validate_github_release_asset", "model_cache.source_unavailable", 1]
       ]
     },
     {

@@ -13,7 +13,7 @@ from vonk_control.catalog_revision_contract import (
     read_catalog_document,
     read_catalog_projection,
 )
-from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
+from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_contract import (
     ModelCacheDownloadPayload,
     parse_model_cache_payload,
@@ -49,7 +49,7 @@ def test_catalog_revision_projection_is_persisted_and_read_as_canonical_model(
             read_catalog_projection(stored)
 
 
-def test_model_cache_operation_payload_round_trips_through_database_and_rejects_malformed_state(
+def test_model_cache_operation_payload_round_trips_through_database_and_reads_malformed_state_as_unknown(
     tmp_path: Path,
 ) -> None:
     sessions = _database(tmp_path)
@@ -74,14 +74,20 @@ def test_model_cache_operation_payload_round_trips_through_database_and_rejects_
         stored.payload = {"schema_version": 2, "source_policy": "nas-first"}
         session.commit()
 
-    with pytest.raises(ModelCacheStorageError, match="payload is invalid"):
-        cache.get_operation(operation.id)
+    # A damaged document is unknown, not a failure to read: the row still renders
+    # (from its own columns) and its other bookkeeping is untouched.
+    unreadable = cache.get_operation(operation.id)
+    assert unreadable.id == operation.id
+    assert unreadable.artifact_set_sha256 == operation.artifact_set_sha256
+    assert unreadable.blockers == ()
 
     with sessions.begin() as session:
         stored = session.get(ModelCacheOperation, operation.id)
         assert stored is not None
         stored.payload = valid_payload
         stored.progress = {"schema_version": 2, "phase": "queued"}
-    with pytest.raises(ModelCacheStorageError, match="progress is invalid"):
-        cache.get_operation(operation.id)
+    # A damaged progress measurement restarts from zero; the next sample rebuilds it.
+    restarted = cache.get_operation(operation.id)
+    assert restarted.progress["phase"] == "queued"
+    assert restarted.progress["downloaded_bytes"] == 0
     cache.close()
