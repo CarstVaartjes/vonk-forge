@@ -9,9 +9,16 @@ superseded, possibly by a crash), the record is a residue:
 * a residue with **no proven effect on a Spark** is released here, the same
   way whichever attempt left it behind;
 * a residue that **may have an effect** (installed or partially installed
-  files, a running workload) is never released here: the exact
-  reconcile/cleanup path owns it, and the fleet view reports it
-  (``install.partial``) instead of a silent wait.
+  files, a running workload) is never released directly here. A leftover
+  *incomplete installation* (failed, partial, or installed with a rank not
+  installed or short of its payload) that nothing owns (no active operation on
+  its Sparks, no run that has not stopped) and that nobody has touched for the
+  retention grace, or that a later installation of the same recipe on the same
+  Sparks superseded, is queued to the lifecycle's own uninstall, the same path
+  the retention sweep uses. Until then, and when the uninstall is refused (for
+  example because its rank membership no longer matches the plan), the fleet
+  view names it (``install.partial`` with typed evidence) instead of a silent
+  wait.
 
 Separately, a *reservation* (disk, port, memory) is bookkeeping and not an
 effect: when its owner is dead (a cancelled or failed profile application, a
@@ -44,13 +51,16 @@ operations (the agent job service retires them).
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable, Collection
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .fleet_projection import _installation_payload_expectations
 from .logging import log_event
 from .models import (
     ArtifactDistributionAssignment,
@@ -58,7 +68,9 @@ from .models import (
     InstallationNode,
     Job,
     RecipeInstallation,
+    RecipeRun,
 )
+from .recipe_action_plans import UninstallPlan
 from .reservation_owners import (
     ADOPTION_WINDOW,
     release_covered_installation_claims,
@@ -66,6 +78,10 @@ from .reservation_owners import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+#: How long an unowned incomplete installation is left alone before it is
+#: removed (the retention grace: a retry or a person may still be using it).
+LEFTOVER_GRACE = timedelta(hours=24)
+_LEFTOVER_ACTOR = "system:residue-sweep"
 _ACTIVE_JOB_STATES = ("queued", "running", "waiting", "waiting-for-operator")
 # Operations that may own an installation plan or a distribution grant.
 _OWNER_JOB_KINDS = (
@@ -193,6 +209,55 @@ def superseded_plan_ids(
     return frozenset(superseded)
 
 
+class LeftoverRemoval(Protocol):
+    """The recipe lifecycle's uninstall, as the residue sweep uses it."""
+
+    def preview_uninstall(self, installation_id: str) -> UninstallPlan: ...
+
+    def uninstall(
+        self,
+        installation_id: str,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+        unattended_guard: Callable[[Session], None] | None = None,
+    ) -> object: ...
+
+
+def incomplete_installation_ids(session: Session) -> tuple[str, ...]:
+    """Installations whose group is incomplete, by the fleet view's own rule.
+
+    Failed or partial installations, and installed ones with a rank that is not
+    installed or is short of the admitted payload.
+    """
+
+    found: list[str] = []
+    for installation in session.scalars(
+        select(RecipeInstallation).where(
+            RecipeInstallation.state.in_(("installed", "partial", "failed"))
+        )
+    ):
+        if installation.state != "installed":
+            found.append(installation.id)
+            continue
+        expectations = _installation_payload_expectations(installation.plan)
+        if any(
+            node.state != "installed"
+            or (
+                node.node_id in expectations
+                and node.installed_bytes < expectations[node.node_id]
+            )
+            for node in session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == installation.id
+                )
+            )
+        ):
+            found.append(installation.id)
+    return tuple(found)
+
+
 class AttemptResidueReconciler:
     """One sweep, one rule, for every per-attempt record kind."""
 
@@ -201,16 +266,19 @@ class AttemptResidueReconciler:
         sessions: sessionmaker[Session],
         *,
         abandon_never_installed: Callable[[str], object],
+        removal: LeftoverRemoval | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._sessions = sessions
         self._abandon = abandon_never_installed
+        self._removal = removal
         self._clock = clock
 
     def tick(self) -> bool:
         """Release every current residue; True when anything was released."""
 
         released = self._never_installed_plans()
+        released = self._incomplete_installations() or released
         released = self._dead_owner_claims() or released
         return self._ownerless_grants() or released
 
@@ -276,6 +344,126 @@ class AttemptResidueReconciler:
             )
             released = True
         return released
+
+    def _leftover_candidates(self) -> list[tuple[str, str]]:
+        """Unowned incomplete installations that are due, with why."""
+
+        now = self._clock()
+        due: list[tuple[str, str]] = []
+        with self._sessions() as session:
+            incomplete = incomplete_installation_ids(session)
+            if not incomplete:
+                return []
+            owned = _owned_nodes(session)
+            superseded = superseded_plan_ids(session, incomplete)
+            for installation_id in incomplete:
+                nodes = set(
+                    session.scalars(
+                        select(InstallationNode.node_id).where(
+                            InstallationNode.installation_id == installation_id
+                        )
+                    )
+                )
+                if not nodes or owned.intersection(nodes):
+                    continue
+                if session.scalar(
+                    select(RecipeRun.id)
+                    .where(
+                        RecipeRun.installation_id == installation_id,
+                        RecipeRun.state != "stopped",
+                    )
+                    .limit(1)
+                ):
+                    continue
+                if installation_id in superseded:
+                    due.append((installation_id, "superseded"))
+                elif self._quiet_since(session, nodes, now - LEFTOVER_GRACE) and (
+                    self._untouched_since(
+                        session, installation_id, now - LEFTOVER_GRACE
+                    )
+                ):
+                    due.append((installation_id, "unowned-past-grace"))
+        return due
+
+    @staticmethod
+    def _untouched_since(
+        session: Session, installation_id: str, since: datetime
+    ) -> bool:
+        installation = session.get(RecipeInstallation, installation_id)
+        if installation is None:
+            return False
+        stamps = [installation.updated_at]
+        stamps.extend(
+            session.scalars(
+                select(InstallationNode.updated_at).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+        )
+        return all(
+            (stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)) < since
+            for stamp in stamps
+        )
+
+    def _incomplete_installations(self) -> bool:
+        """Queue the lifecycle's uninstall for leftover incomplete installations.
+
+        The uninstall re-proves, under its own locks, that nothing runs or is
+        in flight on those Sparks; a refusal (blocked plan, changed
+        membership, a fault) keeps the installation for the next tick, and the
+        fleet view keeps naming it.
+        """
+
+        if self._removal is None:
+            return False
+        queued = False
+        for installation_id, why in self._leftover_candidates():
+            try:
+                plan = self._removal.preview_uninstall(installation_id)
+                if not plan.allowed:
+                    code = plan.blockers[0].code if plan.blockers else "not allowed"
+                    self._log(
+                        "incomplete-installation",
+                        installation_id,
+                        "kept",
+                        reason=str(code),
+                    )
+                    continue
+
+                def still_unowned(
+                    session: Session, owner: str = installation_id
+                ) -> None:
+                    nodes = set(
+                        session.scalars(
+                            select(InstallationNode.node_id).where(
+                                InstallationNode.installation_id == owner
+                            )
+                        )
+                    )
+                    if _owned_nodes(session).intersection(nodes):
+                        raise RuntimeError("an operation now owns these Sparks")
+
+                self._removal.uninstall(
+                    installation_id,
+                    plan_digest=plan.plan_digest,
+                    actor=_LEFTOVER_ACTOR,
+                    request_id=str(uuid.uuid4()),
+                    unattended_guard=still_unowned,
+                )
+            except (
+                KeyError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                SQLAlchemyError,
+            ) as error:  # a conflict (RecipeOperationConflict) is a RuntimeError
+                self._log("incomplete-installation", installation_id, "refused", error)
+                continue
+            self._log(
+                "incomplete-installation", installation_id, "released", reason=why
+            )
+            queued = True
+        return queued
 
     @staticmethod
     def _quiet_since(session: Session, nodes: set[str], since: datetime) -> bool:

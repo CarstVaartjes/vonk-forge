@@ -475,6 +475,7 @@ def assemble_production_worker(
         residue_cleanup=AttemptResidueReconciler(
             sessions,
             abandon_never_installed=lifecycle.abandon_never_installed,
+            removal=lifecycle,
             clock=clock,
         ).tick,
         fleet_profiles=fleet_profiles,

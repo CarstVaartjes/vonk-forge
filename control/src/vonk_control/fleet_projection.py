@@ -185,6 +185,85 @@ _CERTIFICATE_OFFLINE_REASONS: Mapping[CertificateState, OfflineReason | None] = 
 }
 
 
+_INSTALL_PARTIAL_MAX_NAMED = 16
+_INSTALL_REASON_WORDS: dict[str, str] = {
+    "external-member": "a member is outside this fleet",
+    "mapping-incomplete": "the cluster mapping is incomplete",
+    "missing-ranks": "ranks are missing",
+    "unexpected-ranks": "ranks are unexpected",
+    "rank-membership-mismatch": "ranks are on the wrong Sparks",
+    "installation-not-installed": "the installation is not installed",
+    "rank-not-installed": "a rank is not installed",
+    "rank-incomplete-bytes": "a rank is short of its payload",
+}
+
+
+def _install_partial_warnings(
+    installed: Sequence[RecipePresence],
+) -> list[ProjectionReason]:
+    """One warning per incomplete installation group on the Spark.
+
+    Each names the installation, the rank this Spark holds and the reason, as
+    typed evidence and in the text, so the owner sees which one to act on. A
+    flood of leftovers is capped and summarized, keeping the warning list
+    bounded.
+    """
+
+    incomplete = [value for value in installed if not value.complete]
+    named = incomplete[:_INSTALL_PARTIAL_MAX_NAMED]
+    warnings: list[ProjectionReason] = []
+    for value in named:
+        reason = value.degraded_reason
+        if reason is None:
+            reason = "installation-not-installed"
+        words = _INSTALL_REASON_WORDS[reason]
+        ranks = (
+            f" (rank {', '.join(str(rank) for rank in value.affected_ranks)})"
+            if value.affected_ranks
+            else ""
+        )
+        detail = (
+            f"{value.title} installation {value.installation_id[:8]} "
+            f"rank {value.rank} of {value.expected_rank_count} is incomplete: "
+            f"{words}{ranks} "
+            f"[{value.group_state}/{value.rank_state}]"
+        )
+        warnings.append(
+            ProjectionReason(
+                code="install.partial",
+                detail=detail[:256],
+                severity="warning",
+                install_partial=InstallPartialEvidence(
+                    installation_id=value.installation_id,
+                    recipe_id=value.recipe_id,
+                    recipe_revision_id=value.recipe_revision_id,
+                    title=value.title,
+                    rank=value.rank,
+                    expected_rank_count=value.expected_rank_count,
+                    present_ranks=value.present_ranks,
+                    affected_ranks=value.affected_ranks,
+                    reason=reason,
+                    group_state=value.group_state,
+                    rank_state=value.rank_state,
+                    installed_bytes=value.installed_bytes,
+                    required_bytes=value.required_bytes,
+                ),
+            )
+        )
+    if len(incomplete) > len(named):
+        warnings.append(
+            ProjectionReason(
+                code="install.partial",
+                detail=(
+                    f"{len(incomplete) - len(named)} more recipe installation "
+                    "groups are incomplete."
+                ),
+                severity="warning",
+            )
+        )
+    return warnings
+
+
 def _install_degraded_reason(
     value: str | None,
 ) -> InstallDegradedReason | None:
@@ -226,6 +305,27 @@ def _low_clock_detail(sample: TelemetrySampleView) -> str:
     )
 
 
+class InstallPartialEvidence(_StrictModel):
+    """Why one recipe installation group on a Spark is not complete."""
+
+    installation_id: Text128
+    recipe_id: Text128
+    recipe_revision_id: Text128
+    title: Text200
+    #: The rank this Spark holds in the installation.
+    rank: Rank
+    expected_rank_count: int = Field(ge=1, le=_MAX_FLEET_NODES)
+    present_ranks: list[Rank] = Field(max_length=_MAX_FLEET_NODES)
+    #: Ranks the reason names (not installed, or short of their payload);
+    #: empty for a reason about the group as a whole.
+    affected_ranks: list[Rank] = Field(max_length=_MAX_FLEET_NODES)
+    reason: InstallDegradedReason
+    group_state: InstallationState
+    rank_state: InstallationState
+    installed_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    required_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+
+
 class ProjectionReason(_StrictModel):
     code: Literal[
         "node.offline",
@@ -242,6 +342,9 @@ class ProjectionReason(_StrictModel):
     ]
     detail: Text256
     severity: Literal["info", "warning", "error"]
+    #: Typed evidence for ``install.partial``: which installation, which rank
+    #: and which reason. Absent for every other code.
+    install_partial: InstallPartialEvidence | None = None
 
 
 class NodeConnection(_StrictModel):
@@ -321,6 +424,11 @@ class RecipePresence(_StrictModel):
     rank_state: InstallationState
     complete: bool
     degraded_reason: InstallDegradedReason | None = None
+    affected_ranks: list[Rank] = Field(
+        default_factory=list, max_length=_MAX_FLEET_NODES
+    )
+    installed_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    required_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
 
 
 class RunPresence(_StrictModel):
@@ -814,17 +922,22 @@ class FleetProjection:
                     fleet_node_ids=fleet_node_ids,
                 )
             )
+            affected: list[int] = []
+            expectations = _installation_payload_expectations(installation.plan)
             if reason is None and installation.state != "installed":
                 reason = "installation-not-installed"
-            if reason is None and any(node.state != "installed" for node in nodes):
-                reason = "rank-not-installed"
             if reason is None:
-                expectations = _installation_payload_expectations(installation.plan)
-                if any(
-                    node.installed_bytes < expectations[node.node_id]
+                affected = [node.rank for node in nodes if node.state != "installed"]
+                if affected:
+                    reason = "rank-not-installed"
+            if reason is None:
+                affected = [
+                    node.rank
                     for node in nodes
                     if node.node_id in expectations
-                ):
+                    and node.installed_bytes < expectations[node.node_id]
+                ]
+                if affected:
                     reason = "rank-incomplete-bytes"
             present_ranks = [node.rank for node in visible_nodes]
             member_node_ids = sorted(node.node_id for node in visible_nodes)
@@ -845,6 +958,9 @@ class FleetProjection:
                         rank_state=node.state,
                         complete=reason is None,
                         degraded_reason=reason,
+                        affected_ranks=affected,
+                        installed_bytes=node.installed_bytes,
+                        required_bytes=expectations.get(node.node_id),
                     )
                 )
         return {
@@ -1138,14 +1254,7 @@ class FleetProjection:
                         severity="warning",
                     )
                 )
-        if any(not value.complete for value in installed):
-            warnings.append(
-                ProjectionReason(
-                    code="install.partial",
-                    detail="A recipe installation group is incomplete.",
-                    severity="warning",
-                )
-            )
+        warnings.extend(_install_partial_warnings(installed))
         for detail in stalls:
             warnings.append(
                 ProjectionReason(

@@ -3445,6 +3445,47 @@ export interface components {
             /** Repository */
             repository: string;
         };
+        /**
+         * InstallPartialEvidence
+         * @description Why one recipe installation group on a Spark is not complete.
+         */
+        InstallPartialEvidence: {
+            /** Affected Ranks */
+            affected_ranks: number[];
+            /** Expected Rank Count */
+            expected_rank_count: number;
+            /**
+             * Group State
+             * @enum {string}
+             */
+            group_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
+            /** Installation Id */
+            installation_id: string;
+            /** Installed Bytes */
+            installed_bytes?: number | null;
+            /** Present Ranks */
+            present_ranks: number[];
+            /** Rank */
+            rank: number;
+            /**
+             * Rank State
+             * @enum {string}
+             */
+            rank_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "external-member" | "mapping-incomplete" | "missing-ranks" | "unexpected-ranks" | "rank-membership-mismatch" | "installation-not-installed" | "rank-not-installed" | "rank-incomplete-bytes";
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Required Bytes */
+            required_bytes?: number | null;
+            /** Title */
+            title: string;
+        };
         /** InstallationNodeChange */
         InstallationNodeChange: {
             /** Entity Id */
@@ -4858,6 +4899,7 @@ export interface components {
             code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "profile.retrying" | "run.degraded" | "recipe.update_available" | "cpu.low-clock";
             /** Detail */
             detail: string;
+            install_partial?: components["schemas"]["InstallPartialEvidence"] | null;
             /**
              * Severity
              * @enum {string}
@@ -5556,6 +5598,8 @@ export interface components {
         };
         /** RecipePresence */
         RecipePresence: {
+            /** Affected Ranks */
+            affected_ranks?: number[];
             /** Complete */
             complete: boolean;
             /** Degraded Reason */
@@ -5569,6 +5613,8 @@ export interface components {
             group_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
             /** Installation Id */
             installation_id: string;
+            /** Installed Bytes */
+            installed_bytes?: number | null;
             /** Member Node Ids */
             member_node_ids: string[];
             /** Present Ranks */
@@ -5584,6 +5630,8 @@ export interface components {
             recipe_id: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
+            /** Required Bytes */
+            required_bytes?: number | null;
             /** Role */
             role: string;
             /** Title */

@@ -8,12 +8,12 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.recipe_presence_degraded_reason_type_0 import check_recipe_presence_degraded_reason_type_0
-from ..models.recipe_presence_degraded_reason_type_0 import RecipePresenceDegradedReasonType0
-from ..models.recipe_presence_group_state import check_recipe_presence_group_state
-from ..models.recipe_presence_group_state import RecipePresenceGroupState
-from ..models.recipe_presence_rank_state import check_recipe_presence_rank_state
-from ..models.recipe_presence_rank_state import RecipePresenceRankState
+from ..models.install_partial_evidence_group_state import check_install_partial_evidence_group_state
+from ..models.install_partial_evidence_group_state import InstallPartialEvidenceGroupState
+from ..models.install_partial_evidence_rank_state import check_install_partial_evidence_rank_state
+from ..models.install_partial_evidence_rank_state import InstallPartialEvidenceRankState
+from ..models.install_partial_evidence_reason import check_install_partial_evidence_reason
+from ..models.install_partial_evidence_reason import InstallPartialEvidenceReason
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -22,48 +22,41 @@ from typing import cast
 
 
 
-T = TypeVar("T", bound="RecipePresence")
+T = TypeVar("T", bound="InstallPartialEvidence")
 
 
 
 @_attrs_define
-class RecipePresence:
-    """
+class InstallPartialEvidence:
+    """ Why one recipe installation group on a Spark is not complete.
+
         Attributes:
-            complete (bool):
+            affected_ranks (list[int]):
             expected_rank_count (int):
-            group_state (RecipePresenceGroupState):
+            group_state (InstallPartialEvidenceGroupState):
             installation_id (str):
-            member_node_ids (list[str]):
             present_ranks (list[int]):
             rank (int):
-            rank_state (RecipePresenceRankState):
+            rank_state (InstallPartialEvidenceRankState):
+            reason (InstallPartialEvidenceReason):
             recipe_id (str):
             recipe_revision_id (str):
-            role (str):
             title (str):
-            topology_name (str):
-            affected_ranks (list[int] | Unset):
-            degraded_reason (None | RecipePresenceDegradedReasonType0 | Unset):
             installed_bytes (int | None | Unset):
             required_bytes (int | None | Unset):
      """
 
-    complete: bool
+    affected_ranks: list[int]
     expected_rank_count: int
-    group_state: RecipePresenceGroupState
+    group_state: InstallPartialEvidenceGroupState
     installation_id: str
-    member_node_ids: list[str]
     present_ranks: list[int]
     rank: int
-    rank_state: RecipePresenceRankState
+    rank_state: InstallPartialEvidenceRankState
+    reason: InstallPartialEvidenceReason
     recipe_id: str
     recipe_revision_id: str
-    role: str
     title: str
-    topology_name: str
-    affected_ranks: list[int] | Unset = UNSET
-    degraded_reason: None | RecipePresenceDegradedReasonType0 | Unset = UNSET
     installed_bytes: int | None | Unset = UNSET
     required_bytes: int | None | Unset = UNSET
 
@@ -72,17 +65,15 @@ class RecipePresence:
 
 
     def to_dict(self) -> dict[str, Any]:
-        complete = self.complete
+        affected_ranks = self.affected_ranks
+
+
 
         expected_rank_count = self.expected_rank_count
 
         group_state: str = self.group_state
 
         installation_id = self.installation_id
-
-        member_node_ids = self.member_node_ids
-
-
 
         present_ranks = self.present_ranks
 
@@ -92,29 +83,13 @@ class RecipePresence:
 
         rank_state: str = self.rank_state
 
+        reason: str = self.reason
+
         recipe_id = self.recipe_id
 
         recipe_revision_id = self.recipe_revision_id
 
-        role = self.role
-
         title = self.title
-
-        topology_name = self.topology_name
-
-        affected_ranks: list[int] | Unset = UNSET
-        if not isinstance(self.affected_ranks, Unset):
-            affected_ranks = self.affected_ranks
-
-
-
-        degraded_reason: None | str | Unset
-        if isinstance(self.degraded_reason, Unset):
-            degraded_reason = UNSET
-        elif isinstance(self.degraded_reason, str):
-            degraded_reason = self.degraded_reason
-        else:
-            degraded_reason = self.degraded_reason
 
         installed_bytes: int | None | Unset
         if isinstance(self.installed_bytes, Unset):
@@ -132,24 +107,18 @@ class RecipePresence:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "complete": complete,
+            "affected_ranks": affected_ranks,
             "expected_rank_count": expected_rank_count,
             "group_state": group_state,
             "installation_id": installation_id,
-            "member_node_ids": member_node_ids,
             "present_ranks": present_ranks,
             "rank": rank,
             "rank_state": rank_state,
+            "reason": reason,
             "recipe_id": recipe_id,
             "recipe_revision_id": recipe_revision_id,
-            "role": role,
             "title": title,
-            "topology_name": topology_name,
         })
-        if affected_ranks is not UNSET:
-            field_dict["affected_ranks"] = affected_ranks
-        if degraded_reason is not UNSET:
-            field_dict["degraded_reason"] = degraded_reason
         if installed_bytes is not UNSET:
             field_dict["installed_bytes"] = installed_bytes
         if required_bytes is not UNSET:
@@ -162,26 +131,29 @@ class RecipePresence:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        complete = d.pop("complete")
+        affected_ranks = cast(list[int], d.pop("affected_ranks"))
+
 
         expected_rank_count = d.pop("expected_rank_count")
 
-        group_state = check_recipe_presence_group_state(d.pop("group_state"))
+        group_state = check_install_partial_evidence_group_state(d.pop("group_state"))
 
 
 
 
         installation_id = d.pop("installation_id")
 
-        member_node_ids = cast(list[str], d.pop("member_node_ids"))
-
-
         present_ranks = cast(list[int], d.pop("present_ranks"))
 
 
         rank = d.pop("rank")
 
-        rank_state = check_recipe_presence_rank_state(d.pop("rank_state"))
+        rank_state = check_install_partial_evidence_rank_state(d.pop("rank_state"))
+
+
+
+
+        reason = check_install_partial_evidence_reason(d.pop("reason"))
 
 
 
@@ -190,34 +162,7 @@ class RecipePresence:
 
         recipe_revision_id = d.pop("recipe_revision_id")
 
-        role = d.pop("role")
-
         title = d.pop("title")
-
-        topology_name = d.pop("topology_name")
-
-        affected_ranks = cast(list[int], d.pop("affected_ranks", UNSET))
-
-
-        def _parse_degraded_reason(data: object) -> None | RecipePresenceDegradedReasonType0 | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, str):
-                    raise TypeError()
-                degraded_reason_type_0 = check_recipe_presence_degraded_reason_type_0(data)
-
-
-
-                return degraded_reason_type_0
-            except (TypeError, ValueError, AttributeError, KeyError):
-                pass
-            return cast(None | RecipePresenceDegradedReasonType0 | Unset, data)
-
-        degraded_reason = _parse_degraded_reason(d.pop("degraded_reason", UNSET))
-
 
         def _parse_installed_bytes(data: object) -> int | None | Unset:
             if data is None:
@@ -239,24 +184,20 @@ class RecipePresence:
         required_bytes = _parse_required_bytes(d.pop("required_bytes", UNSET))
 
 
-        recipe_presence = cls(
-            complete=complete,
+        install_partial_evidence = cls(
+            affected_ranks=affected_ranks,
             expected_rank_count=expected_rank_count,
             group_state=group_state,
             installation_id=installation_id,
-            member_node_ids=member_node_ids,
             present_ranks=present_ranks,
             rank=rank,
             rank_state=rank_state,
+            reason=reason,
             recipe_id=recipe_id,
             recipe_revision_id=recipe_revision_id,
-            role=role,
             title=title,
-            topology_name=topology_name,
-            affected_ranks=affected_ranks,
-            degraded_reason=degraded_reason,
             installed_bytes=installed_bytes,
             required_bytes=required_bytes,
         )
 
-        return recipe_presence
+        return install_partial_evidence
