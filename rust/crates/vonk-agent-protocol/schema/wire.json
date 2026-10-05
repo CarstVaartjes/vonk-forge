@@ -3254,6 +3254,35 @@
           "title": "Memory Pool",
           "type": "string"
         },
+        "nas_route_interface": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nas Route Interface"
+        },
+        "network_interfaces": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/NetworkInterface"
+              },
+              "maxItems": 16,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Network Interfaces"
+        },
         "nvidia_driver_version": {
           "maxLength": 256,
           "minLength": 1,
@@ -3346,6 +3375,51 @@
         "generation"
       ],
       "title": "IssuedCertificateResponse",
+      "type": "object"
+    },
+    "NetworkInterface": {
+      "additionalProperties": false,
+      "description": "One NIC as the agent reads it from sysfs.",
+      "properties": {
+        "carrier": {
+          "title": "Carrier",
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "wired",
+            "wifi",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "link_speed_mbps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Link Speed Mbps"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "carrier"
+      ],
+      "title": "NetworkInterface",
       "type": "object"
     },
     "OperationCheckpoint": {
@@ -6110,6 +6184,7 @@
     "InstallerReleaseObject": "vonk_agent_protocol.installer_release.InstallerReleaseObject",
     "InventoryRequest": "vonk_agent_protocol.inventory.InventoryRequest",
     "IssuedCertificateResponse": "vonk_agent_protocol.enrollment.IssuedCertificateResponse",
+    "NetworkInterface": "vonk_agent_protocol.inventory.NetworkInterface",
     "OperationCheckpoint": "vonk_agent_protocol.wire_model.OperationCheckpoint",
     "OperationMemberProgress": "vonk_agent_protocol.wire_model.OperationMemberProgress",
     "OperationProgress": "vonk_agent_protocol.wire_model.OperationProgress",
@@ -6233,6 +6308,7 @@
     "InstallerReleaseObject": "#/$defs/InstallerReleaseObject",
     "InventoryRequest": "#/$defs/InventoryRequest",
     "IssuedCertificateResponse": "#/$defs/IssuedCertificateResponse",
+    "NetworkInterface": "#/$defs/NetworkInterface",
     "OperationCheckpoint": "#/$defs/OperationCheckpoint",
     "OperationMemberProgress": "#/$defs/OperationMemberProgress",
     "OperationProgress": "#/$defs/OperationProgress",

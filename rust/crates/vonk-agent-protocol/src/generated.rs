@@ -2000,6 +2000,10 @@ pub struct InventoryRequest {
     pub host_memory_free_bytes: u64,
     pub host_memory_total_bytes: u64,
     pub memory_pool: InventoryRequestMemoryPool,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub nas_route_interface: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub network_interfaces: ::std::option::Option<::std::vec::Vec<NetworkInterface>>,
     pub nvidia_driver_version: ::std::string::String,
     #[serde(
         serialize_with = "crate::wire_datetime::serialize",
@@ -2070,6 +2074,70 @@ pub struct IssuedCertificateResponse {
     pub not_after: ::std::string::String,
     pub not_before: ::std::string::String,
     pub serial: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct NetworkInterface {
+    pub carrier: bool,
+    pub kind: NetworkInterfaceKind,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub link_speed_mbps: ::std::option::Option<u32>,
+    pub name: ::std::string::String,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum NetworkInterfaceKind {
+    #[serde(rename = "wired")]
+    Wired,
+    #[serde(rename = "wifi")]
+    Wifi,
+    #[serde(rename = "other")]
+    Other,
+}
+impl ::std::fmt::Display for NetworkInterfaceKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Wired => f.write_str("wired"),
+            Self::Wifi => f.write_str("wifi"),
+            Self::Other => f.write_str("other"),
+        }
+    }
+}
+impl ::std::str::FromStr for NetworkInterfaceKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "wired" => Ok(Self::Wired),
+            "wifi" => Ok(Self::Wifi),
+            "other" => Ok(Self::Other),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for NetworkInterfaceKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for NetworkInterfaceKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -5686,6 +5754,10 @@ impl<'de> ::serde::Deserialize<'de> for InventoryRequest {
             pub host_memory_free_bytes: u64,
             pub host_memory_total_bytes: u64,
             pub memory_pool: InventoryRequestMemoryPool,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub nas_route_interface: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub network_interfaces: ::std::option::Option<::std::vec::Vec<NetworkInterface>>,
             pub nvidia_driver_version: ::std::string::String,
             #[serde(
                 serialize_with = "crate::wire_datetime::serialize",
@@ -5710,6 +5782,8 @@ impl<'de> ::serde::Deserialize<'de> for InventoryRequest {
             host_memory_free_bytes: raw.host_memory_free_bytes,
             host_memory_total_bytes: raw.host_memory_total_bytes,
             memory_pool: raw.memory_pool,
+            nas_route_interface: raw.nas_route_interface,
+            network_interfaces: raw.network_interfaces,
             nvidia_driver_version: raw.nvidia_driver_version,
             observed_at: raw.observed_at,
             schema_version: raw.schema_version,
@@ -5770,6 +5844,56 @@ impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
             not_before: raw.not_before,
             serial: raw.serial,
         })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for NetworkInterface {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("NetworkInterface", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub carrier: bool,
+            pub kind: NetworkInterfaceKind,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub link_speed_mbps: ::std::option::Option<u32>,
+            pub name: ::std::string::String,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            carrier: raw.carrier,
+            kind: raw.kind,
+            link_speed_mbps: raw.link_speed_mbps,
+            name: raw.name,
+        })
+    }
+}
+impl NetworkInterfaceKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Wired => "wired",
+            Self::Wifi => "wifi",
+            Self::Other => "other",
+        }
+    }
+}
+impl ::std::ops::Deref for NetworkInterfaceKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for NetworkInterfaceKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for NetworkInterfaceKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for OperationCheckpoint {

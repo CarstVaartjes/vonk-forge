@@ -183,6 +183,12 @@ def _actions(value: object) -> None:
         _field("Next", item.get("key") if isinstance(item, Mapping) else item)
 
 
+def _recommendation(item: Mapping[str, object]) -> str:
+    """The Controller's own next step for a warning, when it names one."""
+    recommendation = item.get("recommendation")
+    return f" {_text(recommendation)}" if recommendation is not None else ""
+
+
 def _reasons(value: object, *, subject: object = None) -> None:
     if value is None:
         return
@@ -195,6 +201,7 @@ def _reasons(value: object, *, subject: object = None) -> None:
             continue
         if isinstance(item, Mapping):
             message = f"{_text(item.get('code'))}: {_text(item.get('detail'))}"
+            message += _recommendation(item)
         else:
             message = _text(item)
         prefix = f"{_text(subject)}: " if subject is not None else ""
@@ -258,6 +265,8 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
     if telemetry.get("freshness") == "live" and type(temperature) is int:
         _field("Temperature", f"{temperature} °C")
     _field("CPU", _cpu_clock(node))
+    _field("NAS route", _nas_route(inventory))
+    _field("Wired ports", _wired_ports(inventory))
     loaded = _records(node, "loaded")
     if not loaded:
         print("Running workloads: none")
@@ -343,6 +352,38 @@ def _cpu_clock(node: Mapping[str, object]) -> str:
     return text
 
 
+def _nas_route(inventory: Mapping[str, object]) -> str:
+    """The interface the NAS is reached through, with its kind, speed and link."""
+    route = inventory.get("nas_route_interface")
+    interfaces = inventory.get("network_interfaces")
+    if route is None or not isinstance(interfaces, list):
+        return "unavailable"
+    for item in interfaces:
+        if isinstance(item, Mapping) and item.get("name") == route:
+            speed = item.get("link_speed_mbps")
+            parts = [_text(item.get("kind"))]
+            if type(speed) is int:
+                parts.append(f"{speed} Mb/s")
+            parts.append("link up" if item.get("carrier") else "no link")
+            return f"{_text(route)} ({', '.join(parts)})"
+    return _text(route)
+
+
+def _wired_ports(inventory: Mapping[str, object]) -> str:
+    interfaces = inventory.get("network_interfaces")
+    if not isinstance(interfaces, list):
+        return "unavailable"
+    ports = []
+    for item in interfaces:
+        if isinstance(item, Mapping) and item.get("kind") == "wired":
+            speed = item.get("link_speed_mbps")
+            state = f"{speed} Mb/s" if type(speed) is int else "link up"
+            ports.append(
+                f"{_text(item.get('name'))} ({state if item.get('carrier') else 'no link'})"
+            )
+    return ", ".join(ports) if ports else "none"
+
+
 def _status(node: Mapping[str, object]) -> str:
     connection = _object(node.get("connection"), "connection")
     state = _text(connection.get("online_state"))
@@ -401,6 +442,7 @@ def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
             if isinstance(warning, Mapping):
                 notes.append(
                     f"{name}: {_text(warning.get('detail') or warning.get('code'))}"
+                    + _recommendation(warning)
                 )
             else:
                 notes.append(f"{name}: {_text(warning)}")

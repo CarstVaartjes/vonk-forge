@@ -14,6 +14,8 @@ from ..types import UNSET, Unset
 from typing import cast
 import datetime
 
+if TYPE_CHECKING:
+  from ..models.network_interface import NetworkInterface
 
 
 
@@ -44,6 +46,8 @@ class InventoryState:
             received_at (datetime.datetime):
             fabric_address (None | str | Unset):
             fabric_bandwidth_mbps (int | None | Unset):
+            nas_route_interface (None | str | Unset):
+            network_interfaces (list[NetworkInterface] | None | Unset):
      """
 
     age_seconds: float
@@ -63,12 +67,15 @@ class InventoryState:
     received_at: datetime.datetime
     fabric_address: None | str | Unset = UNSET
     fabric_bandwidth_mbps: int | None | Unset = UNSET
+    nas_route_interface: None | str | Unset = UNSET
+    network_interfaces: list[NetworkInterface] | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.network_interface import NetworkInterface # noqa: PLC0415
         age_seconds = self.age_seconds
 
         artifact_store_read_only = self.artifact_store_read_only
@@ -113,6 +120,25 @@ class InventoryState:
         else:
             fabric_bandwidth_mbps = self.fabric_bandwidth_mbps
 
+        nas_route_interface: None | str | Unset
+        if isinstance(self.nas_route_interface, Unset):
+            nas_route_interface = UNSET
+        else:
+            nas_route_interface = self.nas_route_interface
+
+        network_interfaces: list[dict[str, Any]] | None | Unset
+        if isinstance(self.network_interfaces, Unset):
+            network_interfaces = UNSET
+        elif isinstance(self.network_interfaces, list):
+            network_interfaces = []
+            for network_interfaces_type_0_item_data in self.network_interfaces:
+                network_interfaces_type_0_item = network_interfaces_type_0_item_data.to_dict()
+                network_interfaces.append(network_interfaces_type_0_item)
+
+
+        else:
+            network_interfaces = self.network_interfaces
+
 
         field_dict: dict[str, Any] = {}
 
@@ -137,6 +163,10 @@ class InventoryState:
             field_dict["fabric_address"] = fabric_address
         if fabric_bandwidth_mbps is not UNSET:
             field_dict["fabric_bandwidth_mbps"] = fabric_bandwidth_mbps
+        if nas_route_interface is not UNSET:
+            field_dict["nas_route_interface"] = nas_route_interface
+        if network_interfaces is not UNSET:
+            field_dict["network_interfaces"] = network_interfaces
 
         return field_dict
 
@@ -144,6 +174,7 @@ class InventoryState:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.network_interface import NetworkInterface # noqa: PLC0415
         d = dict(src_dict)
         age_seconds = d.pop("age_seconds")
 
@@ -205,6 +236,41 @@ class InventoryState:
         fabric_bandwidth_mbps = _parse_fabric_bandwidth_mbps(d.pop("fabric_bandwidth_mbps", UNSET))
 
 
+        def _parse_nas_route_interface(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        nas_route_interface = _parse_nas_route_interface(d.pop("nas_route_interface", UNSET))
+
+
+        def _parse_network_interfaces(data: object) -> list[NetworkInterface] | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, list):
+                    raise TypeError()
+                network_interfaces_type_0 = []
+                _network_interfaces_type_0 = data
+                for network_interfaces_type_0_item_data in (_network_interfaces_type_0):
+                    network_interfaces_type_0_item = NetworkInterface.from_dict(network_interfaces_type_0_item_data)
+
+
+
+                    network_interfaces_type_0.append(network_interfaces_type_0_item)
+
+                return network_interfaces_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(list[NetworkInterface] | None | Unset, data)
+
+        network_interfaces = _parse_network_interfaces(d.pop("network_interfaces", UNSET))
+
+
         inventory_state = cls(
             age_seconds=age_seconds,
             artifact_store_read_only=artifact_store_read_only,
@@ -223,6 +289,8 @@ class InventoryState:
             received_at=received_at,
             fabric_address=fabric_address,
             fabric_bandwidth_mbps=fabric_bandwidth_mbps,
+            nas_route_interface=nas_route_interface,
+            network_interfaces=network_interfaces,
         )
 
         return inventory_state

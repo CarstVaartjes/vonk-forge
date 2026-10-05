@@ -11,10 +11,11 @@ pub use generated::{
     AgentUpgradePayload as AgentUpgradeRequest,
     ArtifactDistributionPayload as ArtifactDistributionRequest, DistributionAssignment,
     DistributionObject, EnrollmentEvidence, EnrollmentSubmitRequest as EnrollmentRequest,
-    InventoryRequest, InventoryRequestMemoryPool as MemoryPool, RecipeBuildAdapter,
-    RecipeBuildAdapterDefinition, RecipeBuildAdditionalContext, RecipeBuildBaseImage,
-    RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest, RecipeBuildEvidence, RecipeBuildLimits,
-    RecipeBuildMetadata, RecipeBuildNetwork, RecipeBuildOptions, RecipeBuildRequest,
+    InventoryRequest, InventoryRequestMemoryPool as MemoryPool, NetworkInterface,
+    NetworkInterfaceKind, RecipeBuildAdapter, RecipeBuildAdapterDefinition,
+    RecipeBuildAdditionalContext, RecipeBuildBaseImage, RecipeBuildCleanupEvidence,
+    RecipeBuildCleanupRequest, RecipeBuildEvidence, RecipeBuildLimits, RecipeBuildMetadata,
+    RecipeBuildNetwork, RecipeBuildOptions, RecipeBuildRequest,
     RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence, RecipeJobFile,
     RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
     RecipeJobRunRequest, RecipeJobRunResult, RecipeReconcilePayload as RecipeReconcileRequest,
@@ -589,6 +590,7 @@ impl InventoryRequest {
             || self.container_runtime_version.len() > 256
             || !self.nvidia_driver_version.is_ascii()
             || !self.container_runtime_version.is_ascii()
+            || !self.network_evidence_is_consistent()
             || (self.fabric_address.is_none() != self.fabric_bandwidth_mbps.is_none())
             || self
                 .fabric_bandwidth_mbps
@@ -597,6 +599,24 @@ impl InventoryRequest {
             return Err(ProtocolError::Identity("inventory request"));
         }
         Ok(())
+    }
+}
+
+impl InventoryRequest {
+    fn network_evidence_is_consistent(&self) -> bool {
+        let interfaces = self.network_interfaces.as_deref().unwrap_or_default();
+        let mut names = BTreeSet::new();
+        interfaces.len() <= 16
+            && interfaces.iter().all(|value| {
+                names.insert(value.name.as_str())
+                    && value
+                        .link_speed_mbps
+                        .is_none_or(|speed| (1..=1_000_000).contains(&speed))
+            })
+            && self
+                .nas_route_interface
+                .as_deref()
+                .is_none_or(|route| names.contains(route))
     }
 }
 
@@ -1116,6 +1136,8 @@ mod inventory_tests {
             capabilities: vec!["recipe.build.v1".to_owned()],
             fabric_address: None,
             fabric_bandwidth_mbps: None,
+            network_interfaces: None,
+            nas_route_interface: None,
             nvidia_driver_version: "550.1".to_owned(),
             container_runtime_version: "podman-5".to_owned(),
         }
@@ -1138,6 +1160,25 @@ mod inventory_tests {
         let mut invalid = value;
         invalid.nvidia_driver_version = "é".to_owned();
         assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn network_evidence_must_name_its_route_interface() {
+        let wifi = NetworkInterface {
+            name: "wlP9s9".to_owned(),
+            kind: NetworkInterfaceKind::Wifi,
+            link_speed_mbps: None,
+            carrier: true,
+        };
+        let mut value = inventory();
+        value.network_interfaces = Some(vec![wifi.clone()]);
+        value.nas_route_interface = Some("wlP9s9".to_owned());
+        value.validate().unwrap();
+        value.nas_route_interface = Some("enP7s7".to_owned());
+        assert!(value.validate().is_err());
+        value.nas_route_interface = None;
+        value.network_interfaces = Some(vec![wifi.clone(), wifi]);
+        assert!(value.validate().is_err());
     }
 }
 

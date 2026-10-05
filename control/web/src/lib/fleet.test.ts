@@ -106,6 +106,21 @@ test("a Controller warning on an otherwise live Spark also needs attention", () 
   expect(nodeStatus(warned, NOW)).toEqual({status: "needs attention", reasons: ["Disk is nearly full"]});
 });
 
+test("a Wi-Fi NAS route warning shows its recommendation as the next step", () => {
+  const wifi = node({
+    telemetry: telemetry("2026-08-15T11:59:58Z"),
+    warnings: [{
+      code: "network.nas-route-wifi-wired-port-down",
+      detail: "Reaches the NAS over Wi-Fi (wlP9s9, 2.402 Gb/s link, shared airtime).",
+      severity: "warning",
+      recommendation: "Wired port enP7s7 has no link; connect it to the NAS network with a cable.",
+    }],
+  });
+  const {status, reasons} = nodeStatus(wifi, NOW);
+  expect(status).toBe("needs attention");
+  expect(reasons).toEqual(["Reaches the NAS over Wi-Fi (wlP9s9, 2.402 Gb/s link, shared airtime). Wired port enP7s7 has no link; connect it to the NAS network with a cable."]);
+});
+
 test("formats absent and invalid metrics as explicitly unreported", () => {
   // Break caught: null telemetry is rendered as zero capacity.
   expect(formatBytes(null)).toBe("Not reported");

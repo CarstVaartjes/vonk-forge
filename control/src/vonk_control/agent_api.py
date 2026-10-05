@@ -961,6 +961,12 @@ def install_agent_routes(
                     fabric_bandwidth_mbps=body.fabric_bandwidth_mbps,
                     nvidia_driver_version=body.nvidia_driver_version,
                     container_runtime_version=body.container_runtime_version,
+                    network_interfaces=(
+                        None
+                        if body.network_interfaces is None
+                        else tuple(body.network_interfaces)
+                    ),
+                    nas_route_interface=body.nas_route_interface,
                 )
             )
         except ValueError as error:

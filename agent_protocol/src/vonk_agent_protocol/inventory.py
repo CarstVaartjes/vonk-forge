@@ -12,6 +12,8 @@ from .wire_model import WireModel
 
 Capability = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,127}$")]
 MemoryPool = Literal["shared", "separate"]
+NetworkInterfaceKind = Literal["wired", "wifi", "other"]
+InterfaceName = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}$")]
 RuntimeVersion = Annotated[
     str, Field(min_length=1, max_length=256, pattern=r"^[\x00-\x7f]+$")
 ]
@@ -24,6 +26,20 @@ def _strict_json_datetime(value: object) -> object:
         except ValueError as error:
             raise ValueError("inventory observed_at is invalid") from error
     return value
+
+
+class NetworkInterface(WireModel):
+    """One NIC as the agent reads it from sysfs."""
+
+    model_config = ConfigDict(
+        extra="forbid", strict=True, frozen=True, allow_inf_nan=False
+    )
+
+    name: InterfaceName
+    kind: NetworkInterfaceKind
+    # Negotiated speed; None while there is no link or the driver reports none.
+    link_speed_mbps: int | None = Field(default=None, ge=1, le=1_000_000)
+    carrier: bool
 
 
 class InventoryRequest(WireModel):
@@ -47,6 +63,12 @@ class InventoryRequest(WireModel):
     capabilities: list[Capability] = Field(max_length=64)
     fabric_address: str | None = Field(default=None, max_length=45)
     fabric_bandwidth_mbps: int | None = Field(default=None, ge=1, le=1_000_000)
+    # None: the agent predates this evidence (unknown); []: it reported none.
+    network_interfaces: list[NetworkInterface] | None = Field(
+        default=None, max_length=16
+    )
+    # Interface the kernel routes the NAS address through, when determinable.
+    nas_route_interface: InterfaceName | None = None
     nvidia_driver_version: RuntimeVersion
     container_runtime_version: RuntimeVersion
 
@@ -66,6 +88,12 @@ class InventoryRequest(WireModel):
             or len(self.capabilities) != len(set(self.capabilities))
         ):
             raise ValueError("inventory evidence is inconsistent")
+        names = [item.name for item in self.network_interfaces or []]
+        if len(names) != len(set(names)) or (
+            self.nas_route_interface is not None
+            and self.nas_route_interface not in names
+        ):
+            raise ValueError("inventory network evidence is inconsistent")
         if self.fabric_address is not None:
             try:
                 address = ipaddress.ip_address(self.fabric_address)

@@ -34,12 +34,14 @@ class ProjectionReason:
             detail (str):
             severity (ProjectionReasonSeverity):
             install_partial (InstallPartialEvidence | None | Unset):
+            recommendation (None | str | Unset):
      """
 
     code: ProjectionReasonCode
     detail: str
     severity: ProjectionReasonSeverity
     install_partial: InstallPartialEvidence | None | Unset = UNSET
+    recommendation: None | str | Unset = UNSET
 
 
 
@@ -61,6 +63,12 @@ class ProjectionReason:
         else:
             install_partial = self.install_partial
 
+        recommendation: None | str | Unset
+        if isinstance(self.recommendation, Unset):
+            recommendation = UNSET
+        else:
+            recommendation = self.recommendation
+
 
         field_dict: dict[str, Any] = {}
 
@@ -71,6 +79,8 @@ class ProjectionReason:
         })
         if install_partial is not UNSET:
             field_dict["install_partial"] = install_partial
+        if recommendation is not UNSET:
+            field_dict["recommendation"] = recommendation
 
         return field_dict
 
@@ -112,11 +122,22 @@ class ProjectionReason:
         install_partial = _parse_install_partial(d.pop("install_partial", UNSET))
 
 
+        def _parse_recommendation(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        recommendation = _parse_recommendation(d.pop("recommendation", UNSET))
+
+
         projection_reason = cls(
             code=code,
             detail=detail,
             severity=severity,
             install_partial=install_partial,
+            recommendation=recommendation,
         )
 
         return projection_reason

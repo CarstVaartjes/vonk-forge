@@ -13,6 +13,7 @@ pub mod host_runtime;
 pub mod identity;
 pub mod image_store;
 pub mod inventory;
+pub mod network;
 pub mod oci;
 pub mod package_activation;
 pub mod pair;

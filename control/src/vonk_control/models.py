@@ -10,6 +10,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -1588,6 +1589,9 @@ class NodeInventorySnapshot(Base):
     memory_pool: Mapped[MemoryPool] = mapped_column(String(16), nullable=False)
     fabric_address: Mapped[str | None] = mapped_column(String(45))
     fabric_bandwidth_mbps: Mapped[int | None] = mapped_column(BigInteger)
+    # NULL: the agent did not report network evidence (unknown, not "none").
+    network_interfaces: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    nas_route_interface: Mapped[str | None] = mapped_column(String(15))
     nvidia_driver_version: Mapped[str] = mapped_column(
         String(256), nullable=False, default="unknown", server_default="unknown"
     )
