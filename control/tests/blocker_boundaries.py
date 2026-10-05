@@ -20,15 +20,22 @@ operator action it advertises.  ``KEEP`` needs an irreversible effect and one of
 the real action surfaces; everything else is debt that ``max_debt`` caps.
 
 **Fail-closed raises.**  Every ``raise C(...)`` in ``control/src`` where ``C`` is
-a class defined there whose name ends in ``Conflict``, ``Error``, ``Refused``,
-``Busy`` or ``Invalid`` is keyed ``(path, class, function, code)``, ``code``
+a class defined there that is an exception (its bases lead to a builtin
+exception, or its name ends in ``Conflict``, ``Error``, ``Refused``, ``Busy``,
+``Invalid`` or ``NotFound``; a private class that subclasses plain
+``Exception`` is internal control flow and not a site) is keyed
+``(path, class, function, code)``, ``code``
 being the leading dotted token of the message (``run-switch.plan_blocked``) or a
 slug of its first words.  Each key belongs to one *family* with a category:
 ``security-edge``, ``input-validation``, ``already-retried`` (all need a written
-reason) or ``bookkeeping-debt``, whose total is capped by
-``debt_ceiling.total`` and may only fall.  A raise a family does not list fails:
+reason) or ``bookkeeping-debt``, whose total is capped and may only fall:
+``debt_ceiling.total`` for the audited modules (``scope.audited_paths``, where
+the debt is being paid down) and ``debt_ceiling.unaudited`` for every other
+module of ``control/src``.  ``control/tests/blocker_classifier.py`` proposes the
+category of a new site by rule; a reviewer confirms it.  A raise a family does not list fails:
 a new one must choose a category in a PR a reviewer can see.  Builtin
-``ValueError`` / ``KeyError`` / ``TypeError`` raises are out of scope.
+``ValueError`` / ``KeyError`` / ``TypeError`` raises, ``HTTPException`` and
+raises through a factory function are not families (``--summary`` counts them).
 
 ``python -m control.tests.blocker_boundaries --list`` prints both scans;
 ``--write-baseline`` rewrites the counts after a site was removed (a new site is
@@ -38,12 +45,14 @@ never written automatically: it needs a verdict, a category and a reason).
 from __future__ import annotations
 
 import ast
+import builtins
 import json
 import re
 import sys
 from collections import Counter
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
 
 from vonk_agent_protocol import (
@@ -91,8 +100,13 @@ _STATE_CALLS = frozenset({"_finish", "_set_application_state", "_set_state"})
 
 CATEGORIES = frozenset(category.value for category in BlockerCategory)
 _RAISE_SUFFIXES = ("Conflict", "Error", "Refused", "Busy", "Invalid", "NotFound")
-#: Fail-closed classes that do not follow the suffix convention.
-_EXTRA_RAISE_CLASSES = frozenset({"StaleAgentAttempt"})
+#: Exception bases that are not builtins but make a local class an error type.
+_EXTERNAL_EXCEPTION_BASES = frozenset({"HTTPException", "StarletteHTTPException"})
+_BUILTIN_EXCEPTIONS = frozenset(
+    name
+    for name, value in vars(builtins).items()
+    if isinstance(value, type) and issubclass(value, BaseException)
+)
 
 
 @dataclass(frozen=True)
@@ -117,6 +131,8 @@ class RaiseSite:
     function: str
     code: str
     line: int
+    #: The leading text of the message (a hint for the classifier, not identity).
+    message: str = field(default="", compare=False)
 
     @property
     def identity(self) -> tuple[str, str, str, str]:
@@ -270,11 +286,24 @@ class _WaitCollector(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def scan_python_waits(source: str, *, path: str) -> list[WaitSite]:
-    tree = ast.parse(source)
+def _scan_tree_waits(tree: ast.Module, *, path: str) -> list[WaitSite]:
     collector = _WaitCollector(path, _wait_constant_names(tree))
     collector.visit(tree)
     return sorted(collector.sites, key=lambda site: site.line)
+
+
+def scan_python_waits(source: str, *, path: str) -> list[WaitSite]:
+    return _scan_tree_waits(ast.parse(source), path=path)
+
+
+@cache
+def parsed_modules(root: Path) -> Mapping[Path, ast.Module]:
+    """Every module under ``root``, parsed once: the wait and raise scans share it."""
+
+    return {
+        module: ast.parse(module.read_text(encoding="utf-8"))
+        for module in sorted(root.rglob("*.py"))
+    }
 
 
 _RUST_FN = re.compile(r"^\s*(?:pub(?:\([a-z]+\))?\s+)?(?:async\s+)?fn\s+(\w+)")
@@ -319,11 +348,9 @@ def scan_waits(
     control_root: Path = CONTROL_SOURCE_ROOT, rust_root: Path = RUST_SOURCE_ROOT
 ) -> list[WaitSite]:
     sites: list[WaitSite] = []
-    for module in sorted(control_root.rglob("*.py")):
+    for module, tree in parsed_modules(control_root).items():
         relative = module.relative_to(REPO_ROOT).as_posix()
-        sites.extend(
-            scan_python_waits(module.read_text(encoding="utf-8"), path=relative)
-        )
+        sites.extend(_scan_tree_waits(tree, path=relative))
     for module in sorted(rust_root.rglob("*.rs")):
         relative = module.relative_to(REPO_ROOT).as_posix()
         sites.extend(scan_rust_waits(module.read_text(encoding="utf-8"), path=relative))
@@ -334,13 +361,44 @@ def scan_waits(
 
 
 def exception_classes(trees: Sequence[ast.Module]) -> frozenset[str]:
-    """Names of the classes defined in the scanned tree that a raise can name."""
+    """Names of the exception classes defined in the scanned tree.
 
-    return _EXTRA_RAISE_CLASSES | frozenset(
-        node.name
-        for tree in trees
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ClassDef) and node.name.endswith(_RAISE_SUFFIXES)
+    A class is an error type when its name follows the suffix convention or its
+    bases lead (through classes defined here) to a builtin exception.  A private
+    class that subclasses plain ``Exception`` is control flow inside its module
+    (``_Kept``, ``_RangeIgnored``) and is not a site.
+    """
+
+    bases: dict[str, set[str]] = {}
+    for tree in trees:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                names = bases.setdefault(node.name, set())
+                for base in node.bases:
+                    if isinstance(base, ast.Name):
+                        names.add(base.id)
+                    elif isinstance(base, ast.Attribute):
+                        names.add(base.attr)
+    errors: set[str] = set()
+    grew = True
+    while grew:
+        grew = False
+        for name, names in bases.items():
+            if name not in errors and any(
+                base in _BUILTIN_EXCEPTIONS
+                or base in _EXTERNAL_EXCEPTION_BASES
+                or base in errors
+                for base in names
+            ):
+                errors.add(name)
+                grew = True
+    internal = {
+        name
+        for name in errors
+        if name.startswith("_") and bases[name] <= {"Exception", "BaseException"}
+    }
+    return frozenset(
+        (errors - internal) | {name for name in bases if name.endswith(_RAISE_SUFFIXES)}
     )
 
 
@@ -404,6 +462,16 @@ def failure_code(call: ast.Call) -> str:
     return "message"
 
 
+def failure_message(call: ast.Call) -> str:
+    """The leading text of the first string argument, bounded; empty if none."""
+
+    for argument in [*call.args, *(keyword.value for keyword in call.keywords)]:
+        text = _leading_text(argument)
+        if text is not None:
+            return " ".join(text.split())[:200]
+    return ""
+
+
 class _RaiseCollector(ast.NodeVisitor):
     def __init__(self, path: str, classes: frozenset[str]) -> None:
         self.path = path
@@ -444,29 +512,22 @@ class _RaiseCollector(ast.NodeVisitor):
                         function=".".join(self.scope) or "<module>",
                         code=failure_code(call),
                         line=node.lineno,
+                        message=failure_message(call),
                     )
                 )
         self.generic_visit(node)
 
 
-def scan_raises(
-    paths: Sequence[str], root: Path = CONTROL_SOURCE_ROOT
-) -> list[RaiseSite]:
-    """Raises in ``paths`` of classes defined anywhere under ``root``."""
+def scan_raises(root: Path = CONTROL_SOURCE_ROOT) -> list[RaiseSite]:
+    """Raises of the error classes defined anywhere under ``root``, in every module."""
 
-    trees = {
-        module: ast.parse(module.read_text(encoding="utf-8"))
-        for module in sorted(root.rglob("*.py"))
-    }
+    trees = parsed_modules(root)
     classes = exception_classes(list(trees.values()))
-    audited = set(paths)
     sites: list[RaiseSite] = []
     for module, tree in trees.items():
-        relative = module.relative_to(REPO_ROOT).as_posix()
-        if relative in audited:
-            collector = _RaiseCollector(relative, classes)
-            collector.visit(tree)
-            sites.extend(collector.sites)
+        collector = _RaiseCollector(module.relative_to(REPO_ROOT).as_posix(), classes)
+        collector.visit(tree)
+        sites.extend(collector.sites)
     return sorted(sites, key=lambda site: (site.path, site.line))
 
 
@@ -496,9 +557,9 @@ def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, object]:
     document = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict) or document.get("schema") != 1:
         raise ValueError(f"{path}: allowlist must be a schema-1 object")
-    for field in ("max_debt", "debt_ceiling", "scope"):
-        if field not in document:
-            raise ValueError(f"{path}: missing {field}")
+    for required in ("max_debt", "debt_ceiling", "scope"):
+        if required not in document:
+            raise ValueError(f"{path}: missing {required}")
     waits = document.get("operator_waits")
     families = document.get("fail_closed")
     if not isinstance(waits, list) or not isinstance(families, list):
@@ -507,8 +568,8 @@ def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, object]:
         where = f"{path} operator_waits[{index}]"
         if not isinstance(entry, dict):
             raise TypeError(f"{where}: entry is not an object")
-        for field in ("path", "function", "kind"):
-            _require_text(entry, field, where)
+        for name in ("path", "function", "kind"):
+            _require_text(entry, name, where)
         if entry["kind"] not in WAIT_KINDS | UNSCANNED_KINDS:
             raise ValueError(f"{where}: unknown kind {entry['kind']!r}")
         if entry["verdict"] not in VERDICTS:
@@ -545,12 +606,15 @@ def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, object]:
     return document
 
 
-def raise_paths(document: dict[str, object]) -> list[str]:
-    """The audited modules: a raise elsewhere is not yet reviewed."""
+def audited_paths(document: dict[str, object]) -> frozenset[str]:
+    """The modules whose bookkeeping debt is being paid down (the first audit).
+
+    Their debt has its own ceiling, apart from the debt of every other module.
+    """
 
     scope = document["scope"]
-    paths = scope["raise_paths"]  # type: ignore[index]
-    return [str(path) for path in paths]  # type: ignore[attr-defined]
+    paths = scope.get("audited_paths", [])  # type: ignore[attr-defined]
+    return frozenset(str(path) for path in paths)
 
 
 def _wait_groups(
@@ -648,19 +712,24 @@ def evaluate_raise_gate(
     for key in sorted(listed):
         if key not in current:
             messages.append(f"fail-closed entry no longer occurs; delete it: {key}")
-    debt = sum(
-        count for count, category in listed.values() if category == "bookkeeping-debt"
-    )
-    ceiling_document = document["debt_ceiling"]
-    ceiling = int(ceiling_document["total"])  # type: ignore[index, call-overload]
-    if debt > ceiling:
-        messages.append(
-            f"bookkeeping-debt raises are {debt}, above the ceiling {ceiling}"
-        )
-    elif debt < ceiling:
-        messages.append(
-            f"bookkeeping-debt raises are {debt}; lower debt_ceiling.total from {ceiling}"
-        )
+    audited = audited_paths(document)
+    debt = {"total": 0, "unaudited": 0}
+    for (path, *_), (count, category) in listed.items():
+        if category == "bookkeeping-debt":
+            debt["total" if path in audited else "unaudited"] += count
+    ceilings = document["debt_ceiling"]
+    for name, label in (("total", "audited modules"), ("unaudited", "other modules")):
+        ceiling = int(ceilings.get(name, 0))  # type: ignore[attr-defined, call-overload]
+        if debt[name] > ceiling:
+            messages.append(
+                f"bookkeeping-debt raises in the {label} are {debt[name]}, above "
+                f"the ceiling {ceiling}"
+            )
+        elif debt[name] < ceiling:
+            messages.append(
+                f"bookkeeping-debt raises in the {label} are {debt[name]}; lower "
+                f"debt_ceiling.{name} from {ceiling}"
+            )
     return messages
 
 
@@ -701,16 +770,16 @@ def write_counts(
                 )
         if sites:
             families.append({**family, "sites": sites})
-    debt_sites = sum(
-        site[4]
-        for family in families
-        if family["category"] == "bookkeeping-debt"
-        for site in family["sites"]
-    )
+    audited = audited_paths(document)
+    debt = {"total": 0, "unaudited": 0}
+    for family in families:
+        if family["category"] == "bookkeeping-debt":
+            for site in family["sites"]:
+                debt["total" if site[0] in audited else "unaudited"] += site[4]
     return {
         **document,
         "max_debt": sum(1 for entry in kept_waits if entry["verdict"] != "KEEP"),
-        "debt_ceiling": {**document["debt_ceiling"], "total": debt_sites},  # type: ignore[dict-item]
+        "debt_ceiling": {**document["debt_ceiling"], **debt},  # type: ignore[dict-item]
         "operator_waits": kept_waits,
         "fail_closed": families,
     }
@@ -750,7 +819,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     document = load_allowlist()
     waits = scan_waits()
-    raises = scan_raises(raise_paths(document))
+    raises = scan_raises()
     if arguments and arguments[0] == "--list":
         for site in waits:
             print(site.render())

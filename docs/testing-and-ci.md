@@ -342,13 +342,23 @@ module that owns one, `update(Model).values(state=...)`, a constructor,
 migration step (`migrating_in`) that removes it; a new writer, a stale entry, a
 moved count or a higher `max_writes` fails. `control/tests/blocker_boundaries.py`
 finds every place that produces `waiting-for-operator` (Python and the Rust
-agent) and every fail-closed raise in the audited modules, and compares them
+agent) and every fail-closed raise in all of `control/src` (a raise of any
+exception class defined there, found through the class bases), and compares them
 with `tools/blocker-allowlist.json`: an operator wait needs a verdict and an
 advertised action (`KEEP` needs an irreversible effect), a raise belongs to a
 `security-edge`, `input-validation`, `already-retried` or `bookkeeping-debt`
-family, and `max_debt` / `debt_ceiling.total` only fall. Both scanners take
+family, and `max_debt` / `debt_ceiling.total` only fall. The ten audited modules
+(`scope.audited_paths`), where the debt is being paid down, keep
+`debt_ceiling.total`; the bookkeeping debt of every other module has its own
+`debt_ceiling.unaudited`, which also only falls. Both scanners take
 `--list`, and `--write-baseline` lowers the recorded counts after a fix; a new
 site always needs a reviewed entry by hand.
+`control/tests/blocker_classifier.py` proposes the category of a new raise by
+rule (exception class, then message): `--classify-new` appends one family per
+module and category for the sites the allowlist does not list, `--summary` counts
+every raise in `control/src` by category and names the ones that are not a family
+(builtin `ValueError`/`KeyError`/`TypeError`, `HTTPException`, factory functions).
+Read the proposal and move any site it got wrong before committing it.
 
 A PR that touches lifecycle, raise or allowlist files reports the movement.
 `scripts/lifecycle-counts` prints the four numbers (writers, operator waits,

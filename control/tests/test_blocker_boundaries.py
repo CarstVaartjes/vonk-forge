@@ -17,18 +17,20 @@ import pytest
 
 from .blocker_boundaries import (
     ALLOWLIST_PATH,
+    CONTROL_SOURCE_ROOT,
     CONTROL_STATE_ARGUMENT,
     CONTROL_STATE_ASSIGNMENT,
     RUST_RESULT,
     RaiseSite,
     WaitSite,
+    audited_paths,
     dump_document,
     evaluate_raise_gate,
     evaluate_wait_gate,
     exception_classes,
     failure_code,
     load_allowlist,
-    raise_paths,
+    parsed_modules,
     scan_python_waits,
     scan_raise_source,
     scan_raises,
@@ -38,6 +40,15 @@ from .blocker_boundaries import (
 )
 
 PATH = "control/src/vonk_control/sample.py"
+AUDITED_PATH = "control/src/vonk_control/audited_sample.py"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _parsed_control_sources() -> None:
+    """Parse control/src once for the module: the scans share it (a shared fixture
+    is outside the per-test budget, and the parse is the whole cost)."""
+
+    parsed_modules(CONTROL_SOURCE_ROOT)
 
 
 def _waits(source: str) -> list[tuple[str, str]]:
@@ -183,20 +194,28 @@ def _family(
     }
 
 
-def _raise_document(families: list[dict[str, object]], total: int) -> dict[str, object]:
-    return {"fail_closed": families, "debt_ceiling": {"total": total}}
+def _raise_document(
+    families: list[dict[str, object]], total: int, unaudited: int = 0
+) -> dict[str, object]:
+    return {
+        "fail_closed": families,
+        "debt_ceiling": {"total": total, "unaudited": unaudited},
+        "scope": {"audited_paths": [AUDITED_PATH]},
+    }
 
 
-def _raise(function: str = "go", code: str = "x.bad") -> RaiseSite:
-    return RaiseSite(PATH, "SampleConflict", function, code, 1)
+def _raise(function: str = "go", code: str = "x.bad", path: str = PATH) -> RaiseSite:
+    return RaiseSite(path, "SampleConflict", function, code, 1)
 
 
-def _listed(function: str = "go", code: str = "x.bad", count: int = 1) -> list[object]:
-    return [PATH, "SampleConflict", function, code, count]
+def _listed(
+    function: str = "go", code: str = "x.bad", count: int = 1, path: str = PATH
+) -> list[object]:
+    return [path, "SampleConflict", function, code, count]
 
 
 def test_the_raise_gate_fails_on_new_stale_moved_and_rising_debt() -> None:
-    document = _raise_document([_family([_listed()])], 1)
+    document = _raise_document([_family([_listed()])], 0, unaudited=1)
     assert evaluate_raise_gate([_raise()], document) == []
 
     new = evaluate_raise_gate([_raise(), _raise("other")], document)
@@ -209,19 +228,40 @@ def test_the_raise_gate_fails_on_new_stale_moved_and_rising_debt() -> None:
     assert any("rose from 1 to 2" in message for message in more)
 
     fewer = evaluate_raise_gate(
-        [_raise()], _raise_document([_family([_listed(count=2)])], 2)
+        [_raise()], _raise_document([_family([_listed(count=2)])], 0, unaudited=2)
     )
     assert any("fell from 2 to 1" in message for message in fewer)
 
-    over = evaluate_raise_gate([_raise()], _raise_document([_family([_listed()])], 0))
+    over = evaluate_raise_gate(
+        [_raise()], _raise_document([_family([_listed()])], 0, unaudited=0)
+    )
     assert any("above the ceiling" in message for message in over)
-    under = evaluate_raise_gate([_raise()], _raise_document([_family([_listed()])], 4))
-    assert any("lower debt_ceiling.total" in message for message in under)
+    under = evaluate_raise_gate(
+        [_raise()], _raise_document([_family([_listed()])], 0, unaudited=4)
+    )
+    assert any("lower debt_ceiling.unaudited" in message for message in under)
 
     reviewed = evaluate_raise_gate(
         [_raise()], _raise_document([_family([_listed()], "input-validation")], 0)
     )
     assert reviewed == []  # a reviewed category carries no debt
+
+
+def test_debt_of_audited_and_other_modules_has_separate_ceilings() -> None:
+    audited = _listed(path=AUDITED_PATH)
+    document = _raise_document([_family([audited, _listed()])], total=1, unaudited=1)
+    sites = [_raise(path=AUDITED_PATH), _raise()]
+    assert evaluate_raise_gate(sites, document) == []
+
+    # A new debt site elsewhere cannot hide behind the audited modules' ceiling.
+    spill = _raise_document([_family([audited, _listed()])], total=2, unaudited=0)
+    messages = evaluate_raise_gate(sites, spill)
+    assert any(
+        "other modules" in message and "above" in message for message in messages
+    )
+    assert any(
+        "audited modules" in message and "lower" in message for message in messages
+    )
 
 
 def test_a_site_in_two_families_is_refused() -> None:
@@ -267,10 +307,34 @@ def test_raises_of_local_error_classes_are_sites_and_builtins_are_not() -> None:
     ]
 
 
+def test_exception_classes_follow_the_bases_not_only_the_name() -> None:
+    source = dedent(
+        """
+        class Denied(RuntimeError): ...
+        class Pending(Denied): ...
+        class SampleConflict(Exception): ...
+        class _Kept(Exception): ...
+        class _Private(ValueError): ...
+        class Helper: ...
+        """
+    )
+    classes = exception_classes([ast.parse(source)])
+    assert {"Denied", "Pending", "SampleConflict", "_Private"} <= classes
+    assert "_Kept" not in classes and "Helper" not in classes
+
+
+def test_the_scan_covers_every_module_of_control_src() -> None:
+    document = load_allowlist()
+    audited = audited_paths(document)
+    paths = {site.path for site in scan_raises()}
+    assert audited <= paths
+    assert paths - audited, "raises outside the audited modules are scanned too"
+
+
 def test_the_repository_holds_at_its_reviewed_blockers() -> None:
     document = load_allowlist()
     waits = scan_waits()
-    raises = scan_raises(raise_paths(document))
+    raises = scan_raises()
     assert evaluate_wait_gate(waits, document) == []
     assert evaluate_raise_gate(raises, document) == []
 
@@ -312,7 +376,7 @@ def test_a_category_or_verdict_outside_the_vocabulary_is_refused(tmp_path) -> No
 def test_write_counts_lowers_and_never_adds() -> None:
     document = load_allowlist()
     waits = scan_waits()
-    raises = scan_raises(raise_paths(document))
+    raises = scan_raises()
     assert write_counts(document, waits, raises) == document
     fewer = write_counts(document, waits[:-3], raises[:-5])
     assert fewer["max_debt"] <= document["max_debt"]  # type: ignore[operator]
