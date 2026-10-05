@@ -310,17 +310,10 @@ def test_profile_acceptance_joins_the_build_cancellation_boundary(
         response = api.post(
             f"/api/profile/{profile.number}/load", headers=headers, json=body
         )
-        assert response.status_code == 409, response.text
+        # A busy build boundary is a wait, not a refusal: the load is accepted,
+        # parked with its reason, and retried once the boundary is free.
+        assert response.status_code == 202, response.text
         assert "build.consumer_busy" in response.text
-    with sessions() as session:
-        assert (
-            session.scalar(
-                select(FleetProfileApplication.id).where(
-                    FleetProfileApplication.request_key == request_key
-                )
-            )
-            is None
-        )
     response = api.post(
         f"/api/profile/{profile.number}/load", headers=headers, json=body
     )

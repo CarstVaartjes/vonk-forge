@@ -13,6 +13,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol, TypedDict
+from typing import cast as _typing_cast
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import String, case, cast, func, or_, select, update
@@ -483,7 +484,7 @@ def _persisted_profile_result(
 
     def read() -> FleetProfileApplicationResult | None:
         if row.result is None:
-            if row.state == "succeeded":
+            if row.state == _LifecycleState.SUCCEEDED:
                 raise ValueError("a succeeded application has no result")
             return None
         return read_stored_document(
@@ -494,7 +495,7 @@ def _persisted_profile_result(
         )
 
     def rebuild() -> FleetProfileApplicationResult | None:
-        if row.state != "succeeded":
+        if row.state != _LifecycleState.SUCCEEDED:
             return None
         # A succeeded load completed every step its plan listed; a plan that
         # cannot be read leaves the step the row itself reached.
@@ -1024,6 +1025,12 @@ def _operation_state(
             "stored child operation state is outside the contract",
         )
         return default
+
+
+#: The operation state a retired load ends in (its effect recorded unknown).
+_CANCELLED_OPERATION: FleetProfileOperationState = _typing_cast(
+    "FleetProfileOperationState", _LifecycleState.CANCELLED.value
+)
 
 
 def _stored_state(state: _LifecycleState | None) -> str:
@@ -8028,7 +8035,10 @@ class FleetProfileService:
                 row = session.get(
                     FleetProfileApplication, application_id, with_for_update=True
                 )
-                if row is not None and row.state in {"queued", "running"}:
+                if row is not None and row.state in {
+                    _LifecycleState.QUEUED,
+                    _LifecycleState.RUNNING,
+                }:
                     row.status_reason = (
                         f"Waiting to issue the next step ({residue.note})"
                     )[:512]
@@ -8038,7 +8048,10 @@ class FleetProfileService:
             row = session.get(
                 FleetProfileApplication, application_id, with_for_update=True
             )
-            if row is not None and row.state in {"queued", "running"}:
+            if row is not None and row.state in {
+                _LifecycleState.QUEUED,
+                _LifecycleState.RUNNING,
+            }:
                 self._lifecycle.cancelled(
                     row,
                     "Profile order retired: its stored evidence could not be "
@@ -8068,7 +8081,7 @@ class FleetProfileService:
             if isinstance(intended, Residue):
                 self._finish_pending_admission(
                     application_id,
-                    state="cancelled",
+                    state=_CANCELLED_OPERATION,
                     reason="Profile admission retired: its accepted intent could "
                     "not be read; load the profile again",
                 )
@@ -8374,7 +8387,7 @@ class FleetProfileService:
             if isinstance(intended, Residue):
                 self._finish_pending_admission(
                     application_id,
-                    state="cancelled",
+                    state=_CANCELLED_OPERATION,
                     reason="Profile admission retired: its accepted intent could "
                     "not be read; load the profile again",
                 )
