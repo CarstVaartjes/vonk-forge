@@ -3579,7 +3579,19 @@ class ModelCacheService:
                         or_(
                             ModelCacheOperation.next_action_at.is_(None),
                             ModelCacheOperation.next_action_at <= now,
-                        )
+                        ),
+                        # A row the startup adoption has not reached still carries
+                        # its clock in the payload; it must not take a batch slot
+                        # from a due one.  Retired once no such row can exist.
+                        or_(
+                            ModelCacheOperation.payload["retry"]["next_retry_at"]
+                            .as_string()
+                            .is_(None),
+                            ModelCacheOperation.payload["retry"][
+                                "next_retry_at"
+                            ].as_string()
+                            <= _iso(now),
+                        ),
                     )
                     .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
                     .with_for_update(skip_locked=True)
@@ -6571,7 +6583,7 @@ class ModelCacheService:
                         ),
                         now,
                         interrupted=True,
-                        consume_retry=False,
+                        consume_retry=True,
                     )
                     payload = _validated_operation_payload(operation) | {
                         "failure": _cache_failure(
@@ -7353,15 +7365,43 @@ class ModelCacheService:
             return settled.state is State.CANCELLED
 
     def _reconcile_pending_cancellations(self) -> int:
-        """The reconcile pass over active operations (cancels, lapsed leases).
+        """Settle what is due: pending cancels, lapsed leases.
 
-        One loop decides what is due: a cancel whose stop is still unconfirmed, a
-        transfer whose process is gone (its lease lapsed), and cancellation
-        settlement after a Controller restart.
+        A cancel whose transfers are already idle ends at once (that costs no
+        stop budget: it is the success path, and it is what a restarted
+        Controller does for an intent its predecessor persisted); a cancel whose
+        stop is still unconfirmed is left to the reconcile loop, which re-issues
+        the stop at the core's bounded rate and, after its budget, ends it.
         """
 
-        report = self._reconciler.reconcile()
-        return report.changed
+        with self._session() as session:
+            candidates = [
+                (operation.id, self._payload_of(operation))
+                for operation in session.scalars(
+                    select(ModelCacheOperation)
+                    .where(
+                        ModelCacheOperation.kind == "download",
+                        ModelCacheOperation.state.in_(["queued", "running", "partial"]),
+                    )
+                    .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
+                )
+            ]
+        settled = 0
+        for operation_id, payload in candidates:
+            if (
+                payload is not None
+                and payload.get("cancellation") is not None
+                and self.effects_settled(operation_id, payload)
+            ):
+                settled += int(self._try_settle_cancellation(operation_id))
+        return settled + self._reconciler.reconcile().changed
+
+    @staticmethod
+    def _payload_of(operation: ModelCacheOperation) -> dict[str, object] | None:
+        try:
+            return _validated_operation_payload(operation)
+        except ModelCacheStorageError:
+            return None  # a corrupt document has no readable intent (rule 5)
 
     def _cancellation_intent(
         self, *, actor: str, request_key: str, reason: str

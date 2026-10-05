@@ -438,11 +438,11 @@ class ModelCacheAdapter:
                 state = "failed"
             case _:
                 state = "cancelled"
-        claimed = after.state is State.RUNNING and before.state is not State.RUNNING
-        if claimed and operation.fence is not None:
-            # A claim after an earlier one is the next attempt; the first claim
-            # of a fresh operation is attempt 1 (``attempt >= 1`` is stored).
-            put("attempt", int(operation.attempt) + 1)
+        if after.state is State.RUNNING and before.state is not State.RUNNING:
+            # The attempt number counts consumed attempts (a failure's retry), not
+            # claims: waiting for a busy writer is a dependency wait and consumes
+            # none, so the same attempt resumes.
+            put("attempt", max(int(operation.attempt), after.retry_count + 1))
         put("state", state)
         put("next_action_at", next_action)
         put("lease_deadline", lease)
