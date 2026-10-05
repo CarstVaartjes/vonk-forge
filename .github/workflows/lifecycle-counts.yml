@@ -1,0 +1,47 @@
+name: Lifecycle counts
+
+# A platform PR that touches lifecycle, raise or allowlist files must report
+# the counts (writers, operator waits, raises, debt) before and after, and the
+# report must be true. scripts/lifecycle-counts reads the counts from the
+# reviewed allowlists at the merge base and at the head.
+on:
+  pull_request:
+    branches: [main]
+    # `edited` re-runs the check when the description is fixed.
+    types: [opened, edited, synchronize, reopened]
+  # A merge-queue commit has no description to check; the PR check already ran.
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    name: Lifecycle counts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository history
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Compare the reported counts with the real ones
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
+          python3 scripts/lifecycle-counts check \
+            --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --body-file "$RUNNER_TEMP/pr-body.md"
+      - name: A queued commit carries no description
+        if: github.event_name == 'merge_group'
+        run: echo "Checked on the pull request."
