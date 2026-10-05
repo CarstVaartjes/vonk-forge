@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import importlib.machinery
+import importlib.util
+import json
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _module():
+    loader = importlib.machinery.SourceFileLoader(
+        "lifecycle_counts", str(ROOT / "scripts/lifecycle-counts")
+    )
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+WRITERS = {"writers": [{"count": 2}, {"count": 3}]}
+BLOCKERS = {
+    "max_debt": 4,
+    "debt_ceiling": {"total": 10},
+    "operator_waits": [
+        # One site, listed once per operation kind: counted once.
+        {"path": "a.py", "function": "f", "kind": "k", "sites": 2},
+        {"path": "a.py", "function": "f", "kind": "k", "sites": 2},
+        {"path": "b.py", "function": "g", "kind": "k", "sites": 1},
+    ],
+    "fail_closed": [
+        {"sites": [["a.py", "E", "f", "c", 3], ["a.py", "E", "g", "d", 4]]},
+        {"sites": [["b.py", "E", "h", "e", 1]]},
+    ],
+}
+REAL = {"writers": 5, "operator_waits": 3, "raises": 8, "debt": 14}
+
+
+def test_counts_come_from_the_allowlists() -> None:
+    assert _module().count_documents(WRITERS, BLOCKERS) == REAL
+
+
+def test_the_recorded_counts_equal_what_the_scanners_find() -> None:
+    # The allowlists are what the control suite ratchets against the code, so a
+    # count read from them is the count of the code.
+    module = _module()
+    counts = module.counts_from(module.reader_for(None))
+    assert set(counts) == set(module.KEYS)
+    assert all(value >= 0 for value in counts.values())
+
+
+def test_only_lifecycle_raise_and_allowlist_files_need_a_report() -> None:
+    module = _module()
+    assert module.is_covered("tools/blocker-allowlist.json")
+    assert module.is_covered("control/src/vonk_control/lifecycle/job.py")
+    assert module.is_covered("rust/crates/vonk-agent/src/executor.rs")
+    assert not module.is_covered("control/src/vonk_control/api.py")
+    assert not module.is_covered("docs/runbooks/vonkctl.md")
+
+
+def test_an_uncovered_change_needs_no_report() -> None:
+    assert _module().check("", REAL, REAL, ["docs/a.md"]) == []
+
+
+def test_a_covered_change_without_a_report_fails_with_the_block_to_paste() -> None:
+    module = _module()
+    messages = module.check("no numbers", REAL, REAL, [module.BLOCKERS])
+    assert len(messages) == 2
+    assert "before: writers=5 operator_waits=3 raises=8 debt=14" in messages[0]
+
+
+def test_a_report_must_match_the_real_counts() -> None:
+    module = _module()
+    after = {**REAL, "writers": 4}
+    honest = module.report_block(REAL, after)
+    assert module.check(honest, REAL, after, [module.WRITERS]) == []
+    lying = module.report_block(REAL, REAL)
+    messages = module.check(lying, REAL, after, [module.WRITERS])
+    assert len(messages) == 1 and messages[0].startswith("'after:'")
+
+
+def test_report_lines_parse_in_markdown_bullets_and_any_case() -> None:
+    body = (
+        "x\n- Before: writers=1 operator_waits=2 raises=3 debt=4\n* AFTER : writers=0\n"
+    )
+    parsed = _module().parse_report(body)
+    assert parsed["before"]["debt"] == 4
+    assert parsed["after"] == {"writers": 0}
+
+
+def test_cli_prints_json_for_the_tree(capsys) -> None:
+    module = _module()
+    assert module.main([]) == 0
+    assert set(json.loads(capsys.readouterr().out)) == set(module.KEYS)

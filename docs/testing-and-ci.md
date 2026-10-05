@@ -350,6 +350,17 @@ family, and `max_debt` / `debt_ceiling.total` only fall. Both scanners take
 `--list`, and `--write-baseline` lowers the recorded counts after a fix; a new
 site always needs a reviewed entry by hand.
 
+A PR that touches lifecycle, raise or allowlist files reports the movement.
+`scripts/lifecycle-counts` prints the four numbers (writers, operator waits,
+raises, debt) read from the two allowlists, which the ratchets above hold equal
+to the code; `scripts/lifecycle-counts report --base origin/main` prints the
+`before:` / `after:` block for the PR description (see
+`.github/pull_request_template.md`). The `Lifecycle counts` workflow runs
+`scripts/lifecycle-counts check` on every PR: if the diff touches a covered file
+the description must carry both lines and they must equal the counts at the
+merge base and at the head. It checks the report is true; the ratchets decide
+whether a rise is acceptable.
+
 A third ratchet keeps the vocabulary the contract owns out of hand-written code.
 `control/tests/vocabulary_literals.py` finds string literals equal to a word of
 `vonk_agent_protocol.lifecycle_vocabulary` in the Python sources
