@@ -1410,11 +1410,13 @@ def test_upstream_revision_downloads_only_new_files_and_reuses_the_rest(
         "not a result document",
     ],
 )
-def test_cache_operation_reads_reject_malformed_or_wrong_kind_results(
+def test_cache_operation_reads_rebuild_malformed_or_wrong_kind_results(
     cache,
     tmp_path: Path,
     invalid_result: object,
 ) -> None:
+    """A damaged result is re-derived from the operation's own evidence."""
+
     service, sessions = cache
     operation = _download(
         service,
@@ -1426,8 +1428,10 @@ def test_cache_operation_reads_reject_malformed_or_wrong_kind_results(
     with sessions.begin() as session:
         row = session.get(ModelCacheOperation, operation.id)
         row.payload = {**row.payload, "result": invalid_result}
-    with pytest.raises(ModelCacheStorageError, match="payload is invalid"):
-        service.get_operation(operation.id)
+    rebuilt = service.get_operation(operation.id)
+    assert rebuilt.state == "succeeded"
+    assert isinstance(rebuilt.result, ModelCacheDownloadResult)
+    assert rebuilt.result.artifact_set_sha256 == operation.artifact_set_sha256
 
 
 def test_one_set_with_shared_digest_counts_one_physical_payload(
@@ -3642,7 +3646,7 @@ def test_model_removal_child_replay_and_visible_writer_wait(cache, tmp_path: Pat
 @pytest.mark.parametrize(
     "field", ["actor", "request_key", "selector", "removal_fence", "delete_objects"]
 )
-def test_model_removal_rejects_persisted_intent_drift_before_effects(
+def test_model_removal_retires_persisted_intent_drift_before_effects(
     cache, tmp_path: Path, field: str
 ):
     service, sessions = cache
@@ -3675,10 +3679,14 @@ def test_model_removal_rejects_persisted_intent_drift_before_effects(
                 else "00000000-0000-4000-8000-000000001072"
             )
             row.payload = payload
-    with pytest.raises(ModelCacheStorageError) as refused:
-        service._advance_model_removal(accepted.id)
-    assert refused.value.code == "model_cache.removal_plan_changed"
+    # The drifted plan is destructive intent nobody accepted: nothing is
+    # removed, the row ends (kept for inspection) and the worker carries on.
+    assert service._advance_model_removal(accepted.id) is False
     assert service._object_path(str(artifact["sha256"])).read_bytes() == b"bound bytes"
+    retired = service.get_operation(accepted.id)
+    assert retired.state == "failed"
+    assert "persisted-state-damaged" in str(retired.last_error)
+    assert service.advance_removals() == 0
 
 
 def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
