@@ -247,13 +247,26 @@ async fn run_control_lane(
                 fabric_address: config.fabric_address,
                 fabric_bandwidth_mbps: config.fabric_bandwidth_mbps,
             };
-            let inventory = collect_inventory_until_ready(
+            let mut inventory = collect_inventory_until_ready(
                 || collector.collect(),
                 &mut failures,
                 POLL_MIN_SECONDS,
                 POLL_MAX_SECONDS,
             )
             .await;
+            let controller_url = config.controller_url.clone();
+            // Resolving the NAS host may block on DNS; keep it off the reactor.
+            let evidence = tokio::task::spawn_blocking(move || {
+                vonk_agent::network::collect(
+                    Path::new("/sys/class/net"),
+                    Path::new("/proc/net/route"),
+                    vonk_agent::network::nas_address(&controller_url),
+                )
+            })
+            .await
+            .unwrap_or_default();
+            inventory.network_interfaces = evidence.interfaces;
+            inventory.nas_route_interface = evidence.nas_route_interface;
             if disk_reserve_degraded(inventory.disk_available_bytes)
                 || !inventory.state_database_reserve_held
             {
@@ -668,6 +681,8 @@ mod tests {
                         capabilities: vec![],
                         fabric_address: None,
                         fabric_bandwidth_mbps: None,
+                        network_interfaces: None,
+                        nas_route_interface: None,
                     })
                 }
             },

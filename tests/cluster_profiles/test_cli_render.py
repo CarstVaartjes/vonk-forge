@@ -808,3 +808,32 @@ def test_profile_cancel_renders_the_application(application, capsys):
     assert application["id"] in output
     assert str(application["state"]) in output
     assert str(application["cancellation"]["state"]) in output
+
+
+def _wifi_spark():
+    spark = _spark("atlas", 1)
+    spark["inventory"] = {
+        "nas_route_interface": "wlP9s9",
+        "network_interfaces": [
+            {"name": "enP7s7", "kind": "wired", "carrier": False},
+            {"name": "wlP9s9", "kind": "wifi", "carrier": True},
+        ],
+    }
+    spark["warnings"] = [
+        {
+            "code": "network.nas-route-wifi-wired-port-down",
+            "detail": "Reaches the NAS over Wi-Fi (wlP9s9, unknown speed link).",
+            "severity": "warning",
+            "recommendation": "Wired port enP7s7 has no link; connect it.",
+        }
+    ]
+    return spark
+
+
+def test_fleet_shows_the_wifi_nas_route_warning_and_its_recommendation(capsys):
+    render_payload(_wifi_spark(), "fleet", action="detail")
+    captured = capsys.readouterr()
+    assert "NAS route: wlP9s9 (wifi, link up)" in captured.out
+    assert "Wired ports: enP7s7 (no link)" in captured.out
+    assert "Reaches the NAS over Wi-Fi" in captured.err
+    assert "connect it" in captured.err

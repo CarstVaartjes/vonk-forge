@@ -3591,6 +3591,10 @@ export interface components {
             host_memory_free_bytes: number;
             /** Host Memory Total Bytes */
             host_memory_total_bytes: number;
+            /** Nas Route Interface */
+            nas_route_interface?: string | null;
+            /** Network Interfaces */
+            network_interfaces?: components["schemas"]["NetworkInterface"][] | null;
             /** Nvidia Driver Version */
             nvidia_driver_version: string;
             /**
@@ -4516,6 +4520,23 @@ export interface components {
             /** Notice */
             notice: string;
         };
+        /**
+         * NetworkInterface
+         * @description One NIC as the agent reads it from sysfs.
+         */
+        NetworkInterface: {
+            /** Carrier */
+            carrier: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "wired" | "wifi" | "other";
+            /** Link Speed Mbps */
+            link_speed_mbps?: number | null;
+            /** Name */
+            name: string;
+        };
         /** NodeConnection */
         NodeConnection: {
             /**
@@ -4896,10 +4917,12 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "profile.retrying" | "run.degraded" | "recipe.update_available" | "cpu.low-clock";
+            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "profile.retrying" | "run.degraded" | "recipe.update_available" | "cpu.low-clock" | "network.nas-route-wifi-no-wired-port" | "network.nas-route-wifi-wired-port-down" | "network.nas-route-wifi-wired-port-unused";
             /** Detail */
             detail: string;
             install_partial?: components["schemas"]["InstallPartialEvidence"] | null;
+            /** Recommendation */
+            recommendation?: string | null;
             /**
              * Severity
              * @enum {string}

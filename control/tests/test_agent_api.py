@@ -665,6 +665,11 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         "fabric_bandwidth_mbps": 200000,
         "nvidia_driver_version": "580.65.06",
         "container_runtime_version": "28.3.3",
+        "network_interfaces": [
+            {"name": "enP7s7", "kind": "wired", "carrier": False},
+            {"name": "wlP9s9", "kind": "wifi", "carrier": True},
+        ],
+        "nas_route_interface": "wlP9s9",
     }
 
     response = client.post(
@@ -680,7 +685,32 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         assert row is not None
         assert row.fabric_address == "192.168.100.2"
         assert row.fabric_bandwidth_mbps == 200000
+        assert row.nas_route_interface == "wlP9s9"
+        assert row.network_interfaces == [
+            {
+                "name": "enP7s7",
+                "kind": "wired",
+                "link_speed_mbps": None,
+                "carrier": False,
+            },
+            {
+                "name": "wlP9s9",
+                "kind": "wifi",
+                "link_speed_mbps": None,
+                "carrier": True,
+            },
+        ]
         assert row.capabilities == sorted(payload["capabilities"])
+
+    inconsistent = payload | {"nas_route_interface": "wlan9"}
+    assert (
+        client.post(
+            "/agent/inventory",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=inconsistent,
+        ).status_code
+        == 422
+    )
 
     denied = payload | {"fabric_address": "10.0.0.42"}
     assert (

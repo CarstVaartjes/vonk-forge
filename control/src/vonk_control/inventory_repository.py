@@ -12,7 +12,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_agent_protocol.inventory import InventoryRequest, MemoryPool
+from vonk_agent_protocol.inventory import (
+    InventoryRequest,
+    MemoryPool,
+    NetworkInterface,
+)
 
 from .models import NodeInventorySnapshot
 
@@ -39,6 +43,8 @@ class InventorySnapshotInput:
     fabric_bandwidth_mbps: int | None = None
     nvidia_driver_version: str = "unknown"
     container_runtime_version: str = "unknown"
+    network_interfaces: tuple[NetworkInterface, ...] | None = None
+    nas_route_interface: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +69,10 @@ class InventorySnapshotView:
     nvidia_driver_version: str
     container_runtime_version: str
     memory_pool: MemoryPool = field(kw_only=True)
+    network_interfaces: tuple[NetworkInterface, ...] | None = field(
+        kw_only=True, default=None
+    )
+    nas_route_interface: str | None = field(kw_only=True, default=None)
 
 
 def _validated_inventory(
@@ -73,6 +83,12 @@ def _validated_inventory(
         for name in InventoryRequest.model_fields
         if name not in {"schema_version", "observed_at"}
     }
+    interfaces = document["network_interfaces"]
+    if interfaces is not None:
+        document["network_interfaces"] = [
+            item.model_dump(mode="json") if isinstance(item, NetworkInterface) else item
+            for item in interfaces
+        ]
     document.update(schema_version=1, observed_at=observed_at.isoformat())
     return InventoryRequest.model_validate_json(canonical_message(document))
 
@@ -112,6 +128,15 @@ class InventoryRepository:
             fabric_bandwidth_mbps=value.fabric_bandwidth_mbps,
             nvidia_driver_version=value.nvidia_driver_version,
             container_runtime_version=value.container_runtime_version,
+            network_interfaces=(
+                None
+                if validated.network_interfaces is None
+                else [
+                    item.model_dump(mode="json")
+                    for item in validated.network_interfaces
+                ]
+            ),
+            nas_route_interface=validated.nas_route_interface,
             evidence_digest=digest,
         )
         with self._sessions.begin() as session:
@@ -166,6 +191,12 @@ class InventoryRepository:
                 row.nvidia_driver_version,
                 row.container_runtime_version,
                 memory_pool=validated.memory_pool,
+                network_interfaces=(
+                    None
+                    if validated.network_interfaces is None
+                    else tuple(validated.network_interfaces)
+                ),
+                nas_route_interface=validated.nas_route_interface,
             )
 
     def snapshot_count(self, node_id: str) -> int:

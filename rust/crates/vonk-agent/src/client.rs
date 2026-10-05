@@ -1554,6 +1554,8 @@ impl AgentHttpClient {
                 .and_then(|value| u32::try_from(value).ok()),
             nvidia_driver_version: inventory.nvidia_driver_version.clone(),
             container_runtime_version: inventory.container_runtime_version.clone(),
+            network_interfaces: inventory.network_interfaces.clone(),
+            nas_route_interface: inventory.nas_route_interface.clone(),
         };
         clamp_inventory_request(&mut request);
         request.validate().map_err(|_| ClientError::Protocol)?;
@@ -2461,6 +2463,8 @@ mod tests {
             ],
             fabric_address: None,
             fabric_bandwidth_mbps: Some(100),
+            network_interfaces: None,
+            nas_route_interface: None,
             nvidia_driver_version: "580.1\u{e9}".to_owned(),
             container_runtime_version: "podman 5".to_owned(),
         };

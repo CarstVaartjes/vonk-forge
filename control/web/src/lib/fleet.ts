@@ -38,6 +38,11 @@ export function reconcileTelemetryWarnings(
   return reconciled;
 }
 
+/** A warning's sentence, followed by what to do about it when the Controller names one. */
+export function warningText(warning: VisualFleetNode["warnings"][number]): string {
+  return warning.recommendation ? `${warning.detail} ${warning.recommendation}` : warning.detail;
+}
+
 /** Online, offline, or online but needing attention, with the reasons in plain words. */
 export function nodeStatus(node: VisualFleetNode, now: Date): {status: NodeStatus; reasons: string[]} {
   if (node.connection.online_state !== "online") return {status: "offline", reasons: [offlineReasonLabel(node.connection.offline_reason)]};
@@ -45,7 +50,7 @@ export function nodeStatus(node: VisualFleetNode, now: Date): {status: NodeStatu
     ? reconcileTelemetryWarnings(node.warnings, telemetryFreshnessAt(node.telemetry.sample.observed_at, now))
     : node.warnings;
   // Informational notices (a newer recipe revision exists) are not attention.
-  const reasons = warnings.filter(warning => warning.severity !== "info").map(warning => warning.detail);
+  const reasons = warnings.filter(warning => warning.severity !== "info").map(warningText);
   return {status: reasons.length > 0 ? "needs attention" : "online", reasons};
 }
 

@@ -63,7 +63,7 @@ from .host_helper import (
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
-from .inventory import InventoryRequest
+from .inventory import InventoryRequest, NetworkInterface
 from .recipe_jobs import (
     RecipeJobEvidence,
     RecipeJobFile,
@@ -164,6 +164,7 @@ __all__ = [
     "HostRuntimeRequest",
     "InstallVonkDebOperation",
     "InventoryRequest",
+    "NetworkInterface",
     "OperationCheckpoint",
     "OperationMemberProgress",
     "OperationProgress",

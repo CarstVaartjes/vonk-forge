@@ -7999,6 +7999,33 @@
             "title": "Host Memory Total Bytes",
             "type": "integer"
           },
+          "nas_route_interface": {
+            "anyOf": [
+              {
+                "maxLength": 15,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nas Route Interface"
+          },
+          "network_interfaces": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/NetworkInterface"
+                },
+                "maxItems": 16,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network Interfaces"
+          },
           "nvidia_driver_version": {
             "maxLength": 256,
             "minLength": 1,
@@ -10970,6 +10997,50 @@
         "title": "ModelTerritorialRestrictions",
         "type": "object"
       },
+      "NetworkInterface": {
+        "additionalProperties": false,
+        "description": "One NIC as the agent reads it from sysfs.",
+        "properties": {
+          "carrier": {
+            "title": "Carrier",
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "wired",
+              "wifi",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "link_speed_mbps": {
+            "anyOf": [
+              {
+                "maximum": 1000000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Speed Mbps"
+          },
+          "name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "carrier"
+        ],
+        "title": "NetworkInterface",
+        "type": "object"
+      },
       "NodeConnection": {
         "additionalProperties": false,
         "properties": {
@@ -12283,7 +12354,10 @@
               "profile.retrying",
               "run.degraded",
               "recipe.update_available",
-              "cpu.low-clock"
+              "cpu.low-clock",
+              "network.nas-route-wifi-no-wired-port",
+              "network.nas-route-wifi-wired-port-down",
+              "network.nas-route-wifi-wired-port-unused"
             ],
             "title": "Code",
             "type": "string"
@@ -12303,6 +12377,19 @@
                 "type": "null"
               }
             ]
+          },
+          "recommendation": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommendation"
           },
           "severity": {
             "enum": [

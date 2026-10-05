@@ -445,6 +445,8 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                     "fabric_bandwidth_mbps": 100000,
                     "nvidia_driver_version": "580.1",
                     "container_runtime_version": "1.2.3",
+                    "network_interfaces": None,
+                    "nas_route_interface": None,
                 },
                 "telemetry": {
                     "age_seconds": 2.0,
@@ -512,6 +514,8 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                     "fabric_bandwidth_mbps": 100000,
                     "nvidia_driver_version": "580.1",
                     "container_runtime_version": "1.2.3",
+                    "network_interfaces": None,
+                    "nas_route_interface": None,
                 },
                 "telemetry": None,
                 "installed": [],
@@ -529,6 +533,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                         "detail": "No telemetry sample is available.",
                         "severity": "warning",
                         "install_partial": None,
+                        "recommendation": None,
                     }
                 ],
             },
@@ -2197,3 +2202,61 @@ def test_low_cpu_clock_is_raised_only_when_sustained_and_hot_or_loaded() -> None
     # At or above 70% of the maximum is fine, and unreported temperature is not hot.
     assert _cpu_clock_codes(span_seconds=80, avg_mhz=2_800)[0] == []
     assert _cpu_clock_codes(span_seconds=80, temperature=None)[0] == []
+
+
+def _route_warnings(interfaces, route):
+    """Project one node whose inventory carries the given network evidence."""
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="active",
+                architecture="linux-arm64",
+                last_seen_at=NOW - timedelta(seconds=1),
+            )
+        )
+        session.flush()
+        session.add(_certificate(NODE_A, "nas-route"))
+        inventory = _inventory(NODE_A, NOW - timedelta(seconds=1), free_bytes=700)
+        inventory.network_interfaces = interfaces
+        inventory.nas_route_interface = route
+        session.add(inventory)
+    node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+    return [w for w in node.warnings if w.code.startswith("network.")]
+
+
+_WIFI = {"name": "wlP9s9", "kind": "wifi", "link_speed_mbps": 2402, "carrier": True}
+
+
+def test_wifi_nas_route_is_a_typed_warning_with_a_recommendation() -> None:
+    down = {"name": "enP7s7", "kind": "wired", "carrier": False}
+    (warning,) = _route_warnings([down, _WIFI], "wlP9s9")
+    assert warning.code == "network.nas-route-wifi-wired-port-down"
+    assert warning.severity == "warning"
+    assert "over Wi-Fi (wlP9s9, 2.402 Gb/s link" in warning.detail
+    assert warning.recommendation is not None
+    assert "enP7s7 has no link" in warning.recommendation
+
+    up = {"name": "enP7s7", "kind": "wired", "link_speed_mbps": 10000, "carrier": True}
+    (warning,) = _route_warnings([up, _WIFI], "wlP9s9")
+    assert warning.code == "network.nas-route-wifi-wired-port-unused"
+    assert "10 Gb/s" in (warning.recommendation or "")
+
+    (warning,) = _route_warnings([_WIFI], "wlP9s9")
+    assert warning.code == "network.nas-route-wifi-no-wired-port"
+
+
+def test_wired_unknown_or_unreported_nas_route_raises_no_warning() -> None:
+    wired = {
+        "name": "enP7s7",
+        "kind": "wired",
+        "link_speed_mbps": 10000,
+        "carrier": True,
+    }
+    assert _route_warnings([wired, _WIFI], "enP7s7") == []
+    # An older agent never reports network evidence: unknown, not a warning.
+    assert _route_warnings(None, None) == []
+    assert _route_warnings([wired, _WIFI], None) == []

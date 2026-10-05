@@ -14,6 +14,7 @@ from pydantic import (
 )
 from sqlalchemy import Row, case, func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.inventory import NetworkInterface
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .auth import CursorError
@@ -36,6 +37,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .nas_route_notice import nas_route_notice
 from .operation_blockers import PHASE_RETRY_CODE, read_blockers
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -339,12 +341,16 @@ class ProjectionReason(_StrictModel):
         "run.degraded",
         "recipe.update_available",
         "cpu.low-clock",
+        "network.nas-route-wifi-no-wired-port",
+        "network.nas-route-wifi-wired-port-down",
+        "network.nas-route-wifi-wired-port-unused",
     ]
     detail: Text256
     severity: Literal["info", "warning", "error"]
     #: Typed evidence for ``install.partial``: which installation, which rank
     #: and which reason. Absent for every other code.
     install_partial: InstallPartialEvidence | None = None
+    recommendation: Text256 | None = None
 
 
 class NodeConnection(_StrictModel):
@@ -374,6 +380,10 @@ class InventoryState(_StrictModel):
     fabric_bandwidth_mbps: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
     nvidia_driver_version: Text256
     container_runtime_version: Text256
+    network_interfaces: list[NetworkInterface] | None = Field(
+        default=None, max_length=16
+    )
+    nas_route_interface: str | None = Field(default=None, max_length=15)
 
 
 class TelemetryPoint(_StrictModel):
@@ -1220,6 +1230,22 @@ class FleetProjection:
                     severity="warning",
                 )
             )
+        route_notice = (
+            None
+            if inventory_state is None
+            else nas_route_notice(
+                inventory_state.network_interfaces, inventory_state.nas_route_interface
+            )
+        )
+        if route_notice is not None:
+            warnings.append(
+                ProjectionReason(
+                    code=route_notice.code,
+                    detail=route_notice.detail,
+                    severity="warning",
+                    recommendation=route_notice.recommendation,
+                )
+            )
         if telemetry_state is None:
             warnings.append(
                 ProjectionReason(
@@ -1395,6 +1421,12 @@ class FleetProjection:
             fabric_bandwidth_mbps=value.fabric_bandwidth_mbps,
             nvidia_driver_version=value.nvidia_driver_version,
             container_runtime_version=value.container_runtime_version,
+            network_interfaces=(
+                None
+                if value.network_interfaces is None
+                else [NetworkInterface(**item) for item in value.network_interfaces]
+            ),
+            nas_route_interface=value.nas_route_interface,
         )
 
     def _telemetry_state(

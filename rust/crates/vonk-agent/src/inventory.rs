@@ -157,6 +157,9 @@ pub struct Inventory {
     pub capabilities: Vec<String>,
     pub fabric_address: Option<std::net::IpAddr>,
     pub fabric_bandwidth_mbps: Option<u64>,
+    /// Filled by the caller from [`crate::network`]; `None` means unknown.
+    pub network_interfaces: Option<Vec<vonk_agent_protocol::generated::NetworkInterface>>,
+    pub nas_route_interface: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -298,6 +301,8 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             capabilities,
             fabric_address: self.fabric_address,
             fabric_bandwidth_mbps: self.fabric_bandwidth_mbps,
+            network_interfaces: None,
+            nas_route_interface: None,
         })
     }
 }

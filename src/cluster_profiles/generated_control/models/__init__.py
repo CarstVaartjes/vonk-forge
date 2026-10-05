@@ -295,6 +295,8 @@ from .model_record import ModelRecord
 from .model_reference import ModelReference
 from .model_source import ModelSource
 from .model_territorial_restrictions import ModelTerritorialRestrictions
+from .network_interface import NetworkInterface
+from .network_interface_kind import NetworkInterfaceKind
 from .node_connection import NodeConnection
 from .node_connection_agent_state import NodeConnectionAgentState
 from .node_connection_certificate_state import NodeConnectionCertificateState
@@ -841,6 +843,8 @@ __all__ = (
     "ModelReference",
     "ModelSource",
     "ModelTerritorialRestrictions",
+    "NetworkInterface",
+    "NetworkInterfaceKind",
     "NodeConnection",
     "NodeConnectionAgentState",
     "NodeConnectionCertificateState",
