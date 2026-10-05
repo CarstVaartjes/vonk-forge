@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -654,3 +654,26 @@ def module_conflict(message: str) -> RunSwitchOperationConflict:
     from vonk_control.run_switch_operations import _RunSwitchDefiniteConflict
 
     return _RunSwitchDefiniteConflict(message)
+
+
+def test_a_retry_never_lands_before_the_evidence_it_waits_for_can_exist() -> None:
+    """The retry clock is jittered per operation, so a wait with a known instant (the
+    post-stop inventory must be collected strictly after it) gives the core that
+    instant as a lower bound.  Without it, a retry that happened to land exactly on
+    the threshold found no evidence and lost a whole backoff step (a flake seen in
+    the profile image-replacement test on the Linux lane)."""
+
+    adapter = RunSwitchAdapter()
+    threshold = NOW + timedelta(seconds=26)
+    for _ in range(200):
+        job = _job("running", {})
+        progress: dict[str, Any] = {}
+        adapter.retry(
+            job,
+            progress,
+            "run-switch.post-stop-inventory-pending",
+            NOW,
+            retry_after=threshold,
+        )
+        due = datetime.fromisoformat(str(progress["observation_due_at"]))
+        assert due >= threshold, (due, job.id)

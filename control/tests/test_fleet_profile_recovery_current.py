@@ -405,10 +405,15 @@ def test_pending_admission_is_not_cancelled_by_parked_child_observer(
         row.state = "waiting-for-operator"
         row.status_reason = "Profile admission is waiting for the active workload owner"
 
-    assert service.tick() is False
+    # No action exists for a legacy wait: the first tick heals it (it returns to the
+    # queue and retries its admission), and admission retry still owns it - the
+    # parked-child observer never cancels it.
+    assert service.tick() is True
     parked = service.application(application.id)
-    assert parked.state == "waiting-for-operator"
+    assert parked.state == "queued"
     assert parked.progress.admission_pending is True
+    assert parked.progress.workload_intent_ordinal is None
+    assert service.tick() is False
 
 
 def test_exhausted_profile_retry_keeps_an_automatic_due_time(

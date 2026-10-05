@@ -43,6 +43,7 @@ from .admission_locking import (
 )
 from .agent_operation_facts import (
     AGENT_UPGRADE_RECOVERY_FENCE,
+    SUPERSEDED_CANCELLATION_SECONDS,
 )
 from .agent_operation_facts import (
     RESTART_REISSUE_OPERATIONS as _RESTART_REISSUE_OPERATIONS,
@@ -210,7 +211,6 @@ _ABANDONABLE_OPERATIONS = frozenset(
 )
 _ENDED_PARENT_STATES = _CONCLUDED_OUTCOMES | {"expired"}
 _DATABASE_REPOLL_SECONDS = 0.25
-_SUPERSEDED_CANCELLATION_SECONDS = 660
 
 
 def superseded_cancellation_deadline(result: object) -> datetime | None:
@@ -226,7 +226,7 @@ def superseded_cancellation_deadline(result: object) -> datetime | None:
         return None
     if requested_at.tzinfo is None:
         return None
-    return requested_at + timedelta(seconds=_SUPERSEDED_CANCELLATION_SECONDS)
+    return requested_at + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
 
 
 _CONTROL_OPERATIONS = frozenset(operation.value for operation in AgentOperation)

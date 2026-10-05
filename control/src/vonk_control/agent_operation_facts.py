@@ -49,6 +49,10 @@ STALLED_RETRY_BASE_SECONDS = 30
 
 
 STALLED_RETRY_MAX_SECONDS = 600
+#: The fixed authority an old workload fence's cancellation-only STOP is given, and
+#: so the budget a cancel of anything built on it (a profile load) is given: it never
+#: outlives the order it waits for.
+SUPERSEDED_CANCELLATION_SECONDS = 660
 
 
 INTERRUPTION_CODES = frozenset(

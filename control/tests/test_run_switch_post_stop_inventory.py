@@ -118,6 +118,13 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     for values in samples:
         values["observed_at"] = now[0]
         repository.record(InventorySnapshotInput(**values))
+    # The wait is not due before the instant evidence can exist (strictly after the
+    # stop plus the admitted lead): the retry clock never lands on or before it.
+    waiting_result = planner.get(accepted.operation_id).result
+    assert waiting_result is not None
+    first_due = waiting_result.observation_due_at
+    assert first_due is not None and first_due > now[0]
+    now[0] = first_due
     restarted = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
     assert restarted.tick()
     waiting = restarted.get(accepted.operation_id)
