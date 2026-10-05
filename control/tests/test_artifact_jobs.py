@@ -30,7 +30,6 @@ from vonk_control.artifact_blob_store import (
 )
 from vonk_control.artifact_jobs import (
     ArtifactJobError,
-    ArtifactJobResultEvidence,
     ArtifactJobService,
     CompiledArtifactContract,
     _effective_parameters,
@@ -1364,13 +1363,14 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
         agent_jobs.record_result(acknowledged)
 
 
-def test_artifact_cancel_stop_failure_remains_recoverable_and_blocks_release(
-    tmp_path,
-) -> None:
+def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> None:
+    """An unconfirmed stop completes: ``cancelled``, effect unknown, residue kept."""
+
     sessions, recipe_operations, _queue, service, run_id, node_id = (
         running_artifact_service(tmp_path)
     )
-    agent_jobs = AgentJobService(sessions, clock=MutableClock(NOW))
+    clock = MutableClock(NOW)
+    agent_jobs = AgentJobService(sessions, clock=clock)
 
     def consume(session, operation, attempt, message) -> None:
         service.consume_agent_result(session, operation, attempt, message)
@@ -1382,6 +1382,7 @@ def test_artifact_cancel_stop_failure_remains_recoverable_and_blocks_release(
     submitted = submitted_artifact_job(service, run_id, request_suffix=121)
     claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
+    assert service.get(submitted.id).supported_actions == ("stop",)
     service.cancel(
         submitted.id,
         actor="operator",
@@ -1396,24 +1397,44 @@ def test_artifact_cancel_stop_failure_remains_recoverable_and_blocks_release(
     )
     agent_jobs.record_result(waiting)
 
+    # Not a wait for a person: the cancel is being driven to its end.
     view = service.get(submitted.id)
-    assert view.state == "waiting-for-operator"
-    assert ArtifactJobResultEvidence.model_validate(
-        view.result_evidence
-    ) == ArtifactJobResultEvidence.model_validate(
-        {
-            "failure_kind": "cancellation-stop-uncertain",
-            "recoverable": True,
-            "active_scope_may_remain": True,
-            "elapsed_milliseconds": 10,
-        }
-    )
+    assert view.state == "cancelling"
+    assert view.supported_actions == ()
+    assert view.result_evidence is not None
+    assert {
+        "failure_kind": "cancellation-stop-uncertain",
+        "recoverable": True,
+        "active_scope_may_remain": True,
+        "elapsed_milliseconds": 10,
+    }.items() <= view.result_evidence.items()
     assert recipe_operations.preview_stop(run_id).allowed
 
+    for _ in range(40):
+        if service.get(submitted.id).state == "cancelled":
+            break
+        clock.advance(seconds=120)
+        agent_jobs.reconcile_orders()
+    ended = service.get(submitted.id)
+    assert ended.state == "cancelled"
+    assert ended.supported_actions == ()
+    assert ended.result_evidence is not None
+    assert ended.result_evidence["active_scope_may_remain"] is True
+    assert ended.result_evidence["failure_kind"] == "cancellation-stop-uncertain"
+    assert ended.result_evidence["cancel_request_id"] == (
+        "00000000-0000-4000-8000-000000000123"
+    )
+    # An ended job never blocks the run's Stop: its residue is recorded, not awaited.
+    with sessions.begin() as session:
+        assert (
+            recipe_operations._one_shot_stop_prerequisite(session, run_id, clock.now)
+            is None
+        )
 
-def test_unsafe_artifact_lease_expiry_is_terminal_recoverable_and_fences_result(
-    tmp_path,
-) -> None:
+
+def test_artifact_lease_expiry_is_observed_then_stoppable(tmp_path) -> None:
+    """A lapsed one-shot job is observed, then waits only with Stop to offer."""
+
     sessions, recipe_operations, _queue, service, run_id, node_id = (
         running_artifact_service(tmp_path)
     )
@@ -1427,24 +1448,12 @@ def test_unsafe_artifact_lease_expiry_is_terminal_recoverable_and_fences_result(
 
     clock.advance(seconds=31)
     assert claim_agent(agent_jobs, node_id, "serial-0") is None
-    expired = service.get(submitted.id)
-    assert expired.state == "failed"
-    assert expired.result_evidence == {
-        "failure_kind": "agent-lease-expired",
-        "recoverable": True,
-        "late_results_accepted": False,
-    }
-    stop_plan = recipe_operations.preview_stop(run_id)
-    with pytest.raises(RecipeArtifactJobCancellationPending):
-        recipe_operations.stop(
-            run_id,
-            plan_digest=stop_plan.plan_digest,
-            actor="operator",
-            request_id="00000000-0000-4000-8000-000000000155",
-        )
-    with sessions() as session:
-        run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running" and run.stopped_at is None
+    observed = service.get(submitted.id)
+    assert observed.state == "running"
+    assert observed.supported_actions == ("stop",)
+    assert observed.result_evidence is not None
+    assert observed.result_evidence["failure_kind"] == "agent-lease-expired"
+    assert observed.result_evidence["late_results_accepted"] is False
     with pytest.raises(StaleAgentAttempt):
         agent_jobs.record_result(
             cancellation_result(
@@ -1454,6 +1463,31 @@ def test_unsafe_artifact_lease_expiry_is_terminal_recoverable_and_fences_result(
                 reason="controller cancellation requested",
             )
         )
+    for _ in range(40):
+        if service.get(submitted.id).state == "waiting-for-operator":
+            break
+        clock.advance(seconds=120)
+        agent_jobs.reconcile_orders()
+    waiting = service.get(submitted.id)
+    assert waiting.state == "waiting-for-operator"
+    assert waiting.supported_actions == ("stop",)
+
+    # Stop completes it: cancelled, the effect unknown, the residue recorded.
+    service.cancel(
+        submitted.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000156",
+        reason="operator stopped the lost job",
+    )
+    for _ in range(40):
+        if service.get(submitted.id).state == "cancelled":
+            break
+        clock.advance(seconds=120)
+        agent_jobs.reconcile_orders()
+    ended = service.get(submitted.id)
+    assert ended.state == "cancelled"
+    assert ended.result_evidence is not None
+    assert ended.result_evidence["active_scope_may_remain"] is True
 
 
 def test_draft_artifact_cancel_idempotency_rejects_mismatched_replay(tmp_path) -> None:

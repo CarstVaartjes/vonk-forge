@@ -1250,6 +1250,11 @@ export interface components {
             status_reason?: string | null;
             /** Submit Request Id */
             submit_request_id?: string | null;
+            /**
+             * Supported Actions
+             * @default []
+             */
+            supported_actions: "stop"[];
             /** Timeout Seconds */
             timeout_seconds: number;
             /**

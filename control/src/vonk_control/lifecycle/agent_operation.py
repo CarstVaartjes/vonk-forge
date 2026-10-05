@@ -94,6 +94,11 @@ IRREVERSIBLE_OPERATIONS = frozenset(
     }
 )
 WAITING = "waiting-for-operator"
+JOB_RUN_OPERATION = AgentOperation.RECIPE_JOB_RUN.value
+#: The owner kind a one-shot job's order carries in its parent job's payload.
+OWNER_KIND = "artifact-job"
+#: The one operator action of a one-shot job's order (the artifact job owns it).
+STOP_ACTION = "stop"
 #: A parent in one of these states can no longer claim, resume or retire anything:
 #: its orders end with it instead of waiting.
 ENDED_PARENT_STATES = frozenset({"succeeded", "failed", "cancelled", "expired"})
@@ -108,6 +113,22 @@ _LEGACY_RETRY = "retry"
 _MAX_REASON = 512
 
 ResumeCandidates = Callable[[Session, str, datetime], Sequence[StoredOperation]]
+
+
+def is_artifact_owned(parent: Job | None) -> bool:
+    """Whether a parent job is the submission of a one-shot artifact job.
+
+    Such an order is owned by its artifact job: its operator action is ``stop``
+    only, never ``resume`` or ``retire`` (a resume would run a user's job again).
+    """
+
+    payload = None if parent is None else parent.payload
+    return (
+        parent is not None
+        and parent.kind == JOB_RUN_OPERATION
+        and isinstance(payload, Mapping)
+        and payload.get("owner_kind") == OWNER_KIND
+    )
 
 
 def _legacy_retry_due(operation: StoredOperation) -> datetime | None:
@@ -356,11 +377,19 @@ class AgentOperationAdapter:
         return StopResult.UNCONFIRMED if live or unobservable else StopResult.CONFIRMED
 
     def actions(self, row: Lifecycle) -> tuple[str, ...]:
-        """``resume``/``retire`` exactly when the Job endpoints would accept them."""
+        """``resume``/``retire`` exactly when the Job endpoints would accept them.
 
-        if self._resume_candidates is None or row.owner_id is None:
+        An artifact job's order has ``stop`` instead, until a cancel is requested
+        (then the cancel completes by itself and nothing is left to advertise).
+        """
+
+        if row.owner_id is None:
             return ()
         with self._read() as session:
+            if is_artifact_owned(session.get(Job, row.owner_id)):
+                return () if row.cancel_requested else (STOP_ACTION,)
+            if self._resume_candidates is None:
+                return ()
             candidates = self._resume_candidates(session, row.owner_id, self.now())
             if any(candidate.id == row.id for candidate in candidates):
                 return OPERATOR_ACTIONS
@@ -886,13 +915,17 @@ def parked_orders(now: datetime):
 
 __all__ = [
     "IRREVERSIBLE_OPERATIONS",
+    "JOB_RUN_OPERATION",
     "OBSERVE_BUDGET",
     "OPERATOR_ACTIONS",
+    "OWNER_KIND",
     "RESTART_REISSUE_OPERATIONS",
+    "STOP_ACTION",
     "AgentOperationAdapter",
     "adopt_legacy_orders",
     "aggregate_parent_state",
     "cancel_requested_at",
+    "is_artifact_owned",
     "lapsed_running_orders",
     "parked_orders",
     "retry_scheduled",

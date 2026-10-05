@@ -1,15 +1,7 @@
 {
   "schema": 1,
-  "max_writes": 170,
+  "max_writes": 156,
   "writers": [
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._project_artifact_job_expiry",
-      "model": "ArtifactJob",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-3"
-    },
     {
       "path": "control/src/vonk_control/agent_upgrades.py",
       "function": "AgentUpgradeService._advance",
@@ -41,46 +33,6 @@
       "kind": "attribute",
       "count": 1,
       "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/artifact_jobs.py",
-      "function": "ArtifactJobService._create_in_session",
-      "model": "ArtifactJob",
-      "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-3"
-    },
-    {
-      "path": "control/src/vonk_control/artifact_jobs.py",
-      "function": "ArtifactJobService.cancel",
-      "model": "ArtifactJob",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-3"
-    },
-    {
-      "path": "control/src/vonk_control/artifact_jobs.py",
-      "function": "ArtifactJobService.consume_agent_result",
-      "model": "ArtifactJob",
-      "kind": "attribute",
-      "count": 4,
-      "migrating_in": "step-3"
-    },
-    {
-      "path": "control/src/vonk_control/artifact_jobs.py",
-      "function": "ArtifactJobService.finalize",
-      "model": "ArtifactJob",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-3"
-    },
-    {
-      "path": "control/src/vonk_control/artifact_jobs.py",
-      "function": "ArtifactJobService.submit",
-      "model": "ArtifactJob",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-3"
     },
     {
       "path": "control/src/vonk_control/distributed_recovery.py",
@@ -637,34 +589,10 @@
     {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService._complete_profile_jobrun_stop_in_session",
-      "model": "ArtifactJob",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-3"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._complete_profile_jobrun_stop_in_session",
       "model": "Job",
       "kind": "attribute",
       "count": 1,
       "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._one_shot_stop_prerequisite",
-      "model": "ArtifactJob",
-      "kind": "attribute",
-      "count": 3,
-      "migrating_in": "step-3"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._profile_jobrun_stop_in_session",
-      "model": "ArtifactJob",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-3"
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",

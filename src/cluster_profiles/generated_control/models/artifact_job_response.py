@@ -14,6 +14,7 @@ from ..models.artifact_job_response_state import ArtifactJobResponseState
 from ..models.artifact_job_response_state import check_artifact_job_response_state
 from ..types import UNSET, Unset
 from typing import cast
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
@@ -55,6 +56,7 @@ class ArtifactJobResponse:
             result_evidence (ArtifactJobResultEvidence | None | Unset):
             status_reason (None | str | Unset):
             submit_request_id (None | str | Unset):
+            supported_actions (list[Literal['stop']] | Unset):
      """
 
     compiled_contract: CompiledArtifactContract
@@ -77,6 +79,7 @@ class ArtifactJobResponse:
     result_evidence: ArtifactJobResultEvidence | None | Unset = UNSET
     status_reason: None | str | Unset = UNSET
     submit_request_id: None | str | Unset = UNSET
+    supported_actions: list[Literal['stop']] | Unset = UNSET
 
 
 
@@ -165,6 +168,12 @@ class ArtifactJobResponse:
         else:
             submit_request_id = self.submit_request_id
 
+        supported_actions: list[Literal['stop']] | Unset = UNSET
+        if not isinstance(self.supported_actions, Unset):
+            supported_actions = self.supported_actions
+
+
+
 
         field_dict: dict[str, Any] = {}
 
@@ -195,6 +204,8 @@ class ArtifactJobResponse:
             field_dict["status_reason"] = status_reason
         if submit_request_id is not UNSET:
             field_dict["submit_request_id"] = submit_request_id
+        if supported_actions is not UNSET:
+            field_dict["supported_actions"] = supported_actions
 
         return field_dict
 
@@ -340,6 +351,17 @@ class ArtifactJobResponse:
         submit_request_id = _parse_submit_request_id(d.pop("submit_request_id", UNSET))
 
 
+        _supported_actions = d.pop("supported_actions", UNSET)
+        supported_actions: list[Literal['stop']] | Unset = UNSET
+        if _supported_actions is not UNSET:
+            supported_actions = []
+            for supported_actions_item_data in _supported_actions:
+                supported_actions_item = cast(Literal['stop'] , supported_actions_item_data)
+                if supported_actions_item != 'stop':
+                    raise ValueError(f"supported_actions_item must match const 'stop', got '{supported_actions_item}'")
+                supported_actions.append(supported_actions_item)
+
+
         artifact_job_response = cls(
             compiled_contract=compiled_contract,
             contract_sha256=contract_sha256,
@@ -361,6 +383,7 @@ class ArtifactJobResponse:
             result_evidence=result_evidence,
             status_reason=status_reason,
             submit_request_id=submit_request_id,
+            supported_actions=supported_actions,
         )
 
         return artifact_job_response

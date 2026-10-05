@@ -781,6 +781,15 @@
             ],
             "title": "Submit Request Id"
           },
+          "supported_actions": {
+            "default": [],
+            "items": {
+              "const": "stop",
+              "type": "string"
+            },
+            "title": "Supported Actions",
+            "type": "array"
+          },
           "timeout_seconds": {
             "maximum": 3600.0,
             "minimum": 1.0,

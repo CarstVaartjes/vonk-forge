@@ -593,6 +593,14 @@ issued work. A cancellation receipt is not proof that remote execution has
 already stopped; follow the same job until it reaches a settled state. A
 bounded follow timeout or Ctrl-C ends local observation only.
 
+A cancellation always completes. If the agent cannot confirm that the job
+stopped, the job ends `cancelled` after a bounded number of checks, with
+`result_evidence.active_scope_may_remain: true` recording that the job's scope
+may still hold memory; it never waits for a person. A job whose agent stopped
+reporting is observed first; if it still cannot be confirmed it shows
+`waiting-for-operator` with `supported_actions: ["stop"]`, and `recipe job
+cancel` is that Stop. A job never waits for an operator without that action.
+
 Download only works for a succeeded job. The destination must already be an
 existing, non-symlink directory. The CLI checks result names and declared
 limits, then verifies each file's size and SHA-256 and publishes it atomically.
