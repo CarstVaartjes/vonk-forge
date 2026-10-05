@@ -203,3 +203,12 @@ def test_product_code_and_other_workflows_do_not_need_a_lane_proof() -> None:
 )
 def test_blocker_guard_inputs_select_the_controller_suite(path: str) -> None:
     assert _module().select([path], "pull_request")["control"] is True
+
+
+def test_merge_queue_commit_selects_from_its_diff_like_a_pull_request() -> None:
+    module = _module()
+    assert module.select(["scripts/select-ci-areas"], "merge_group") == module.select(
+        ["scripts/select-ci-areas"], "pull_request"
+    )
+    assert module.select([], "merge_group") == {area: True for area in module.AREAS}
+    assert module.lane_selected(["tests/acceptance/x.py"], "merge_group") is False
