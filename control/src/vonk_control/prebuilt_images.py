@@ -48,6 +48,7 @@ from .catalog_revision_contract import (
     BuildSecurityProjection,
     PrebuiltImage,
 )
+from .lifecycle.image_availability import PrebuiltImageAdapter
 from .models import Job, RecipeBuild
 from .oci_image_store import (
     IMAGE_CACHE_DIRECTORY,
@@ -478,6 +479,7 @@ class PrebuiltImageImporter:
         self._sessions = sessions
         self._image_cache = artifact_root / IMAGE_CACHE_DIRECTORY
         self._clock = clock
+        self._lifecycle = PrebuiltImageAdapter(clock=clock)
         self._store = store or OciImageStore(artifact_root)
         self._owner = owner or f"prebuilt-{uuid.uuid4()}"
         self._executor = ThreadPoolExecutor(
@@ -720,7 +722,7 @@ class PrebuiltImageImporter:
             if evidence is not None:
                 document = evidence.model_dump(mode="json")
                 record_build_evidence(session, build, document, now=now)
-                job.state = "succeeded"
+                self._lifecycle.finish(job, ok=True, now=now)
                 job.result = {
                     "successful_nodes": [node_id],
                     "failed_nodes": [],
@@ -732,7 +734,7 @@ class PrebuiltImageImporter:
                 build.state = "failed"
                 build.error = f"{code}: {detail}"[:512]
                 build.updated_at = now
-                job.state = "failed"
+                self._lifecycle.finish(job, ok=False, now=now)
                 job.result = {
                     "successful_nodes": [],
                     "failed_nodes": [node_id],
