@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "max_writes": 56,
+  "max_writes": 50,
   "writers": [
     {
       "path": "control/src/vonk_control/distributed_recovery.py",
@@ -335,38 +335,6 @@
       "function": "RecipeOperationService.reconcile_superseded_unissued",
       "model": "Job",
       "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_update_batches.py",
-      "function": "RecipeUpdateBatches.claim",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 2,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_update_batches.py",
-      "function": "RecipeUpdateBatches.reconcile_cancellations",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_update_batches.py",
-      "function": "RecipeUpdateBatches.run",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 2,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_update_batches.py",
-      "function": "RecipeUpdateBatches.start",
-      "model": "Job",
-      "kind": "constructor",
       "count": 1,
       "migrating_in": "step-7"
     }
