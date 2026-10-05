@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "max_writes": 37,
+  "max_writes": 17,
   "writers": [
     {
       "path": "control/src/vonk_control/prebuilt_images.py",
@@ -127,110 +127,6 @@
       "function": "RecipeImageAvailabilityService.retry",
       "model": "Job",
       "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._cancel_current_build",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._cancel_prebuilt_build",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._complete_absent_stop_in_session",
-      "model": "Job",
-      "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._complete_profile_jobrun_stop_in_session",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._project_node_result",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 7,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._queue_in_session",
-      "model": "Job",
-      "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._queue_prebuilt_build_in_session",
-      "model": "Job",
-      "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._stop_logical_job_run",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._stop_logical_job_run",
-      "model": "Job",
-      "kind": "constructor",
-      "count": 2,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.activate_job_run",
-      "model": "Job",
-      "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.build",
-      "model": "Job",
-      "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.cancel",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.reconcile_superseded_unissued",
-      "model": "Job",
-      "kind": "attribute",
       "count": 1,
       "migrating_in": "step-7"
     }

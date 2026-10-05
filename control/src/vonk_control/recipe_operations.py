@@ -79,6 +79,7 @@ from .install_admission import (
 from .lifecycle import CancelRequested, Effect, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
 from .lifecycle.artifact_job import ArtifactJobAdapter
+from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .logging import redact_text
 from .models import (
     AgentNode,
@@ -421,6 +422,7 @@ class RecipeRunStatus:
     recovery_owners: tuple[RecipeRunRecoveryOwner, ...]
 
 
+new_recipe_job = RecipeOperationAdapter.new_job
 _TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _INITIAL_OBSERVATION_GRACE_SECONDS = 120
 # A Stop withdraws the run's route again if a competing publication listed it
@@ -829,7 +831,7 @@ class RecipeOperationService:
                 )
                 if succeeded is None:
                     raise RecipeOperationConflict("recipe build receipt is unavailable")
-                replay = Job(
+                replay = new_recipe_job(
                     id=str(uuid.uuid4()),
                     request_id=request_id,
                     kind=succeeded.kind,
@@ -1054,7 +1056,7 @@ class RecipeOperationService:
             "prebuilt_node_id": build.builder_node_id,
             **({"force_rebuild": True} if force else {}),
         }
-        job = Job(
+        job = new_recipe_job(
             id=str(uuid.uuid4()),
             request_id=request_id,
             kind="recipe.build.v1",
@@ -2098,7 +2100,7 @@ class RecipeOperationService:
                 "execution_mode": "one-shot-jobs",
                 "workload_intent_ordinal": workload_intent_ordinal,
             }
-            job = Job(
+            job = new_recipe_job(
                 id=str(uuid.uuid4()),
                 request_id=request_id,
                 kind="recipe.job.activate.v1",
@@ -2275,9 +2277,9 @@ class RecipeOperationService:
                 children = _unissued_workload_children(session, job, lock=True)
                 if children is None:
                     continue
-                job.state = "cancelled"
-                job.status_reason = "superseded before agent issuance"
-                job.updated_at = now
+                RecipeOperationAdapter().cancelled(
+                    job, now, reason="superseded before agent issuance", keep=False
+                )
                 adapter = AgentOperationAdapter(session)
                 for child in children:
                     adapter.settle(
@@ -2542,7 +2544,7 @@ class RecipeOperationService:
             "plan_digest": admitted.plan_digest,
             "workload_intent_ordinal": ordinal,
         }
-        job = Job(
+        job = new_recipe_job(
             id=str(uuid.uuid4()),
             request_id=request_id,
             kind="recipe.stop",
@@ -4172,7 +4174,7 @@ class RecipeOperationService:
                 AgentOperationAdapter(session).record_outcome(
                     original, None, original_job, Outcome.CANCELLED, now
                 )
-                original_job.state = "cancelled"
+                RecipeOperationAdapter().cancelled(original_job, now)
                 original_job.result = cancellation.model_copy(
                     update={"cancelled": True}
                 ).model_dump(mode="json", exclude_none=True)
@@ -4191,9 +4193,11 @@ class RecipeOperationService:
                     AgentOperationAdapter(session).record_outcome(
                         operation, None, job, Outcome.CANCELLED, now
                     )
-                    job.state = "cancelled"
+                    RecipeOperationAdapter().cancelled(job, now)
                 else:
-                    job.state = "waiting-for-operator"
+                    # The cancel stays in flight for the cleanup sweeper; it never
+                    # waits for an operator (audit C7).
+                    RecipeOperationAdapter().cancel_race(job, now)
                 return False
             force_rebuild = job.payload.get("force_rebuild") is True
             if succeeded:
@@ -4433,8 +4437,7 @@ class RecipeOperationService:
                 if any(
                     child.state not in _TERMINAL_JOB_STATES for child in phase_children
                 ):
-                    job.state = "running"
-                    job.updated_at = now
+                    RecipeOperationAdapter().project(job, now)
                     return cleanup_queued
                 if (
                     all(child.state == "succeeded" for child in phase_children)
@@ -4455,8 +4458,7 @@ class RecipeOperationService:
                             next_payload,
                             operation_id=next_operation_id,
                         )
-                    job.state = "running"
-                    job.updated_at = now
+                    RecipeOperationAdapter().project(job, now)
                     return True
         terminal = all(child.state in _TERMINAL_JOB_STATES for child in children)
         if terminal:
@@ -4522,7 +4524,7 @@ class RecipeOperationService:
                 self._complete_profile_jobrun_stop_in_session(
                     session, job, children, now=now
                 )
-            job.state = "failed" if job_failed else "succeeded"
+            RecipeOperationAdapter().finish(job, now, failed=job_failed)
             stored_result = job.result
             projected_result = (
                 dict(stored_result) if isinstance(stored_result, Mapping) else {}
@@ -4845,7 +4847,7 @@ class RecipeOperationService:
                 if reconciliation_complete:
                     self._release(session, "installation", owner_id, now)
         else:
-            job.state = "running"
+            RecipeOperationAdapter().project(job, now)
         job.updated_at = now
         return cleanup_queued
 
@@ -4952,11 +4954,10 @@ class RecipeOperationService:
                 raise RecipeOperationConflict(
                     "cancellation request key was already used differently"
                 )
-            if job.state not in {"queued", "running"} and not (
-                # The Stop of a one-shot job whose effect is in doubt: its job
-                # advertises it, so the parent that waits must accept it.
-                job.kind == "recipe.job.run.v1" and job.state == "waiting-for-operator"
-            ):
+            if job.state not in {"queued", "running", "waiting-for-operator"}:
+                # A cancel always completes (rule 4): a parent that mirrors an
+                # order's wait (the Stop of a one-shot job in doubt, a legacy
+                # parked order) accepts it, and the orders end it.
                 raise RecipeOperationConflict("recipe operation is not cancellable")
             previous = _validated_result(job.kind, job.result) or {}
             if previous.get("cancel_requested") is True:
@@ -4998,8 +4999,9 @@ class RecipeOperationService:
                 job.status_reason = cancellation_reason
                 job.updated_at = now
                 return self._view(job)
-            job.state = "cancelled"
-            job.status_reason = cancellation_reason
+            RecipeOperationAdapter().cancelled(
+                job, now, reason=cancellation_reason, keep=False
+            )
             job.result = _validated_result(
                 job.kind,
                 {
@@ -5015,6 +5017,15 @@ class RecipeOperationService:
             )
             job.updated_at = now
         return self.get(operation_id)
+
+    def _heal_cancelling_build(self, job_id: str) -> None:
+        """A legacy build parked ``waiting-for-operator`` by a completion that raced
+        its cancel is shown as cancelling again; the sweep below completes it."""
+        now = self._clock()
+        with self._sessions.begin() as session:
+            job = session.get(Job, job_id, with_for_update={"skip_locked": True})
+            if job is not None:
+                RecipeOperationAdapter().heal(job, now)
 
     def reconcile_cancelled_builds(self) -> bool:
         """Cancel unneeded dependent builds and resume exact issued cleanup."""
@@ -5050,6 +5061,7 @@ class RecipeOperationService:
         progressed = False
         for job in candidates:
             try:
+                self._heal_cancelling_build(job.id)
                 cancellation = build_cancellation(job)
                 progressed = (
                     self._cancel_build(
@@ -5328,7 +5340,7 @@ class RecipeOperationService:
                 )
             build.error = cancellation.reason
             build.updated_at = now
-            job.state = "cancelled"
+            RecipeOperationAdapter().cancelled(job, now)
             job.result = cancellation.model_copy(update={"cancelled": True}).model_dump(
                 mode="json", exclude_none=True
             )
@@ -5433,7 +5445,7 @@ class RecipeOperationService:
                 AgentOperationAdapter(session).record_outcome(
                     child, None, job, Outcome.CANCELLED, now
                 )
-                job.state = "cancelled"
+                RecipeOperationAdapter().cancelled(job, now)
                 job.result = cancellation.model_copy(
                     update={"cancelled": True}
                 ).model_dump(mode="json", exclude_none=True)
@@ -5675,7 +5687,7 @@ class RecipeOperationService:
             if pending is not None:
                 if pending_job is None:
                     session.add(
-                        Job(
+                        new_recipe_job(
                             id=str(uuid.uuid4()),
                             request_id=request_id,
                             kind="recipe.stop",
@@ -5710,7 +5722,7 @@ class RecipeOperationService:
                 self._release_node_reservations(session, run_id, targets, now)
             else:
                 self._release(session, "run", run_id, now)
-            job = pending_job or Job(
+            job = pending_job or new_recipe_job(
                 id=str(uuid.uuid4()),
                 request_id=request_id,
                 kind="recipe.stop",
@@ -5725,7 +5737,7 @@ class RecipeOperationService:
                 updated_at=now,
             )
             if pending_job is not None:
-                pending_job.state = "succeeded"
+                RecipeOperationAdapter().finish(pending_job, now, failed=False)
                 pending_job.result = _validated_result("recipe.stop", {"stopped": True})
                 pending_job.updated_at = now
             else:
@@ -5914,9 +5926,9 @@ class RecipeOperationService:
             # The exact Stop receipt proves the runtime absent: a definite,
             # confirmed cancellation of the job and of its order.
             ArtifactJobAdapter(session).confirm_stopped(artifact, reason, now)
-            source_job.state = "cancelled"
-            source_job.status_reason = reason
-            source_job.updated_at = now
+            RecipeOperationAdapter().cancelled(
+                source_job, now, reason=reason, keep=False
+            )
             AgentOperationAdapter(session).record_outcome(
                 source_operation,
                 None,
@@ -7109,7 +7121,7 @@ class RecipeOperationService:
                 raise RecipeOperationConflict(
                     "recipe operation job payload is too large"
                 )
-        job = Job(
+        job = new_recipe_job(
             id=job_id,
             request_id=request_id,
             kind=kind,

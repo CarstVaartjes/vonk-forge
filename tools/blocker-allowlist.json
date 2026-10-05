@@ -20,26 +20,12 @@
       "control/src/vonk_control/run_switch_operations.py"
     ]
   },
-  "max_debt": 13,
+  "max_debt": 12,
   "debt_ceiling": {
     "total": 408,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "operator_waits": [
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._project_node_result",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.build.v1"
-      ],
-      "trigger": "build completion races cancellation",
-      "advertised_action": "automatic: same cleanup sweeper",
-      "irreversible_effect": "none",
-      "verdict": "SELF-HEAL",
-      "reason": "A build completion racing a cancel is closed by the build-cleanup sweeper; the state is only a label.",
-      "sites": 1
-    },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService.run_status",
