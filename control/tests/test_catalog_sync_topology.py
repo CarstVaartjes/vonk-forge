@@ -63,6 +63,9 @@ class _Catalog:
     def import_catalog_models(self, actor, documents) -> int:
         return 0
 
+    def retract_recipes_absent_from(self, published):
+        return []
+
     def store_source_bundle(self, *args) -> None:
         pass
 

@@ -518,6 +518,22 @@ class ManagedRecipeCatalogSyncService:
                         str(getattr(error, "detail", str(error))),
                     )
             self._progress(run_id, result)
+        # Newest only: a recipe the published library no longer lists stops
+        # being offered.  Installed and running revisions are untouched.  A
+        # snapshot with skipped documents or no recipes may be incomplete, so
+        # it retracts nothing; the next complete sync does.
+        if snapshot.items and not snapshot.problems:
+            retracted = self._catalog.retract_recipes_absent_from(
+                [(item.publisher, item.slug) for item in snapshot.items]
+            )
+            withdrawn = result["withdrawn_recipes"]
+            assert isinstance(withdrawn, list)
+            for revision in retracted:
+                entry: dict[str, object] = {"recipe_id": revision.recipe_id}
+                if revision.release_version is not None:
+                    entry["release_version"] = revision.release_version
+                withdrawn.append(entry)
+            result["withdrawn_count"] = len(retracted)
         # Prebuilt images can arrive after their revision (CI publishes the
         # bundle first and adds image digests once the builds finish), so
         # every sync records them for unchanged revisions too.

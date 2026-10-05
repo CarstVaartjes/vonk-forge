@@ -1042,3 +1042,70 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
     )
     assert third.unchanged_count == 1
     assert republished_reader.fetches == [republished.uri]
+
+
+def test_sync_retracts_recipes_absent_from_the_published_library(
+    tmp_path: Path,
+) -> None:
+    sessions, catalog, reader, original = _fixture(tmp_path)
+    sync = _sync(sessions, catalog, reader)
+    library = LibraryProjection(
+        sessions, cursors=catalog._cursors, clock=catalog._clock
+    )
+    other_document = deepcopy(original.document)
+    _document_section(other_document, "identity")["slug"] = "deleted-upstream"
+    other = replace(
+        _item_with_document(original, other_document), slug="deleted-upstream"
+    )
+
+    def apply(items, commit):
+        items = tuple(replace(item, library_commit=commit) for item in items)
+        reader.snapshot = replace(reader.snapshot, commit=commit, items=items)
+        return sync.sync(
+            request_key=str(uuid.uuid4()),
+            trigger="manual",
+            actor="test",
+            expected_commit=commit,
+        )
+
+    def offered() -> set[str]:
+        return {recipe.identity.slug for recipe in library.recipe_library().recipes}
+
+    both = apply((original, other), "1" * 40)
+    assert both.imported_count == 2
+    assert both.withdrawn_count == 0
+    assert offered() == {original.slug, other.slug}
+    other_revision = catalog.recipe_catalog_local_revisions(
+        [(other.publisher, other.slug)]
+    )[(other.publisher, other.slug)]
+
+    # A snapshot with no recipes or with skipped documents may be incomplete.
+    assert apply((), "2" * 40).withdrawn_count == 0
+    assert offered() == {original.slug, other.slug}
+
+    retracted = apply((original,), "3" * 40)
+    assert retracted.state == "current"
+    assert retracted.withdrawn_count == 1
+    assert [item["recipe_id"] for item in retracted.withdrawn_recipes] == [
+        other_revision.recipe_id
+    ]
+    assert offered() == {original.slug}
+    # The retained revision still resolves by id: running work is unaffected.
+    kept_id = _revision_id(sessions, other_revision.recipe_id)
+    assert catalog.get_recipe(kept_id).id == kept_id
+
+    # Retraction is repeatable and publishing the recipe again restores it.
+    assert apply((original,), "4" * 40).withdrawn_count == 0
+    back = apply((original, other), "5" * 40)
+    assert back.state == "current"
+    assert offered() == {original.slug, other.slug}
+
+
+def _revision_id(sessions, document_id: str) -> str:
+    with sessions() as session:
+        return session.scalars(
+            select(CatalogDocumentRevision.id).where(
+                CatalogDocumentRevision.document_id == document_id,
+                CatalogDocumentRevision.state == "active",
+            )
+        ).one()
