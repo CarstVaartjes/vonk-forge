@@ -7797,6 +7797,31 @@ class RunSwitchOperationService:
                         if isinstance(raw_start_deadline, str)
                         else None
                     )
+                    # The start's budget begins when it is first dispatched, so
+                    # the Controller moves its deadline past the queue wait; the
+                    # start job's own payload is the one source of the accepted
+                    # deadline.
+                    verify_run_id = (execution.result or {}).get("run_id")
+                    if isinstance(verify_run_id, str):
+                        issued = session.scalar(
+                            select(Job)
+                            .where(
+                                Job.kind == "recipe.start",
+                                Job.payload["owner_id"].as_string() == verify_run_id,
+                            )
+                            .order_by(Job.created_at.desc())
+                            .limit(1)
+                        )
+                        issued_deadline = (
+                            issued.payload.get("start_deadline")
+                            if issued is not None
+                            else None
+                        )
+                        if isinstance(issued_deadline, str):
+                            anchored = _aware(datetime.fromisoformat(issued_deadline))
+                            if start_deadline is None or anchored > start_deadline:
+                                start_deadline = anchored
+                                progress["start_deadline"] = anchored.isoformat()
                     deadline_expired = (
                         plan.action in {"run", "switch"}
                         and start_deadline is not None
