@@ -438,6 +438,17 @@ def wait_for_peer(kind: str, key: str) -> None:
             raise SystemExit(70)
         time.sleep(0.01)
 
+def fault(name: str, key: str) -> bool:
+    limit = int(os.environ.get(name, "0"))
+    if limit <= 0:
+        return False
+    counters = object_root.parent / "faults"
+    counters.mkdir(exist_ok=True)
+    counter = counters / (name + "-" + key.replace("/", "_"))
+    seen = int(counter.read_text()) if counter.exists() else 0
+    counter.write_text(str(seen + 1))
+    return seen < limit
+
 if command == "lsjson":
     path = object_path(arguments[0])
     if not path.is_file():
@@ -449,6 +460,8 @@ if command == "lsjson":
 elif command == "cat":
     path = object_path(arguments[0])
     wait_for_peer("read", str(path.relative_to(object_root)))
+    if path.is_file() and fault("FAKE_RCLONE_CAT_FAILS", path.name):
+        raise SystemExit(1)
     # rclone cat succeeds with no output when its exact source object is absent.
     if path.is_file():
         sys.stdout.buffer.write(path.read_bytes())
@@ -464,7 +477,13 @@ elif command == "copyto":
         if "--immutable" in arguments and destination.exists():
             raise SystemExit(9)
         destination.parent.mkdir(parents=True, exist_ok=True)
+        if fault("FAKE_RCLONE_PARTIAL_COPIES", destination.name):
+            destination.write_bytes(source.read_bytes()[:-1] + b"?")
+            raise SystemExit(0)
         shutil.copyfile(source, destination)
+        if fault("FAKE_RCLONE_NOT_IMPLEMENTED_COPIES", destination.name):
+            print("NotImplemented: Not Implemented", file=sys.stderr)
+            raise SystemExit(1)
     finally:
         update_activity(-1)
 elif command == "deletefile":
@@ -1591,6 +1610,76 @@ def test_rclone_publication_treats_empty_cat_as_missing_object(
         publication / "objects/spark"
     ).read_bytes()
     assert (object_root / "artifacts/stable/current.manifest").is_file()
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        {"FAKE_RCLONE_NOT_IMPLEMENTED_COPIES": "1"},
+        {"FAKE_RCLONE_CAT_FAILS": "2"},
+        {"FAKE_RCLONE_PARTIAL_COPIES": "1"},
+    ],
+)
+def test_rclone_candidate_publication_survives_transient_r2_faults(
+    tmp_path: Path, fault: dict[str, str]
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    environment, object_root = _fake_rclone_environment(tmp_path)
+    environment["INSTALL_RELEASE_PUBLICATION_RETRY_DELAY"] = "0"
+    environment.update(fault)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    for entry in plan["objects"]:
+        if entry["phase"] == "immutable":
+            published = object_root / entry["key"]
+            assert hashlib.sha256(published.read_bytes()).hexdigest() == entry["sha256"]
+
+
+def test_rclone_candidate_verification_stays_strict_when_object_never_matches(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    environment, _ = _fake_rclone_environment(tmp_path)
+    environment["INSTALL_RELEASE_PUBLICATION_RETRY_DELAY"] = "0"
+    environment["FAKE_RCLONE_PARTIAL_COPIES"] = "100"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "R2 verification failed" in result.stderr
 
 
 def test_rclone_candidate_objects_publish_with_bounded_parallelism(
