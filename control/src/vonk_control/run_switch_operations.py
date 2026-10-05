@@ -5995,17 +5995,23 @@ class RunSwitchOperationService:
                             # collector may remove cover a shortfall, so the
                             # review plans that eviction (the load waits for it)
                             # and refuses only for what nothing can free.
-                            evictable, kept_sentence = spark_eviction_capacity(
+                            capacity = spark_eviction_capacity(
                                 session, item.node_id, now
+                            )
+                            evictable, kept_sentence = (
+                                capacity.freeable,
+                                capacity.kept,
                             )
                             if evictable >= -disk_free_after:
                                 node_warnings.append(
                                     _as_reason(
                                         "run-switch.disk-eviction-planned",
                                         f"The operation needs {required_disk} bytes and "
-                                        f"{-disk_free_after} more must be freed; "
-                                        "unused installations on this Spark will be "
-                                        "removed, least recently used first.",
+                                        f"{-disk_free_after} more must be freed on "
+                                        "this Spark: "
+                                        + capacity.plan(-disk_free_after)
+                                        + ", least recently used first. Models stay "
+                                        "on the NAS, so a later load reinstalls.",
                                         scope="node",
                                         node_ids=(item.node_id,),
                                         severity="warning",

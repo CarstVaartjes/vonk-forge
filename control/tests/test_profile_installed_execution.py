@@ -634,3 +634,63 @@ def test_a_review_plans_the_eviction_of_many_unused_installations_instead_of_ref
         if reason.code == "run-switch.insufficient-disk"
     )
     assert "can be removed" in blocker.detail
+
+
+def test_a_review_plans_evicting_installations_a_saved_profile_points_to(
+    tmp_path: Path,
+) -> None:
+    """A full Spark where only saved-profile-pointed installations are evictable
+    still admits the plan, and the warning names the profile. Models stay on the
+    NAS, so a later load reinstalls."""
+
+    from vonk_control.models import CatalogDocumentRevision, FleetProfile
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4()))
+    _, planner = _profile_service(sessions, lifecycle)
+    request = _request(sessions, nodes[0])
+    needed = planner.preview(request, actor="admin").fit.nodes[0].disk_required_bytes
+    assert needed is not None
+    _idle_installations(
+        sessions, lifecycle, nodes, count=4, installed_bytes=needed * 100
+    )
+    with sessions.begin() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+        assert revision is not None
+        session.add(
+            FleetProfile(
+                number=7,
+                name="Pointed",
+                installation_policy="keep-cached",
+                assignments=[
+                    {
+                        "recipe_selector": f"{revision.publisher}/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "option_choices": {},
+                    }
+                ],
+                created_by="test",
+                created_at=revision.created_at,
+                updated_at=revision.created_at,
+            )
+        )
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = 0
+
+    review = planner.preview(request, actor="admin")
+
+    codes = {reason.code for reason in (*review.blockers, *review.warnings)}
+    assert "run-switch.insufficient-disk" not in codes, review.blockers
+    planned = next(
+        reason
+        for reason in review.warnings
+        if reason.code == "run-switch.disk-eviction-planned"
+    )
+    assert "from saved profile Pointed" in planned.detail

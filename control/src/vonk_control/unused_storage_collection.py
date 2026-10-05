@@ -13,7 +13,11 @@ removes the least recently used unused items until the shortfall plus a small
 reserve is covered, then stops. Items used in the last 24 hours go only after
 everything older. Which items exist:
 
-1. **Spark installations** (state ``installed``). Removal is a real uninstall on
+1. **Spark installations** (state ``installed``). An installation a saved
+   profile points to (but that is not the loaded profile's) may go when space is
+   needed, after every installation no profile points to, least recently used
+   first within each group: its models stay on the NAS, so loading that profile
+   again reinstalls it. Removal is a real uninstall on
    the Sparks, queued through the same lifecycle as ``vonkctl recipe
    uninstall``; its model files go with it unless another installation on that
    Spark still needs them. Installations that share one model are removed
@@ -25,9 +29,9 @@ everything older. Which items exist:
 
 Nothing is removed while it is
 
-* pointed to by a saved profile (loaded or not): an installation by the
-  profile's recipe selector resolving to its revision on its Sparks, an image or
-  model by the newest revision of every recipe a profile names;
+* an installation of the loaded profile (the selected profile's recipe selector
+  resolving to its revision on its Sparks), or an image or model the newest
+  revision of every recipe a saved profile names;
 * running, or installed for a workload that has not stopped;
 * named by a live or recently finished operation (searched in the stored JSON,
   as the catalog revision collector does).
@@ -56,7 +60,7 @@ import shutil
 import time
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -94,6 +98,7 @@ from .models import (
     CatalogRecipeModelReference,
     FleetProfile,
     FleetProfileApplication,
+    FleetProfileSelection,
     InstallationNode,
     Job,
     ModelCacheOperation,
@@ -201,7 +206,7 @@ class Swept:
 
 #: How a keeping reason reads in the sentence a waiting load shows.
 _KEPT_WORDS = {
-    "profile": "a saved profile points to",
+    "profile": "the loaded profile uses them",
     "running": "its workload is running",
     "run not stopped": "its run was never stopped",
     "live operation": "a live operation names it",
@@ -231,22 +236,82 @@ def _kept_sentence(kept_bytes: Mapping[str, int]) -> str:
     return ("; ".join(parts[:2]) + ". ") if parts else ""
 
 
+@dataclass(frozen=True, slots=True)
+class EvictionCapacity:
+    """What a Spark's unused installations could free, and what stays."""
+
+    freeable: int
+    kept: str
+    items: tuple[_Item, ...]
+
+    def plan(self, shortfall: int) -> str:
+        """What would be evicted to cover ``shortfall``, in eviction order."""
+
+        return _eviction_sentence(self.items, shortfall)
+
+
+def _eviction_order(items: Iterable[_Item]) -> list[_Item]:
+    """Installations no saved profile points to first, then pointed ones; the
+    least recently used first within each group."""
+
+    return sorted(
+        items,
+        key=lambda item: (
+            bool(item.profiles),
+            item.recent,
+            item.last_used,
+            item.kind,
+            item.key,
+        ),
+    )
+
+
+def _eviction_sentence(items: Iterable[_Item], shortfall: int) -> str:
+    """Name what eviction removes to free ``shortfall`` bytes: unpointed
+    installations first, then the bytes taken from each saved profile."""
+
+    unpointed = 0
+    by_profile: dict[str, int] = {}
+    remaining = shortfall
+    for item in _eviction_order(items):
+        if remaining <= 0:
+            break
+        remaining -= item.freeable
+        if item.profiles:
+            by_profile[", ".join(item.profiles)] = (
+                by_profile.get(", ".join(item.profiles), 0) + item.freeable
+            )
+        else:
+            unpointed += item.freeable
+    parts = []
+    if unpointed:
+        parts.append(f"evicting {unpointed} bytes from unused installations")
+    parts.extend(
+        f"evicting {size} bytes from saved profile {names}"
+        for names, size in by_profile.items()
+    )
+    return "; ".join(parts)
+
+
 def spark_eviction_capacity(
     session: Session, node_id: str, now: datetime
-) -> tuple[int, str]:
+) -> EvictionCapacity:
     """What unused installations on a Spark could free, read-only, and what stays.
 
     A review asks this to plan the eviction a load needs instead of refusing it:
-    the bytes the collector can remove (least recently used first) and a
-    sentence naming what it must keep, so a refusal names what blocks. It
-    registers no demand and removes nothing.
+    the installations the collector can remove (no saved profile points to them
+    first, then pointed ones, least recently used first) and a sentence naming
+    what it must keep, so a refusal names what blocks. It registers no demand and
+    removes nothing.
     """
 
     kept_bytes: Counter[str] = Counter()
     items = UnusedStorageCollector._spark_items(
         session, node_id, _Evidence.read(session, now), Counter(), kept_bytes
     )
-    return sum(item.freeable for item in items), _kept_sentence(kept_bytes)
+    return EvictionCapacity(
+        sum(item.freeable for item in items), _kept_sentence(kept_bytes), tuple(items)
+    )
 
 
 def _waits_for_storage(application: FleetProfileApplication) -> bool:
@@ -288,7 +353,11 @@ class _Evidence:
     newest: Mapping[str, tuple[str, datetime, int]]
     # (publisher, slug) -> Spark sets of the saved profile assignments naming it.
     # None when a profile cannot be read: nothing can then be proven unused.
-    pointers: Mapping[tuple[str, str], tuple[frozenset[str], ...]] | None
+    pointers: Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None
+    # The same for the loaded (selected) profile alone: its installations never go.
+    loaded_pointers: (
+        Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None
+    )
     owned_nodes: frozenset[str]
     active_scopes: tuple[str, ...]
     recent_sets: frozenset[str]
@@ -314,6 +383,12 @@ class _Evidence:
             if known is None or number > known[2]:
                 newest[document_id] = (revision_id, _utc(created), number)
         pointers = _profile_pointers(session)
+        selected = session.scalar(select(FleetProfileSelection.profile_id))
+        loaded_pointers = (
+            {}
+            if selected is None
+            else _profile_pointers(session, only_profile_id=selected)
+        )
         head_ids = {revision_id for revision_id, _created, _number in newest.values()}
         for column in (
             CatalogDocumentHead.active_revision_id,
@@ -396,6 +471,7 @@ class _Evidence:
             | pinned,
             newest=newest,
             pointers=pointers,
+            loaded_pointers=loaded_pointers,
             owned_nodes=owned,
             active_scopes=scopes,
             recent_sets=frozenset(
@@ -456,6 +532,8 @@ class _Item:
     last_used: datetime
     recent: bool
     freeable: int
+    #: Saved profiles pointing at it: evicted after everything no profile points to.
+    profiles: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -669,8 +747,9 @@ class UnusedStorageCollector:
             code = STORAGE_EVICTING
             detail = (
                 f"Needs {shortfall} more free bytes on this Spark; "
-                f"{freeable} bytes of unused installations can be removed, "
-                "least recently used first"
+                f"{freeable} bytes of unused installations can be removed: "
+                + _eviction_sentence(items, shortfall)
+                + ", least recently used first"
                 + (" (waiting for the last removal to finish)." if settling else ".")
             )
         else:
@@ -839,9 +918,7 @@ class UnusedStorageCollector:
             # the work that asked.
             outcome.outcome = "insufficient_after_eviction"
             return outcome
-        ordered = sorted(
-            items, key=lambda item: (item.recent, item.last_used, item.kind, item.key)
-        )
+        ordered = _eviction_order(items)
         queued = 0
         for item in ordered:
             if queued >= pressure.need:
@@ -988,16 +1065,6 @@ class UnusedStorageCollector:
             )
         items: list[_Item] = []
         for key, members in sorted(groups.items()):
-            if key in evidence.pointed_models:
-                # Removing the last installation of a model deletes the Spark's
-                # shared copy, which the profile's own recipe would then fetch
-                # again (and admission counts it as already there).
-                kept["installation: model a profile needs"] += len(members)
-                if kept_bytes is not None:
-                    kept_bytes["a model a saved profile needs"] += max(
-                        installed for _id, _state, installed in members
-                    )
-                continue
             reasons = {
                 installation_id: (
                     _installation_kept(session, installation_id, evidence)
@@ -1027,6 +1094,15 @@ class UnusedStorageCollector:
                 _installation_last_used(session, installation_id)
                 for installation_id, _state, _installed in members
             )
+            profiles = sorted(
+                {
+                    name
+                    for installation_id, _state, _installed in members
+                    for name in _installation_pointing(
+                        session, installation_id, evidence, evidence.pointers
+                    )
+                }
+            )
             items.append(
                 _Item(
                     "installation",
@@ -1035,6 +1111,7 @@ class UnusedStorageCollector:
                     last_used,
                     last_used > evidence.cutoff,
                     freeable,
+                    tuple(profiles),
                 )
             )
         return items
@@ -1259,13 +1336,10 @@ def _installation_kept(
             )
         )
     )
-    if evidence.pointers is None:
+    if evidence.pointers is None or evidence.loaded_pointers is None:
         return "profiles unreadable"
-    if newest[0] == installation.recipe_revision_id and any(
-        nodes & sparks
-        for sparks in evidence.pointers.get(
-            (revision.publisher.casefold(), revision.slug.casefold()), ()
-        )
+    if newest[0] == installation.recipe_revision_id and _points_at(
+        evidence.loaded_pointers, revision.publisher, revision.slug, nodes
     ):
         return "profile"
     runs = session.execute(
@@ -1288,6 +1362,57 @@ def _installation_kept(
     ):
         return "live operation"
     return None
+
+
+def _points_at(
+    pointers: Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]],
+    publisher: str,
+    slug: str,
+    nodes: set[str],
+) -> tuple[str, ...]:
+    """The profiles in ``pointers`` that name this recipe on any of ``nodes``."""
+
+    return tuple(
+        name
+        for name, sparks in pointers.get((publisher.casefold(), slug.casefold()), ())
+        if nodes & sparks
+    )
+
+
+def _installation_pointing(
+    session: Session,
+    installation_id: str,
+    evidence: _Evidence,
+    pointers: Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None,
+) -> tuple[str, ...]:
+    """The saved profiles that point at this installation (newest revision of
+    their recipe, on its Sparks); empty when none or when unreadable."""
+
+    installation = session.get(RecipeInstallation, installation_id)
+    if installation is None or pointers is None:
+        return ()
+    revision = session.execute(
+        select(
+            CatalogDocumentRevision.document_id,
+            CatalogDocumentRevision.publisher,
+            CatalogDocumentRevision.slug,
+        ).where(CatalogDocumentRevision.id == installation.recipe_revision_id)
+    ).one_or_none()
+    newest = evidence.newest.get(revision.document_id) if revision else None
+    if (
+        revision is None
+        or newest is None
+        or newest[0] != installation.recipe_revision_id
+    ):
+        return ()
+    nodes = set(
+        session.scalars(
+            select(InstallationNode.node_id).where(
+                InstallationNode.installation_id == installation_id
+            )
+        )
+    )
+    return _points_at(pointers, revision.publisher, revision.slug, nodes)
 
 
 def _installation_last_used(session: Session, installation_id: str) -> datetime:
@@ -1423,17 +1548,21 @@ def _model_removal_in_flight(session: Session) -> bool:
 
 
 def _profile_pointers(
-    session: Session,
-) -> dict[tuple[str, str], tuple[frozenset[str], ...]] | None:
-    """The Spark sets each saved profile assigns to each recipe, or ``None``.
+    session: Session, only_profile_id: str | None = None
+) -> dict[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None:
+    """The profile name and Spark set each saved profile assigns to each recipe.
 
-    A profile that cannot be read as the current contract leaves nothing
-    provably unused, so the caller keeps everything an assignment might name.
+    ``None`` when a profile cannot be read as the current contract: nothing is
+    then provably unpointed, so the caller keeps everything an assignment might
+    name.  ``only_profile_id`` restricts it to one profile (the loaded one).
     """
 
-    found: dict[tuple[str, str], list[frozenset[str]]] = {}
+    found: dict[tuple[str, str], list[tuple[str, frozenset[str]]]] = {}
+    statement = select(FleetProfile.name, FleetProfile.assignments)
+    if only_profile_id is not None:
+        statement = statement.where(FleetProfile.id == only_profile_id)
     try:
-        for assignments in session.scalars(select(FleetProfile.assignments)):
+        for name, assignments in session.execute(statement):
             for assignment in _ASSIGNMENTS.validate_json(
                 canonical_message(assignments), strict=True
             ):
@@ -1441,7 +1570,7 @@ def _profile_pointers(
                 if not separator:
                     return None
                 found.setdefault((publisher.casefold(), slug.casefold()), []).append(
-                    frozenset(assignment.spark_ids)
+                    (name, frozenset(assignment.spark_ids))
                 )
     except (TypeError, ValueError):
         return None
