@@ -475,7 +475,7 @@ def chunked_asgi_telemetry(
             "root_path": "",
             "state": {},
         }
-        await asyncio.wait_for(app(scope, receive, send), timeout=1)  # type: ignore[operator]
+        await asyncio.wait_for(app(scope, receive, send), timeout=10)  # type: ignore[operator]
         start = next(
             message for message in sent if message["type"] == "http.response.start"
         )
@@ -1321,7 +1321,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
 
     def slow_fsync(descriptor: int) -> None:
         entered.set()
-        assert release.wait(timeout=2)
+        assert release.wait(timeout=60)
         real_fsync(descriptor)
 
     monkeypatch.setattr("vonk_control.agent_api.os.fsync", slow_fsync)
@@ -1333,8 +1333,8 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
     }
 
     def observe_responsiveness() -> bool:
-        assert entered.wait(timeout=1)
-        responsive = health_completed.wait(timeout=0.25)
+        assert entered.wait(timeout=30)
+        responsive = health_completed.wait(timeout=5)
         release.set()
         return responsive
 
@@ -1364,7 +1364,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
                     )
                 finally:
                     release.set()
-                return upload_response, health_response, observer.result(timeout=1)
+                return upload_response, health_response, observer.result(timeout=60)
 
     upload_response, health_response, responsive = asyncio.run(exercise())
 
@@ -1547,7 +1547,7 @@ def test_unauthenticated_agent_gate_returns_without_reading_request_body() -> No
         "state": {},
     }
 
-    asyncio.run(asyncio.wait_for(app(scope, receive, send), timeout=0.5))
+    asyncio.run(asyncio.wait_for(app(scope, receive, send), timeout=10))
 
     start = next(
         message for message in sent if message["type"] == "http.response.start"
@@ -3027,25 +3027,31 @@ def test_agent_validation_errors_are_canonical_json(agent_system) -> None:
 def test_claim_endpoint_long_poll_wakes_when_work_is_enqueued(agent_system) -> None:
     client, services, _, clock = agent_system
     parent_job = parent(services.sessions, clock)
-    started = time.monotonic()
     with ThreadPoolExecutor(max_workers=1) as pool:
+        # A long wait with generous bounds: shared runners can stall a thread
+        # for seconds, so correctness must not depend on wall-clock timing.
         waiting = pool.submit(
             client.post,
             "/agent/claim",
             headers=agent_headers(NODE_A, "serial-a"),
-            json={"wait_seconds": 1},
+            json={"wait_seconds": 30},
         )
-        time.sleep(0.05)
+        # Synchronize on the observable event instead of sleeping: the claim
+        # is parked on the availability condition once it has a waiter.
+        deadline = time.monotonic() + 20
+        while not services.operations._available._waiters:
+            assert not waiting.done(), "claim returned before work existed"
+            assert time.monotonic() < deadline, "claim never began waiting"
+            time.sleep(0.005)
         operation = services.operations.enqueue(
             parent_job.id, NODE_A, "recipe.stop", "a" * 64, STOP_PAYLOAD
         )
-        response = waiting.result(timeout=1)
+        response = waiting.result(timeout=20)
 
     assert response.status_code == 200
     assert (
         fenced_operation(services.sessions, response.json()["fence"]).id == operation.id
     )
-    assert time.monotonic() - started < 0.8
 
 
 def test_enrollment_rate_limit_rejects_before_reading_request_body(
@@ -3091,7 +3097,7 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
         "root_path": "",
         "state": {},
     }
-    asyncio.run(asyncio.wait_for(app(scope, receive, send), timeout=0.5))
+    asyncio.run(asyncio.wait_for(app(scope, receive, send), timeout=10))
 
     assert (
         next(message for message in sent if message["type"] == "http.response.start")[

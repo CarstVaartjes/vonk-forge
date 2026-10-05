@@ -49,6 +49,8 @@ KEY = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\Z")
 MAX_EVIDENCE_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024
 MAX_RCLONE_CANDIDATE_WORKERS = 8
+UPLOAD_ATTEMPTS = 3
+VERIFICATION_ATTEMPTS = 5
 MAX_PROMOTION_IO_WORKERS = 8
 ACCEPTANCE_REPLAY_TIMEOUT = 30
 INSTALLER_PUBLICATION_SCHEMA_VERSION = 2
@@ -1422,6 +1424,40 @@ def _rclone_bytes(remote: str, key: str, maximum: int) -> bytes | None:
     return content
 
 
+def _verification_delay(attempt: int) -> float:
+    base = float(os.environ.get("INSTALL_RELEASE_PUBLICATION_RETRY_DELAY", "0.5"))
+    return min(base * (2**attempt), 8.0)
+
+
+def _rclone_upload(
+    source: Path, remote: str, key: str, *, immutable: bool
+) -> bool:
+    command = ["rclone", "copyto"]
+    if immutable:
+        command.append("--immutable")
+    command.extend((str(source), f"{remote}/{key}"))
+    return subprocess.run(command, check=False).returncode == 0
+
+
+def _await_digest(remote: str, key: str, expected: str) -> str | None:
+    """Re-read an object with bounded backoff until it has the expected digest.
+
+    A read can transiently fail (R2 answers some requests with 501 or drops a
+    connection) right after a retried upload.  Only the transient handling is
+    lenient: the digest comparison itself stays exact.  Returns the last
+    observed digest, or None when the object was absent or unreadable.
+    """
+
+    observed: str | None = None
+    for attempt in range(VERIFICATION_ATTEMPTS):
+        observed = _rclone_digest(remote, key)
+        if observed == expected:
+            return observed
+        if attempt + 1 < VERIFICATION_ATTEMPTS:
+            time.sleep(_verification_delay(attempt))
+    return observed
+
+
 def _rclone_copy(source: Path, remote: str, entry: dict[str, Any]) -> None:
     key = entry["key"]
     expected = entry["sha256"]
@@ -1431,14 +1467,35 @@ def _rclone_copy(source: Path, remote: str, entry: dict[str, Any]) -> None:
         if observed != expected:
             raise PublicationError(f"refusing to overwrite immutable object {key}")
         return
-    command = ["rclone", "copyto"]
-    if immutable:
-        command.append("--immutable")
-    command.extend((str(source), f"{remote}/{key}"))
-    result = subprocess.run(command, check=False)
-    if result.returncode != 0:
+    uploaded = False
+    for attempt in range(UPLOAD_ATTEMPTS):
+        uploaded = _rclone_upload(source, remote, key, immutable=immutable)
+        if uploaded:
+            break
+        # A failed attempt may still have stored the object (rclone reports
+        # NotImplemented from a follow-up request).  Accept it only when the
+        # stored bytes are exactly the expected ones.
+        if _await_digest(remote, key, expected) == expected:
+            return
+        if attempt + 1 < UPLOAD_ATTEMPTS:
+            time.sleep(_verification_delay(attempt))
+    if not uploaded:
         raise PublicationError(f"R2 upload failed for {key}")
-    if _rclone_digest(remote, key) != expected:
+    observed = _await_digest(remote, key, expected)
+    if observed == expected:
+        return
+    if observed is None:
+        # Unreadable or missing after a successful copy: write it again.  The
+        # object is absent, so the immutable guard still applies.
+        if _rclone_upload(source, remote, key, immutable=immutable):
+            observed = _await_digest(remote, key, expected)
+    else:
+        # The key holds bytes we did not just write (a partial first attempt).
+        # Our copy is the signed truth for this content-addressed key, so
+        # replace that one object once; verification below stays exact.
+        if _rclone_upload(source, remote, key, immutable=False):
+            observed = _await_digest(remote, key, expected)
+    if observed != expected:
         raise PublicationError(f"R2 verification failed for {key}")
 
 
