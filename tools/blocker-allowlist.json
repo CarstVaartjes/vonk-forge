@@ -22,7 +22,7 @@
   },
   "max_debt": 12,
   "debt_ceiling": {
-    "total": 285,
+    "total": 263,
     "unaudited": 605,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
@@ -381,7 +381,11 @@
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._authorized_agent_job", "agent-is-not-authorized-for-this-artifact-job", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._authorized_agent_job", "artifact-job-transfer-is-closed", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._put_blob_in_session", "content-addressed-artifact-collision", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.create", "artifact-job-request-key-collision", 1]
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.create", "artifact-job-request-key-collision", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.input_blob", "message", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.result_blob", "message", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._validate_output_upload", "artifact-job-transfer-is-closed", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._attach_output", "artifact-job-transfer-is-closed", 1]
       ]
     },
     {
@@ -441,7 +445,24 @@
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_outputs_against_contract", "artifact-output", 3],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_outputs_against_contract", "artifact-output-bytes-exceed-the-recipe-contract", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_outputs_against_contract", "artifact-output-slot", 2],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_parameter_definition", "artifact-parameter-contract-is-invalid", 1]
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_parameter_definition", "artifact-parameter-contract-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_recipe_interface", "recipe-interface-is-unavailable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_compile_contract", "message", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_canonical_contract", "compiled-artifact-contract-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._create_in_session", "recipe-revision-is-unavailable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._create_in_session", "artifact-job-interface-does-not-match-the-run", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_input", "message", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_input_stream", "message", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_output", "message", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_output_stream", "message", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.finalize", "artifact-job-cannot-be-finalized", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "artifact-job-was-submitted-under-another-request-identity", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "another-artifact-job-already-owns-this-run-reservation", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "artifact-job-contract-is-unavailable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.result_blob", "artifact-job-result-is-not-available", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._job_node_in_session", "artifact-job-endpoint-owner-is-not-running", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.cancel", "message", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "recipe-job-workload-identity-is-unavailable", 1]
       ]
     },
     {
@@ -449,31 +470,8 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping uncertainty (missing receipt, stale stored plan, persisted state, changed scope) that rule 5 of the lifecycle core turns into unknown-then-reconcile. Debt: the ceiling only falls. Audit notes: Stored artifact-job evidence/plan consistency.",
       "sites": [
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._create_in_session", "artifact-job-interface-does-not-match-the-run", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._create_in_session", "recipe-revision-is-unavailable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._job_node_in_session", "artifact-job-endpoint-owner-is-not-running", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._job_node_in_session", "recipe-run-plan-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.cancel", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.consume_agent_result", "artifact-job-authority-is-unavailable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.finalize", "artifact-job-cannot-be-finalized", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.input_blob", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_input", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_input_stream", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_output", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_output_stream", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.result_blob", "artifact-job-result-is-not-available", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.result_blob", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "another-artifact-job-already-owns-this-run-reservation", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "artifact-job-was-submitted-under-another-request-identity", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "installed-job-execution-plan-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "installed-job-execution-plan-is-unavailable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "recipe-job-workload-identity-is-unavailable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "recipe-run-memory-requirement-is-unavailable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "recipe-run-plan-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_canonical_contract", "compiled-artifact-contract-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_compile_contract", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_recipe_interface", "recipe-interface-is-unavailable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_result_evidence", "stored-artifact-result-evidence-is-invalid", 1]
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "installed-job-execution-plan-is-invalid", 2],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "installed-job-execution-plan-is-unavailable", 1]
       ]
     },
     {
