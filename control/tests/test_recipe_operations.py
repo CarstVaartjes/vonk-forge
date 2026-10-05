@@ -1783,6 +1783,236 @@ def test_distributed_start_launches_all_ranks_then_checks_collective(
         )
 
 
+def test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting(
+    tmp_path: Path,
+) -> None:
+    """A readiness phase whose start budget is spent fails; no operator wait.
+
+    Production: both rank launches succeeded, the owner-only readiness order
+    lapsed its lease, was re-issued until the hour of budget was gone, then sat
+    in ``waiting-for-operator`` forever (and behind a cancelled parent).  The
+    next agent poll must fail it with a named reason and fail the start.
+    """
+
+    now = [NOW]
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path,
+        nodes=2,
+        distributed_lifecycle=True,
+        distributed_start_timeout_seconds=3600,
+    )
+    service._clock = lambda: now[0]
+    jobs = AgentJobService(sessions, clock=lambda: now[0])
+    jobs.set_result_consumer(service.consume_agent_result)
+
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="u" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "slow-launch")
+    start = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="v" * 36,
+    )
+
+    def children(phase: str) -> tuple[AgentOperation, ...]:
+        with sessions() as session:
+            rows = tuple(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(AgentOperation.parent_job_id == start.id)
+                    .order_by(AgentOperation.created_at, AgentOperation.id)
+                )
+            )
+        return tuple(row for row in rows if row.payload.get("phase") == phase)
+
+    def success(payload: Mapping[str, object]) -> dict[str, object]:
+        return start_evidence(payload)
+
+    def claim(node_id: str):
+        runtime_identity = dict(PACKAGED_RUNTIME_IDENTITY)
+        return claim_agent(
+            jobs,
+            node_id,
+            f"serial-{nodes.index(node_id)}",
+            runtime_identity=runtime_identity,
+        )
+
+    def complete(claim, result: Mapping[str, object]) -> None:
+        jobs.record_result(
+            AgentResult.model_validate_json(
+                canonical_message(
+                    {
+                        "fence": claim.fence,
+                        "state": "succeeded",
+                        "result": result,
+                    }
+                )
+            )
+        )
+
+    for launch in children("rank-launch"):
+        launch_claim = claim(launch.node_id)
+        assert launch_claim is not None
+        jobs.record_result(
+            AgentResult.model_validate_json(
+                canonical_message(
+                    {
+                        "fence": launch_claim.fence,
+                        "state": "succeeded",
+                        "result": start_evidence(launch_claim.payload),
+                    }
+                )
+            )
+        )
+
+    target = children("collective-readiness")[0]
+    assert claim(target.node_id) is not None
+
+    # The budget is spent and the lease lapsed long ago; park it the old way
+    # and request cancellation, as the stuck production order was.
+    now[0] = NOW + timedelta(seconds=3700)
+    with sessions.begin() as session:
+        stored = _required(session.get(AgentOperation, target.id))
+        stored.state = "waiting-for-operator"
+        stored.retry_disposition = "retry"
+        stored.retry_disposition_attempt = stored.current_attempt
+        parent = _required(session.get(Job, start.id))
+        parent.result = {
+            **(parent.result or {}),
+            "cancel_requested": True,
+            "cancel_request_id": "00000000-0000-4000-8000-000000000001",
+            "cancel_actor": "controller",
+            "cancel_requested_at": now[0].isoformat(),
+            "reason": "superseded by newer workload intent",
+        }
+
+    cleanup = claim(target.node_id)
+    # The failed start queued its cleanup Stop, which the same poll may claim.
+    assert cleanup is None or cleanup.operation.value == "recipe.stop"
+
+    with sessions() as session:
+        stored = _required(session.get(AgentOperation, target.id))
+        assert stored.state == "failed"
+        assert "start deadline" in (stored.status_reason or "")
+        run = _required(session.get(RecipeRun, start.owner_id))
+        assert run.state in {"stopping", "failed", "stopped"}
+    assert service.get(start.id).state == "failed"
+
+
+def test_failed_collective_readiness_is_recorded_and_fails_the_start(
+    tmp_path: Path,
+) -> None:
+    """A readiness phase whose start budget is spent fails; no operator wait.
+
+    Production: both rank launches succeeded, the owner-only readiness order
+    lapsed its lease, was re-issued until the hour of budget was gone, then sat
+    in ``waiting-for-operator`` forever (and behind a cancelled parent).  The
+    next agent poll must fail it with a named reason and fail the start.
+    """
+
+    now = [NOW]
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path,
+        nodes=2,
+        distributed_lifecycle=True,
+        distributed_start_timeout_seconds=3600,
+    )
+    service._clock = lambda: now[0]
+    jobs = AgentJobService(sessions, clock=lambda: now[0])
+    jobs.set_result_consumer(service.consume_agent_result)
+
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="u" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "slow-launch")
+    start = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="v" * 36,
+    )
+
+    def children(phase: str) -> tuple[AgentOperation, ...]:
+        with sessions() as session:
+            rows = tuple(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(AgentOperation.parent_job_id == start.id)
+                    .order_by(AgentOperation.created_at, AgentOperation.id)
+                )
+            )
+        return tuple(row for row in rows if row.payload.get("phase") == phase)
+
+    def success(payload: Mapping[str, object]) -> dict[str, object]:
+        return start_evidence(payload)
+
+    def claim(node_id: str):
+        runtime_identity = dict(PACKAGED_RUNTIME_IDENTITY)
+        return claim_agent(
+            jobs,
+            node_id,
+            f"serial-{nodes.index(node_id)}",
+            runtime_identity=runtime_identity,
+        )
+
+    def complete(claim, result: Mapping[str, object]) -> None:
+        jobs.record_result(
+            AgentResult.model_validate_json(
+                canonical_message(
+                    {
+                        "fence": claim.fence,
+                        "state": "succeeded",
+                        "result": result,
+                    }
+                )
+            )
+        )
+
+    for launch in children("rank-launch"):
+        launch_claim = claim(launch.node_id)
+        assert launch_claim is not None
+        jobs.record_result(
+            AgentResult.model_validate_json(
+                canonical_message(
+                    {
+                        "fence": launch_claim.fence,
+                        "state": "succeeded",
+                        "result": start_evidence(launch_claim.payload),
+                    }
+                )
+            )
+        )
+
+    target = children("collective-readiness")[0]
+    readiness_claim = claim(target.node_id)
+    assert readiness_claim is not None
+    jobs.record_result(
+        AgentResult.model_validate_json(
+            canonical_message(
+                {
+                    "fence": readiness_claim.fence,
+                    "state": "failed",
+                    "result": {
+                        "status": "failed",
+                        "error_code": "recipe_start_failed",
+                        "reason": "engine exited before becoming ready",
+                        "failure_kind": "invalid-contract",
+                    },
+                }
+            )
+        )
+    )
+
+    with sessions() as session:
+        stored = _required(session.get(AgentOperation, target.id))
+        assert stored.state == "failed"
+        run = _required(session.get(RecipeRun, start.owner_id))
+        assert run.state in {"stopping", "failed", "stopped"}
+    assert service.get(start.id).state == "failed"
+
+
 def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
     tmp_path: Path,
 ) -> None:

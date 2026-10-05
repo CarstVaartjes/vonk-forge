@@ -4451,6 +4451,11 @@ class RecipeOperationService:
             failed = sorted(
                 {child.node_id for child in children if child.state == "failed"}
             )
+            # A two-phase start has two children on its owner node: the rank
+            # launch (succeeded) and the collective readiness (failed).  The
+            # node failed; listing it as successful too makes the aggregate
+            # result invalid, so the failed readiness could never be recorded.
+            successful = sorted(set(successful) - set(failed))
             reconciliation_complete = False
             reconciliation_error: str | None = None
             if job.kind == "recipe.reconcile":

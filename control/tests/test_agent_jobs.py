@@ -1442,13 +1442,13 @@ def test_a_silent_start_inside_its_launch_budget_is_not_parked_and_completes(
     assert job_state(sessions, operation.parent_job_id).state == "succeeded"
 
 
-def test_a_start_that_stops_reporting_past_its_budget_is_parked_with_the_reason(
+def test_a_start_that_stops_reporting_past_its_budget_fails_with_the_reason(
     service,
 ) -> None:
     # The launch allowance is bounded by the operation's own budget: a node that
-    # never reports again is still parked once that budget is spent, with the
-    # same typed lease-expiry reason an operator reconciles against today.  A
-    # fix that simply made the park unreachable would strand the effect.
+    # never reports again once that budget is spent cannot be waited for, and a
+    # retry could only be refused by the agent before it executes anything.  The
+    # start fails with a named reason instead of waiting for an operator.
     jobs, sessions, clock = service
     payload = canonical_start_payload(start_deadline=clock.now + timedelta(seconds=40))
     operation = jobs.enqueue(
@@ -1462,11 +1462,10 @@ def test_a_start_that_stops_reporting_past_its_budget_is_parked_with_the_reason(
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-    assert stored is not None and stored.state == "waiting-for-operator"
+    assert stored is not None and stored.state == "failed"
     reason = stored.status_reason
     assert reason is not None
-    assert "attempt 1 lease expired" in reason
-    assert "the effect is unobserved" in reason
+    assert "start deadline" in reason and "not retried" in reason
 
 
 def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
@@ -1504,14 +1503,21 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
     )
     assert abandoned is not None
     clock.advance(seconds=60)
-    assert (
-        claim_agent(
-            jobs,
-            NODE_B,
-            "serial-b",
+    # A spent budget now fails the order; park it directly the way a restart
+    # reconciliation of a still-open budget does, to keep this fence scenario.
+    with sessions.begin() as session:
+        parked = session.get(AgentOperation, superseded.id)
+        parked.payload = canonical_start_payload(
+            start_deadline=clock.now + timedelta(minutes=30)
         )
-        is None
-    )
+        attempt_row = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == superseded.id
+            )
+        )
+        attempt_row.state = "expired"
+        parked.state = "waiting-for-operator"
+        jobs._schedule_safe_retry(parked, clock.now)
     with sessions.begin() as session:
         authorize_operator_resume_in_session(
             session, superseded.parent_job_id, clock.now
@@ -2024,6 +2030,83 @@ def test_transient_start_failure_retries_automatically_without_operator(
         "serial-a",
     )
     assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
+
+
+def test_spent_start_budget_fails_a_parked_start_instead_of_waiting(service) -> None:
+    """A start past its immutable deadline is failed, never parked or retried.
+
+    Reproduces a distributed collective-readiness start that lapsed its lease
+    and was re-issued until its parent was cancelled: the order sat in
+    ``waiting-for-operator`` behind a retry the cancelled parent could never
+    grant.  The next poll of the node closes it with a named reason.
+    """
+
+    jobs, sessions, clock = service
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
+    )
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    clock.advance(seconds=31 * 60)
+    # Lease lapsed and the budget is spent; park it the way the old path did.
+    with sessions.begin() as session:
+        stored = session.get(AgentOperation, operation.id)
+        stored.state = "waiting-for-operator"
+        stored.retry_disposition = "retry"
+        stored.retry_disposition_attempt = stored.current_attempt
+        parent_job = session.get(Job, stored.parent_job_id)
+        parent_job.result = {"cancel_requested": True}
+
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state == "failed"
+        assert stored.retry_disposition is None and stored.retry_due_at is None
+        assert "start deadline" in (stored.status_reason or "")
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        assert attempt is not None and attempt.state == "failed"
+        assert attempt.result["error_code"] == "recipe_start_failed"
+    assert job_state(sessions, operation.parent_job_id).state == "failed"
+
+
+def test_start_failure_after_the_deadline_is_not_retried(service) -> None:
+    from vonk_agent_protocol import AgentResult
+
+    jobs, sessions, clock = service
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(seconds=40))
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    clock.advance(seconds=35)
+    jobs.heartbeat(claim, None, 30)
+    clock.advance(seconds=10)
+    jobs.record_result(
+        AgentResult.model_validate_json(
+            json.dumps(
+                {
+                    "fence": claim.fence,
+                    "state": "failed",
+                    "result": {
+                        "status": "failed",
+                        "error_code": "recipe_start_failed",
+                        "reason": "distributed start deadline elapsed before execution",
+                        "failure_kind": "temporary-dependency",
+                    },
+                }
+            )
+        )
+    )
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state == "failed"
+        assert stored.retry_disposition is None
 
 
 def test_uncertain_stop_is_reconciled_by_exact_resume_not_parked(service) -> None:
