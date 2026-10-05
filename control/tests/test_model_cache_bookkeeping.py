@@ -13,6 +13,7 @@ observed, is *unknown*, never a reason to stop a load.  Three families:
 # ruff: noqa: F811 - tests take the imported ``cache`` fixture by name
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -151,6 +152,27 @@ def test_one_unreadable_download_never_stops_the_claim_loop(cache, tmp_path: Pat
     assert retired.state == "failed"
     assert "persisted-state-damaged" in str(retired.last_error)
     assert retired.failure is not None
+
+
+def test_a_running_operation_under_a_live_lease_is_never_retired(cache, tmp_path: Path):
+    """Fail open: another process's running workload survives an unreadable document."""
+
+    service, sessions = cache
+    operation, _artifact_document = _queue(
+        service, tmp_path, "00000000-0000-4000-8000-00000000b013"
+    )
+    with sessions.begin() as session:
+        stored = session.get(ModelCacheOperation, operation.id)
+        assert stored is not None
+        stored.state = "running"
+        stored.fence = "another-process"
+        stored.lease_deadline = datetime.now(UTC) + timedelta(seconds=60)
+        stored.payload = {"written_by": "a newer Controller"}
+    assert service._claim_operations(limit=5, respect_backoff=False) == []
+    with sessions() as session:
+        stored = session.get(ModelCacheOperation, operation.id)
+        assert stored is not None
+        assert stored.state == "running" and stored.fence == "another-process"
 
 
 def test_a_damaged_envelope_is_rebuilt_from_its_set_row(cache, tmp_path: Path):

@@ -728,7 +728,7 @@ def _derived_result(
 ) -> dict[str, object] | None:
     """The result a succeeded operation's own evidence implies, else ``None``."""
 
-    if operation.state != "succeeded":
+    if operation.state != State.SUCCEEDED:
         return None
     if operation.kind in {"download", "repair"}:
         if operation.artifact_set_sha256 is None:
@@ -816,7 +816,7 @@ def _fresh_progress(now: datetime) -> ModelCacheOperationProgress:
     document = cache_progress(
         {
             "schema_version": SCHEMA_VERSION,
-            "phase": "queued",
+            "phase": State.QUEUED.value,
             "completed_artifacts": 0,
             "total_artifacts": 0,
             "downloaded_bytes": 0,
@@ -1860,11 +1860,10 @@ class ModelCacheService:
         *,
         now: datetime | None = None,
     ) -> None:
-        if operation.state not in {"succeeded", "failed", "cancelled"}:
+        at = now or self._clock()
+        if not self._lifecycle.lifecycle(operation, at).terminal:
             self._lifecycle.fail_corrupt(
-                operation,
-                f"{residue.reason.value}: {residue.note}",
-                now or self._clock(),
+                operation, f"{residue.reason.value}: {residue.note}", at
             )
         log_event(
             _LOGGER,
@@ -8022,7 +8021,9 @@ class ModelCacheService:
     def _operation_view(operation: ModelCacheOperation) -> CacheOperationView:
         # An unreadable document renders from the row's own columns: a succeeded
         # operation with its derived result, a failed one with its ``last_error``
-        # as the failure evidence.  Reading never raises on damaged bookkeeping.
+        # as the failure evidence.  Reading never raises on a damaged envelope,
+        # progress or result (a damaged ``cancellation`` sub-document still does:
+        # that raise is the input-validation family's).
         stored = ModelCacheService._payload_of(operation)
         payload = stored or {}
         progress = _operation_progress(operation)
@@ -8031,7 +8032,7 @@ class ModelCacheService:
         failure = ModelCacheService._canonical_failure(operation)
         if stored is None:
             result = _derived_result(operation, {}) if result is None else result
-            if operation.state == "failed" and failure is None:
+            if operation.state == State.FAILED and failure is None:
                 failure = _cache_failure(
                     "model_cache.document_unreadable",
                     redact_text(
@@ -8567,20 +8568,25 @@ class ModelCacheService:
                 )
                 if operation is None:
                     continue
+                row = self._lifecycle.lifecycle(operation, now)
+                if row.state is State.OBSERVING:
+                    continue  # a cancel is being settled
+                if (
+                    row.state is State.RUNNING
+                    and row.lease_deadline is not None
+                    and row.lease_deadline > _aware(now)
+                ):
+                    # A live lease, ours or another process's (a running workload
+                    # of an older or newer Controller): never retired, even when
+                    # this process cannot read its document.
+                    continue
                 # An unreadable envelope is rebuilt from its set row, else the
                 # operation ends as failed (kept for inspection) and the claim
                 # loop carries on: one damaged row never stops the others.
                 payload = self._payload_or_retire(operation, now=now)
                 if payload is None or payload.get("cancellation") is not None:
                     continue
-                row = self._lifecycle.lifecycle(operation, now)
-                if row.state is State.OBSERVING:
-                    continue  # a cancel is being settled
                 if row.state is State.RUNNING:
-                    if row.lease_deadline is not None and row.lease_deadline > _aware(
-                        now
-                    ):
-                        continue  # a live lease: ours, or another process's
                     # The attempt can no longer report: the core decides (rule 1:
                     # nothing here is irreversible, so it is retried with backoff)
                     # instead of the next claimant stealing the claim.
