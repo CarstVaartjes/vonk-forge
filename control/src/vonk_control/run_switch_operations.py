@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, Protocol, TypeGuard, runtime_checkable
+from typing import Any, Literal, Protocol, TypeGuard, get_args, runtime_checkable
 
 import httpx2
 from pydantic import TypeAdapter, ValidationError
@@ -68,6 +68,12 @@ from .install_admission import (
     InstallPreflightExpired,
 )
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
+from .lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    read_or_rebuild,
+    retire_as_unknown,
+)
 from .lifecycle.run_switch import (
     KEEP as _KEEP_REASON,
 )
@@ -222,6 +228,7 @@ from .run_switch_contract import (
     RunSwitchPhase,
     RunSwitchPhaseKind,
     RunSwitchPhaseResult,
+    RunSwitchPlacementAction,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
     RunSwitchProfileStopScope,
@@ -2446,13 +2453,26 @@ class RunSwitchOperationService:
             run = session.get(RecipeRun, run_id)
             if run is None:
                 raise KeyError(run_id)
-            try:
-                stored_run_plan = run_plan_document(run.plan)
-            except RecipeExecutionContractError as error:
-                raise RunSwitchOperationConflict(
-                    "run-switch.run-plan-invalid"
-                ) from error
             installation = session.get(RecipeInstallation, run.installation_id)
+            # Stopping a live run never waits on its stored plan: a plan that
+            # cannot be read is rebuilt from the installation (the evidence of
+            # which recipe and model the run serves), else it is retired.
+            run_plan = read_or_rebuild(
+                kind="run-switch.run-plan",
+                subject=run.id,
+                read=lambda: run_plan_document(run.plan),
+                rebuild=lambda: (
+                    {
+                        "recipe_revision_id": installation.recipe_revision_id,
+                        "model_content_sha256": installation.model_content_sha256,
+                    }
+                    if installation is not None
+                    else None
+                ),
+            )
+            stored_run_plan: Mapping[str, object] = (
+                {} if isinstance(run_plan, Residue) else run_plan
+            )
             revision = _active_recipe_revision(
                 session, _string_or_none(stored_run_plan.get("recipe_revision_id"))
             )
@@ -2549,13 +2569,18 @@ class RunSwitchOperationService:
             )
             if profile_stop_scope is not None and stop_digest is not None:
                 lifecycle = self._lifecycle
-                if lifecycle is None:
-                    raise RunSwitchOperationConflict("run-switch.lifecycle-unavailable")
-                lifecycle_stop = lifecycle.preview_stop(
-                    run.id,
-                    profile_target_node_ids=profile_stop_scope.target_node_ids,
+                # An unbound lifecycle owner cannot cross-check the stop set:
+                # that is unknown, and the stop (idempotent, scoped by the
+                # profile's own reviewed group) goes ahead on the digest.
+                lifecycle_stop = (
+                    lifecycle.preview_stop(
+                        run.id,
+                        profile_target_node_ids=profile_stop_scope.target_node_ids,
+                    )
+                    if lifecycle is not None
+                    else None
                 )
-                if (
+                if lifecycle_stop is not None and (
                     lifecycle_stop.target_node_ids
                     != tuple(profile_stop_scope.target_node_ids)
                     or lifecycle_stop.missing_node_ids
@@ -3276,32 +3301,39 @@ class RunSwitchOperationService:
                 raise RunSwitchOperationConflict(
                     "run-switch operation is not cancellable"
                 )
+            # A cancel always completes: a plan that cannot be read is unknown,
+            # so the cancel treats the operation as possibly started and Stops
+            # through the child's run, without the plan's build-dependency lock.
             plan = _load_plan(job.payload["plan"])
             profile_application_id = _string_or_none(
                 progress.get("profile_application_id")
             )
-            try:
-                lock_run_switch_build_dependency(
-                    session,
-                    plan,
-                    phase_index=require_integer(
-                        progress.get("phase_index", 0), "phase index"
-                    ),
-                    allow_cancelling=True,
-                )
-            except BuildConsumerError as error:
-                raise RunSwitchOperationConflict(f"{error.code}: {error}") from error
-            phase = plan.phases[
-                min(
-                    require_integer(progress.get("phase_index", 0), "phase index"),
-                    len(plan.phases) - 1,
-                )
-            ]
+            phase = None
+            if plan is not None:
+                try:
+                    lock_run_switch_build_dependency(
+                        session,
+                        plan,
+                        phase_index=require_integer(
+                            progress.get("phase_index", 0), "phase index"
+                        ),
+                        allow_cancelling=True,
+                    )
+                except BuildConsumerError as error:
+                    raise RunSwitchOperationConflict(
+                        f"{error.code}: {error}"
+                    ) from error
+                phase = plan.phases[
+                    min(
+                        require_integer(progress.get("phase_index", 0), "phase index"),
+                        len(plan.phases) - 1,
+                    )
+                ]
             if "start" in require_sequence(
                 progress.get("completed_phases", []), "completed phases"
             ) or (
                 job.state in {"running", "waiting"}
-                and phase.kind in {"start", "final_verify"}
+                and (phase is None or phase.kind in {"start", "final_verify"})
             ):
                 child_id = _string_or_none(progress.get("child_operation_id"))
                 child = session.get(Job, child_id) if child_id is not None else None
@@ -3310,7 +3342,9 @@ class RunSwitchOperationService:
                     if child is not None and child.payload.get("owner_kind") == "run"
                     else None
                 )
-                stop_run_id = plan.run_id or _string_or_none(owner_id)
+                stop_run_id = (
+                    plan.run_id if plan is not None else None
+                ) or _string_or_none(owner_id)
                 # The operation is marked cancelled only after its Stop is
                 # durably accepted below; a failed Stop leaves it cancellable.
                 # An intent with no run identity to Stop is a bookkeeping gap,
@@ -3326,7 +3360,7 @@ class RunSwitchOperationService:
                 job.status_reason = (
                     "Cancellation requested; finishing the current preparation safely."
                 )
-                if phase.subphase == "container-build":
+                if phase is not None and phase.subphase == "container-build":
                     _complete_cancellation(job, progress, cancellation.requested_at)
                 else:
                     # Nothing issued ends at once; an issued child is stopped and
@@ -3423,6 +3457,12 @@ class RunSwitchOperationService:
                     "run-switch.superseded: retry belongs to an obsolete workload intent"
                 )
             retry_plan = _load_plan(previous.payload["plan"])
+            if retry_plan is None:
+                # Nothing to retry from: the request-led way forward is a new
+                # request, exactly as for an operation without a readable result.
+                raise RunSwitchOperationConflict(
+                    "run-switch operation is not retryable"
+                )
             prior_image_intent = current_progress.runtime_image_reference_intent
             if prior_image_intent is not None:
                 try:
@@ -3527,9 +3567,16 @@ class RunSwitchOperationService:
 
         binder = getattr(self._artifacts, "bind_model_cache", None)
         if not callable(binder):
-            raise RunSwitchOperationConflict(
-                "run-switch.artifact-inspector-does-not-support-model-cache"
+            # An inspector without a model-cache binding reports its artifact
+            # evidence as unavailable, which admission already reconciles; the
+            # composition continues instead of failing the Controller start.
+            retire_as_unknown(
+                "run-switch.model-cache-binding",
+                type(self._artifacts).__name__,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "artifact inspector does not support model-cache binding",
             )
+            return
         binder(model_cache)
 
     def tick(self) -> bool:
@@ -3651,10 +3698,9 @@ class RunSwitchOperationService:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
                 return
-            try:
-                progress = _read_progress(job.result)
-            except RunSwitchOperationConflict:
+            if _progress_damaged(job.result):
                 return
+            progress = _read_progress(job.result)
             wanted = bound_blockers(_wait_blockers(job, progress))
             stored = dump_blockers(wanted)
             if stored == (progress.get("blockers") or []):
@@ -6668,16 +6714,12 @@ class RunSwitchOperationService:
             row = session.get(Job, operation_id)
             if row is None or row.kind not in _OPERATION_KINDS:
                 return False
-            try:
-                plan = _load_plan(row.payload.get("plan"))
-            except RunSwitchOperationConflict:
-                plan = None
-            try:
-                persisted_progress = _read_progress(row.result)
-            except RunSwitchOperationConflict:
+            plan = _load_plan(row.payload.get("plan"))
+            if _progress_damaged(row.result):
                 # Unreadable evidence of what was issued is never re-planned
                 # from the accepted payload: a Start may already exist.
                 return False
+            persisted_progress = _read_progress(row.result)
             if (
                 plan is not None
                 and plan.allowed
@@ -6752,14 +6794,10 @@ class RunSwitchOperationService:
             current = session.get(Job, operation_id, with_for_update=True)
             if current is None or current.state not in {"queued", "running", "waiting"}:
                 return True
-            try:
-                current_plan = _load_plan(current.payload.get("plan"))
-            except RunSwitchOperationConflict:
-                current_plan = None
-            try:
-                progress = _read_progress(current.result)
-            except RunSwitchOperationConflict:
+            current_plan = _load_plan(current.payload.get("plan"))
+            if _progress_damaged(current.result):
                 return False
+            progress = _read_progress(current.result)
             if (
                 current_plan is not None
                 and current_plan.allowed
@@ -6872,25 +6910,23 @@ class RunSwitchOperationService:
                 )
                 session.commit()
                 return True
-            try:
-                plan = _load_plan(raw_plan)
-            except RunSwitchOperationConflict:
+            plan = _load_plan(raw_plan)
+            if plan is None:
                 _reject_invalid_operation(
                     job, "run-switch persisted plan is invalid", now
                 )
                 session.commit()
                 return True
-            try:
-                progress = _read_progress(job.result)
-            except RunSwitchOperationConflict:
+            if _progress_damaged(job.result):
                 # The stored result is the evidence of what was issued; it is
                 # retained untouched rather than replaced with a fabricated
-                # empty progress document.
+                # empty progress document. The operation is retired as unknown.
                 _reject_invalid_operation(
                     job, "run-switch persisted progress is invalid", now
                 )
                 session.commit()
                 return True
+            progress = _read_progress(job.result)
             intent_status = self._scope_intent_status(session, job)
             if intent_status == "invalid":
                 self._mark_failed(
@@ -7130,6 +7166,11 @@ class RunSwitchOperationService:
                     ):
                         return False
                     persisted_plan = _load_plan(job.payload["plan"])
+                    if persisted_plan is None:
+                        _reject_invalid_operation(
+                            job, "run-switch persisted plan is invalid", now
+                        )
+                        return True
                     persisted_phase_index = require_integer(
                         progress.get("phase_index", phase_index), "phase index"
                     )
@@ -7325,6 +7366,11 @@ class RunSwitchOperationService:
                     require_integer(progress.get("item_index", 0), "item index") + 1
                 )
                 persisted_plan = _load_plan(job.payload["plan"])
+                if persisted_plan is None:
+                    _reject_invalid_operation(
+                        job, "run-switch persisted plan is invalid", now
+                    )
+                    return True
                 phase = persisted_plan.phases[phase_index]
                 _merge_progress_evidence(
                     progress,
@@ -7463,6 +7509,11 @@ class RunSwitchOperationService:
             progress = _read_progress(job.result)
             if progress.get("cancellation"):
                 _complete_cancellation(job, progress, now)
+                return True
+            if plan is None:
+                _reject_invalid_operation(
+                    job, "run-switch persisted plan is invalid", now
+                )
                 return True
             _ADAPTER.project(job, None, now, state=_LifecycleState.RUNNING)
             phase_index = require_integer(progress.get("phase_index", 0), "phase index")
@@ -8359,7 +8410,7 @@ class RunSwitchOperationService:
             now = _now(self._clock)
             if child_evidence is not None and checkpoint is not None:
                 plan = _load_plan(job.payload["plan"])
-                if checkpoint[0] < len(plan.phases):
+                if plan is not None and checkpoint[0] < len(plan.phases):
                     _merge_progress_evidence(
                         progress, plan, plan.phases[checkpoint[0]], child_evidence, now
                     )
@@ -8485,6 +8536,9 @@ class RunSwitchOperationService:
         # Target membership belongs to the Job; receipts carry member progress.
         progress["node_ids"] = list(job.targets)
         plan = _load_plan(job.payload.get("plan"))
+        # A plan that cannot be read still leaves the identity the operation was
+        # accepted under in the payload: the view is rebuilt from that.
+        action, plan_digest, cleanup_mode, installation_id = _view_identity(job, plan)
         current_phase = persisted_result.phase if persisted_result is not None else None
         completed = (
             persisted_result.completed_phases if persisted_result is not None else []
@@ -8507,14 +8561,12 @@ class RunSwitchOperationService:
         return RunSwitchOperation(
             operation_id=job.id,
             kind=_OPERATION_KIND_ADAPTER.validate_python(job.kind, strict=True),
-            action=plan.action,
+            action=action,
             state=projected_state,
-            plan_digest=plan.plan_digest,
+            plan_digest=plan_digest,
             request_key=job.request_id,
-            cleanup_mode=(plan.cleanup_mode if plan.action == "cleanup" else None),
-            installation_id=(
-                plan.installation_id if plan.action == "cleanup" else None
-            ),
+            cleanup_mode=cleanup_mode,
+            installation_id=installation_id,
             node_ids=list(job.targets),
             current_phase=current_phase,
             completed_phases=completed,
@@ -8524,7 +8576,10 @@ class RunSwitchOperationService:
                 projected_state,
                 job.status_reason,
             ),
-            status_reason=job.status_reason,
+            status_reason=job.status_reason
+            if plan is not None or job.status_reason is not None
+            else "The stored plan cannot be read; the operation is shown from its "
+            "recorded identity.",
             result=persisted_result,
             blockers=blockers,
             next_attempt_at=(
@@ -9038,22 +9093,38 @@ def _progress_mapping(value: object) -> Mapping[str, object] | None:
     return None
 
 
-def _parse_persisted_result(value: object) -> RunSwitchOperationResult | None:
-    """Parse stored JSON strictly, including nested datetime and tuple fields."""
+def _stored_result(value: object) -> RunSwitchOperationResult | Residue | None:
+    """Parse stored JSON strictly, including nested datetime and tuple fields.
+
+    A damaged stored result is a :class:`Residue` (typed unknown), never an
+    exception: a reader shows what it can, and the advancing tick retires the
+    one operation (``_reject_invalid_operation``) while retaining the bytes.
+    """
 
     if value is None:
         return None
-    try:
-        return read_stored_document(
+    loaded = read_or_rebuild(
+        kind="run-switch.result",
+        subject="stored-result",
+        read=lambda: read_stored_document(
             lambda document: RunSwitchOperationResult.model_validate_json(
                 json.dumps(document), strict=True
             ),
             value,
-        )
-    except (TypeError, ValueError) as error:
-        raise RunSwitchOperationConflict(
-            "run-switch persisted result is invalid"
-        ) from error
+        ),
+    )
+    return loaded
+
+
+def _parse_persisted_result(value: object) -> RunSwitchOperationResult | None:
+    result = _stored_result(value)
+    return None if isinstance(result, Residue) else result
+
+
+def _progress_damaged(value: object) -> bool:
+    """Whether the stored result exists but cannot be read (evidence unknown)."""
+
+    return isinstance(_stored_result(value), Residue)
 
 
 def _read_progress(value: object) -> dict[str, object]:
@@ -9748,6 +9819,10 @@ def _complete_operation_progress(
     return progress
 
 
+#: The one placeholder member of a damaged operation that records no targets.
+_UNKNOWN_MEMBER_NODE_ID = "spk_" + "0" * 32
+
+
 def _progress_view(
     plan: RunSwitchPlan | None,
     raw: Mapping[str, object],
@@ -9801,6 +9876,19 @@ def _progress_view(
         # NAS download and Spark distribution are distinct transfer checkpoints.
         # Only their persisted byte counters prove how much actually completed.
         completed = min(completed, total)
+    if not node_ids:
+        # Rebuild the group from the member receipts the operation recorded.
+        recorded = (
+            item.get("node_id")
+            for item in _progress_member_entries(
+                raw.get("members", raw.get("member_progress"))
+            )
+        )
+        node_ids = [
+            value
+            for value in recorded
+            if isinstance(value, str) and re.fullmatch(r"spk_[0-9a-f]{32}", value)
+        ][:32]
     raw_members = {
         str(item.get("node_id")): item
         for item in _progress_member_entries(
@@ -9858,10 +9946,26 @@ def _progress_view(
             )
         )
     if not members:
-        # High-level operations always have a complete group.  Keep a valid
-        # DTO if a corrupted historical row is inspected so the API can still
-        # report the operation's durable failure.
-        raise RunSwitchOperationConflict("run-switch operation has no target members")
+        # High-level operations always have a complete group.  A damaged
+        # historical row without any recorded target is unknown, not an error:
+        # keep a valid DTO (one unknown member) so the API still reports the
+        # operation's durable state.
+        retire_as_unknown(
+            "run-switch.progress",
+            "no-target-members",
+            BookkeepingReason.ROW_INCOMPLETE,
+            "operation has no recorded target members",
+        )
+        members.append(
+            RunSwitchMemberProgress(
+                node_id=_UNKNOWN_MEMBER_NODE_ID,
+                phase=phase,
+                state="unknown",
+                completed_bytes=0,
+                total_bytes=None,
+                error="no target members are recorded for this operation",
+            )
+        )
     measurement = (
         read_stored_model(OperationProgress, raw["operation"])
         if raw.get("operation")
@@ -10195,22 +10299,67 @@ def _mapping_node(node: SparkGroupNode) -> Any:
     )
 
 
-def _load_plan(value: object) -> RunSwitchPlan:
+_DIGEST = re.compile(r"[0-9a-f]{64}")
+
+
+def _view_identity(
+    job: Job, plan: RunSwitchPlan | None
+) -> tuple[RunSwitchAction, str, Literal["uninstall", "reconcile"] | None, str | None]:
+    """Action, digest and cleanup identity of an operation, from its plan or,
+    when the plan is unreadable, from the identity recorded beside it."""
+
+    if plan is not None:
+        cleanup = plan.action == "cleanup"
+        return (
+            plan.action,
+            plan.plan_digest,
+            plan.cleanup_mode if cleanup else None,
+            plan.installation_id if cleanup else None,
+        )
+    digest = job.payload.get("plan_digest")
+    recorded_action = job.payload.get("action")
+    # A cleanup carries an identity (mode, installation) only its plan held.
+    action: RunSwitchAction = "stop"
+    for candidate in get_args(RunSwitchPlacementAction):
+        if recorded_action == candidate:
+            action = candidate
+    return (
+        action,
+        digest if isinstance(digest, str) and _DIGEST.fullmatch(digest) else "0" * 64,
+        None,
+        None,
+    )
+
+
+def _load_plan(value: object) -> RunSwitchPlan | None:
+    """The stored plan, or ``None`` once it cannot be read (retired as unknown).
+
+    A damaged stored plan is never a reason to refuse: each caller either
+    rebuilds from the accepted intent (re-plan), retires the one operation
+    (``_reject_invalid_operation``), or carries on without the plan.
+    """
+
     if not isinstance(value, Mapping):
-        raise RunSwitchOperationConflict("run-switch persisted plan is invalid")
+        retire_as_unknown(
+            "run-switch.plan",
+            "stored-plan",
+            BookkeepingReason.PERSISTED_STATE_DAMAGED,
+            "stored plan is not a document",
+        )
+        return None
     # Job.payload is JSON, so strict validation must permit the RFC3339
     # timestamp representation when a worker restarts and reloads a plan.
-    try:
-        return read_stored_document(
+    loaded = read_or_rebuild(
+        kind="run-switch.plan",
+        subject="stored-plan",
+        read=lambda: read_stored_document(
             lambda document: RunSwitchPlan.model_validate_json(
                 json.dumps(document), strict=True
             ),
             value,
-        )
-    except (TypeError, ValueError) as error:
-        raise RunSwitchOperationConflict(
-            "run-switch persisted plan is invalid"
-        ) from error
+        ),
+    )
+    return None if isinstance(loaded, Residue) else loaded
 
 
 def _reserve_run_switch_assets(
@@ -10363,13 +10512,14 @@ def _persist_run_switch_runtime_image_reference(
         ):
             raise owner_changed("RunSwitch operation no longer owns image publication")
         raw_plan = job.payload.get("plan")
-        try:
-            persisted_plan = _load_plan(raw_plan)
-        except RunSwitchOperationConflict as error:
-            raise identity_invalid("persisted RunSwitch plan is invalid") from error
+        persisted_plan = _load_plan(raw_plan)
+        if persisted_plan is None:
+            raise identity_invalid("persisted RunSwitch plan is invalid")
         if persisted_plan != plan:
             raise identity_invalid("RunSwitch plan changed before image publication")
 
+        if _progress_damaged(job.result):
+            raise owner_changed("RunSwitch progress no longer owns image publication")
         try:
             current = _read_progress(job.result)
             current_ordinal = _bound_workload_intent(current)
