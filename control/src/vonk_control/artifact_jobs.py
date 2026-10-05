@@ -43,8 +43,9 @@ from .compiled_artifact_contract import (
 )
 from .execution_plan_service import compile_job_invocation
 from .library_contract import UuidId
-from .lifecycle import Outcome
+from .lifecycle import CancelRequested, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter
+from .lifecycle.artifact_job import ArtifactJobAdapter
 from .models import (
     AgentOperation,
     ArtifactJob,
@@ -214,6 +215,7 @@ class ArtifactJobResponse(ArtifactJobContractModel):
     timeout_seconds: int = Field(ge=1, le=3_600)
     created_at: datetime
     updated_at: datetime
+    supported_actions: tuple[Literal["stop"], ...] = ()
 
     @model_validator(mode="after")
     def response_is_consistent(self) -> ArtifactJobResponse:
@@ -248,6 +250,13 @@ class ArtifactJobResponse(ArtifactJobContractModel):
             and not (self.status_reason or "").strip()
         ):
             raise ValueError("failed or waiting artifact job requires a status reason")
+        if (
+            self.state == "waiting-for-operator"
+            and "stop" not in self.supported_actions
+        ):
+            # Rule 3 of the lifecycle core, as a contract: a job never waits for
+            # an operator without an action the operator can take.
+            raise ValueError("a waiting artifact job must advertise its stop action")
         return self
 
 
@@ -303,6 +312,8 @@ class ArtifactJobView:
     timeout_seconds: int
     created_at: datetime
     updated_at: datetime
+    #: The operator actions that apply now (``stop`` while the job is in doubt).
+    supported_actions: tuple[str, ...] = ()
 
 
 def _json_copy(value: object) -> object:
@@ -930,7 +941,7 @@ class ArtifactJobService:
             ):
                 raise ArtifactJobError("request key was already used differently")
             return self._view_in_session(session, existing)
-        artifact_job = ArtifactJob(
+        artifact_job = ArtifactJobAdapter.new_job(
             id=str(uuid.uuid4()),
             run_id=run_id,
             request_id=request_id,
@@ -939,7 +950,6 @@ class ArtifactJobService:
             output_limits=effective_limits,
             compiled_contract=contract_mapping,
             contract_sha256=contract_digest,
-            state="draft",
             input_manifest=manifest,
             input_manifest_sha256=manifest_digest,
             input_total_bytes=total,
@@ -1096,9 +1106,7 @@ class ArtifactJobService:
             observed = [self._file_mapping(item) for item in uploaded]
             if expected != observed:
                 raise ArtifactJobError("artifact job inputs are incomplete")
-            job.state = "ready"
-            job.finalized_at = now
-            job.updated_at = now
+            ArtifactJobAdapter.mark_ready(job, now)
             return self._view_in_session(session, job)
 
     def submit(self, job_id: str, *, actor: str, request_id: str) -> ArtifactJobView:
@@ -1231,10 +1239,7 @@ class ArtifactJobService:
                 authority_digest=revision.content_digest,
                 now=now,
             )
-            artifact_job.operation_id = operation.id
-            artifact_job.state = "queued"
-            artifact_job.submitted_at = now
-            artifact_job.updated_at = now
+            ArtifactJobAdapter.mark_submitted(artifact_job, operation.id, now)
         self._recipe_operations.notify_agents()
         return self.get(job_id)
 
@@ -1308,29 +1313,29 @@ class ArtifactJobService:
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
             assert job is not None
-            parent = (
-                session.get(Job, operation_id) if operation_id is not None else None
-            )
-            cancel_pending = bool(
-                parent is not None
-                and parent.state == "running"
-                and isinstance(parent.result, Mapping)
-                and parent.result.get("cancel_requested") is True
-            )
             if job.state not in {"succeeded", "failed", "cancelled"}:
-                job.state = "cancelling" if cancel_pending else "cancelled"
-                job.status_reason = cancellation_reason
-                existing_evidence = _result_evidence(job.result_evidence)
-                job.result_evidence = _result_evidence(
-                    {
-                        **(existing_evidence or {}),
-                        "cancel_request_id": request_id,
-                        "cancel_actor": actor,
-                        "cancel_reason": cancellation_reason,
-                    }
-                )
-                job.completed_at = None if cancel_pending else now
-                job.updated_at = now
+                adapter = ArtifactJobAdapter(session, clock=self._clock)
+                evidence = {
+                    "cancel_request_id": request_id,
+                    "cancel_actor": actor,
+                    "cancel_reason": cancellation_reason,
+                }
+                if job.operation_id is None:
+                    # Nothing was ever issued: the core cancels it at once.
+                    adapter.settle(
+                        job,
+                        CancelRequested(request_id, cancellation_reason),
+                        now,
+                        reason=cancellation_reason,
+                        evidence=evidence,
+                    )
+                else:
+                    # The order carries the cancel; the job mirrors what it decided
+                    # (``cancelling`` until the agent's receipt, or until the core
+                    # ends the order after its stop budget).
+                    adapter.project(
+                        job, now, reason=cancellation_reason, evidence=evidence
+                    )
             return self._view_in_session(session, job)
 
     def input_blob(
@@ -1552,6 +1557,7 @@ class ArtifactJobService:
         state = getattr(message, "state", None)
         raw_result = getattr(message, "result", None)
         now = self._clock()
+        adapter = ArtifactJobAdapter(session, clock=self._clock)
         if state == "waiting-for-operator":
             try:
                 waiting_result = RecipeJobRunResult.parse(raw_result)
@@ -1565,30 +1571,31 @@ class ArtifactJobService:
                         "waiting artifact result identity or output is invalid"
                     )
             except (AgentProtocolError, TypeError, ValueError) as error:
-                AgentOperationAdapter(session).record_outcome(
-                    operation, None, parent, Outcome.FAILED, now
+                self._reject_result(
+                    adapter, operation, parent, artifact_job, error, now
                 )
-                artifact_job.state = "failed"
-                artifact_job.status_reason = str(error)[:512]
-                artifact_job.completed_at = now
-                artifact_job.updated_at = now
                 return
-            artifact_job.state = "waiting-for-operator"
-            artifact_job.status_reason = (
-                waiting_result.reason
-                if waiting_result.reason
-                else "artifact cancellation could not safely stop the active scope"
-            )[:512]
-            artifact_job.result_evidence = _result_evidence(
-                {
+            # The agent could not confirm that the job stopped.  The core has
+            # already decided the order (an uncertain report under a cancel is
+            # stopped and observed, and ends ``cancelled`` with the effect unknown
+            # after its stop budget); the job mirrors that decision and keeps the
+            # report as evidence.  It never waits for an operator on its own.
+            adapter.project(
+                artifact_job,
+                now,
+                reason=(
+                    waiting_result.reason
+                    if waiting_result.reason
+                    else "artifact cancellation could not safely stop the active scope"
+                ),
+                evidence={
                     "failure_kind": "cancellation-stop-uncertain",
                     "recoverable": True,
                     "active_scope_may_remain": True,
                     "elapsed_milliseconds": waiting_result.elapsed_milliseconds,
                     "peak_memory_bytes": waiting_result.peak_memory_bytes,
-                }
+                },
             )
-            artifact_job.updated_at = now
             return
         try:
             result = RecipeJobRunResult.parse(raw_result)
@@ -1637,32 +1644,52 @@ class ArtifactJobService:
             if not (succeeded or failed or cancelled):
                 raise AgentProtocolError("artifact result state and exit code disagree")
         except (AgentProtocolError, TypeError, ValueError) as error:
-            AgentOperationAdapter(session).record_outcome(
-                operation, None, parent, Outcome.FAILED, now
-            )
-            artifact_job.state = "failed"
-            artifact_job.status_reason = str(error)[:512]
-            artifact_job.completed_at = now
-            artifact_job.updated_at = now
+            self._reject_result(adapter, operation, parent, artifact_job, error, now)
             return
-        artifact_job.output_manifest_sha256 = result.output_manifest_sha256
-        artifact_job.result_evidence = _result_evidence(
-            {
+        adapter.settle(
+            artifact_job,
+            Reported(
+                Outcome.OK
+                if succeeded
+                else Outcome.CANCELLED
+                if cancelled
+                else Outcome.FAILED,
+                retryable=False,
+            ),
+            now,
+            reason=(
+                None
+                if succeeded
+                else result.reason
+                or ("artifact job cancelled" if cancelled else "recipe job failed")
+            ),
+            evidence={
                 "elapsed_milliseconds": result.elapsed_milliseconds,
                 "peak_memory_bytes": result.peak_memory_bytes,
-            }
+            },
+            output_manifest_sha256=result.output_manifest_sha256,
         )
-        artifact_job.state = (
-            "succeeded" if succeeded else "cancelled" if cancelled else "failed"
+
+    @staticmethod
+    def _reject_result(
+        adapter: ArtifactJobAdapter,
+        operation: AgentOperation,
+        parent: Job,
+        artifact_job: ArtifactJob,
+        error: Exception,
+        now: datetime,
+    ) -> None:
+        """A result that breaks the contract ends the order and the job, failed."""
+
+        AgentOperationAdapter(adapter.session).record_outcome(
+            operation, None, parent, Outcome.FAILED, now
         )
-        artifact_job.status_reason = (
-            None
-            if succeeded
-            else result.reason
-            or ("artifact job cancelled" if cancelled else "recipe job failed")
+        adapter.settle(
+            artifact_job,
+            Reported(Outcome.FAILED, retryable=False),
+            now,
+            reason=str(error)[:512],
         )
-        artifact_job.completed_at = now
-        artifact_job.updated_at = now
 
     def _authorized_agent_job(
         self, session: Session, job_id: str, node_id: str, *, lock: bool = False
@@ -1676,7 +1703,14 @@ class ArtifactJobService:
         parent = session.get(Job, job.operation_id)
         if parent is None or node_id not in parent.targets:
             raise ArtifactJobError("agent is not authorized for this artifact job")
-        if job.state not in {"queued", "running"}:
+        order = session.scalar(
+            select(AgentOperation.state).where(
+                AgentOperation.parent_job_id == job.operation_id
+            )
+        )
+        if job.state not in {"queued", "running"} or order not in {"queued", "running"}:
+            # A job that ended, or whose attempt lapsed (its order is only being
+            # observed), is fenced: its bytes are no longer accepted.
             raise ArtifactJobError("artifact job transfer is closed")
         return job
 
@@ -1784,16 +1818,9 @@ class ArtifactJobService:
         return value
 
     def _view_in_session(self, session: Session, job: ArtifactJob) -> ArtifactJobView:
-        state = job.state
         submission = _artifact_submission_in_session(session, job)
-        if state == "queued" and job.operation_id is not None:
-            operation_state = session.scalar(
-                select(AgentOperation.state).where(
-                    AgentOperation.parent_job_id == job.operation_id
-                )
-            )
-            if operation_state == "running":
-                state = "running"
+        adapter = ArtifactJobAdapter(session, clock=self._clock)
+        state, actions = adapter.view(job)
         inputs = tuple(
             self._file_mapping(item)
             for item in self._files_in_session(session, job.id, "input")
@@ -1829,6 +1856,7 @@ class ArtifactJobService:
             timeout_seconds=job.timeout_seconds,
             created_at=job.created_at,
             updated_at=job.updated_at,
+            supported_actions=actions,
         )
         ArtifactJobResponse.model_validate(view, from_attributes=True)
         return view

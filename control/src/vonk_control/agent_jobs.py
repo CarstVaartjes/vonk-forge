@@ -84,12 +84,14 @@ from .lifecycle.agent_operation import (
     AgentOperationAdapter,
     aggregate_parent_state,
     cancel_requested_at,
+    is_artifact_owned,
     lapsed_running_orders,
     parked_orders,
     retry_scheduled,
     same_order,
     set_parent_state,
 )
+from .lifecycle.artifact_job import ArtifactJobAdapter
 from .logging import redact_text
 from .models import (
     AgentCertificate,
@@ -97,7 +99,6 @@ from .models import (
     AgentNodeProfile,
     AgentOperationAttempt,
     ArtifactDistributionAssignment,
-    ArtifactJob,
     Job,
     RecipeBuild,
     RecipeInstallation,
@@ -566,6 +567,10 @@ def operator_resume_candidates_in_session(
         return ()
     payload = job.payload if isinstance(job.payload, Mapping) else None
     if payload is None:
+        return ()
+    if is_artifact_owned(job):
+        # A one-shot job is owned by its artifact job: its only action is Stop
+        # (resuming it would run a user's job again).
         return ()
     parent_intent = payload.get("workload_intent_ordinal")
     if parent_intent is not None and (
@@ -1645,7 +1650,11 @@ class AgentJobService:
 
         progressed = self._sweep_lapsed_attempts(limit)
         report = self._order_reconciler().reconcile(limit)
-        return progressed or report.changed > 0
+        # A one-shot job is a projection of its order: heal any that did not follow.
+        healed = ArtifactJobAdapter(
+            sessions=self._sessions, clock=self._clock
+        ).reconcile(limit)
+        return progressed or report.changed > 0 or healed > 0
 
     def _order_reconciler(self) -> Reconciler:
         reconciler = getattr(self, "_reconciler", None)
@@ -2550,23 +2559,17 @@ class AgentJobService:
     ) -> None:
         """Decide an attempt that can no longer report, through the core.
 
-        An artifact job's own attempt is fenced and failed with the job (its late
-        results are rejected).  Every other order is a ``LeaseLapsed``: retried
-        when restart-safe or an upgrade, waiting for an operator only when it is
-        irreversible and an operator has an action for it.
+        Every order is a ``LeaseLapsed``: retried when restart-safe or an upgrade,
+        observed and then waiting for an operator only when it is irreversible and
+        an operator has an action for it (a one-shot job's action is ``stop``).  The
+        lapsed attempt stays fenced, so its late results are rejected.
         """
 
         adapter = AgentOperationAdapter(
             session, resume_candidates=operator_resume_candidates_in_session
         )
         parent = session.get(Job, operation.parent_job_id)
-        if self._project_artifact_job_expiry(session, operation, now):
-            event: LeaseLapsed | Reported = Reported(
-                Outcome.FAILED, retryable=False, reason=reason
-            )
-        else:
-            event = LeaseLapsed(reason=reason)
-        adapter.settle(operation, attempt, parent, event, now)
+        adapter.settle(operation, attempt, parent, LeaseLapsed(reason=reason), now)
 
     @staticmethod
     def _claimable_operations(node_id: str, now: datetime):
@@ -4361,44 +4364,6 @@ class AgentJobService:
         self._contact_consumer(session, source)
 
     @staticmethod
-    def _project_artifact_job_expiry(
-        session: Session,
-        operation: StoredOperation,
-        now: datetime,
-    ) -> bool:
-        """Fail the artifact job whose one-shot attempt can no longer report.
-
-        Returns whether the order belongs to an artifact job, which then ends
-        failed with it: the uncertain attempt is fenced and late results are
-        rejected.
-        """
-
-        if operation.kind != AgentOperation.RECIPE_JOB_RUN.value:
-            return False
-        artifact_job = session.scalar(
-            select(ArtifactJob)
-            .where(ArtifactJob.operation_id == operation.parent_job_id)
-            .with_for_update(of=ArtifactJob)
-        )
-        if artifact_job is None:
-            return False
-        reason = (
-            "artifact job agent lease expired; the uncertain attempt was fenced "
-            "and late results will be rejected"
-        )
-        if artifact_job.state not in {"succeeded", "failed", "cancelled"}:
-            artifact_job.state = "failed"
-            artifact_job.status_reason = reason
-            artifact_job.result_evidence = {
-                "failure_kind": "agent-lease-expired",
-                "recoverable": True,
-                "late_results_accepted": False,
-            }
-            artifact_job.completed_at = now
-            artifact_job.updated_at = now
-        return True
-
-    @staticmethod
     def _fence_token(fence: AgentFence) -> str:
         if isinstance(fence, str):
             return fence
@@ -4451,6 +4416,25 @@ class AgentJobService:
         )
 
     def _aggregate_parent(self, session: Session, parent_job_id: str) -> None:
+        """Aggregate a parent from its orders, then project a one-shot job's state.
+
+        Every change of an order reaches here, so the artifact job (a projection of
+        its order) is updated by the same transaction that changed the order.
+        """
+
+        self._aggregate_parent_state(session, parent_job_id)
+        parent = session.get(Job, parent_job_id)
+        if parent is not None and is_artifact_owned(parent):
+            orders = session.scalars(
+                select(StoredOperation).where(
+                    StoredOperation.parent_job_id == parent_job_id
+                )
+            )
+            adapter = ArtifactJobAdapter(session, clock=self._clock)
+            for order in orders:
+                adapter.project_for_order(order, self._clock())
+
+    def _aggregate_parent_state(self, session: Session, parent_job_id: str) -> None:
         job = session.scalar(
             select(Job).where(Job.id == parent_job_id).with_for_update(of=Job)
         )

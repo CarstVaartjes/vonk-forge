@@ -76,8 +76,9 @@ from .install_admission import (
 from .install_admission import (
     require_admissible as require_install_admissible,
 )
-from .lifecycle import CancelRequested, Outcome
+from .lifecycle import CancelRequested, Effect, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
+from .lifecycle.artifact_job import ArtifactJobAdapter
 from .logging import redact_text
 from .models import (
     AgentNode,
@@ -4951,7 +4952,11 @@ class RecipeOperationService:
                 raise RecipeOperationConflict(
                     "cancellation request key was already used differently"
                 )
-            if job.state not in {"queued", "running"}:
+            if job.state not in {"queued", "running"} and not (
+                # The Stop of a one-shot job whose effect is in doubt: its job
+                # advertises it, so the parent that waits must accept it.
+                job.kind == "recipe.job.run.v1" and job.state == "waiting-for-operator"
+            ):
                 raise RecipeOperationConflict("recipe operation is not cancellable")
             previous = _validated_result(job.kind, job.result) or {}
             if previous.get("cancel_requested") is True:
@@ -5906,10 +5911,9 @@ class RecipeOperationService:
                     "stopped JobRun source no longer matches its owner"
                 )
             reason = "runtime stopped by the newer accepted profile intent"
-            artifact.state = "cancelled"
-            artifact.status_reason = reason
-            artifact.completed_at = artifact.completed_at or now
-            artifact.updated_at = now
+            # The exact Stop receipt proves the runtime absent: a definite,
+            # confirmed cancellation of the job and of its order.
+            ArtifactJobAdapter(session).confirm_stopped(artifact, reason, now)
             source_job.state = "cancelled"
             source_job.status_reason = reason
             source_job.updated_at = now
@@ -6150,12 +6154,12 @@ class RecipeOperationService:
             ) from error
 
         for artifact in unissued_artifacts:
-            artifact.state = "cancelled"
-            artifact.status_reason = (
-                "superseded before JobRun issuance by profile intent"
+            ArtifactJobAdapter(session).settle(
+                artifact,
+                CancelRequested(None, "superseded before JobRun issuance"),
+                now,
+                reason="superseded before JobRun issuance by profile intent",
             )
-            artifact.completed_at = now
-            artifact.updated_at = now
         if not target_rows:
             return None
 
@@ -6227,36 +6231,10 @@ class RecipeOperationService:
         target_node_ids: Sequence[str] | None = None,
     ) -> RecipeArtifactJobCancellationPending | None:
         target_scope = set(target_node_ids) if target_node_ids is not None else None
-        uncertain = tuple(
-            session.scalars(
-                select(ArtifactJob)
-                .where(ArtifactJob.run_id == run_id, ArtifactJob.state == "failed")
-                .order_by(ArtifactJob.created_at, ArtifactJob.id)
-                .with_for_update(of=ArtifactJob)
-            )
-        )
-        for artifact in uncertain:
-            if (
-                target_scope is not None
-                and not RecipeOperationService._artifact_job_targets(
-                    session, artifact, target_scope
-                )
-            ):
-                continue
-            evidence = artifact.result_evidence
-            if isinstance(evidence, Mapping) and (
-                evidence.get("active_scope_may_remain") is True
-                or evidence.get("failure_kind") == "agent-lease-expired"
-            ):
-                if artifact.operation_id is None:
-                    raise RecipeOperationConflict(
-                        "uncertain artifact job has no operation"
-                    )
-                return RecipeArtifactJobCancellationPending(
-                    job_id=artifact.operation_id,
-                    observe_due_at=now,
-                    observation_deadline=now,
-                )
+        # An ended job never blocks a Stop: a job whose stop could not be confirmed
+        # ended ``cancelled`` with its residue recorded in its evidence, and a
+        # legacy ``failed`` job that lost its lease did too (core rule 4).  Only a
+        # job still being cancelled waits, and it completes by itself.
         active = tuple(
             session.scalars(
                 select(ArtifactJob)
@@ -6291,10 +6269,12 @@ class RecipeOperationService:
                     raise RecipeOperationConflict(
                         "artifact job operation identity is missing"
                     )
-                artifact.state = "cancelled"
-                artifact.status_reason = "superseded by newer workload intent"
-                artifact.completed_at = now
-                artifact.updated_at = now
+                ArtifactJobAdapter(session).settle(
+                    artifact,
+                    CancelRequested(None, "superseded by newer workload intent"),
+                    now,
+                    reason="superseded by newer workload intent",
+                )
                 continue
             parent = session.get(Job, artifact.operation_id, with_for_update=True)
             children = tuple(
@@ -6319,23 +6299,29 @@ class RecipeOperationService:
                 and children[0].state == "cancelled"
                 and children[0].current_attempt == 0
             ):
-                artifact.state = "cancelled"
-                artifact.status_reason = "superseded before agent dispatch"
-                artifact.completed_at = now
-                artifact.updated_at = now
+                ArtifactJobAdapter(session).settle(
+                    artifact,
+                    Reported(
+                        Outcome.CANCELLED,
+                        effect=Effect.NONE,
+                        reason="superseded before agent dispatch",
+                    ),
+                    now,
+                    reason="superseded before agent dispatch",
+                )
                 continue
             deadline = superseded_cancellation_deadline(parent.result)
             if deadline is None:
                 raise RecipeOperationConflict(
                     "artifact job has no cancellation authority"
                 )
-            artifact.state = (
-                "cancelling"
-                if artifact.state != "waiting-for-operator"
-                else artifact.state
+            # The order carries the superseding cancel: the job mirrors it
+            # (``cancelling``, or ended already) and reports the wait.
+            ArtifactJobAdapter(session).project(
+                artifact,
+                now,
+                reason="waiting for exact artifact cancellation receipt",
             )
-            artifact.status_reason = "waiting for exact artifact cancellation receipt"
-            artifact.updated_at = now
             if pending is None:
                 pending = RecipeArtifactJobCancellationPending(
                     job_id=parent.id,

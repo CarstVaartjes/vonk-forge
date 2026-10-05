@@ -22,7 +22,7 @@
   },
   "max_debt": 16,
   "debt_ceiling": {
-    "total": 504,
+    "total": 503,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "operator_waits": [
@@ -53,20 +53,6 @@
       "irreversible_effect": "inherits",
       "verdict": "DERIVED",
       "reason": "Read-side projection of an existing Job state onto a typed owner view; it creates no wait.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/artifact_jobs.py",
-      "function": "ArtifactJobService.consume_agent_result",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.job.run.v1"
-      ],
-      "trigger": "agent says cancellation could not safely stop the active job scope (exit_code 130)",
-      "advertised_action": "stop route: _one_shot_stop_prerequisite (recipe_operations.py:6229-6306); not listed in supported_actions",
-      "irreversible_effect": "the job process may still be running and holding GPU/memory",
-      "verdict": "KEEP",
-      "reason": "Irreversible and uncertain. FIX-ACTION: advertise Stop as the action on the artifact job.",
       "sites": 1
     },
     {
@@ -315,6 +301,20 @@
       "irreversible_effect": "inherits",
       "verdict": "DERIVED",
       "reason": "Pure projection of the children onto the parent job; allowed exactly while a child wait is allowed.",
+      "sites": 1
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/artifact_job.py",
+      "function": "ArtifactJobAdapter._stored_state",
+      "kind": "control-state-projection",
+      "operation_kinds": [
+        "recipe.job.run.v1"
+      ],
+      "trigger": "the job's order is parked for an operator (its effect is unknown after the observation budget) and no cancel is requested",
+      "advertised_action": "stop: ArtifactJobAdapter.actions; the cancel endpoint takes it (a waiting parent accepts it) and the job's supported_actions advertises it",
+      "irreversible_effect": "the job process may still be running and holding GPU/memory",
+      "verdict": "KEEP",
+      "reason": "Irreversible and uncertain (audit C8, now FIX-ACTION done: Stop is advertised and accepted). The row is a projection of the order's core decision (rule 3). The job never waits on its own: a requested cancel is shown as cancelling and ends cancelled with the effect unknown and a residue record (rule 4), and the API contract refuses waiting-for-operator without supported_actions=[stop].",
       "sites": 1
     }
   ],
@@ -1050,7 +1050,6 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeOperationConflict", "RecipeOperationService._model_dependents_on_nodes", "dependent-model-authority-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeOperationConflict", "RecipeOperationService._model_dependents_on_nodes", "dependent-recipe-authority-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeOperationConflict", "RecipeOperationService._one_shot_stop_prerequisite", "artifact-job-operation-identity-is-missing", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeOperationConflict", "RecipeOperationService._one_shot_stop_prerequisite", "uncertain-artifact-job-has-no-operation", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeOperationConflict", "RecipeOperationService._prepared_installation_id", "stored-installation-has-no-compiled-execution-plan", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeOperationConflict", "RecipeOperationService._prepared_installation_id", "stored-installation-plan-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeOperationConflict", "RecipeOperationService._profile_jobrun_stop_in_session", "accepted-profile-does-not-authorize-this-exact-jobrun-stop", 1],
