@@ -4033,15 +4033,19 @@ def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
         assert isinstance(persisted_plan, dict)
         invalid_plan = dict(persisted_plan)
         # A required current-contract field is absent. Reading the durable
-        # operation must stay strict; Activity will report this row as invalid.
+        # operation shows it from the identity recorded beside the plan.
         invalid_plan.pop("action")
         persisted_payload["plan"] = invalid_plan
         job.payload = persisted_payload
         job.created_at = job.created_at + timedelta(seconds=1)
         job.updated_at = job.created_at
 
-    with pytest.raises(RunSwitchOperationConflict, match="persisted plan is invalid"):
-        service.get(unreadable.operation_id)
+    # A plan that cannot be read is unknown, not an error: the operation is
+    # shown from the identity recorded beside it.
+    rebuilt = service.get(unreadable.operation_id)
+    assert rebuilt.operation_id == unreadable.operation_id
+    assert rebuilt.plan_digest == unreadable.plan_digest
+    assert rebuilt.status_reason is not None
 
     provider = service.activity_provider()
     shared_provider = OperationProvider(
@@ -4064,8 +4068,10 @@ def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
         valid.operation_id,
     ]
     damaged_item = page.items[0]
-    assert damaged_item["kind"] == "run-switch-unreadable"
-    assert damaged_item["state"] == "unavailable"
+    # The unreadable plan does not make the row unavailable: it is listed from
+    # the identity recorded beside the plan.
+    assert damaged_item["kind"] != "run-switch-unreadable"
+    assert damaged_item["state"] != "unavailable"
     assert damaged_item.get("failure") is None
     damaged_detail = operation_detail_response(damaged_item)
     assert damaged_detail.id == unreadable.operation_id
@@ -4109,7 +4115,7 @@ def test_measured_operation_keeps_unknown_totals_and_failure_readable(
 @pytest.mark.parametrize(
     "invalid_result", [[], "broken", {"phase_index": "0"}, {"phase": "old-phase"}]
 )
-def test_operation_read_rejects_malformed_persisted_result(
+def test_operation_read_survives_malformed_persisted_result(
     tmp_path: Path, invalid_result: object
 ) -> None:
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
@@ -4139,9 +4145,11 @@ def test_operation_read_rejects_malformed_persisted_result(
             .values(result=invalid_result)
         )
         previous_state = job.state
-    with pytest.raises(RunSwitchOperationConflict, match="persisted result is invalid"):
-        service.get(operation.operation_id)
-    with pytest.raises(RunSwitchOperationConflict, match="persisted result is invalid"):
+    # A damaged stored result is unknown, not an error: the operation is still
+    # readable from its plan, and a retry (which needs the result) is refused as
+    # not retryable so the person starts a new request.
+    assert service.get(operation.operation_id).operation_id == operation.operation_id
+    with pytest.raises(RunSwitchOperationConflict, match="not retryable"):
         service.retry(
             operation.operation_id, request_key=str(uuid.uuid4()), actor="admin"
         )
