@@ -323,9 +323,17 @@ class RunSwitchIssuedWorkloadPending(RunSwitchOperationConflict):
 
 
 class RunSwitchPostStopEvidencePending(RunSwitchOperationConflict):
-    """A released claim is not evidence that its physical bytes are free."""
+    """A released claim is not evidence that its physical bytes are free.
+
+    ``collected_after`` is the instant evidence must be collected after (strictly):
+    a retry before it cannot find any, so the retry clock never schedules one.
+    """
 
     code = "run-switch.post-stop-inventory-pending"
+
+    def __init__(self, message: str, *, collected_after: datetime | None = None):
+        super().__init__(message)
+        self.collected_after = collected_after
 
 
 class RunSwitchInstallPreflightExpired(RunSwitchOperationConflict):
@@ -1140,7 +1148,8 @@ class RecipeLifecyclePhaseExecutor:
                         raise RunSwitchPostStopEvidencePending(
                             f"Spark {node_id} needs inventory collected after stop {stop.run_id} "
                             f"({(stopped_at + MAX_INVENTORY_FUTURE_SKEW).isoformat()}; "
-                            f"latest {snapshot.observed_at.isoformat()})"
+                            f"latest {snapshot.observed_at.isoformat()})",
+                            collected_after=stopped_at + MAX_INVENTORY_FUTURE_SKEW,
                         )
 
     def _execute_container_build(
@@ -7572,6 +7581,13 @@ class RunSwitchOperationService:
                     item_index,
                     reason=pending.code,
                     detail=str(pending),
+                    # Evidence collected at the threshold itself is not "after" it:
+                    # the retry waits one second past it, never lands on it.
+                    not_before=(
+                        None
+                        if pending.collected_after is None
+                        else _aware(pending.collected_after) + timedelta(seconds=1)
+                    ),
                 )
             except RunSwitchIssuedWorkloadPending as pending:
                 return self._hold_issued_observation(
@@ -8107,6 +8123,7 @@ class RunSwitchOperationService:
         *,
         reason: str,
         detail: str | None = None,
+        not_before: datetime | None = None,
     ) -> bool:
         """Retry an unchanged capacity handoff with bounded exponential backoff.
 
@@ -8137,6 +8154,7 @@ class RunSwitchOperationService:
                     reason,
                     now,
                     reset_on_change=True,
+                    retry_after=not_before,
                     describe=lambda due: (
                         (
                             detail

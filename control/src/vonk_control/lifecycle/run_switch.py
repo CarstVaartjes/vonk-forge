@@ -519,6 +519,7 @@ class RunSwitchAdapter:
         visible: str | None = None,
         record_reason: bool = True,
         reset_on_change: bool = False,
+        retry_after: datetime | None = None,
     ) -> Lifecycle:
         """A phase could not be settled: observe it again later (rules 1, 2 and 5).
 
@@ -531,7 +532,12 @@ class RunSwitchAdapter:
         row = self.settle(
             job,
             progress,
-            Reported(Outcome.FAILED, retryable=True, reason=reason),
+            Reported(
+                Outcome.FAILED,
+                retryable=True,
+                reason=reason,
+                retry_after=None if retry_after is None else aware(retry_after),
+            ),
             now,
             visible=visible,
             retry_reason=reason if record_reason else _KEEP,
