@@ -695,7 +695,12 @@ restart-safe sequence:
    parallel, skip already-local assets, then safely replace, start,
    health-check, and verify the new workload graph through outbound agent
    operations.
-5. Compensate or enter `waiting-for-operator` when mutation outcome is uncertain.
+5. Decide an uncertain mutation outcome in the shared lifecycle core
+   (`vonk_control/lifecycle`): work that never ran, or that is idempotent, is
+   retried with bounded backoff after the Spark inspects the prior effect;
+   only an irreversible effect that stays unknown, with an operator action
+   advertised for it, waits as `waiting-for-operator`; a cancel always
+   completes. A Spark order's schedule is `next_action_at`.
 6. Publish routes only after every required result and endpoint readiness is
    accepted, then require an exact LiteLLM supervisor acknowledgement.
 7. Renew only while the applicable PostgreSQL authority and catalog revisions,

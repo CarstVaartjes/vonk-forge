@@ -22,7 +22,6 @@ from vonk_control.fleet_events import (
     FleetEventRepository,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
-from vonk_control.jobs import JobService
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.telemetry import (
     TelemetryRepository,
@@ -160,8 +159,6 @@ def _operation() -> models.AgentOperation:
         authority_revision="a" * 64,
         state="queued",
         current_attempt=0,
-        retry_disposition=None,
-        retry_disposition_attempt=None,
         created_at=NOW,
         updated_at=NOW,
     )
@@ -873,24 +870,6 @@ def test_production_session_factory_installs_the_recorder(tmp_path) -> None:
     rows = _event_rows(production_sessions)
     assert [(row.id, row.entity_kind, row.entity_id) for row in rows] == [
         (1, "job", "job-production")
-    ]
-
-
-def test_durable_job_service_resume_records_waiting_then_queued(tmp_path) -> None:
-    engine = create_engine(f"sqlite:///{tmp_path / 'job-resume-events.sqlite'}")
-    models.Base.metadata.create_all(engine)
-    production_sessions = session_factory(engine)
-    job = _job("job-service-resume")
-    job.state = "waiting-for-operator"
-    with production_sessions.begin() as session:
-        session.add(job)
-
-    JobService(production_sessions, clock=lambda: NOW).resume(job.id)
-
-    rows = _event_rows(production_sessions)
-    assert [(row.id, row.event_type, row.payload["state"]) for row in rows] == [
-        (1, "operation-state", "waiting-for-operator"),
-        (2, "operation-state", "queued"),
     ]
 
 

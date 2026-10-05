@@ -4847,8 +4847,7 @@ def test_restart_retry_due_is_projected_without_replacing_the_child(
         )
         assert agent_child is not None
         agent_child.state = "waiting-for-operator"
-        agent_child.retry_disposition = "retry"
-        agent_child.retry_due_at = due
+        agent_child.next_action_at = due
         agent_child.status_reason = "exact lifecycle retry scheduled"
 
     assert service.tick() is True

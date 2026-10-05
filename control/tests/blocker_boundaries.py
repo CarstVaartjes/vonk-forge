@@ -54,8 +54,19 @@ ALLOWLIST_PATH = REPO_ROOT / "tools" / "blocker-allowlist.json"
 WAIT_STATE = "waiting-for-operator"
 CONTROL_STATE_ASSIGNMENT = "control-state-assignment"
 CONTROL_STATE_ARGUMENT = "control-state-argument"
+#: A ``return`` of the stored wait state inside the lifecycle core: the one place a
+#: core decision is projected onto a legacy state vocabulary.
+CONTROL_STATE_PROJECTION = "control-state-projection"
 RUST_RESULT = "rust-result"
-WAIT_KINDS = frozenset({CONTROL_STATE_ASSIGNMENT, CONTROL_STATE_ARGUMENT, RUST_RESULT})
+LIFECYCLE_PREFIX = "control/src/vonk_control/lifecycle/"
+WAIT_KINDS = frozenset(
+    {
+        CONTROL_STATE_ASSIGNMENT,
+        CONTROL_STATE_ARGUMENT,
+        CONTROL_STATE_PROJECTION,
+        RUST_RESULT,
+    }
+)
 #: Entry kinds with no scanned site: they document a verdict about code the
 #: scan cannot see by shape (a projection or a deleted entry point).
 UNSCANNED_KINDS = frozenset({"derived-mirror"})
@@ -111,8 +122,20 @@ class RaiseSite:
 # --------------------------------------------------------------------- waits
 
 
-def _is_wait_constant(node: ast.AST) -> bool:
+def _is_wait_literal(node: ast.AST) -> bool:
     return isinstance(node, ast.Constant) and node.value == WAIT_STATE
+
+
+def _wait_constant_names(tree: ast.Module) -> frozenset[str]:
+    """Module-level names bound to the literal (``WAITING = "waiting-for-operator"``)."""
+
+    return frozenset(
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign) and _is_wait_literal(node.value)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    )
 
 
 def _value_leaves(node: ast.AST) -> Iterator[ast.AST]:
@@ -141,10 +164,16 @@ def _is_state_target(target: ast.AST) -> bool:
 
 
 class _WaitCollector(ast.NodeVisitor):
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, constants: frozenset[str] = frozenset()) -> None:
         self.path = path
+        self.constants = constants
         self.scope: list[str] = []
         self.sites: list[WaitSite] = []
+
+    def _is_wait(self, node: ast.AST) -> bool:
+        return _is_wait_literal(node) or (
+            isinstance(node, ast.Name) and node.id in self.constants
+        )
 
     def _add(self, node: ast.AST, kind: str) -> None:
         self.sites.append(
@@ -174,7 +203,7 @@ class _WaitCollector(ast.NodeVisitor):
         if value is None or not any(_is_state_target(target) for target in targets):
             return
         for leaf in _value_leaves(value):
-            if _is_wait_constant(leaf):
+            if self._is_wait(leaf):
                 self._add(leaf, CONTROL_STATE_ASSIGNMENT)
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -199,14 +228,26 @@ class _WaitCollector(ast.NodeVisitor):
             values.extend(node.args)
         for value in values:
             for leaf in _value_leaves(value):
-                if _is_wait_constant(leaf):
+                if self._is_wait(leaf):
                     self._add(leaf, CONTROL_STATE_ARGUMENT)
+        self.generic_visit(node)
+
+    def visit_Return(self, node: ast.Return) -> None:
+        if self.path.startswith(LIFECYCLE_PREFIX) and node.value is not None:
+            parts = (
+                node.value.elts if isinstance(node.value, ast.Tuple) else [node.value]
+            )
+            for part in parts:
+                for leaf in _value_leaves(part):
+                    if self._is_wait(leaf):
+                        self._add(leaf, CONTROL_STATE_PROJECTION)
         self.generic_visit(node)
 
 
 def scan_python_waits(source: str, *, path: str) -> list[WaitSite]:
-    collector = _WaitCollector(path)
-    collector.visit(ast.parse(source))
+    tree = ast.parse(source)
+    collector = _WaitCollector(path, _wait_constant_names(tree))
+    collector.visit(tree)
     return sorted(collector.sites, key=lambda site: site.line)
 
 

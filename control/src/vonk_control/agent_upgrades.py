@@ -26,6 +26,8 @@ from .agent_jobs import (
 )
 from .agent_package_source import load_package_source
 from .bounded_json import require_integer
+from .lifecycle import CancelRequested, Outcome, Reported
+from .lifecycle.agent_operation import AgentOperationAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
 from .strict_json import read_stored_model
 
@@ -640,9 +642,6 @@ class AgentUpgradeService:
                         "waiting-for-operator",
                     }:
                         raise ValueError("stored agent upgrade attempt is invalid")
-                    operation.retry_disposition = "retry"
-                    operation.retry_disposition_attempt = operation.current_attempt
-                    operation.updated_at = now
                     # Operator resume is a new dispatch decision. For an
                     # attempted install it must establish a fresh full safety
                     # fence regardless of the stored helper result. Old agents
@@ -650,10 +649,7 @@ class AgentUpgradeService:
                     # acknowledgement is not proof that the new runtime took
                     # over. This prevents the resumed request from overlapping
                     # an orphaned dpkg or maintainer script.
-                    not_before = now + _AGENT_UPGRADE_RECOVERY_FENCE
-                    attempt.lease_deadline = max(
-                        _aware(attempt.lease_deadline), _aware(not_before)
-                    )
+                    schedule_agent_upgrade_retry(operation, attempt, now)
             else:
                 self._advance(session, parent)
         self._operations.notify_available()
@@ -694,9 +690,17 @@ class AgentUpgradeService:
         # order first; the retry is dispatched only while the Spark still runs
         # the exact rollback source.  Meanwhile the rollout moves on.
         if node is None or node.state != "active" or node.revoked_at is not None:
-            operation.state = "failed"
-            operation.status_reason = "Spark is no longer an active enrolled node"
-            operation.updated_at = self._clock()
+            AgentOperationAdapter(session).settle(
+                operation,
+                attempt,
+                parent,
+                Reported(
+                    Outcome.FAILED,
+                    retryable=False,
+                    reason="Spark is no longer an active enrolled node",
+                ),
+                self._clock(),
+            )
         else:
             schedule_agent_upgrade_retry(operation, attempt, self._clock())
             detail = _failure_detail(attempt.result)
@@ -756,14 +760,16 @@ class AgentUpgradeService:
             )
             .with_for_update(of=AgentOperation)
         ):
-            operation.state = "succeeded"
-            operation.status_reason = (
-                "Spark reports it already runs the requested agent build"
+            AgentOperationAdapter(session).settle(
+                operation,
+                None,
+                parent,
+                Reported(
+                    Outcome.OK,
+                    reason="Spark reports it already runs the requested agent build",
+                ),
+                now,
             )
-            operation.retry_disposition = None
-            operation.retry_disposition_attempt = None
-            operation.retry_due_at = None
-            operation.updated_at = now
 
     def _retry_parked(self, session: Session, parent: Job, now: datetime) -> None:
         """Turn a parked order into an automatic, fenced retry."""
@@ -773,15 +779,23 @@ class AgentUpgradeService:
             .where(
                 AgentOperation.parent_job_id == parent.id,
                 AgentOperation.state == "waiting-for-operator",
-                AgentOperation.retry_disposition.is_(None),
+                AgentOperation.next_action_at.is_(None),
             )
             .with_for_update(of=AgentOperation)
         ):
             node = session.get(AgentNode, operation.node_id)
             if node is None or node.state != "active" or node.revoked_at is not None:
-                operation.state = "failed"
-                operation.status_reason = "Spark is no longer an active enrolled node"
-                operation.updated_at = now
+                AgentOperationAdapter(session).settle(
+                    operation,
+                    None,
+                    parent,
+                    Reported(
+                        Outcome.FAILED,
+                        retryable=False,
+                        reason="Spark is no longer an active enrolled node",
+                    ),
+                    now,
+                )
                 continue
             attempt = session.scalar(
                 select(AgentOperationAttempt)
@@ -821,12 +835,13 @@ class AgentUpgradeService:
                 )
                 .with_for_update(of=AgentOperation)
             ):
-                operation.state = "cancelled"
-                operation.status_reason = f"superseded by agent upgrade {job.id}"
-                operation.retry_disposition = None
-                operation.retry_disposition_attempt = None
-                operation.retry_due_at = None
-                operation.updated_at = now
+                AgentOperationAdapter(session).settle(
+                    operation,
+                    None,
+                    older,
+                    CancelRequested(reason=f"superseded by agent upgrade {job.id}"),
+                    now,
+                )
             self._advance(session, older)
 
     def _advance(self, session: Session, parent: Job) -> None:

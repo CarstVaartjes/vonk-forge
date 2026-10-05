@@ -10,6 +10,7 @@ read-only and deterministic for a given store state; ``execute``, ``observe`` an
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from .types import Lifecycle, Observed, StopResult
@@ -45,6 +46,15 @@ class KindAdapter[RowT](Protocol):
 
     def irreversible(self, row: Lifecycle) -> bool:
         """Whether repeating ``execute`` could repeat a visible effect."""
+        ...
+
+    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+        """The earliest instant a retry may start, or ``None`` for backoff only.
+
+        A safety fence (an install that may still be running), a dependency's
+        ``Retry-After`` or a slowed crash loop.  The core never schedules a retry
+        before it, and never waits longer than the bounded backoff beyond it.
+        """
         ...
 
     def execute(self, row: Lifecycle, attempt: int) -> Dispatch:

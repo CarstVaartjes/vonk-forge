@@ -20,208 +20,12 @@
       "control/src/vonk_control/run_switch_operations.py"
     ]
   },
-  "max_debt": 23,
+  "max_debt": 16,
   "debt_ceiling": {
     "total": 504,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "operator_waits": [
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "schedule_agent_upgrade_retry",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "agent.upgrade.v1"
-      ],
-      "trigger": "upgrade attempt cannot report; fenced retry parked",
-      "advertised_action": "automatic: retry_due_at = now + AGENT_UPGRADE_RECOVERY_FENCE; agent_upgrade_next_action",
-      "irreversible_effect": "agent binary replaced on the Spark; fence prevents reinstall over an unknown build",
-      "verdict": "SELF-HEAL",
-      "reason": "Already automatic. Only the state label says operator; keep the fence, rename the state.",
-      "sites": 2
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._reconcile_dead_running_operation",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.install",
-        "recipe.start",
-        "recipe.stop",
-        "recipe.uninstall",
-        "recipe.reconcile",
-        "artifact.distribution.v1",
-        "runtime.preflight",
-        "recipe.build.v1",
-        "recipe.build.cleanup.v1"
-      ],
-      "trigger": "running attempt can no longer report (lease lapse, node gone, superseded intent)",
-      "advertised_action": "automatic _schedule_safe_retry for restart-safe kinds; build/cleanup have none today",
-      "irreversible_effect": "none for restart-safe kinds (exact-resume inspects first); build is content-addressed, cleanup is delete-if-present",
-      "verdict": "SELF-HEAL",
-      "reason": "Idempotent or never-proved work: re-issue through the exact-resume path. Build and build-cleanup must join _RESTART_REISSUE_OPERATIONS (or be reconciled by the build owner).",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._reconcile_dead_running_operation",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.job.run.v1"
-      ],
-      "trigger": "one-shot job attempt can no longer report",
-      "advertised_action": "operator_resume_candidates_in_session -> POST /api/jobs/{id}/resume or retire; ABSENT when cancel_requested, node inactive/revoked, current_attempt<1 or intent mismatch",
-      "irreversible_effect": "a user job may have run or still be running; re-running repeats user-visible side effects",
-      "verdict": "KEEP",
-      "reason": "Genuinely uncertain, non-idempotent user work. FIX-ACTION: make the action appear in every eligible state (see operator_resume_candidates_in_session early returns).",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._claim_once",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.install",
-        "recipe.start",
-        "recipe.stop",
-        "recipe.uninstall",
-        "recipe.reconcile",
-        "artifact.distribution.v1",
-        "runtime.preflight",
-        "recipe.build.v1",
-        "recipe.build.cleanup.v1",
-        "agent.upgrade.v1"
-      ],
-      "trigger": "poll finds a running operation whose lease expired",
-      "advertised_action": "same as _reconcile_dead_running_operation",
-      "irreversible_effect": "none for restart-safe kinds",
-      "verdict": "SELF-HEAL",
-      "reason": "Duplicate of the reconcile path; collapse to one helper.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._claim_once",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.job.run.v1"
-      ],
-      "trigger": "lease expiry on poll",
-      "advertised_action": "resume/retire (eligibility as above)",
-      "irreversible_effect": "user job may still run",
-      "verdict": "KEEP",
-      "reason": "See reconcile entry for recipe.job.run.v1.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.record_late_result",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.install",
-        "recipe.start",
-        "recipe.stop",
-        "recipe.uninstall",
-        "recipe.reconcile",
-        "artifact.distribution.v1",
-        "runtime.preflight",
-        "recipe.build.v1",
-        "recipe.build.cleanup.v1"
-      ],
-      "trigger": "late receipt for an expired or superseded attempt",
-      "advertised_action": "automatic retry for restart-safe kinds",
-      "irreversible_effect": "none",
-      "verdict": "SELF-HEAL",
-      "reason": "A late receipt for an expired attempt of an idempotent kind is re-issued through the exact-resume path, like the dead-running reconcile.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.record_late_result",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.job.run.v1"
-      ],
-      "trigger": "late receipt, expired attempt",
-      "advertised_action": "resume/retire",
-      "irreversible_effect": "user job may have run",
-      "verdict": "KEEP",
-      "reason": "A late receipt for a one-shot job: the job may have run, so it waits for resume or retire.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._finish",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.install",
-        "recipe.start",
-        "recipe.stop",
-        "recipe.uninstall",
-        "recipe.reconcile",
-        "artifact.distribution.v1",
-        "runtime.preflight"
-      ],
-      "trigger": "agent reports failed(retriable) or waiting-for-operator with failure_kind=uncertain-effect",
-      "advertised_action": "automatic _schedule_safe_retry",
-      "irreversible_effect": "none",
-      "verdict": "SELF-HEAL",
-      "reason": "Label only; the retry is already scheduled.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._finish",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.build.v1",
-        "recipe.build.cleanup.v1",
-        "recipe.job.run.v1",
-        "agent.upgrade.v1"
-      ],
-      "trigger": "agent reports waiting-for-operator",
-      "advertised_action": "resume/retire when eligible",
-      "irreversible_effect": "only recipe.job.run.v1 / agent.upgrade.v1",
-      "verdict": "FIX-ACTION",
-      "reason": "Keep for job.run and upgrade; build and cleanup should be self-heal.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._aggregate_parent",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.build.v1"
-      ],
-      "trigger": "build cancel requested, stopped build needs a cleanup receipt",
-      "advertised_action": "automatic: build-cleanup sweeper queues recipe.build.cleanup.v1 (recipe_operations.py:5010-5060, 5417)",
-      "irreversible_effect": "none (cleanup is idempotent)",
-      "verdict": "SELF-HEAL",
-      "reason": "The sweeper already resolves it; the state is a label.",
-      "sites": 2
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._aggregate_parent",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.build.v1",
-        "recipe.install",
-        "recipe.start",
-        "recipe.stop",
-        "recipe.uninstall",
-        "recipe.reconcile",
-        "artifact.distribution.v1",
-        "runtime.preflight",
-        "agent.upgrade.v1"
-      ],
-      "trigger": "parent aggregate: a child operation is waiting-for-operator and none is still active",
-      "advertised_action": "inherits the child: automatic retry, or resume/retire when eligible",
-      "irreversible_effect": "inherits",
-      "verdict": "DERIVED",
-      "reason": "Pure projection of the children; allowed while the child transition is allowed, and removed when the parent aggregate moves onto the lifecycle core.",
-      "sites": 2
-    },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService._project_node_result",
@@ -305,48 +109,6 @@
       "irreversible_effect": "inherits",
       "verdict": "DERIVED",
       "reason": "Pure projection of the child state.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.wait_for_operator",
-      "kind": "control-state-argument",
-      "operation_kinds": [
-        "any"
-      ],
-      "trigger": "no caller outside tests",
-      "advertised_action": "none",
-      "irreversible_effect": "none",
-      "verdict": "SELF-HEAL",
-      "reason": "Dead entry point into the state (tests use it as a fixture); delete when the agent order moves onto the lifecycle core.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.uncertain",
-      "kind": "control-state-argument",
-      "operation_kinds": [
-        "any"
-      ],
-      "trigger": "no caller outside tests",
-      "advertised_action": "none",
-      "irreversible_effect": "none",
-      "verdict": "SELF-HEAL",
-      "reason": "Dead entry point into the state (tests use it as a fixture); delete when the agent order moves onto the lifecycle core.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/jobs.py",
-      "function": "JobService.wait_for_operator",
-      "kind": "control-state-argument",
-      "operation_kinds": [
-        "any"
-      ],
-      "trigger": "no caller outside tests",
-      "advertised_action": "none",
-      "irreversible_effect": "none",
-      "verdict": "SELF-HEAL",
-      "reason": "Dead entry point; delete.",
       "sites": 1
     },
     {
@@ -461,6 +223,98 @@
       "irreversible_effect": "unknown",
       "verdict": "SELF-HEAL",
       "reason": "Already typed as uncertain-effect; recipe.job.run.v1 and recipe.build.v1 remain parked (see their entries).",
+      "sites": 1
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
+      "function": "AgentOperationAdapter._stored",
+      "kind": "control-state-projection",
+      "operation_kinds": [
+        "recipe.install",
+        "recipe.start",
+        "recipe.stop",
+        "recipe.uninstall",
+        "recipe.reconcile",
+        "artifact.distribution.v1",
+        "runtime.preflight",
+        "agent.upgrade.v1",
+        "recipe.build.v1",
+        "recipe.build.cleanup.v1",
+        "recipe.job.run.v1"
+      ],
+      "trigger": "the core decided backoff (an automatic retry) or a queued retry; projected onto the stored vocabulary",
+      "advertised_action": "automatic: next_action_at schedules the claim (the Spark polls; the label waiting-for-operator is legacy)",
+      "irreversible_effect": "none: only a restart-safe or fenced order is ever scheduled (core rule 1)",
+      "verdict": "DERIVED",
+      "reason": "Projection of a core decision. The stored label is kept for compatibility; no operator is involved and the order is claimable when next_action_at is due.",
+      "sites": 4
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
+      "function": "AgentOperationAdapter._stored",
+      "kind": "control-state-projection",
+      "operation_kinds": [
+        "recipe.job.run.v1",
+        "recipe.build.v1",
+        "recipe.build.cleanup.v1"
+      ],
+      "trigger": "the core decided observing or needs-operator for an irreversible order (a user job or a build) whose effect cannot be observed from the Controller",
+      "advertised_action": "resume/retire (operator_resume_candidates_in_session) while the order is eligible; otherwise the reconciler re-evaluates the wait on every pass and ends it when its job ends or is cancelled",
+      "irreversible_effect": "a user job may have run or still be running; a build may have produced output",
+      "verdict": "KEEP",
+      "reason": "Core rule 3: needs-operator only for an irreversible order with an advertised action. Without one the order keeps being re-evaluated and a cancel ends it with its effect recorded as unknown.",
+      "sites": 4
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
+      "function": "AgentOperationAdapter.reopen",
+      "kind": "control-state-assignment",
+      "operation_kinds": [
+        "agent.upgrade.v1"
+      ],
+      "trigger": "an agent-upgrade helper acknowledgement (or failure) the owner finds is not proof of the target build",
+      "advertised_action": "automatic: the core schedules the fenced retry in the same call (schedule_agent_upgrade_retry)",
+      "irreversible_effect": "none: the claim refuses to install over any binary but the exact rollback source",
+      "verdict": "SELF-HEAL",
+      "reason": "The order is reopened and immediately decided by the core, which retries it behind the dpkg safety fence; it never stays waiting.",
+      "sites": 1
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
+      "function": "AgentOperationAdapter._fence_upgrade_attempt",
+      "kind": "control-state-assignment",
+      "operation_kinds": [
+        "agent.upgrade.v1"
+      ],
+      "trigger": "an upgrade attempt record that cannot report is kept until its dpkg fence elapses",
+      "advertised_action": "inherits the order: automatic fenced retry",
+      "irreversible_effect": "inherits",
+      "verdict": "DERIVED",
+      "reason": "A fact about the attempt record, not a decision about the order: agent_upgrade_in_flight reads its lease as the end of the fence.",
+      "sites": 1
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
+      "function": "aggregate_parent_state",
+      "kind": "control-state-projection",
+      "operation_kinds": [
+        "recipe.install",
+        "recipe.start",
+        "recipe.stop",
+        "recipe.uninstall",
+        "recipe.reconcile",
+        "artifact.distribution.v1",
+        "runtime.preflight",
+        "agent.upgrade.v1",
+        "recipe.build.v1",
+        "recipe.build.cleanup.v1",
+        "recipe.job.run.v1"
+      ],
+      "trigger": "every order of a parent job has finished and at least one waits",
+      "advertised_action": "inherits the waiting child: automatic retry, or resume/retire when eligible",
+      "irreversible_effect": "inherits",
+      "verdict": "DERIVED",
+      "reason": "Pure projection of the children onto the parent job; allowed exactly while a child wait is allowed.",
       "sites": 1
     }
   ],

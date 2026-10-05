@@ -38,6 +38,11 @@ from vonk_control.distribution import (
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.lifecycle import Outcome, Reported
+from vonk_control.lifecycle.agent_operation import (
+    AgentOperationAdapter,
+    retry_scheduled,
+)
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -58,7 +63,7 @@ from vonk_control.recipe_start_payloads import (
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 
-from .agent_fences import fenced_attempt, fenced_operation
+from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -625,8 +630,8 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
         )
         with sessions() as session:
             stored = session.get(AgentOperation, fenced_operation(sessions, first).id)
-            assert stored is not None and stored.retry_due_at is not None
-            clock.now = stored.retry_due_at.replace(tzinfo=UTC)
+            assert stored is not None and stored.next_action_at is not None
+            clock.now = stored.next_action_at.replace(tzinfo=UTC)
         # Retry and upgrade ordering must survive a Controller restart.
         jobs = AgentJobService(sessions, clock=clock)
         # The older exact retry was queued first, so it resumes first.
@@ -1517,7 +1522,9 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
         )
         attempt_row.state = "expired"
         parked.state = "waiting-for-operator"
-        jobs._schedule_safe_retry(parked, clock.now)
+        AgentOperationAdapter(session).settle(
+            parked, attempt_row, None, Reported(Outcome.UNCERTAIN), clock.now
+        )
     with sessions.begin() as session:
         authorize_operator_resume_in_session(
             session, superseded.parent_job_id, clock.now
@@ -1969,7 +1976,7 @@ def test_parent_job_waits_when_all_operations_terminal_without_failures(
 
     waiting = claim_agent(jobs, NODE_A, "serial-a")
     assert waiting is not None
-    jobs.wait_for_operator(waiting, "confirm displayed fingerprint")
+    park_for_operator(sessions, jobs, waiting, "confirm displayed fingerprint")
 
     succeeded = claim_agent(jobs, NODE_B, "serial-b")
     assert succeeded is not None
@@ -2019,9 +2026,9 @@ def test_transient_start_failure_retries_automatically_without_operator(
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None and stored.state == "waiting-for-operator"
-        assert stored.retry_disposition == "retry"
-        assert stored.retry_due_at is not None
-        due = stored.retry_due_at.replace(tzinfo=UTC)
+        assert stored.next_action_at is not None
+        assert stored.next_action_at is not None
+        due = stored.next_action_at.replace(tzinfo=UTC)
     assert job_state(sessions, operation.parent_job_id).state == "queued"
     clock.now = due + timedelta(seconds=1)
     retry = claim_agent(
@@ -2052,8 +2059,7 @@ def test_spent_start_budget_fails_a_parked_start_instead_of_waiting(service) -> 
     with sessions.begin() as session:
         stored = session.get(AgentOperation, operation.id)
         stored.state = "waiting-for-operator"
-        stored.retry_disposition = "retry"
-        stored.retry_disposition_attempt = stored.current_attempt
+        stored.next_action_at = clock.now
         parent_job = session.get(Job, stored.parent_job_id)
         parent_job.result = {"cancel_requested": True}
 
@@ -2062,7 +2068,7 @@ def test_spent_start_budget_fails_a_parked_start_instead_of_waiting(service) -> 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None and stored.state == "failed"
-        assert stored.retry_disposition is None and stored.retry_due_at is None
+        assert stored.next_action_at is None
         assert "start deadline" in (stored.status_reason or "")
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
@@ -2106,11 +2112,32 @@ def test_start_failure_after_the_deadline_is_not_retried(service) -> None:
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None and stored.state == "failed"
-        assert stored.retry_disposition is None
+        assert stored.next_action_at is None
 
 
-def test_uncertain_stop_is_reconciled_by_exact_resume_not_parked(service) -> None:
-    """An uncertain effect of an exact-resume order retries by inspection."""
+@pytest.mark.parametrize(
+    "body",
+    [
+        # What the Rust agent sends today: no failure kind, no uncertain flag.
+        {"reason": "workload stop remains unconfirmed"},
+        {
+            "reason": "workload stop remains unconfirmed",
+            "failure_kind": "uncertain-effect",
+            "uncertain": True,
+        },
+        # Whatever failure kind it names, a waiting result is an uncertain effect.
+        {
+            "reason": "workload stop remains unconfirmed",
+            "failure_kind": "invalid-contract",
+        },
+        {
+            "reason": "workload stop remains unconfirmed",
+            "failure_kind": "invalid-authority",
+        },
+    ],
+)
+def test_an_agent_reported_waiting_body_is_retried_not_parked(service, body) -> None:
+    """Finding 1: a stop that could not be confirmed is idempotent; no person waits."""
 
     jobs, sessions, clock = service
     operation = jobs.enqueue(
@@ -2118,12 +2145,58 @@ def test_uncertain_stop_is_reconciled_by_exact_resume_not_parked(service) -> Non
     )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
-    jobs.uncertain(claim, "runtime did not confirm the stop")
+    jobs.record_result(
+        AgentResult.model_validate(
+            {"fence": claim.fence, "state": "waiting-for-operator", "result": body}
+        )
+    )
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.retry_disposition == "retry"
-        assert stored.retry_due_at is not None
+        assert stored is not None and stored.state == "waiting-for-operator"
+        assert stored.next_action_at is not None  # the retry is scheduled
+        assert stored.status_reason is not None
+        assert "retry scheduled at" in stored.status_reason
+        assert "workload stop remains unconfirmed" in stored.status_reason
     assert job_state(sessions, operation.parent_job_id).state == "queued"
+    clock.advance(seconds=120)
+    retried = claim_agent(jobs, NODE_A, "serial-a")
+    assert retried is not None
+    assert fenced_operation(sessions, retried).id == operation.id
+    assert fenced_attempt(sessions, retried).attempt == 2
+
+
+def test_a_waiting_report_of_a_cancelled_parent_ends_instead_of_waiting(
+    service,
+) -> None:
+    """Rule 4: a cancel completes; the retry a cancelled parent could never claim
+    is not scheduled, and the order does not wait for a person."""
+
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    with sessions.begin() as session:
+        stored_parent = session.get(Job, parent_job.id)
+        assert stored_parent is not None
+        stored_parent.result = {
+            "cancel_requested": True,
+            "cancel_requested_at": clock.now.isoformat(),
+        }
+    jobs.record_result(
+        AgentResult.model_validate(
+            {
+                "fence": claim.fence,
+                "state": "waiting-for-operator",
+                "result": {"reason": "workload stop remains unconfirmed"},
+            }
+        )
+    )
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None
+        assert stored.state == "cancelled"
+        assert stored.next_action_at is None
 
 
 def test_progress_snapshots_and_phase_changes_have_bounded_write_frequency(
@@ -2187,8 +2260,7 @@ def test_distribution_retry_preserves_durable_progress_and_accepts_object_replay
     with sessions.begin() as session:
         stored = session.get(AgentOperation, operation.id)
         stored.state = "waiting-for-operator"
-        stored.retry_disposition = "retry"
-        stored.retry_disposition_attempt = 1
+        stored.next_action_at = clock.now
         prior = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.fence == claim.fence
@@ -2293,9 +2365,9 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
         with sessions() as session:
             stored = session.get(AgentOperation, operation.id)
             assert stored is not None
-            assert stored.retry_disposition == "retry"
-            assert stored.retry_due_at is not None
-            clock.now = max(clock.now, stored.retry_due_at.replace(tzinfo=UTC))
+            assert stored.next_action_at is not None
+            assert stored.next_action_at is not None
+            clock.now = max(clock.now, stored.next_action_at.replace(tzinfo=UTC))
     assert resumed is not None
     assert (
         fenced_operation(sessions, resumed).id == operation.id
@@ -2343,9 +2415,9 @@ def _claim_until_due(jobs, sessions, clock, operation_id: str, *, rounds: int = 
             return claim
         with sessions() as session:
             stored = session.get(AgentOperation, operation_id)
-            if stored.retry_due_at is None:
+            if stored.next_action_at is None:
                 return None
-            clock.now = max(clock.now, stored.retry_due_at.replace(tzinfo=UTC))
+            clock.now = max(clock.now, stored.next_action_at.replace(tzinfo=UTC))
     return None
 
 
@@ -2382,7 +2454,7 @@ def test_distribution_interrupted_twice_by_agent_restart_resumes_without_operato
     assert jobs.record_late_result(_restart_interrupted_result(claim, kind))
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored.retry_due_at is not None
+        assert stored.next_action_at is not None
         assert "retry scheduled at" in stored.status_reason
     assert job_state(sessions, operation.parent_job_id).state == "queued"
 
@@ -2429,7 +2501,7 @@ def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
         with sessions() as session:
             stored = session.get(AgentOperation, operation.id)
             delays.append(
-                (stored.retry_due_at.replace(tzinfo=UTC) - clock.now).total_seconds()
+                (stored.next_action_at.replace(tzinfo=UTC) - clock.now).total_seconds()
             )
             reasons.append(stored.status_reason)
 
@@ -2581,7 +2653,7 @@ def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retr
     with sessions() as session:
         parked = session.get(AgentOperation, first.id)
         assert parked.state == "cancelled"
-        assert parked.retry_due_at is None and parked.retry_disposition is None
+        assert parked.next_action_at is None and parked.next_action_at is None
         assert "abandoned" in parked.status_reason
         assert session.get(AgentOperation, second.id).state == "failed"
 
@@ -2615,9 +2687,7 @@ def test_distribution_parked_with_a_stale_retry_authorisation_resumes_itself(
         attempt.state = "expired"
         attempt.result = {**_RESTART_INTERRUPTED, "operation": kind}
         stored.state = "waiting-for-operator"
-        stored.retry_disposition = "retry"
-        stored.retry_disposition_attempt = 1
-        stored.retry_due_at = None
+        stored.next_action_at = None
         stored.status_reason = "attempt 2 lease expired; the effect is unobserved"
         session.get(Job, stored.parent_job_id).state = "waiting-for-operator"
 
@@ -2651,8 +2721,9 @@ def test_non_idempotent_operation_interrupted_by_restart_still_waits_for_operato
         clock.advance(seconds=3600)
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored.retry_due_at is None
-        assert stored.retry_disposition is None
+        # parked for a person (being observed, never scheduled for a retry)
+        assert stored.state == "waiting-for-operator"
+        assert retry_scheduled(stored) is None
         assert stored.current_attempt == 1
 
 
@@ -2704,7 +2775,7 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
         )
         with sessions() as session:
             stored = session.get(AgentOperation, operation.id)
-            due = stored.retry_due_at
+            due = stored.next_action_at
             assert stored.current_attempt == attempt_number
             assert stored.state == "waiting-for-operator"
         jobs = AgentJobService(sessions, clock=clock)
@@ -3416,8 +3487,7 @@ def _scenario_upgrade_safety_not_elapsed(
         kind=ProtocolAgentOperation.AGENT_UPGRADE.value,
         state="waiting-for-operator",
         current_attempt=1,
-        retry_disposition="retry",
-        retry_disposition_attempt=1,
+        next_action_at=clock.now,
     )
     _add_attempt(sessions, operation, clock, state="running", lease_seconds=60)
 
@@ -3428,9 +3498,7 @@ def _scenario_operator_retry_not_due(sessions, clock, parent_job, operation) -> 
         operation,
         state="waiting-for-operator",
         current_attempt=1,
-        retry_disposition="retry",
-        retry_disposition_attempt=1,
-        retry_due_at=clock.now + timedelta(seconds=60),
+        next_action_at=clock.now + timedelta(seconds=60),
     )
 
 
@@ -3442,9 +3510,7 @@ def _scenario_operator_retry_attempt_not_ready(
         operation,
         state="waiting-for-operator",
         current_attempt=1,
-        retry_disposition="retry",
-        retry_disposition_attempt=1,
-        retry_due_at=None,
+        next_action_at=clock.now,
     )
 
 
@@ -3553,17 +3619,15 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
         )
         with sessions() as session:
             row = session.get(AgentOperation, operation.id)
-            assert row is not None and row.retry_due_at is not None
-            clock.now = row.retry_due_at.replace(tzinfo=UTC) + timedelta(seconds=1)
+            assert row is not None and row.next_action_at is not None
+            clock.now = row.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     with sessions.begin() as session:
         row = session.get(AgentOperation, operation.id)
         assert row is not None
         original_payload = dict(row.payload)
         # The prior finite policy legitimately persisted this current-schema
         # state after its fifth interrupted attempt.
-        row.retry_disposition = None
-        row.retry_disposition_attempt = None
-        row.retry_due_at = None
+        row.next_action_at = None
         parent_row = session.get(Job, job.id)
         assert parent_row is not None
         parent_row.state = "waiting-for-operator"
@@ -3606,7 +3670,7 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
         assert row is not None
-        due = row.retry_due_at
+        due = row.next_action_at
         assert row.current_attempt == 5 and row.payload == original_payload
         if condition not in {"temporary", "expired"}:
             assert due is None

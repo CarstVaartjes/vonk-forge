@@ -469,6 +469,7 @@ def assemble_production_worker(
         sessions,
         recipe_routes,
         clock=clock,
+        order_reconcile=agent_jobs.reconcile_orders,
         build_cleanup=lifecycle.reconcile_cancelled_builds,
         retirement_cleanup=lifecycle.reconcile_retired_operations,
         residue_cleanup=AttemptResidueReconciler(

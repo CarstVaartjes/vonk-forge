@@ -540,9 +540,7 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
     # A later attempt supersedes the lapsed one and succeeds.
     with sessions.begin() as session:
         stored = session.get(AgentOperation, operation.id)
-        stored.retry_disposition = "retry"
-        stored.retry_disposition_attempt = 1
-        stored.retry_due_at = None
+        stored.next_action_at = clock.now
     clock.advance(seconds=1)
     second = claim_agent(
         jobs,

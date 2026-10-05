@@ -45,15 +45,18 @@ MAX_STEPS_PER_ROW = 4
 class LifecycleStore(Protocol):
     """Where lifecycle rows live; one writer per row.
 
-    ``due`` returns non-terminal rows with ``next_action_at <= now`` ordered by
-    ``next_action_at`` and locks them for the caller (``FOR UPDATE SKIP LOCKED``
-    in SQL), ``save`` persists the decided row, and ``record_residue`` writes the
-    note the retention sweeper owns when a cancel gave up confirming a stop.
+    ``due`` returns the non-terminal rows that may need a decision now (a retry or
+    observation whose ``next_action_at`` has come, a lapsed lease, a wait to
+    re-evaluate).  ``save`` persists a decision under the row's lock and returns
+    ``False`` when the stored row is no longer the ``before`` the decision was
+    made from (a concurrent report, claim or cancel): the pass for that row ends
+    and the next one reads it afresh.  ``record_residue`` writes the note the
+    retention sweeper owns when a cancel gave up confirming a stop.
     """
 
     def due(self, now: datetime, limit: int) -> Sequence[Lifecycle]: ...
 
-    def save(self, row: Lifecycle) -> None: ...
+    def save(self, before: Lifecycle, after: Lifecycle) -> bool: ...
 
     def record_residue(self, row: Lifecycle, reason: str) -> None: ...
 
@@ -63,6 +66,84 @@ class ReconcileReport:
     examined: int = 0
     changed: int = 0
     commands: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Settled:
+    """What one row ended as after an event and the commands it caused."""
+
+    row: Lifecycle
+    changed: int = 0
+    commands: int = 0
+    stale: bool = False
+
+
+def settle(
+    row: Lifecycle,
+    event: Event,
+    adapter: KindAdapter,
+    now: datetime,
+    *,
+    save: Callable[[Lifecycle, Lifecycle], bool],
+    residue: Callable[[Lifecycle, str], None],
+    max_steps: int = MAX_STEPS_PER_ROW,
+) -> Settled:
+    """Feed ``event`` to ``row``, run the commands it names, feed the answers back.
+
+    Shared by the reconcile loop and by an owner that holds the row's lock and
+    decides inline: both reach the same rows through the same function.
+    """
+
+    pending: Event | None = event
+    changed = ran = 0
+    for _ in range(max_steps):
+        if pending is None:
+            break
+        decision = transition(row, pending, adapter, now)
+        pending = None
+        if decision.row != row:
+            if not save(row, decision.row):
+                return Settled(row, changed, ran, stale=True)
+            changed += 1
+        row = decision.row
+        for command in decision.commands:
+            ran += 1
+            answer = _run(command, row, adapter, residue)
+            if answer is not None:
+                pending = answer
+    return Settled(row, changed, ran)
+
+
+def _run(
+    command: Command,
+    row: Lifecycle,
+    adapter: KindAdapter,
+    residue: Callable[[Lifecycle, str], None],
+) -> Observed | None:
+    """Run one command; an executor failure is an unknown, never a raise."""
+
+    try:
+        match command:
+            case Observe():
+                return adapter.observe(row)
+            case Stop():
+                confirmed = adapter.stop(row) is StopResult.CONFIRMED
+                return Observed(Effect.STOPPED if confirmed else Effect.UNKNOWN)
+            case Execute():
+                adapter.execute(row, row.attempt + 1)
+            case RecordResidue(reason=reason):
+                residue(row, reason)
+    except Exception as error:  # noqa: BLE001 - bookkeeping becomes unknown
+        _LOGGER.warning(
+            "lifecycle command %s failed for %s %s: %s",
+            type(command).__name__,
+            row.kind,
+            row.id,
+            error,
+        )
+        if isinstance(command, (Observe, Stop)):
+            return Observed(Effect.UNKNOWN, "the inspection could not run")
+    return None
 
 
 class Reconciler:
@@ -91,56 +172,14 @@ class Reconciler:
             if adapter is None:
                 continue  # a kind that has not moved onto the core
             examined += 1
-            did_change, ran = self._settle(row, adapter, now)
-            changed += did_change
-            commands += ran
-        return ReconcileReport(examined, changed, commands)
-
-    def _settle(
-        self, row: Lifecycle, adapter: KindAdapter, now: datetime
-    ) -> tuple[int, int]:
-        event: Event | None = Tick()
-        changed = ran = 0
-        for _ in range(MAX_STEPS_PER_ROW):
-            if event is None:
-                break
-            decision = transition(row, event, adapter, now)
-            if decision.row != row:
-                self._store.save(decision.row)
-                changed += 1
-            row = decision.row
-            event = None
-            for command in decision.commands:
-                ran += 1
-                answer = self._run(command, row, adapter)
-                if answer is not None:
-                    event = answer
-        return changed, ran
-
-    def _run(
-        self, command: Command, row: Lifecycle, adapter: KindAdapter
-    ) -> Observed | None:
-        """Run one command; an executor failure is an unknown, never a raise."""
-
-        try:
-            match command:
-                case Observe():
-                    return adapter.observe(row)
-                case Stop():
-                    confirmed = adapter.stop(row) is StopResult.CONFIRMED
-                    return Observed(Effect.STOPPED if confirmed else Effect.UNKNOWN)
-                case Execute():
-                    adapter.execute(row, row.attempt + 1)
-                case RecordResidue(reason=reason):
-                    self._store.record_residue(row, reason)
-        except Exception as error:  # noqa: BLE001 - bookkeeping becomes unknown
-            _LOGGER.warning(
-                "lifecycle command %s failed for %s %s: %s",
-                type(command).__name__,
-                row.kind,
-                row.id,
-                error,
+            settled = settle(
+                row,
+                Tick(),
+                adapter,
+                now,
+                save=self._store.save,
+                residue=self._store.record_residue,
             )
-            if isinstance(command, (Observe, Stop)):
-                return Observed(Effect.UNKNOWN, "the inspection could not run")
-        return None
+            changed += settled.changed
+            commands += settled.commands
+        return ReconcileReport(examined, changed, commands)

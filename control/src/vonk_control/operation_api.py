@@ -56,6 +56,7 @@ from .fleet_profile_contract import (
     FleetProfileEndpointState,
     FleetProfileEndpointsView,
 )
+from .lifecycle.agent_operation import retry_scheduled
 from .logging import redact_text
 from .models import (
     AgentCertificate,
@@ -1314,9 +1315,7 @@ def _agent_upgrade_diagnostics(
         )
         failure_details_unavailable = failure_details_unavailable or unresolved_generic
         retry_queued = bool(
-            operation is not None
-            and operation.retry_disposition == "retry"
-            and operation.retry_disposition_attempt == operation.current_attempt
+            operation is not None and retry_scheduled(operation) is not None
         )
         retry_queued_any = retry_queued_any or retry_queued
         retry_not_before = (

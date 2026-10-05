@@ -58,7 +58,7 @@ from vonk_control.operation_api import (
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.strict_json import serialize_json_value
 
-from .agent_fences import fenced_attempt, fenced_operation
+from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
@@ -806,7 +806,7 @@ def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
     )
     first = _claim_parked(jobs)
     assert first is not None
-    jobs.wait_for_operator(first, "operator must inspect the effect")
+    park_for_operator(sessions, jobs, first, "operator must inspect the effect")
 
     services.resume_job(job_id)
     with sessions() as session:
@@ -814,11 +814,7 @@ def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
         stored_operation = session.get(AgentOperation, operation.id)
         assert stored_job is not None and stored_job.state == "queued"
         assert stored_operation is not None
-        assert stored_operation.retry_disposition == "retry"
-        assert (
-            stored_operation.retry_disposition_attempt
-            == fenced_attempt(sessions, first).attempt
-        )
+        assert stored_operation.next_action_at is not None
 
     resumed = _claim_parked(jobs)
     assert resumed is not None
@@ -831,7 +827,7 @@ def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
         stored_operation = session.get(AgentOperation, operation.id)
         # The claim consumed the authorisation the operator granted.
         assert stored_operation is not None
-        assert stored_operation.retry_disposition is None
+        assert stored_operation.next_action_at is None
 
 
 @pytest.mark.parametrize(
@@ -861,7 +857,7 @@ def test_resume_action_disappearing_after_preflight_is_refused(
         parent.targets = [PARKED_NODE_ID, other_node_id]
     claim = _claim_parked(jobs)
     assert claim is not None
-    jobs.wait_for_operator(claim, "operator must inspect the effect")
+    park_for_operator(sessions, jobs, claim, "operator must inspect the effect")
     client, operator, _reconciler = _durable_client(sessions, services, clock=clock)
 
     preflight = client.get(f"/api/jobs/{job_id}", headers=operator)
@@ -903,8 +899,7 @@ def test_resume_action_disappearing_after_preflight_is_refused(
         stored = session.get(AgentOperation, operation.id)
         assert parent is not None and parent.state == "waiting-for-operator"
         assert stored is not None and stored.state == "waiting-for-operator"
-        assert stored.retry_disposition is None
-        assert stored.retry_disposition_attempt is None
+        assert stored.next_action_at is None
 
 
 def test_durable_retire_retains_uncertain_run_capacity(tmp_path) -> None:
@@ -966,7 +961,7 @@ def test_durable_retire_retains_uncertain_run_capacity(tmp_path) -> None:
         assert stored is not None and parent is not None
         assert run is not None and reservation is not None
         assert stored.state == "failed"
-        assert stored.retry_disposition is None and stored.retry_due_at is None
+        assert stored.next_action_at is None and stored.next_action_at is None
         assert "operator retired" in (stored.status_reason or "")
         assert parent.state == "failed"
         assert parent.status_reason == stored.status_reason
@@ -1422,8 +1417,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
             select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
         )
         assert operation is not None
-        operation.retry_disposition = "retry"
-        operation.retry_disposition_attempt = operation.current_attempt
+        operation.next_action_at = operation.updated_at
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id,
@@ -1455,8 +1449,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
         # controller's accepted success gate.
         node.binary_digest = expected_binary
         node.build_digest = expected_build
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
+        operation.next_action_at = None
 
     matching_digests = services.job_operations(
         job.id, None, 20
@@ -1878,14 +1871,11 @@ def _park_repeatedly(sessions, jobs, services, operation, times: int = 1):
             claim is not None
             and fenced_attempt(sessions, claim).attempt == expected_attempt
         )
-        jobs.wait_for_operator(claim, "effect requires operator inspection")
+        park_for_operator(sessions, jobs, claim, "effect requires operator inspection")
         with sessions() as session:
             stored = session.get(AgentOperation, operation.id)
             assert stored is not None
-            assert not (
-                stored.retry_disposition == "retry"
-                and stored.retry_disposition_attempt == stored.current_attempt
-            )
+            assert stored.next_action_at is None
         if expected_attempt < times:
             services.resume_job(fenced_operation(sessions, claim).parent_job_id)
     return times
@@ -1907,7 +1897,7 @@ def test_durable_resume_authorises_the_parked_operation_for_the_next_claim(
     )
     first = _claim_parked(jobs)
     assert first is not None
-    jobs.wait_for_operator(first, "operator must inspect the effect")
+    park_for_operator(sessions, jobs, first, "operator must inspect the effect")
 
     services.resume_job(job_id)
 
@@ -2120,7 +2110,7 @@ def test_durable_retire_fails_the_order_but_retains_uncertain_capacity(
         assert stored is not None and parent is not None
         assert run is not None and reservation is not None
         assert stored.state == "failed"
-        assert stored.retry_disposition is None and stored.retry_due_at is None
+        assert stored.next_action_at is None and stored.next_action_at is None
         assert "operator retired" in (stored.status_reason or "")
         assert parent.state == "failed"
         assert parent.status_reason == stored.status_reason
@@ -2175,9 +2165,7 @@ def test_durable_retire_refuses_a_parked_operation_whose_lease_is_live(
         # abandoned.
         stored.state = "waiting-for-operator"
         stored.current_attempt = RecoveryPolicy().max_failures
-        stored.retry_disposition = None
-        stored.retry_disposition_attempt = None
-        stored.retry_due_at = None
+        stored.next_action_at = None
         attempt.attempt = stored.current_attempt
         attempt.state = "running"
         parent = session.get(Job, job_id)

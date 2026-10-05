@@ -373,8 +373,7 @@ def test_failed_install_retries_behind_fence_without_budget_while_rollout_contin
             parent = session.get(Job, job.id)
             assert operation is not None and attempt is not None
             assert operation.state == "waiting-for-operator"
-            assert operation.retry_disposition == "retry"
-            assert operation.retry_disposition_attempt == attempt_number
+            assert operation.next_action_at is not None
             assert attempt.state == "failed"
             deadline = attempt.lease_deadline
             if deadline.tzinfo is None:
@@ -487,8 +486,7 @@ def test_controller_recovery_fence_survives_restart_without_a_retry_budget(
         if deadline.tzinfo is None:
             deadline = deadline.replace(tzinfo=UTC)
         assert deadline == clock() + _AGENT_UPGRADE_RECOVERY_FENCE
-        assert operation.retry_disposition == "retry"
-        assert operation.retry_disposition_attempt == 1
+        assert operation.next_action_at is not None
 
     restarted_operations = AgentJobService(sessions, clock=clock)
     restarted_upgrades = AgentUpgradeService(
@@ -612,8 +610,7 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
             operation.current_attempt,
         ) == immutable
         assert operation.state == "waiting-for-operator"
-        assert operation.retry_disposition == "retry"
-        assert operation.retry_disposition_attempt == 2
+        assert operation.next_action_at is not None
         resumed_attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id,
@@ -829,7 +826,7 @@ def test_resume_quiesces_stale_old_identity_without_duplicate_mutation(
         # automatically only after the dpkg safety window.
         assert parent is not None and parent.state == "queued"
         assert operation is not None and operation.state == "waiting-for-operator"
-        assert operation.retry_disposition == "retry"
+        assert operation.next_action_at is not None
         assert operation.current_attempt == 1
         assert len(attempts) == 1
         assert attempts[0].fence == child.fence
@@ -918,7 +915,7 @@ def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
         assert parent is not None and parent.state == "queued"
         assert operation is not None and operation.current_attempt == 1
         assert operation.state == "waiting-for-operator"
-        assert operation.retry_disposition == "retry"
+        assert operation.next_action_at is not None
 
 
 def test_waiting_upgrade_resume_rejects_live_delayed_worker_fence(tmp_path) -> None:
@@ -1056,7 +1053,7 @@ def test_success_result_cannot_advance_without_exact_fresh_agent_identity(
         # The unproven handoff keeps this Spark in flight; it is retried
         # behind the safety fence unless exact identity arrives first.
         assert operation is not None and operation.state == "waiting-for-operator"
-        assert operation.retry_disposition == "retry"
+        assert operation.next_action_at is not None
         assert stored is not None and stored.state == "queued"
 
 
@@ -1145,8 +1142,8 @@ def test_failed_upgrade_on_a_spark_already_at_target_resolves_to_succeeded(
     with sessions() as session:
         operation = session.get(AgentOperation, fenced_operation(sessions, first).id)
         assert operation is not None and operation.state == "succeeded"
-        assert operation.retry_due_at is None
-        assert operation.retry_disposition is None
+        assert operation.next_action_at is None
+        assert operation.next_action_at is None
     _upgrade_node(operations, NODE_B, "serial-b")
     with sessions() as session:
         parent = session.get(Job, job.id)
@@ -1165,8 +1162,8 @@ def test_failed_upgrade_retries_by_itself_and_names_the_failure(tmp_path) -> Non
     with sessions() as session:
         operation = session.get(AgentOperation, fenced_operation(sessions, first).id)
         assert operation is not None
-        assert operation.retry_disposition == "retry"
-        assert operation.retry_due_at is not None
+        assert operation.next_action_at is not None
+        assert operation.next_action_at is not None
         assert operation.status_reason is not None
         assert "agent upgrade helper is unavailable" in operation.status_reason
         assert "retries automatically" in operation.status_reason
@@ -1254,7 +1251,7 @@ def test_upgrade_failure_on_one_spark_does_not_block_the_next(tmp_path) -> None:
     with sessions() as session:
         parent = session.get(Job, job.id)
         failed = session.get(AgentOperation, fenced_operation(sessions, first).id)
-        assert failed is not None and failed.retry_disposition == "retry"
+        assert failed is not None and failed.next_action_at is not None
         assert parent is not None and parent.state == "queued"
     second = _claim_upgrade(operations, NODE_B, "serial-b", OLD_IDENTITY)
     assert fenced_operation(sessions, second).id != fenced_operation(sessions, first).id
@@ -1698,7 +1695,7 @@ def test_root_rollback_receipt_retries_the_spark_and_preserves_typed_outcome(tmp
         assert attempt.result["package_activation"] == receipt
         assert attempt.state == "failed"
         operation = session.get(AgentOperation, attempt.operation_id)
-        assert operation is not None and operation.retry_disposition == "retry"
+        assert operation is not None and operation.next_action_at is not None
         assert "rolled_back" in (operation.status_reason or "")
     # The restored Spark retries behind the fence; the rollout moves on.
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
@@ -1783,7 +1780,7 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
                 AgentOperation, fenced_operation(sessions, first).id
             )
             assert operation is not None
-            assert operation.retry_disposition == "retry"
+            assert operation.next_action_at is not None
             assert operation.current_attempt == 1
             queued = session.get(Job, job.id)
             assert queued is not None and queued.state == "queued"
@@ -1863,7 +1860,7 @@ def test_predecessor_agent_handoff_is_reconcilable_not_a_failed_upgrade(
         # The handoff is retried only behind the safety fence, and only while
         # the Spark still runs the exact rollback source; proven identity
         # completes it first.
-        assert operation.retry_disposition == "retry"
+        assert operation.next_action_at is not None
 
     with sessions() as session:
         parent = session.get(Job, job.id)

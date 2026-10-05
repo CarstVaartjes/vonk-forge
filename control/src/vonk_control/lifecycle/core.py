@@ -99,7 +99,7 @@ def transition(
         case Reported():
             return _reported(row, event, adapter, now)
         case LeaseLapsed():
-            return _lapsed(row, adapter, now)
+            return _lapsed(row, adapter, now, event.reason)
         case Observed():
             return _observed(row, event, adapter, now)
         case OperatorAction():
@@ -142,14 +142,33 @@ def blind_retry_is_safe(
 # ---------------------------------------------------------------- builders
 
 
-def _due(row: Lifecycle, count: int, now: datetime) -> datetime:
-    scheduled = RECOVERY.next_attempt(row.id, max(count, 1), now, ongoing_intent=True)
+def _due(
+    row: Lifecycle,
+    count: int,
+    now: datetime,
+    adapter: KindAdapter | None = None,
+    retry_after: datetime | None = None,
+) -> datetime:
+    """Stable bounded backoff, never earlier than the kind's own fence."""
+
+    not_before = None if adapter is None else adapter.retry_not_before(row, now)
+    if retry_after is not None:
+        not_before = retry_after if not_before is None else max(not_before, retry_after)
+    scheduled = RECOVERY.next_attempt(
+        row.id, max(count, 1), now, retry_after=not_before, ongoing_intent=True
+    )
     assert scheduled is not None  # ongoing_intent never exhausts
     return scheduled
 
 
 def _retry(
-    row: Lifecycle, now: datetime, *, effect: Effect, reason: str | None
+    row: Lifecycle,
+    now: datetime,
+    adapter: KindAdapter,
+    *,
+    effect: Effect,
+    reason: str | None,
+    retry_after: datetime | None = None,
 ) -> Decision:
     """Rule 1: schedule the next attempt; never an operator wait."""
 
@@ -160,7 +179,7 @@ def _retry(
             state=State.BACKOFF,
             retry_count=count,
             observe_count=0,
-            next_action_at=_due(row, count, now),
+            next_action_at=_due(row, count, now, adapter, retry_after),
             lease_deadline=None,
             effect=effect,
             reason=reason or row.reason,
@@ -233,11 +252,19 @@ def _uncertain(
     *,
     effect: Effect | None = None,
     reason: str | None = None,
+    retry_after: datetime | None = None,
 ) -> Decision:
     """Rules 1 and 2 for an effect that may or may not have happened."""
 
     if blind_retry_is_safe(row, adapter, effect):
-        return _retry(row, now, effect=effect or row.effect, reason=reason)
+        return _retry(
+            row,
+            now,
+            adapter,
+            effect=effect or row.effect,
+            reason=reason,
+            retry_after=retry_after,
+        )
     return _observe(row, now, reason)
 
 
@@ -245,7 +272,7 @@ def _unknown_after_observation(
     row: Lifecycle, adapter: KindAdapter, now: datetime, reason: str | None
 ) -> Decision:
     if not adapter.irreversible(row) or blind_retry_is_safe(row, adapter):
-        return _retry(row, now, effect=row.effect, reason=reason)
+        return _retry(row, now, adapter, effect=row.effect, reason=reason)
     if row.observe_count >= OBSERVE_BUDGET:
         return _park(row, adapter, now, reason)
     return Decision(
@@ -270,8 +297,8 @@ def _with_cancel_flag(row: Lifecycle, now: datetime, key: str | None) -> Lifecyc
 
 
 def _cancel(row: Lifecycle, event: CancelRequested, now: datetime) -> Decision:
-    if row.cancel_requested:
-        return Decision(row)
+    if row.cancel_requested and row.state is State.OBSERVING:
+        return Decision(row)  # the cancel is already being driven to its end
     flagged = _with_cancel_flag(row, now, event.request_key)
     return _advance_cancel(flagged, now, observed=None, reason=event.reason)
 
@@ -379,53 +406,63 @@ def _heartbeat(row: Lifecycle, event: Heartbeat) -> Decision:
 def _reported(
     row: Lifecycle, event: Reported, adapter: KindAdapter, now: datetime
 ) -> Decision:
-    if row.cancel_requested:
-        # The report cannot undo the cancel: stop whatever this left behind.
-        return _advance_cancel(
-            replace(
-                row,
-                effect=event.effect
-                or (Effect.ESTABLISHED if event.outcome is Outcome.OK else row.effect),
-            ),
-            now,
-            observed=event.effect
-            if event.effect in (Effect.STOPPED, Effect.NONE)
-            else None,
-            reason=event.reason,
-            issue_stop=False,
-        )
+    # A definite report ends the row, cancelled or not: the executor says what
+    # happened, and an owner that is waiting for exactly that outcome (a build
+    # whose completion raced its cancel) must see it.
     if event.outcome is Outcome.OK:
-        return Decision(
-            replace(
-                row,
-                state=State.SUCCEEDED,
-                effect=event.effect or Effect.ESTABLISHED,
-                next_action_at=None,
-                lease_deadline=None,
-                reason=event.reason or row.reason,
-            )
-        )
+        return _end(row, State.SUCCEEDED, event.effect or Effect.ESTABLISHED, event)
+    if event.outcome is Outcome.CANCELLED:
+        return _end(row, State.CANCELLED, event.effect or Effect.STOPPED, event)
     if event.outcome is Outcome.FAILED and not event.retryable:
         # A refusal or an invalid request (rule 5): terminal by design.
-        return Decision(
-            replace(
-                row,
-                state=State.FAILED,
-                effect=event.effect or row.effect,
-                next_action_at=None,
-                lease_deadline=None,
-                reason=event.reason or row.reason,
-            )
+        return _end(row, State.FAILED, event.effect or row.effect, event)
+    if row.cancel_requested:
+        # An uncertain report cannot undo the cancel: stop what it left behind.
+        known = event.effect if event.effect in (Effect.STOPPED, Effect.NONE) else None
+        return _advance_cancel(
+            row,
+            now,
+            observed=known,
+            reason=event.reason,
+            # a cancel already being driven is not restarted by a late report
+            issue_stop=row.state is not State.OBSERVING,
         )
-    return _uncertain(row, adapter, now, effect=event.effect, reason=event.reason)
+    return _uncertain(
+        row,
+        adapter,
+        now,
+        effect=event.effect,
+        reason=event.reason,
+        retry_after=event.retry_after,
+    )
 
 
-def _lapsed(row: Lifecycle, adapter: KindAdapter, now: datetime) -> Decision:
+def _end(row: Lifecycle, state: State, effect: Effect, event: Reported) -> Decision:
+    return Decision(
+        replace(
+            row,
+            state=state,
+            effect=effect,
+            next_action_at=None,
+            lease_deadline=None,
+            reason=event.reason or row.reason,
+        )
+    )
+
+
+def _lapsed(
+    row: Lifecycle,
+    adapter: KindAdapter,
+    now: datetime,
+    reason: str | None = None,
+) -> Decision:
     if row.state is not State.RUNNING:
         return Decision(row)
     if row.cancel_requested:
-        return _advance_cancel(row, now, observed=None)
-    return _uncertain(row, adapter, now, reason="the attempt can no longer report")
+        return _advance_cancel(row, now, observed=None, reason=reason)
+    return _uncertain(
+        row, adapter, now, reason=reason or "the attempt can no longer report"
+    )
 
 
 def _observed(
@@ -449,7 +486,7 @@ def _observed(
                 )
             )
         case Effect.NONE | Effect.STOPPED:
-            return _retry(row, now, effect=Effect.NONE, reason=event.reason)
+            return _retry(row, now, adapter, effect=Effect.NONE, reason=event.reason)
         case _:
             return _unknown_after_observation(row, adapter, now, event.reason)
 
@@ -463,10 +500,13 @@ def _operator(
         if row.cancel_requested:
             return Decision(row)
         return _advance_cancel(
-            _with_cancel_flag(row, now, None), now, observed=None, reason="stopped"
+            _with_cancel_flag(row, now, None),
+            now,
+            observed=None,
+            reason=event.reason or "stopped",
         )
-    if row.state is not State.NEEDS_OPERATOR:
-        return Decision(row)
+    if row.state not in {State.NEEDS_OPERATOR, State.OBSERVING}:
+        return Decision(row)  # only a wait (or an observation of one) is acted on
     if event.name in _RESUME_ACTIONS:
         return Decision(
             replace(
@@ -475,17 +515,19 @@ def _operator(
                 retry_count=0,
                 observe_count=0,
                 next_action_at=None,
-                reason="resumed by an operator",
+                reason=event.reason or "resumed by an operator",
             )
         )
     if event.name == "retire":
+        # The terminal counterpart of ``resume``: the order is failed, and its
+        # effect stays unknown for the owner's exact cleanup to resolve.
         return Decision(
             replace(
                 row,
-                state=State.CANCELLED,
+                state=State.FAILED,
                 effect=Effect.UNKNOWN,
                 next_action_at=None,
-                reason="retired by an operator",
+                reason=event.reason or "retired by an operator",
             )
         )
     return Decision(row)
@@ -536,9 +578,9 @@ def _reevaluate_parked(row: Lifecycle, adapter: KindAdapter, now: datetime) -> D
             now,
         )
     if row.effect is Effect.STOPPED:
-        return _retry(row, now, effect=Effect.NONE, reason=row.reason)
+        return _retry(row, now, adapter, effect=Effect.NONE, reason=row.reason)
     if blind_retry_is_safe(row, adapter):
-        return _retry(row, now, effect=row.effect, reason=row.reason)
+        return _retry(row, now, adapter, effect=row.effect, reason=row.reason)
     if not adapter.actions(row):
         return _observe(replace(row, observe_count=0), now, row.reason)
     return Decision(replace(row, next_action_at=None))

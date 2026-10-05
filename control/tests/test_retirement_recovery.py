@@ -237,8 +237,8 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
             session.get(AgentOperation, fenced_operation(sessions, stop).id)
         )
         assert _required(session.get(Job, cleanup.id)).state == "queued"
-        assert child.retry_due_at is not None
-        now[0] = child.retry_due_at + timedelta(seconds=1)
+        assert child.next_action_at is not None
+        now[0] = child.next_action_at + timedelta(seconds=1)
     retry = claim_agent(
         restarted_jobs,
         fenced_operation(sessions, claim).node_id,
@@ -395,7 +395,7 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
         child = _required(
             session.get(AgentOperation, fenced_operation(sessions, cleanup).id)
         )
-        assert child.state == "failed" and child.retry_due_at is None
+        assert child.state == "failed" and child.next_action_at is None
         assert (
             session.scalar(
                 select(ResourceReservation.state).where(

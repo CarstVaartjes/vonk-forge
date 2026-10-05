@@ -43,6 +43,8 @@ from .compiled_artifact_contract import (
 )
 from .execution_plan_service import compile_job_invocation
 from .library_contract import UuidId
+from .lifecycle import Outcome
+from .lifecycle.agent_operation import AgentOperationAdapter
 from .models import (
     AgentOperation,
     ArtifactJob,
@@ -1563,7 +1565,9 @@ class ArtifactJobService:
                         "waiting artifact result identity or output is invalid"
                     )
             except (AgentProtocolError, TypeError, ValueError) as error:
-                operation.state = "failed"
+                AgentOperationAdapter(session).record_outcome(
+                    operation, None, parent, Outcome.FAILED, now
+                )
                 artifact_job.state = "failed"
                 artifact_job.status_reason = str(error)[:512]
                 artifact_job.completed_at = now
@@ -1633,7 +1637,9 @@ class ArtifactJobService:
             if not (succeeded or failed or cancelled):
                 raise AgentProtocolError("artifact result state and exit code disagree")
         except (AgentProtocolError, TypeError, ValueError) as error:
-            operation.state = "failed"
+            AgentOperationAdapter(session).record_outcome(
+                operation, None, parent, Outcome.FAILED, now
+            )
             artifact_job.state = "failed"
             artifact_job.status_reason = str(error)[:512]
             artifact_job.completed_at = now

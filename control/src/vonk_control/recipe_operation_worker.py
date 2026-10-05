@@ -66,6 +66,7 @@ class RecipeOperationWorker:
         build_cleanup: Callable[[], bool] | None = None,
         retirement_cleanup: Callable[[], bool] | None = None,
         residue_cleanup: Callable[[], bool] | None = None,
+        order_reconcile: Callable[[], bool] | None = None,
     ) -> None:
         self._sessions = sessions
         self._routes = routes
@@ -76,9 +77,14 @@ class RecipeOperationWorker:
         self._build_cleanup = build_cleanup
         self._retirement_cleanup = retirement_cleanup
         self._residue_cleanup = residue_cleanup
+        self._order_reconcile = order_reconcile
 
     def tick(self) -> bool:
         progressed = False
+        if self._order_reconcile is not None:
+            # The Spark orders first: a lapsed attempt or a wait that needs no
+            # person is decided before the owners above them read its state.
+            progressed = self._order_reconcile()
         if self._build_cleanup is not None:
             progressed = self._build_cleanup()
         if self._retirement_cleanup is not None:

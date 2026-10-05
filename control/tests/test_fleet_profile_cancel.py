@@ -1590,9 +1590,7 @@ def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
                     {}
                     if index == 0
                     else {
-                        "retry_disposition": "retry",
-                        "retry_disposition_attempt": 3,
-                        "retry_due_at": now[0] + timedelta(seconds=30),
+                        "next_action_at": now[0] + timedelta(seconds=30),
                     }
                 ),
             )

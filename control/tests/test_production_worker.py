@@ -133,6 +133,9 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
         def notify_available(self):
             return None
 
+        def reconcile_orders(self):
+            return False
+
     agent_jobs = SignerBackedAgentJobs()
     model_cache = ModelCacheService(sessions, tmp_path / "models", clock=clock)
     request.addfinalizer(model_cache.close)
@@ -230,6 +233,9 @@ def test_production_worker_binds_build_reuse_to_the_image_cache_root(tmp_path) -
 
         def notify_available(self):
             return None
+
+        def reconcile_orders(self):
+            return False
 
     model_cache = ModelCacheService(sessions, tmp_path / "models", clock=clock)
     agent_root = tmp_path / "agent-artifacts"

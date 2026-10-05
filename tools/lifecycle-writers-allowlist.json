@@ -1,95 +1,7 @@
 {
   "schema": 1,
-  "max_writes": 228,
+  "max_writes": 170,
   "writers": [
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._aggregate_parent",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 3,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._cancel_superseded_operation",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._claim_has_authority",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._claim_once",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 3,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._claim_once",
-      "model": "AgentOperationAttempt",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._claim_once",
-      "model": "AgentOperationAttempt",
-      "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._fail_spent_start_budgets",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._fail_spent_start_budgets",
-      "model": "AgentOperationAttempt",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._finish",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._finish",
-      "model": "AgentOperationAttempt",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._project_artifact_job_expiry",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
     {
       "path": "control/src/vonk_control/agent_jobs.py",
       "function": "AgentJobService._project_artifact_job_expiry",
@@ -97,166 +9,6 @@
       "kind": "attribute",
       "count": 1,
       "migrating_in": "step-3"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._reconcile_agent_upgrade",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._reconcile_agent_upgrade",
-      "model": "AgentOperationAttempt",
-      "kind": "attribute",
-      "count": 2,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._reconcile_dead_running_operation",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._reconcile_dead_running_operation",
-      "model": "AgentOperationAttempt",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._reject_recipe_build_claim",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._reject_recipe_build_claim",
-      "model": "AgentOperationAttempt",
-      "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.enqueue_in_session",
-      "model": "AgentOperation",
-      "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.record_late_result",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 2,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.record_late_result",
-      "model": "AgentOperationAttempt",
-      "kind": "attribute",
-      "count": 2,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.request_superseded_workload_cancellation_in_session",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 2,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.request_superseded_workload_cancellation_in_session",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 3,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "_abandon_operation",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "_release_retired_owner_in_session",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "abandon_idempotent_job_in_session",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "abandon_idempotent_job_in_session",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "retire_exhausted_operations_in_session",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "retire_exhausted_operations_in_session",
-      "model": "AgentOperationAttempt",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "retire_exhausted_operations_in_session",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "schedule_agent_upgrade_retry",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "schedule_agent_upgrade_retry",
-      "model": "AgentOperationAttempt",
-      "kind": "attribute",
-      "count": 2,
-      "migrating_in": "step-2"
     },
     {
       "path": "control/src/vonk_control/agent_upgrades.py",
@@ -268,43 +20,11 @@
     },
     {
       "path": "control/src/vonk_control/agent_upgrades.py",
-      "function": "AgentUpgradeService._retry_parked",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_upgrades.py",
-      "function": "AgentUpgradeService._settle_at_target",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_upgrades.py",
-      "function": "AgentUpgradeService._supersede_older",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/agent_upgrades.py",
       "function": "AgentUpgradeService.apply",
       "model": "Job",
       "kind": "constructor",
       "count": 1,
       "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/agent_upgrades.py",
-      "function": "AgentUpgradeService.consume_agent_result",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
     },
     {
       "path": "control/src/vonk_control/agent_upgrades.py",
@@ -337,14 +57,6 @@
       "kind": "attribute",
       "count": 1,
       "migrating_in": "step-3"
-    },
-    {
-      "path": "control/src/vonk_control/artifact_jobs.py",
-      "function": "ArtifactJobService.consume_agent_result",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 2,
-      "migrating_in": "step-2"
     },
     {
       "path": "control/src/vonk_control/artifact_jobs.py",
@@ -591,22 +303,6 @@
       "function": "JobService.enqueue_guarded",
       "model": "Job",
       "kind": "constructor",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/jobs.py",
-      "function": "JobService.resume",
-      "model": "Job",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/jobs.py",
-      "function": "JobService.resume",
-      "model": "Job",
-      "kind": "bulk-update",
       "count": 1,
       "migrating_in": "step-7"
     },
@@ -917,14 +613,6 @@
     {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService._cancel_current_build",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._cancel_current_build",
       "model": "Job",
       "kind": "attribute",
       "count": 1,
@@ -945,14 +633,6 @@
       "kind": "constructor",
       "count": 1,
       "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._complete_profile_jobrun_stop_in_session",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
@@ -985,14 +665,6 @@
       "kind": "attribute",
       "count": 1,
       "migrating_in": "step-3"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._project_node_result",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 3,
-      "migrating_in": "step-2"
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
@@ -1053,14 +725,6 @@
     {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService.cancel",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.cancel",
       "model": "Job",
       "kind": "attribute",
       "count": 1,
@@ -1069,26 +733,10 @@
     {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService.reconcile_superseded_unissued",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.reconcile_superseded_unissued",
       "model": "Job",
       "kind": "attribute",
       "count": 1,
       "migrating_in": "step-7"
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.record_node_result",
-      "model": "AgentOperation",
-      "kind": "attribute",
-      "count": 1,
-      "migrating_in": "step-2"
     },
     {
       "path": "control/src/vonk_control/recipe_update_batches.py",

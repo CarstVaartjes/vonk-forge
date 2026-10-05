@@ -689,6 +689,25 @@ class AgentOperation(Base):
     #: an interrupted operation and no evidence of what actually happened.
     status_reason: Mapped[str | None] = mapped_column(String(512))
     current_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: The one retry, observation and cancel clock of the lifecycle core.  On a
+    #: ``waiting-for-operator`` order it is the instant its next attempt may be
+    #: claimed (an automatic retry, a safety fence or an operator's resume); it is
+    #: cleared by the claim.  ``NULL`` on a waiting order means a real operator
+    #: wait.
+    next_action_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    #: How many times the lifecycle core has looked at this waiting order since it
+    #: last ran (an observation, or a stop of a cancelled order).  Above zero the
+    #: order is being observed, not retried: it is not claimable and its
+    #: ``next_action_at`` is when to look again.  Reset by every claim and retry.
+    observe_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    #: Legacy retry encoding, replaced by ``next_action_at``.  Read only by the
+    #: lifecycle adapter's ``adopt`` (and the startup adoption) for rows written
+    #: before the core; nothing writes them any more.  Dropped once no deployed
+    #: row can carry them.
     retry_disposition: Mapped[str | None] = mapped_column(String(32))
     retry_disposition_attempt: Mapped[int | None] = mapped_column(Integer)
     retry_due_at: Mapped[datetime | None] = mapped_column(

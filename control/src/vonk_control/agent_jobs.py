@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import ValidationError
@@ -41,6 +41,27 @@ from .admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
+from .agent_operation_facts import (
+    AGENT_UPGRADE_RECOVERY_FENCE,
+)
+from .agent_operation_facts import (
+    RESTART_REISSUE_OPERATIONS as _RESTART_REISSUE_OPERATIONS,
+)
+from .agent_operation_facts import (
+    attempt_holds_open_launch_budget as _attempt_holds_open_launch_budget,
+)
+from .agent_operation_facts import (
+    attempt_is_live as _attempt_is_live,
+)
+from .agent_operation_facts import (
+    aware as _aware,
+)
+from .agent_operation_facts import (
+    lapsed_renewal_allowed as _lapsed_renewal_allowed,
+)
+from .agent_operation_facts import (
+    operation_start_deadline as _operation_start_deadline,
+)
 from .agent_upgrade_status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_REASONS,
     operator_agent_upgrade_reason,
@@ -49,6 +70,26 @@ from .auth import AgentSource
 from .distribution import record_distributed_runtime_image
 from .failure_evidence import safe_text, sanitize_diagnostics
 from .install_admission import InstallAdmissionBusy
+from .lifecycle import (
+    CancelRequested,
+    LeaseLapsed,
+    Lifecycle,
+    OperatorAction,
+    Outcome,
+    Reconciler,
+    Reported,
+)
+from .lifecycle.agent_operation import (
+    AGGREGATE_FINAL_STATES,
+    AgentOperationAdapter,
+    aggregate_parent_state,
+    cancel_requested_at,
+    lapsed_running_orders,
+    parked_orders,
+    retry_scheduled,
+    same_order,
+    set_parent_state,
+)
 from .logging import redact_text
 from .models import (
     AgentCertificate,
@@ -78,7 +119,6 @@ from .recipe_lifecycle_contract import (
 from .recovery_policy import (
     FailureKind,
     RecoveryDecision,
-    RecoveryPolicy,
     classify,
     kind_for_agent_error,
 )
@@ -145,21 +185,6 @@ _WORKLOAD_INTENT_OPERATIONS = frozenset(
         AgentOperation.RECIPE_RECONCILE.value,
     }
 )
-_LIFECYCLE_RESTART_OPERATIONS = frozenset(
-    {
-        AgentOperation.RECIPE_INSTALL.value,
-        AgentOperation.RECIPE_START.value,
-        AgentOperation.RECIPE_STOP.value,
-        AgentOperation.RECIPE_UNINSTALL.value,
-        AgentOperation.RECIPE_RECONCILE.value,
-    }
-)
-_RESTART_REISSUE_OPERATIONS = _LIFECYCLE_RESTART_OPERATIONS | frozenset(
-    {
-        AgentOperation.ARTIFACT_DISTRIBUTION.value,
-        AgentOperation.RUNTIME_PREFLIGHT.value,
-    }
-)
 _TERMINAL_PARENT_STATES = frozenset(
     {"succeeded", "failed", "waiting-for-operator", "expired", "cancelled"}
 )
@@ -171,9 +196,7 @@ _TERMINAL_PARENT_STATES = frozenset(
 #: carry a refusal; ``waiting-for-operator`` is excluded because such work can
 #: resume, and a refusal that explains why it is not progressing is genuine
 #: evidence that must stay.
-_AGGREGATE_FINAL_STATES = frozenset(
-    {"cancelled", "compensated", "failed", "succeeded", "waiting-for-operator"}
-)
+_AGGREGATE_FINAL_STATES = AGGREGATE_FINAL_STATES
 _CONCLUDED_OUTCOMES = _AGGREGATE_FINAL_STATES - {"waiting-for-operator"}
 #: Idempotent, content-addressed transfers and read-only checks. When their job
 #: has already ended, a sibling's parked retry can never be claimed; abandoning
@@ -185,7 +208,6 @@ _ABANDONABLE_OPERATIONS = frozenset(
     }
 )
 _ENDED_PARENT_STATES = _CONCLUDED_OUTCOMES | {"expired"}
-_RETRY_DISPOSITION = "retry"
 _DATABASE_REPOLL_SECONDS = 0.25
 _SUPERSEDED_CANCELLATION_SECONDS = 660
 
@@ -222,9 +244,16 @@ def _safe_retry_failure(kind: str, state: str, result: Mapping[str, object]) -> 
     """
     if kind not in _RESTART_REISSUE_OPERATIONS:
         return False
-    failure_kind = kind_for_agent_error(result)
     if state == "waiting-for-operator":
-        return failure_kind is FailureKind.UNCERTAIN_EFFECT
+        # The agent's own words for "I could not confirm the effect".  Its body
+        # is often only ``{"reason": ...}`` with no ``failure_kind``, which
+        # ``kind_for_agent_error`` reads as an invalid contract, so the kind is
+        # not consulted: any waiting result of a restart-safe order is an
+        # uncertain effect, re-issued through the exact-resume path that
+        # inspects and reconciles it first (a stop that could not be confirmed
+        # is idempotent and must not wait for a person).
+        return True
+    failure_kind = kind_for_agent_error(result)
     return (
         state == "failed"
         and result.get("status") == "failed"
@@ -238,29 +267,21 @@ def _safe_retry_failure(kind: str, state: str, result: Mapping[str, object]) -> 
 
 
 def _retry_authorized_for_current_attempt(operation: StoredOperation) -> bool:
-    """Whether a retry is already authorised for the operation's current attempt.
+    """Whether a retry is already scheduled for the operation's current attempt.
 
-    Authorisation is keyed by attempt.  A disposition written for an earlier
-    attempt has been consumed by the claim that issued the later one, so it
-    never authorises, schedules, or hides the current attempt's recovery.
+    The claim that issues an attempt clears ``next_action_at``, so a schedule
+    can only belong to the attempt that is parked now; an earlier attempt's
+    never authorises, schedules, or hides the current attempt's recovery.  (A
+    row written before the core carries its schedule in the legacy retry
+    columns; ``retry_scheduled`` reads both.)
     """
-    return (
-        operation.retry_disposition == _RETRY_DISPOSITION
-        and operation.retry_disposition_attempt == operation.current_attempt
-    )
+    return retry_scheduled(operation) is not None
 
 
 def _retry_not_authorized_for_current_attempt() -> ColumnElement[bool]:
-    """SQL form of the negation of :func:`_retry_authorized_for_current_attempt`.
-
-    Written NULL-safe: a row without a disposition, or one whose attempt column
-    is NULL, is simply not authorised.
-    """
+    """SQL form of the negation of :func:`_retry_authorized_for_current_attempt`."""
     return or_(
-        StoredOperation.retry_disposition.is_(None),
-        StoredOperation.retry_disposition != _RETRY_DISPOSITION,
-        StoredOperation.retry_disposition_attempt.is_(None),
-        StoredOperation.retry_disposition_attempt != StoredOperation.current_attempt,
+        StoredOperation.next_action_at.is_(None), StoredOperation.observe_count > 0
     )
 
 
@@ -271,7 +292,6 @@ def _parked_retry_evidence(
     if (
         operation.state != "waiting-for-operator"
         or _retry_authorized_for_current_attempt(operation)
-        or operation.retry_due_at is not None
         or operation.current_attempt < 1
         or operation.current_attempt != attempt.attempt
         or operation.kind not in _RESTART_REISSUE_OPERATIONS
@@ -316,14 +336,18 @@ def _abandon_operation(
     a claim for, and no operator action applies to it.
     """
 
-    operation.state = "cancelled"
-    operation.retry_disposition = None
-    operation.retry_disposition_attempt = None
-    operation.retry_due_at = None
-    operation.status_reason = (
-        reason or f"job {job_id} ended without this operation; its retry was abandoned"
-    )[:512]
-    operation.updated_at = now
+    session = object_session(operation)
+    assert session is not None
+    AgentOperationAdapter(session).settle(
+        operation,
+        None,
+        None,
+        CancelRequested(
+            reason=reason
+            or f"job {job_id} ended without this operation; its retry was abandoned"
+        ),
+        now,
+    )
 
 
 def abandon_idempotent_job_in_session(
@@ -353,18 +377,12 @@ def abandon_idempotent_job_in_session(
         for operation in operations
     ):
         return False
+    adapter = AgentOperationAdapter(session)
     for operation in operations:
         if operation.state in {"queued", "waiting-for-operator"}:
-            operation.state = "cancelled"
-            operation.retry_disposition = None
-            operation.retry_disposition_attempt = None
-            operation.retry_due_at = None
-            operation.status_reason = reason[:512]
-            operation.updated_at = now
+            adapter.settle(operation, None, job, CancelRequested(reason=reason), now)
     if job.state not in _ENDED_PARENT_STATES:
-        job.state = "cancelled"
-        job.status_reason = reason[:1024]
-        job.updated_at = now
+        set_parent_state(job, "cancelled", reason, now)
     return True
 
 
@@ -404,90 +422,35 @@ def _renew_distribution_grant(
     )
 
 
-#: Consecutive interrupted transfer attempts that copied no new bytes before
-#: the retry rate is relaxed. A transfer that progresses between restarts is
-#: healthy recovery and is never slowed; one that dies without progress is a
-#: crash loop, which a faster retry cannot help.
-_STALLED_INTERRUPTION_LIMIT = 3
-_STALLED_RETRY_BASE_SECONDS = 30
-_STALLED_RETRY_MAX_SECONDS = 600
-_INTERRUPTION_CODES = frozenset(
-    {"agent_restart_interrupted", "operation_outcome_uncertain"}
-)
-
-
-def _completed_bytes(attempt: AgentOperationAttempt | None) -> int:
-    value = None if attempt is None else (attempt.progress or {}).get("completed_bytes")
-    return value if type(value) is int else 0
-
-
-def _stalled_interruptions(operation: StoredOperation) -> int:
-    """Count trailing transfer attempts that ended interrupted without progress."""
-
-    session = object_session(operation)
-    if (
-        session is None
-        or operation.kind != AgentOperation.ARTIFACT_DISTRIBUTION.value
-        or operation.current_attempt < 1
-    ):
-        return 0
-    attempts = list(
-        session.scalars(
-            select(AgentOperationAttempt)
-            .where(
-                AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt <= operation.current_attempt,
-            )
-            .order_by(AgentOperationAttempt.attempt.desc())
-            .limit(_STALLED_RETRY_MAX_SECONDS // _STALLED_RETRY_BASE_SECONDS + 2)
-        )
-    )
-    stalled = 0
-    for index, attempt in enumerate(attempts):
-        result = attempt.result
-        interrupted = attempt.state in {"expired", "waiting-for-operator"} and (
-            result is None or result.get("error_code") in _INTERRUPTION_CODES
-        )
-        previous = attempts[index + 1] if index + 1 < len(attempts) else None
-        if not interrupted or _completed_bytes(attempt) > _completed_bytes(previous):
-            break
-        stalled += 1
-    return stalled
-
-
-#: An ambiguous agent-package install can leave durable apt/dpkg recovery in
-#: progress; an automatic re-dispatch never overlaps it.  A stable dispatch
-#: contract, not a derivation from package-helper implementation timeouts.
-AGENT_UPGRADE_RECOVERY_FENCE = timedelta(seconds=960)
-
-
 def schedule_agent_upgrade_retry(
     operation: StoredOperation,
     attempt: AgentOperationAttempt | None,
     now: datetime,
 ) -> None:
-    """Park one agent-upgrade order for automatic, fenced re-dispatch.
+    """Schedule one agent-upgrade order for automatic, fenced re-dispatch.
 
     The retry is claimable only after the safety fence and only while the Spark
     still runs the exact rollback source (see ``_claim_once``); authenticated
-    contact that proves the target completes the order first.
+    contact that proves the target completes the order first.  The lifecycle
+    core decides it (a retryable failure of a restart-safe order is a retry);
+    the adapter owns the fence.
     """
 
-    not_before = _aware(now) + AGENT_UPGRADE_RECOVERY_FENCE
-    operation.state = "waiting-for-operator"
-    operation.retry_disposition = _RETRY_DISPOSITION
-    operation.retry_disposition_attempt = operation.current_attempt
-    operation.retry_due_at = not_before
-    operation.status_reason = (
-        f"agent upgrade retries automatically after {not_before.isoformat()}"
+    session = object_session(operation)
+    assert session is not None
+    adapter = AgentOperationAdapter(session)
+    if operation.state in {"succeeded", "failed"}:
+        # A helper acknowledgement (or a failure the owner treats as retryable)
+        # is not the end of an upgrade: only authenticated contact that proves
+        # the target is.  The order is reopened so the core can schedule it.
+        adapter.reopen(operation, now)
+    adapter.settle(
+        operation,
+        attempt,
+        session.get(Job, operation.parent_job_id),
+        Reported(Outcome.FAILED, retryable=True),
+        now,
     )
-    operation.updated_at = now
-    if attempt is not None:
-        if attempt.state == "running":
-            attempt.state = "expired"
-        elif attempt.state not in {"expired", "failed", "waiting-for-operator"}:
-            attempt.state = "waiting-for-operator"
-        attempt.lease_deadline = max(_aware(attempt.lease_deadline), not_before)
 
 
 def agent_upgrade_in_flight(
@@ -670,10 +633,7 @@ def operator_resume_eligible_operations_in_session(
     return tuple(
         operation
         for operation in operator_resume_candidates_in_session(session, job_id, now)
-        if not (
-            operation.retry_disposition == _RETRY_DISPOSITION
-            and operation.retry_disposition_attempt == operation.current_attempt
-        )
+        if not _retry_authorized_for_current_attempt(operation)
     )
 
 
@@ -683,13 +643,13 @@ def authorize_operator_resume_in_session(
     """Authorise one bounded claim for each parked operation of ``job_id``.
 
     The claim predicate requires a ``waiting-for-operator`` operation to carry
-    its own retry authorisation, so releasing the parent job alone leaves the
-    operation unclaimable and an operator resume that wrote only the parent
-    state silently did nothing.  This writes the very disposition the
-    exact-resume path writes, due immediately.  Earlier failures never exhaust
-    it: retry rate is bounded by the claim path, not the lifetime of intent.
-    It performs no external work, so it is safe inside the caller's SQL
-    transaction.
+    its own schedule (``next_action_at``), so releasing the parent job alone
+    leaves the operation unclaimable and an operator resume that wrote only the
+    parent state silently did nothing.  The lifecycle core takes the
+    operator's ``resume`` and schedules the claim, due immediately.  Earlier
+    failures never exhaust it: retry rate is bounded by the claim path, not the
+    lifetime of intent.  It performs no external work, so it is safe inside the
+    caller's SQL transaction.
     """
 
     operations = operator_resume_candidates_in_session(session, job_id, now)
@@ -707,31 +667,34 @@ def authorize_operator_resume_in_session(
     if parent is None or (
         parent.state != "waiting-for-operator"
         and any(
-            operation.retry_disposition != _RETRY_DISPOSITION
-            or operation.retry_disposition_attempt != operation.current_attempt
+            not _retry_authorized_for_current_attempt(operation)
             for operation in operations
         )
     ):
         raise ValueError("job is not waiting for operator")
+    adapter = AgentOperationAdapter(
+        session, resume_candidates=operator_resume_candidates_in_session
+    )
     for operation in operations:
-        if (
-            operation.retry_disposition == _RETRY_DISPOSITION
-            and operation.retry_disposition_attempt == operation.current_attempt
-        ):
-            # Already authorised at this attempt: resume is idempotent and must
-            # not move a scheduled retry earlier.
-            continue
-        operation.retry_disposition = _RETRY_DISPOSITION
-        operation.retry_disposition_attempt = operation.current_attempt
-        # The operator's authorisation is due now, but the due time must still
-        # be set: the parent aggregate treats an authorised retry without one as
-        # unparked and would return the job to ``waiting-for-operator`` before
-        # the agent polls.
-        operation.retry_due_at = now
-        operation.status_reason = (
-            f"operator resumed; attempt {operation.current_attempt + 1} authorised"
-        )[:512]
-        operation.updated_at = now
+        # An order already scheduled at this attempt is left alone: resume is
+        # idempotent and must not move a scheduled retry earlier (the core
+        # ignores a resume of anything but a real operator wait).  The due time
+        # is set: the parent aggregate treats a retry without one as unparked
+        # and would return the job to ``waiting-for-operator`` before the agent
+        # polls.
+        adapter.settle(
+            operation,
+            None,
+            parent,
+            OperatorAction(
+                "resume",
+                reason=(
+                    f"operator resumed; attempt {operation.current_attempt + 1} "
+                    "authorised"
+                ),
+            ),
+            now,
+        )
 
 
 def retire_exhausted_operations_in_session(
@@ -792,11 +755,7 @@ def retire_exhausted_operations_in_session(
         raise OperatorRetirementRefused(job_id, "job has no parked operation")
     attempts: list[AgentOperationAttempt] = []
     for operation in operations:
-        if (
-            operation.retry_disposition == _RETRY_DISPOSITION
-            and operation.retry_disposition_attempt == operation.current_attempt
-            and operation.retry_due_at is not None
-        ):
+        if _retry_authorized_for_current_attempt(operation):
             raise OperatorRetirementRefused(
                 operation.id, "another attempt is already authorised"
             )
@@ -827,16 +786,19 @@ def retire_exhausted_operations_in_session(
         )
         for operation in operations
     }
+    adapter = AgentOperationAdapter(session)
     for operation in operations:
-        operation.state = "failed"
-        operation.status_reason = reasons[operation.id][:512]
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
-        operation.retry_due_at = None
-        operation.updated_at = now
+        # Retirement is the operator's definite decision to end the order; its
+        # effect stays unknown for the exact cleanup to resolve.
+        adapter.settle(
+            operation,
+            None,
+            job,
+            Reported(Outcome.FAILED, retryable=False, reason=reasons[operation.id]),
+            now,
+        )
     for attempt in attempts:
-        if attempt.state == "running":
-            attempt.state = "expired"
+        adapter.expire_attempt(attempt)
     job_reason = reasons[operations[0].id]
     if job.kind in {
         "recipe.start",
@@ -872,9 +834,7 @@ def retire_exhausted_operations_in_session(
             from_json=True,
         ).model_dump(mode="json", exclude_none=True)
     _release_retired_owner_in_session(session, job, job_reason, now)
-    job.state = "failed"
-    job.status_reason = job_reason[:1024]
-    job.updated_at = now
+    set_parent_state(job, "failed", job_reason, now)
     return tuple(operation.id for operation in operations)
 
 
@@ -915,6 +875,7 @@ def _release_retired_owner_in_session(
                 release_owned_reservations_in_session(
                     session, owner_kind, owner_id, now
                 )
+    adapter = AgentOperationAdapter(session)
     for child in session.scalars(
         select(StoredOperation).where(
             StoredOperation.parent_job_id == job.id,
@@ -922,9 +883,13 @@ def _release_retired_owner_in_session(
             StoredOperation.current_attempt == 0,
         )
     ):
-        child.state = "cancelled"
-        child.status_reason = "parent operation was retired by the operator"[:512]
-        child.updated_at = now
+        adapter.settle(
+            child,
+            None,
+            job,
+            CancelRequested(reason="parent operation was retired by the operator"),
+            now,
+        )
 
 
 def _failure_result(
@@ -953,10 +918,6 @@ def _failure_result(
     return sanitize_failure_evidence(evidence)
 
 
-def _aware(value: datetime) -> datetime:
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
 def _lease_expiry_reason(
     operation: StoredOperation,
     previous: AgentOperationAttempt | None,
@@ -982,99 +943,6 @@ def _lease_expiry_reason(
     )
     parts.append(f"expired at {_aware(now).isoformat()}")
     return ("; ".join(parts) + "; the effect is unobserved")[:512]
-
-
-def _operation_start_deadline(operation: StoredOperation) -> datetime | None:
-    """Return the immutable start deadline a two-phase start bound, if any.
-
-    Only a distributed start persists one, and it is the budget the start may not
-    outlive.  It is the one clock that can bound a lapsed renewal: the lease is
-    the thing being recovered, so it cannot also be the recovery budget.  An
-    operation that binds none gets no allowance, because inventing a second clock
-    would widen the fence without a fact to bound it.
-    """
-
-    payload = operation.payload if isinstance(operation.payload, Mapping) else {}
-    value = payload.get("start_deadline")
-    if not isinstance(value, str):
-        return None
-    try:
-        deadline = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if deadline.tzinfo is None or deadline.utcoffset() is None:
-        return None
-    return deadline
-
-
-def _lapsed_renewal_allowed(operation: StoredOperation, now: datetime) -> bool:
-    """Return whether a lapsed lease may still be re-acquired by its own fence.
-
-    A lease lapse parks a healthy start when the Controller was briefly
-    unreachable, and the operation's own start budget is the clock that says how
-    long that start is still legitimate.  Until it is spent, the executor that
-    holds the fence may prove it is alive again; after it, nothing may.
-    """
-
-    deadline = _operation_start_deadline(operation)
-    return deadline is not None and _aware(now) < _aware(deadline)
-
-
-def _attempt_holds_open_launch_budget(
-    operation: StoredOperation,
-    attempt: AgentOperationAttempt | None,
-    now: datetime,
-) -> bool:
-    """Return whether this exact attempt still owns an open launch budget.
-
-    Dependency: the attempt is the executor of a start that declared an
-    immutable readiness budget.  Owner: the operation's current attempt, still
-    running.  Deadline: that budget's instant, which derives from the plan's own
-    readiness window and never from the lease being recovered.  Resume
-    condition: the exact fence submits its outcome, or the budget elapses.
-
-    A start may legitimately be silent for the whole budget while its engine
-    loads -- the recipe itself declares that window -- so the budget, not the
-    lease the agent happened to accept, decides whether the attempt is still
-    current.  The ownership facts are named here so every caller agrees on what
-    "still current" means: only the operation's own attempt may use the
-    allowance, so a newer attempt's takeover is never masked.
-    """
-
-    return (
-        attempt is not None
-        and attempt.attempt == operation.current_attempt
-        and attempt.state == "running"
-        and _lapsed_renewal_allowed(operation, now)
-    )
-
-
-def _attempt_is_live(
-    operation: StoredOperation,
-    attempt: AgentOperationAttempt | None,
-    now: datetime,
-) -> bool:
-    """Return whether an attempt still holds the operation's fence.
-
-    This is the boundary that decides whether another owner may take the
-    operation over, and which attempts count as expired, so a missing attempt, an
-    attempt that already stopped, or a lease deadline at or before ``now`` is not
-    live.  A still-current attempt inside its own launch budget is live as well,
-    because the budget is the plan's declared readiness window and the lease
-    exists to bound takeover latency, not to end a launch the plan permitted.
-    It is deliberately not the renewal boundary: ``_active`` additionally lets
-    this exact fence renew inside the operation's own start allowance, which
-    restores a healthy attempt without ever letting a second owner in.
-    """
-
-    return (
-        attempt is not None
-        and attempt.state == "running"
-        and (
-            _aware(attempt.lease_deadline) > _aware(now)
-            or _attempt_holds_open_launch_budget(operation, attempt, now)
-        )
-    )
 
 
 def _reconciled_dead_attempt_reason(
@@ -1498,10 +1366,12 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
                 (
                     _ClaimCondition(
                         "operator-retry-not-authorized",
+                        # A schedule is the authorisation: the lifecycle core
+                        # sets ``next_action_at`` for an automatic retry and for
+                        # an operator's resume, and the claim clears it.
                         and_(
-                            StoredOperation.retry_disposition == _RETRY_DISPOSITION,
-                            StoredOperation.retry_disposition_attempt
-                            == StoredOperation.current_attempt,
+                            StoredOperation.next_action_at.is_not(None),
+                            StoredOperation.observe_count == 0,
                         ),
                     ),
                     # The upgrade timing gate and the ordinary retry-clock gate
@@ -1516,8 +1386,7 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
                         "operator-retry-not-due",
                         or_(
                             StoredOperation.kind == upgrade,
-                            StoredOperation.retry_due_at.is_(None),
-                            StoredOperation.retry_due_at <= now,
+                            StoredOperation.next_action_at <= now,
                         ),
                     ),
                     _ClaimCondition(
@@ -1570,8 +1439,8 @@ def _claim_condition_facts(
         return facts
     if check == "operator-retry-not-due":
         facts = {"attempt": operation.current_attempt}
-        if operation.retry_due_at is not None:
-            facts["retry_due_at"] = _aware(operation.retry_due_at).isoformat()
+        if operation.next_action_at is not None:
+            facts["retry_due_at"] = _aware(operation.next_action_at).isoformat()
         return facts
     return {}
 
@@ -1738,7 +1607,7 @@ class AgentJobService:
             payload=final_payload,
             deadline=now,
         )
-        stored = StoredOperation(
+        stored = AgentOperationAdapter.new_order(
             id=operation_id,
             parent_job_id=parent_job_id,
             node_id=node_id,
@@ -1747,7 +1616,6 @@ class AgentJobService:
             payload=_document(validated.payload),
             authority_revision=authority_revision,
             workload_intent_ordinal=workload_intent_ordinal,
-            state="queued",
             current_attempt=0,
             created_at=now,
             updated_at=now,
@@ -1760,6 +1628,104 @@ class AgentJobService:
         """Wake long polls after a caller-managed enqueue transaction commits."""
         with self._available:
             self._available.notify_all()
+
+    # ---------------------------------------------------- lifecycle reconcile
+
+    def reconcile_orders(self, limit: int = 100) -> bool:
+        """One pass of the lifecycle core over the Spark orders.
+
+        It decides what no claim and no report will.  An attempt that lapsed on a
+        Spark that never polls again is retried (or ends with its cancelled owner)
+        instead of staying ``running`` forever, and a wait whose cause is gone, or
+        that no operator can act on, is retried or ended instead of waiting for a
+        person.  Idempotent and restart-safe: a pass interrupted anywhere is simply
+        repeated, and a row another transaction changed meanwhile is left to the
+        next pass.  Returns whether anything changed.
+        """
+
+        progressed = self._sweep_lapsed_attempts(limit)
+        report = self._order_reconciler().reconcile(limit)
+        return progressed or report.changed > 0
+
+    def _order_reconciler(self) -> Reconciler:
+        reconciler = getattr(self, "_reconciler", None)
+        if reconciler is None:
+            adapter = AgentOperationAdapter(
+                sessions=self._sessions,
+                clock=self._clock,
+                resume_candidates=operator_resume_candidates_in_session,
+            )
+            reconciler = Reconciler(
+                _OrderStore(self, adapter),
+                {operation.value: adapter for operation in AgentOperation},
+                clock=self._clock,
+                enabled=True,
+            )
+            self._reconciler = reconciler
+        return reconciler
+
+    def _sweep_lapsed_attempts(self, limit: int) -> bool:
+        """Decide every ``running`` order whose attempt can no longer report.
+
+        This is the periodic form of what the claim path did only when a Spark
+        polled.  The order is decided exactly as there (``_reconcile_dead_running_
+        operation``); a superseded order is left to the supersession path, and an
+        attempt that still holds a lease or an open launch budget is left alone.
+        """
+
+        now = self._clock()
+        with self._sessions() as session:
+            candidates = tuple(
+                session.execute(
+                    select(
+                        StoredOperation.id,
+                        StoredOperation.node_id,
+                        StoredOperation.parent_job_id,
+                    )
+                    .where(
+                        lapsed_running_orders(now), StoredOperation.current_attempt > 0
+                    )
+                    .order_by(StoredOperation.created_at, StoredOperation.id)
+                    .limit(limit)
+                )
+            )
+        progressed = False
+        for operation_id, node_id, parent_job_id in candidates:
+            with self._claim_lock, self._sessions.begin() as session:
+                scopes = self._lock_operation_scopes(session, (operation_id,), node_id)
+                if scopes is None or scopes[operation_id][0] != parent_job_id:
+                    continue
+                operation = session.scalar(
+                    select(StoredOperation)
+                    .where(StoredOperation.id == operation_id)
+                    .with_for_update(of=StoredOperation)
+                    .execution_options(populate_existing=True)
+                )
+                node = session.get(AgentNode, node_id)
+                if operation is None or node is None or operation.state != "running":
+                    continue
+                attempt = session.scalar(
+                    select(AgentOperationAttempt)
+                    .where(
+                        AgentOperationAttempt.operation_id == operation.id,
+                        AgentOperationAttempt.attempt == operation.current_attempt,
+                    )
+                    .with_for_update(of=AgentOperationAttempt)
+                )
+                now = self._clock()
+                if _attempt_is_live(operation, attempt, now) or (
+                    operation.workload_intent_ordinal is not None
+                    and operation.workload_intent_ordinal
+                    != node.workload_intent_ordinal
+                ):
+                    continue
+                self._reconcile_dead_running_operation(
+                    session, operation, attempt, node, now, superseded_by=None
+                )
+                progressed = True
+        if progressed:
+            self.notify_available()
+        return progressed
 
     @staticmethod
     def request_superseded_workload_cancellation_in_session(
@@ -1830,6 +1796,7 @@ class AgentJobService:
             parent.id: parent
             for parent in locked.get("superseded-workload-parents", ())
         }
+        adapter = AgentOperationAdapter(session)
         children_by_parent: dict[str, list[StoredOperation]] = {}
         for child in locked.get("superseded-workload-children", ()):
             children_by_parent.setdefault(child.parent_job_id, []).append(child)
@@ -1868,16 +1835,20 @@ class AgentJobService:
                 ):
                     continue
                 for child in children:
-                    child.retry_disposition = None
-                    child.retry_disposition_attempt = None
-                    child.retry_due_at = None
+                    adapter.withdraw_retry(child)
                     if child.state == "waiting-for-operator":
-                        child.state = "cancelled"
-                        child.status_reason = "superseded by newer workload intent"
-                        child.updated_at = now
-                parent.state = "cancelled"
-                parent.status_reason = "superseded by newer workload intent"
-                parent.updated_at = now
+                        adapter.settle(
+                            child,
+                            None,
+                            parent,
+                            CancelRequested(
+                                reason="superseded by newer workload intent"
+                            ),
+                            now,
+                        )
+                set_parent_state(
+                    parent, "cancelled", "superseded by newer workload intent", now
+                )
                 continue
             if (
                 type(bound) is not int
@@ -1892,13 +1863,18 @@ class AgentJobService:
             ):
                 raise ValueError("superseded workload order identity is invalid")
             for child in children:
-                child.retry_disposition = None
-                child.retry_disposition_attempt = None
-                child.retry_due_at = None
+                # Superseded work is never retried: withdraw any schedule.  An
+                # order that never ran ends now; one that did stays until its
+                # cancellation receipt arrives or the cancellation window closes.
+                adapter.withdraw_retry(child)
                 if child.state == "queued" and child.current_attempt == 0:
-                    child.state = "cancelled"
-                    child.status_reason = "superseded by newer workload intent"
-                    child.updated_at = now
+                    adapter.settle(
+                        child,
+                        None,
+                        parent,
+                        CancelRequested(reason="superseded by newer workload intent"),
+                        now,
+                    )
             if any(
                 child.state in {"running", "waiting-for-operator"} for child in children
             ):
@@ -1926,7 +1902,7 @@ class AgentJobService:
                         **previous,
                         "cancel_requested_at": _aware(now).isoformat(),
                     }
-                parent.state = "running"
+                state = "running"
             elif all(
                 child.state
                 in {"succeeded", "failed", "cancelled", "waiting-for-operator"}
@@ -1938,13 +1914,14 @@ class AgentJobService:
                 # the children have mixed terminal outcomes.  Leaving the
                 # parent ``running`` here makes every newer intent wait for a
                 # receipt that can no longer arrive.
-                parent.state = (
+                state = (
                     "failed"
                     if any(child.state == "failed" for child in children)
                     else "cancelled"
                 )
-            parent.status_reason = "superseded by newer workload intent"
-            parent.updated_at = now
+            else:
+                state = parent.state
+            set_parent_state(parent, state, "superseded by newer workload intent", now)
 
     @staticmethod
     def abandon_superseded_idempotent_operations_in_session(
@@ -2466,15 +2443,18 @@ class AgentJobService:
             if disarmed
             else "cancellation cleanup deadline elapsed"
         )
-        operation.state = "cancelled"
-        operation.status_reason = (
-            f"superseded by workload intent {superseded_by}; intent "
-            f"{operation.workload_intent_ordinal} cancelled ({detail})"
-        )[:512]
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
-        operation.retry_due_at = None
-        operation.updated_at = now
+        AgentOperationAdapter(session).settle(
+            operation,
+            None,
+            parent,
+            CancelRequested(
+                reason=(
+                    f"superseded by workload intent {superseded_by}; intent "
+                    f"{operation.workload_intent_ordinal} cancelled ({detail})"
+                )
+            ),
+            now,
+        )
         # Aggregate first: it recomputes the parent's operator reason from its
         # children, so the defect note has to be written afterwards to survive.
         self._aggregate_parent(session, operation.parent_job_id)
@@ -2547,32 +2527,46 @@ class AgentJobService:
         result and fence are retained so a late receipt is still accepted.
         """
 
-        if attempt is not None and attempt.state in {
-            "running",
-            "waiting-for-operator",
-        }:
-            attempt.state = "expired"
-        operation.state = "waiting-for-operator"
+        adapter = AgentOperationAdapter(session)
+        if attempt is not None:
+            adapter.expire_attempt(attempt)
         reason = _reconciled_dead_attempt_reason(operation, attempt, node, now)
         if superseded_by is not None and operation.workload_intent_ordinal is not None:
             reason = f"superseded by workload intent {superseded_by}; {reason}"
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
-        operation.retry_due_at = None
-        if operation.kind in _RESTART_REISSUE_OPERATIONS:
-            self._schedule_safe_retry(operation, now)
-        elif operation.kind == AgentOperation.AGENT_UPGRADE.value:
-            schedule_agent_upgrade_retry(operation, attempt, now)
-        if operation.retry_disposition == _RETRY_DISPOSITION:
-            scheduled = operation.status_reason
-            if isinstance(scheduled, str) and scheduled:
-                reason = f"{reason}; {scheduled}"
-        # The reconciliation reason is the durable fact an operator needs, so
-        # it survives the schedule note instead of being replaced by it.
-        operation.status_reason = reason[:512]
-        operation.updated_at = now
-        self._project_artifact_job_expiry(session, operation, now)
+        # The core decides: a restart-safe order is retried (re-issued through the
+        # exact-resume path, which reconciles the old effect first), an agent
+        # upgrade is retried behind its dpkg fence, and an irreversible order
+        # waits only if an operator has an action for it.
+        self._settle_lapsed(session, operation, attempt, reason, now)
         self._aggregate_parent(session, operation.parent_job_id)
+
+    def _settle_lapsed(
+        self,
+        session: Session,
+        operation: StoredOperation,
+        attempt: AgentOperationAttempt | None,
+        reason: str,
+        now: datetime,
+    ) -> None:
+        """Decide an attempt that can no longer report, through the core.
+
+        An artifact job's own attempt is fenced and failed with the job (its late
+        results are rejected).  Every other order is a ``LeaseLapsed``: retried
+        when restart-safe or an upgrade, waiting for an operator only when it is
+        irreversible and an operator has an action for it.
+        """
+
+        adapter = AgentOperationAdapter(
+            session, resume_candidates=operator_resume_candidates_in_session
+        )
+        parent = session.get(Job, operation.parent_job_id)
+        if self._project_artifact_job_expiry(session, operation, now):
+            event: LeaseLapsed | Reported = Reported(
+                Outcome.FAILED, retryable=False, reason=reason
+            )
+        else:
+            event = LeaseLapsed(reason=reason)
+        adapter.settle(operation, attempt, parent, event, now)
 
     @staticmethod
     def _claimable_operations(node_id: str, now: datetime):
@@ -2649,14 +2643,16 @@ class AgentJobService:
                     {"fence": attempt.fence, "state": "failed", "result": result}
                 )
             )
-            attempt.state = "failed"
-            attempt.result = result
-            operation.state = "failed"
-            operation.retry_disposition = None
-            operation.retry_disposition_attempt = None
-            operation.retry_due_at = None
-            operation.status_reason = reason[:512]
-            operation.updated_at = now
+            adapter = AgentOperationAdapter(session)
+            adapter.record_report(attempt, "failed", result)
+            # A definite, non-retryable failure: the budget is final.
+            adapter.settle(
+                operation,
+                attempt,
+                None,
+                Reported(Outcome.FAILED, retryable=False, reason=reason),
+                now,
+            )
             if self._result_consumer is not None:
                 self._result_consumer(session, operation, attempt, message)
             self._aggregate_parent(session, operation.parent_job_id)
@@ -2700,7 +2696,6 @@ class AgentJobService:
                         StoredOperation.state == "waiting-for-operator",
                         StoredOperation.kind.in_(_RESTART_REISSUE_OPERATIONS),
                         _retry_not_authorized_for_current_attempt(),
-                        StoredOperation.retry_due_at.is_(None),
                         Job.state.in_({"queued", "running", "waiting-for-operator"}),
                         *(condition.expression for condition in predicate.common),
                         *(condition.expression for condition in predicate.diagnostics),
@@ -2809,8 +2804,21 @@ class AgentJobService:
                         else None
                     )
                     previous_reason = parked.status_reason
-                    self._schedule_safe_retry(
-                        parked, now, retry_after if type(retry_after) is int else None
+                    # Evidence that the order is restart-safe makes its parked
+                    # attempt an uncertain effect: the core retries it.
+                    AgentOperationAdapter(session).settle(
+                        parked,
+                        attempt,
+                        session.get(Job, parked.parent_job_id),
+                        Reported(
+                            Outcome.UNCERTAIN,
+                            retry_after=(
+                                _aware(now) + timedelta(seconds=retry_after)
+                                if type(retry_after) is int
+                                else None
+                            ),
+                        ),
+                        now,
                     )
                     if self._claim_has_authority(
                         session,
@@ -2822,9 +2830,7 @@ class AgentJobService:
                         parked.updated_at = now
                         self._aggregate_parent(session, parked.parent_job_id)
                     else:
-                        parked.retry_disposition = None
-                        parked.retry_disposition_attempt = None
-                        parked.retry_due_at = None
+                        AgentOperationAdapter.withdraw_retry(parked)
                         parked.status_reason = previous_reason
                 # Recovery schedules a future exact claim. It never reissues
                 # an effect inside this observation of an old parked attempt.
@@ -3075,30 +3081,20 @@ class AgentJobService:
                         # fence keeps the operation until it reports or the
                         # budget elapses.
                         return None
-                    previous.state = "expired"
+                    AgentOperationAdapter.expire_attempt(previous)
             if operation.state == "running":
-                operation.state = "waiting-for-operator"
-                # An expiry parks the operation without an attempt result, so
+                # An expiry decides the operation without an attempt result, so
                 # record why it stopped and the last facts describing the
                 # interruption.  Without this an uncertain operation carries no
                 # evidence at all and no operator can tell a lost connection
                 # from an effect that may already have happened.
-                operation.status_reason = _lease_expiry_reason(
-                    operation, previous, node, now
+                self._settle_lapsed(
+                    session,
+                    operation,
+                    previous,
+                    _lease_expiry_reason(operation, previous, node, now),
+                    now,
                 )
-                operation.retry_disposition = None
-                operation.retry_disposition_attempt = None
-                operation.retry_due_at = None
-                if operation.kind in _RESTART_REISSUE_OPERATIONS:
-                    self._schedule_safe_retry(operation, now)
-                elif operation.kind == AgentOperation.AGENT_UPGRADE.value:
-                    reason = operation.status_reason
-                    schedule_agent_upgrade_retry(operation, previous, now)
-                    operation.status_reason = f"{reason}; {operation.status_reason}"[
-                        :512
-                    ]
-                operation.updated_at = now
-                self._project_artifact_job_expiry(session, operation, now)
                 self._aggregate_parent(session, operation.parent_job_id)
                 return None
             if (
@@ -3130,21 +3126,24 @@ class AgentJobService:
                     # ``cancelled`` when this order never attempted an install:
                     # no package receipt may be derived from it.  A previously
                     # attempted install is proven by the target build.
-                    operation.state = (
-                        ("succeeded" if operation.current_attempt >= 1 else "cancelled")
-                        if at_target
-                        else "failed"
-                    )
-                    operation.status_reason = (
+                    settled_reason = (
                         "Spark already runs the requested agent build"
                         if at_target
                         else "Spark runs a different agent build than this "
                         "rollout's rollback source"
                     )
-                    operation.retry_disposition = None
-                    operation.retry_disposition_attempt = None
-                    operation.retry_due_at = None
-                    operation.updated_at = now
+                    settle_event: Reported | CancelRequested
+                    if not at_target:
+                        settle_event = Reported(
+                            Outcome.FAILED, retryable=False, reason=settled_reason
+                        )
+                    elif operation.current_attempt >= 1:
+                        settle_event = Reported(Outcome.OK, reason=settled_reason)
+                    else:
+                        settle_event = CancelRequested(reason=settled_reason)
+                    AgentOperationAdapter(session).settle(
+                        operation, None, None, settle_event, now
+                    )
                     self._aggregate_parent(session, operation.parent_job_id)
                     return None
                 # A new claim owns a fresh watchdog authority. The retry query
@@ -3159,31 +3158,22 @@ class AgentJobService:
                 )
                 operation.payload = json.loads(payload_bytes)
                 operation.payload_digest = hashlib.sha256(payload_bytes).hexdigest()
-            operation.current_attempt += 1
-            operation.state = "running"
-            operation.retry_due_at = None
-            if operation.kind in _RESTART_REISSUE_OPERATIONS:
-                # This claim consumes the retry authorisation the previous
-                # attempt carried. Leaving it on the running row made the
-                # parked attempt that follows look like it still had one.
-                operation.retry_disposition = None
-                operation.retry_disposition_attempt = None
-            # A live attempt has no interrupted reason: keeping the previous
-            # one would describe work that is running again.
-            operation.status_reason = None
-            operation.updated_at = now
             fence = str(uuid.uuid4())
             deadline = now + timedelta(seconds=CLAIM_LEASE_SECONDS)
-            attempt = AgentOperationAttempt(
-                operation_id=operation.id,
-                attempt=operation.current_attempt,
-                fence=fence,
-                lease_deadline=deadline,
-                agent_certificate_serial=certificate_serial,
-                state="running",
+            # The claim consumes the schedule the previous attempt carried
+            # (leaving it would make the attempt that follows look like it still
+            # had one) and clears the interrupted reason: a live attempt has none.
+            attempt = AgentOperationAdapter(session).start_attempt(
+                operation,
+                session.get(Job, operation.parent_job_id),
+                certificate_serial,
+                fence,
+                deadline,
+                now,
                 progress=resumable_progress,
             )
-            session.add(attempt)
+            if attempt is None:
+                return None  # the core refuses a claim the predicate let through
             if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
                 # Every attempt is issued with a fresh grant, as the first one
                 # was: a retry that waited out the grant's hour (a parked
@@ -3254,8 +3244,7 @@ class AgentJobService:
             # The same terminal receipt is reported until the next install.
             # It must not revoke an operator-authorized retry of that outcome.
             if (
-                operation.retry_disposition == "retry"
-                and operation.retry_disposition_attempt == operation.current_attempt
+                _retry_authorized_for_current_attempt(operation)
                 and current is not None
                 and isinstance(current.result, dict)
                 and current.result.get("package_activation")
@@ -3263,11 +3252,14 @@ class AgentJobService:
             ):
                 return
             if current is not None:
-                current.state = "failed"
-                current.result = {
-                    "reason": "agent package " + receipt.phase,
-                    "package_activation": receipt.model_dump(mode="json"),
-                }
+                AgentOperationAdapter.record_report(
+                    current,
+                    "failed",
+                    {
+                        "reason": "agent package " + receipt.phase,
+                        "package_activation": receipt.model_dump(mode="json"),
+                    },
+                )
             # The helper restored (or tried to restore) the rollback source.
             # Retry this Spark behind the dpkg safety fence while the rollout
             # continues with the next one.
@@ -3316,12 +3308,12 @@ class AgentJobService:
         # contact reconciles the operation projection, not the historical fact
         # that the signed helper attempt returned failure.
         if attempt.state != "failed":
-            attempt.state = "succeeded"
-            attempt.result = _document(evidence)
-        operation.state = "succeeded"
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
-        operation.updated_at = now
+            AgentOperationAdapter.record_report(
+                attempt, "succeeded", _document(evidence)
+            )
+        AgentOperationAdapter(session).settle(
+            operation, attempt, None, Reported(Outcome.OK), now
+        )
         if self._result_consumer is not None:
             self._result_consumer(session, operation, attempt, message)
         self._aggregate_parent(session, operation.parent_job_id)
@@ -3355,27 +3347,15 @@ class AgentJobService:
         certificate_serial: str,
         now: datetime,
     ) -> None:
-        operation.current_attempt += 1
-        operation.state = "failed"
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
-        operation.updated_at = now
         reason = _failure_result(
             "recipe_build_failed",
             "builder runtime identity changed before claim",
             uncertain=False,
         )
         fence = str(uuid.uuid4())
-        attempt = AgentOperationAttempt(
-            operation_id=operation.id,
-            attempt=operation.current_attempt,
-            fence=fence,
-            lease_deadline=now,
-            agent_certificate_serial=certificate_serial,
-            state="failed",
-            result=reason,
+        attempt = AgentOperationAdapter(session).reject_attempt(
+            operation, certificate_serial, fence, now, result=reason
         )
-        session.add(attempt)
         session.flush()
         if self._result_consumer is not None:
             self._result_consumer(
@@ -3475,13 +3455,9 @@ class AgentJobService:
         if (
             job.state == "waiting-for-operator"
             and current_operation.state == "waiting-for-operator"
-            and current_operation.retry_disposition == _RETRY_DISPOSITION
-            and current_operation.retry_disposition_attempt
-            == current_operation.current_attempt
+            and _retry_authorized_for_current_attempt(current_operation)
         ):
-            job.state = "queued"
-            job.status_reason = None
-            job.updated_at = now
+            set_parent_state(job, "queued", None, now)
             return True
         if job.state in _TERMINAL_PARENT_STATES:
             self._record_claim_refusal(
@@ -3792,31 +3768,6 @@ class AgentJobService:
             reason=None,
         )
 
-    def wait_for_operator(self, fence: AgentFence, reason: str) -> None:
-        """Park an order that needs an authority decision, not a retry."""
-        self._finish(
-            fence,
-            "waiting-for-operator",
-            result=_failure_result(
-                "operation_requires_operator",
-                reason,
-                uncertain=True,
-                failure_kind=FailureKind.INVALID_AUTHORITY,
-            ),
-            reason=None,
-        )
-
-    def uncertain(self, fence: AgentFence, reason: str) -> None:
-        """Persist an ambiguous mutation outcome and require inspection first."""
-        self._finish(
-            fence,
-            "waiting-for-operator",
-            result=_failure_result(
-                "operation_outcome_uncertain", reason, uncertain=True
-            ),
-            reason=None,
-        )
-
     def record_result(
         self, message: AgentResult, *, source: AgentSource | None = None
     ) -> None:
@@ -3827,66 +3778,6 @@ class AgentJobService:
             result=message.result,
             reason=None,
             source=source,
-        )
-
-    @staticmethod
-    def _schedule_safe_retry(
-        operation: StoredOperation,
-        now: datetime,
-        retry_after_seconds: int | None = None,
-    ) -> None:
-        if operation.kind not in _RESTART_REISSUE_OPERATIONS:
-            raise ValueError(
-                "operation cannot be reissued without effect reconciliation"
-            )
-        stalled = _stalled_interruptions(operation)
-        crash_loop = stalled >= _STALLED_INTERRUPTION_LIMIT
-        if crash_loop:
-            # Rate, not intent, is what a crash loop bounds: slow down to a
-            # cap while the request stays authorised, and say why.
-            retry_after_seconds = max(
-                retry_after_seconds or 0,
-                min(
-                    _STALLED_RETRY_BASE_SECONDS
-                    * 2 ** (stalled - _STALLED_INTERRUPTION_LIMIT),
-                    _STALLED_RETRY_MAX_SECONDS,
-                ),
-            )
-        retry_after = (
-            None
-            if retry_after_seconds is None
-            else _aware(now) + timedelta(seconds=retry_after_seconds)
-        )
-        due = RecoveryPolicy().next_attempt(
-            operation.id,
-            operation.current_attempt,
-            _aware(now),
-            retry_after=retry_after,
-            ongoing_intent=True,
-        )
-        # Exact-resume support reconciles the prior effect before any new work.
-        # Bound frequency, not the lifetime of current authorized intent: a long
-        # outage must not require an operator to retire and recreate this job.
-        assert due is not None
-        operation.retry_disposition = _RETRY_DISPOSITION
-        operation.retry_disposition_attempt = operation.current_attempt
-        operation.retry_due_at = due
-        previous_reason = operation.status_reason
-        schedule_reason = (
-            f"exact {operation.kind} interrupted; retry scheduled at {due.isoformat()}"
-        )
-        if crash_loop:
-            schedule_reason = (
-                f"agent restarted {stalled} times in a row during "
-                f"{operation.kind} without copying new bytes; inspect the "
-                f"Spark's agent journal; retry scheduled at {due.isoformat()}"
-            )
-        operation.status_reason = (
-            f"{previous_reason}; {schedule_reason}"
-            if isinstance(previous_reason, str)
-            and previous_reason.startswith("attempt ")
-            and "lease expired" in previous_reason
-            else schedule_reason
         )
 
     def record_late_result(
@@ -3996,13 +3887,16 @@ class AgentJobService:
                     )
                 )
             ):
-                attempt.state = "cancelled"
-                attempt.result = evidence
-                operation.state = "cancelled"
-                operation.retry_disposition = None
-                operation.retry_disposition_attempt = None
-                operation.retry_due_at = None
-                operation.updated_at = now
+                adapter = AgentOperationAdapter(session)
+                adapter.record_report(attempt, "cancelled", evidence)
+                # The agent confirmed its host action has ceased: a definite end.
+                adapter.settle(
+                    operation,
+                    attempt,
+                    parent,
+                    Reported(Outcome.CANCELLED, reason="cancellation confirmed"),
+                    now,
+                )
                 if self._result_consumer is not None:
                     self._result_consumer(session, operation, attempt, message)
                 self._aggregate_parent(session, operation.parent_job_id)
@@ -4010,28 +3904,44 @@ class AgentJobService:
             if attempt.state == "running" and (
                 _aware(attempt.lease_deadline) <= _aware(now) or superseded_intent
             ):
-                attempt.state = "expired"
+                AgentOperationAdapter.expire_attempt(attempt)
                 if (
                     operation.current_attempt == attempt.attempt
                     and operation.state == "running"
                 ):
-                    operation.state = "waiting-for-operator"
-                    operation.status_reason = _lease_expiry_reason(
-                        operation, attempt, node, now
+                    lapse_reason = _lease_expiry_reason(operation, attempt, node, now)
+                    adapter = AgentOperationAdapter(
+                        session, resume_candidates=operator_resume_candidates_in_session
                     )
-                    operation.retry_disposition = None
-                    operation.retry_disposition_attempt = None
-                    operation.retry_due_at = None
                     if parent.state in _ENDED_PARENT_STATES:
-                        if operation.kind in _ABANDONABLE_OPERATIONS:
-                            _abandon_operation(operation, parent.id, now)
-                    elif operation.kind in _RESTART_REISSUE_OPERATIONS:
+                        # The job already ended, so nothing can claim or resume
+                        # this order: it ends with it instead of waiting.
+                        adapter.settle(
+                            operation,
+                            attempt,
+                            parent,
+                            CancelRequested(
+                                reason=(
+                                    f"job {parent.id} ended without this operation; "
+                                    "its retry was abandoned"
+                                    if operation.kind in _ABANDONABLE_OPERATIONS
+                                    else f"{lapse_reason}; its job already ended"
+                                )
+                            ),
+                            now,
+                        )
+                    else:
                         # An interrupted exact-resume order reconciles its own
-                        # effect on the next attempt: schedule it here, as the
-                        # claim and sweep paths do, instead of waiting for an
-                        # operator.
-                        self._schedule_safe_retry(operation, now)
-                    operation.updated_at = now
+                        # effect on the next attempt: the core schedules it here,
+                        # as the claim and sweep paths do, instead of waiting
+                        # for an operator.
+                        adapter.settle(
+                            operation,
+                            attempt,
+                            parent,
+                            LeaseLapsed(reason=lapse_reason),
+                            now,
+                        )
                     if parent.state in {"queued", "running"}:
                         self._aggregate_parent(session, operation.parent_job_id)
             if attempt.state != "expired":
@@ -4171,37 +4081,80 @@ class AgentJobService:
                     plan_digest=operation.authority_revision,
                     now=now,
                 )
-            attempt.result = message_result
-            attempt.state = state
-            start_deadline = _operation_start_deadline(operation)
-            safe_retry = (
-                _safe_retry_failure(operation.kind, state, message_result)
-                and not (
-                    isinstance(parent.result, Mapping)
-                    and parent.result.get("cancel_requested") is True
-                )
-                # A spent start budget is final: a retry could only be refused.
-                and not (
-                    operation.kind == AgentOperation.RECIPE_START.value
-                    and start_deadline is not None
-                    and _aware(now) >= _aware(start_deadline)
-                )
+            adapter = AgentOperationAdapter(
+                session, resume_candidates=operator_resume_candidates_in_session
             )
-            operation.state = "waiting-for-operator" if safe_retry else state
-            operation.updated_at = now
-            if safe_retry:
-                retry_after_seconds = message_result.get("retry_after_seconds")
-                self._schedule_safe_retry(
-                    operation,
-                    now,
-                    retry_after_seconds if type(retry_after_seconds) is int else None,
-                )
+            adapter.record_report(attempt, state, message_result)
+            adapter.settle(
+                operation,
+                attempt,
+                parent,
+                self._report_event(
+                    operation, attempt, parent, state, message_result, now
+                ),
+                now,
+            )
             if self._result_consumer is not None:
                 self._result_consumer(session, operation, attempt, message)
             self._aggregate_parent(session, operation.parent_job_id)
         # A result consumer can atomically make the next durable recipe phase
         # queueable; wake long-polling agents only after that transaction commits.
         self.notify_available()
+
+    @staticmethod
+    def _report_event(
+        operation: StoredOperation,
+        attempt: AgentOperationAttempt,
+        parent: Job,
+        state: str,
+        result: Mapping[str, object],
+        now: datetime,
+    ) -> Reported:
+        """What an agent's report tells the lifecycle core.
+
+        ``waiting-for-operator`` is the agent's word for "I could not confirm the
+        effect", whatever failure kind (or none) its body carries: it is an
+        uncertain effect, which the core retries for restart-safe work (after the
+        exact-resume inspection) and observes for the rest.  A cancel the parent
+        asked for, and a spent start budget, end a retry before it starts.
+        """
+
+        fence = attempt.fence
+        if state == "succeeded":
+            return Reported(Outcome.OK, fence=fence)
+        if state == "cancelled":
+            return Reported(Outcome.CANCELLED, fence=fence)
+        raw_reason = result.get("reason")
+        reason = (
+            f"agent reported: {raw_reason[:200]}"
+            if isinstance(raw_reason, str) and raw_reason
+            else None
+        )
+        start_deadline = _operation_start_deadline(operation)
+        if (
+            operation.kind == AgentOperation.RECIPE_START.value
+            and start_deadline is not None
+            and _aware(now) >= _aware(start_deadline)
+        ):
+            # A spent start budget is final: a retry could only be refused.
+            return Reported(Outcome.FAILED, fence=fence, retryable=False, reason=reason)
+        retry_after = result.get("retry_after_seconds")
+        due = (
+            _aware(now) + timedelta(seconds=retry_after)
+            if type(retry_after) is int
+            else None
+        )
+        if state == "failed":
+            requested, _ = cancel_requested_at(parent, now)
+            return Reported(
+                Outcome.FAILED,
+                fence=fence,
+                retryable=requested is None
+                and _safe_retry_failure(operation.kind, state, result),
+                retry_after=due,
+                reason=reason,
+            )
+        return Reported(Outcome.UNCERTAIN, fence=fence, retry_after=due, reason=reason)
 
     def _active(
         self,
@@ -4413,6 +4366,13 @@ class AgentJobService:
         operation: StoredOperation,
         now: datetime,
     ) -> bool:
+        """Fail the artifact job whose one-shot attempt can no longer report.
+
+        Returns whether the order belongs to an artifact job, which then ends
+        failed with it: the uncertain attempt is fenced and late results are
+        rejected.
+        """
+
         if operation.kind != AgentOperation.RECIPE_JOB_RUN.value:
             return False
         artifact_job = session.scalar(
@@ -4426,8 +4386,6 @@ class AgentJobService:
             "artifact job agent lease expired; the uncertain attempt was fenced "
             "and late results will be rejected"
         )
-        operation.state = "failed"
-        operation.updated_at = now
         if artifact_job.state not in {"succeeded", "failed", "cancelled"}:
             artifact_job.state = "failed"
             artifact_job.status_reason = reason
@@ -4506,8 +4464,9 @@ class AgentJobService:
         ):
             # A stopped build needs a separate cleanup receipt before its
             # reservation can be released, even if completion raced removal.
-            job.state = "waiting-for-operator"
-            job.updated_at = self._clock()
+            set_parent_state(
+                job, "waiting-for-operator", None, self._clock(), keep_reason=True
+            )
             return
         if job.kind == "agent-upgrade" and self._advance_rollout is not None:
             self._advance_rollout(session, job)
@@ -4522,25 +4481,17 @@ class AgentJobService:
         retrying = [
             operation
             for operation in operations
-            if operation.state == "waiting-for-operator"
-            and operation.retry_disposition == _RETRY_DISPOSITION
-            and operation.retry_disposition_attempt == operation.current_attempt
-            and operation.retry_due_at is not None
+            if _retry_authorized_for_current_attempt(operation)
         ]
-        if (
-            retrying
-            and all(
-                operation.state == "succeeded" or operation in retrying
-                for operation in operations
-            )
-            and not (
-                isinstance(job.result, Mapping)
-                and job.result.get("cancel_requested") is True
-            )
-        ):
-            job.state = "queued"
-            job.status_reason = retrying[0].status_reason
-            job.updated_at = self._clock()
+        cancel_requested = isinstance(job.result, Mapping) and (
+            job.result.get("cancel_requested") is True
+        )
+        verdict = aggregate_parent_state(
+            [(operation.state, operation in retrying) for operation in operations],
+            cancel_requested=cancel_requested,
+        )
+        if verdict == "queued":
+            set_parent_state(job, "queued", retrying[0].status_reason, self._clock())
             return
         if (
             job.kind == "agent-upgrade"
@@ -4552,22 +4503,10 @@ class AgentJobService:
             # service's specific operator-facing reason instead of declaring the
             # job successful merely because every materialized operation passed.
             return
-        terminal = _AGGREGATE_FINAL_STATES
-        if not operations or any(
-            operation.state not in terminal for operation in operations
-        ):
+        if verdict is None:
             return
-        states = {operation.state for operation in operations}
-        if "failed" in states:
-            state = "failed"
-        elif "waiting-for-operator" in states:
-            state = "waiting-for-operator"
-        elif "cancelled" in states:
-            state = "cancelled"
-        else:
-            state = "succeeded"
-        job.state = state
-        job.updated_at = self._clock()
+        state = verdict
+        set_parent_state(job, state, None, self._clock(), keep_reason=True)
         if state == "succeeded":
             job.status_reason = None
             return
@@ -4612,12 +4551,94 @@ class AgentJobService:
                                     None if node is None else node.build_digest
                                 ),
                                 raw_reason=reason,
-                                retry_queued=(
-                                    operation.retry_disposition == _RETRY_DISPOSITION
-                                    and operation.retry_disposition_attempt
-                                    == operation.current_attempt
+                                retry_queued=_retry_authorized_for_current_attempt(
+                                    operation
                                 ),
                             )
                     job.status_reason = redact_text(reason)[:1024]
                     return
         job.status_reason = None
+
+
+class _OrderStore:
+    """The reconciler's view of the waiting Spark orders.
+
+    ``due`` reads committed state; ``save`` re-reads the order under the same locks
+    the claim path takes (target nodes, then parent jobs, then the order and its
+    attempt) and applies a decision only if the order is still what the decision
+    was made from.  The write is the adapter's ``apply``: the one projection of a
+    core decision onto the stored order.
+    """
+
+    def __init__(
+        self, service: AgentJobService, adapter: AgentOperationAdapter
+    ) -> None:
+        self._service = service
+        self._adapter = adapter
+
+    def due(self, now: datetime, limit: int) -> Sequence[Lifecycle]:
+        with self._service._sessions() as session:
+            orders = tuple(
+                session.scalars(
+                    select(StoredOperation)
+                    .where(parked_orders(now))
+                    .order_by(StoredOperation.created_at, StoredOperation.id)
+                    .limit(limit)
+                )
+            )
+            return tuple(
+                self._adapter.lifecycle(
+                    order,
+                    AgentOperationAdapter.attempt_of(session, order),
+                    session.get(Job, order.parent_job_id),
+                    now,
+                )
+                for order in orders
+            )
+
+    def save(self, before: Lifecycle, after: Lifecycle) -> bool:
+        service = self._service
+        with service._claim_lock, service._sessions.begin() as session:
+            hint = session.execute(
+                select(StoredOperation.node_id, StoredOperation.parent_job_id).where(
+                    StoredOperation.id == before.id
+                )
+            ).one_or_none()
+            if hint is None:
+                return False
+            node_id, parent_job_id = hint
+            scopes = service._lock_operation_scopes(session, (before.id,), node_id)
+            if scopes is None or scopes[before.id][0] != parent_job_id:
+                return False
+            order = session.scalar(
+                select(StoredOperation)
+                .where(StoredOperation.id == before.id)
+                .with_for_update(of=StoredOperation)
+                .execution_options(populate_existing=True)
+            )
+            if order is None:
+                return False
+            attempt = session.scalar(
+                select(AgentOperationAttempt)
+                .where(
+                    AgentOperationAttempt.operation_id == order.id,
+                    AgentOperationAttempt.attempt == order.current_attempt,
+                )
+                .with_for_update(of=AgentOperationAttempt)
+            )
+            parent = session.get(Job, parent_job_id)
+            now = service._clock()
+            bound = AgentOperationAdapter(
+                session,
+                clock=service._clock,
+                resume_candidates=operator_resume_candidates_in_session,
+            )
+            current = bound.lifecycle(order, attempt, parent, now)
+            if not same_order(current, before):
+                return False  # a report, claim or cancel got there first
+            if bound.apply(order, attempt, before, after, now):
+                service._aggregate_parent(session, parent_job_id)
+        return True
+
+    def record_residue(self, row: Lifecycle, reason: str) -> None:
+        _LOGGER.info("order %s %s: %s", row.id, row.kind, reason)

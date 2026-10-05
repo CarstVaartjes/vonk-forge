@@ -172,9 +172,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             assert job is not None and child is not None
             assert job.state == "queued"
             job.state = "waiting-for-operator"
-            child.retry_disposition = None
-            child.retry_disposition_attempt = None
-            child.retry_due_at = None
+            child.next_action_at = None
 
         with sessions() as session:
             job = session.get(Job, job_id)
@@ -354,8 +352,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             assert job is not None and child is not None and attempt is not None
             assert job.state == "queued"
             assert child.state == "waiting-for-operator"
-            assert child.retry_disposition == "retry"
-            assert child.retry_disposition_attempt == child_attempt_number
+            assert child.next_action_at is not None
             assert job.request_id == request_key
             assert len(children) == 1 and children[0].id == child_operation_id
             assert (
