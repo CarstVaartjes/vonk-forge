@@ -204,7 +204,7 @@ class RecipeOperationAdapter:
         each order was retried by its own core before it reported)."""
 
         before = self.lifecycle(job, issued=True, now=now)
-        outcome = Outcome.FAILED if failed else Outcome.OK
+        outcome = Outcome.FAILED if failed else Outcome.DONE
         decision = transition(
             before, Reported(outcome, retryable=False, reason=reason), self, aware(now)
         )
