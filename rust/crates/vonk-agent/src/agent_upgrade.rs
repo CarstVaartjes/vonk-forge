@@ -11,9 +11,12 @@ use reqwest::Client;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
+use vonk_agent_protocol::generated::{FailureCode, SecurityRefusalReason};
 use vonk_agent_protocol::{AgentClaim, AgentUpgradeRequest, canonical_json, parse_strict};
 
 use crate::client::{AgentHttpClient, ClientError};
+use crate::outcome::GRANT_REFUSALS;
+use crate::vocabulary;
 
 const HELPER_SOCKET: &str = "/run/vonk-forge-package-helper/package-helper.sock";
 /// Shared with the host-runtime frame and the privileged helper.
@@ -325,23 +328,20 @@ pub(crate) fn validate_helper_response(
 }
 
 fn stable_helper_error_code(value: &str) -> bool {
-    matches!(
-        value,
-        "request_invalid"
-            | "peer_identity_invalid"
-            | "grant_invalid"
-            | "grant_node_mismatch"
-            | "grant_unauthorized"
-            | "request_replayed"
-            | "request_ledger_failed"
-            | "package_preflight_failed"
-            | "package_verification_failed"
-            | "package_metadata_failed"
-            | "package_custody_failed"
-            | "package_install_failed"
-            | "operation_failed"
-            | "concurrency_limit"
-    )
+    vocabulary::is_any(value, &GRANT_REFUSALS)
+        || vocabulary::is(value, SecurityRefusalReason::RequestReplayed)
+        || vocabulary::is(value, FailureCode::OperationFailed)
+        || matches!(
+            value,
+            "request_invalid"
+                | "request_ledger_failed"
+                | "package_preflight_failed"
+                | "package_verification_failed"
+                | "package_metadata_failed"
+                | "package_custody_failed"
+                | "package_install_failed"
+                | "concurrency_limit"
+        )
 }
 
 #[cfg(test)]

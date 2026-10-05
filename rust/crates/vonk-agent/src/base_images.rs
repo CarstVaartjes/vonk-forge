@@ -633,6 +633,13 @@ struct EntryRecord {
     size: u64,
 }
 
+/// The exact `oci-layout` document of an image layout: one known key and no other.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct OciLayout {
+    image_layout_version: String,
+}
+
 fn verify_archive(
     file: &File,
     image: &RecipeBuildBaseImage,
@@ -648,9 +655,8 @@ fn verify_archive(
         return Err(BaseImageError::Invalid);
     }
     let layout = read_archive_entry(file, "oci-layout", MAX_JSON_BYTES)?;
-    let layout: serde_json::Value =
-        serde_json::from_slice(&layout).map_err(|_| BaseImageError::Invalid)?;
-    if layout != serde_json::json!({"imageLayoutVersion": "1.0.0"}) {
+    let layout: OciLayout = serde_json::from_slice(&layout).map_err(|_| BaseImageError::Invalid)?;
+    if layout.image_layout_version != "1.0.0" {
         return Err(BaseImageError::Invalid);
     }
     let index: Index =

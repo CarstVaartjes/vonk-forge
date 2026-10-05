@@ -245,42 +245,36 @@ impl fmt::Display for PodmanImportDiagnostic {
 }
 
 impl RecipeBuildError {
-    pub(crate) fn failure_evidence(&self) -> serde_json::Value {
+    /// The typed failure this build error reports: its reason, stage, bounded
+    /// cause and the captured process output.
+    pub(crate) fn failure_evidence(&self) -> crate::outcome::Failure {
+        use crate::outcome::Failure;
+        let failure = Failure::new(self.to_string());
         match self {
-            Self::Process(error) => serde_json::json!({
-                "diagnostic": process_error_diagnostic(error),
-                "reason": self.to_string(),
-                "stage": "bounded-build-process",
-            }),
-            Self::BaseImageImport { diagnostic, logs } => serde_json::json!({
-                "diagnostic": diagnostic.to_string(),
-                "reason": self.to_string(),
-                "stage": "base-image-import",
-                "diagnostic_logs": logs,
-            }),
-            Self::ImageBuild { diagnostic, logs } => serde_json::json!({
-                "diagnostic": diagnostic.to_string(),
-                "reason": self.to_string(),
-                "stage": "image-build",
-                "diagnostic_logs": logs,
-            }),
-            Self::AdapterBuild { diagnostic, logs } => serde_json::json!({
-                "diagnostic": diagnostic.to_string(),
-                "reason": self.to_string(),
-                "stage": "runtime-adapter",
-                "diagnostic_logs": logs,
-            }),
+            Self::Process(error) => failure
+                .stage("bounded-build-process")
+                .diagnostic(process_error_diagnostic(error)),
+            Self::BaseImageImport { diagnostic, logs } => failure
+                .stage("base-image-import")
+                .diagnostic(diagnostic.to_string())
+                .process_logs(logs.as_deref().cloned()),
+            Self::ImageBuild { diagnostic, logs } => failure
+                .stage("image-build")
+                .diagnostic(diagnostic.to_string())
+                .process_logs(logs.as_deref().cloned()),
+            Self::AdapterBuild { diagnostic, logs } => failure
+                .stage("runtime-adapter")
+                .diagnostic(diagnostic.to_string())
+                .process_logs(logs.as_deref().cloned()),
             Self::NetworkBoundary {
                 stage,
                 diagnostic,
                 logs,
-            } => serde_json::json!({
-                "diagnostic": diagnostic.to_string(),
-                "reason": self.to_string(),
-                "stage": stage,
-                "diagnostic_logs": logs,
-            }),
-            _ => serde_json::json!({"reason": self.to_string()}),
+            } => failure
+                .stage(*stage)
+                .diagnostic(diagnostic.to_string())
+                .process_logs(Some((**logs).clone())),
+            _ => failure,
         }
     }
 }
@@ -1716,14 +1710,13 @@ mod tests {
         ];
         for error in errors {
             let body = error.failure_evidence();
-            let diagnostics = crate::failure_evidence::from_failure("recipe.build.v1", &body);
+            let diagnostics = crate::failure_evidence::from_failure(
+                &vonk_agent_protocol::generated::AgentOperation::RecipeBuildV1,
+                &body,
+            );
             assert!(diagnostics.stderr.truncated);
             assert!(diagnostics.stderr.text.contains("permission denied"));
-            assert!(
-                !serde_json::to_string(&body)
-                    .unwrap()
-                    .contains("never-persist")
-            );
+            assert!(!format!("{body:?}").contains("never-persist"));
             assert!(matches!(
                 diagnostics.category,
                 crate::failure_evidence::FailureCategory::PlatformPolicy
@@ -1766,7 +1759,7 @@ mod tests {
                 cancelled: &|| false,
             },
         )
-        .unwrap_or_else(|error| panic!("{}", error.failure_evidence()));
+        .unwrap_or_else(|error| panic!("{:?}", error.failure_evidence()));
         let unit = boundary.proxy_unit.clone();
         let active = runner
             .run(
@@ -1942,10 +1935,16 @@ mod tests {
                 diagnostic: classified,
                 logs: None,
             };
-            assert_eq!(error.failure_evidence()["stage"], "image-build");
-            assert_eq!(error.failure_evidence()["diagnostic"], diagnostic);
-            assert!(!error.failure_evidence().to_string().contains("private"));
-            assert!(!error.failure_evidence().to_string().contains("secret"));
+            assert_eq!(
+                error.failure_evidence().stage.as_deref(),
+                Some("image-build")
+            );
+            assert_eq!(
+                error.failure_evidence().diagnostic.as_deref(),
+                Some(diagnostic)
+            );
+            assert!(!format!("{:?}", error.failure_evidence()).contains("private"));
+            assert!(!format!("{:?}", error.failure_evidence()).contains("secret"));
         }
     }
 
@@ -1968,10 +1967,16 @@ mod tests {
         ] {
             let error = podman_import_process_error(error);
             assert!(matches!(error, RecipeBuildError::BaseImageImport { .. }));
-            assert_eq!(error.failure_evidence()["stage"], "base-image-import");
-            assert_eq!(error.failure_evidence()["diagnostic"], diagnostic);
-            assert!(!error.failure_evidence().to_string().contains("private"));
-            assert!(!error.failure_evidence().to_string().contains("secret"));
+            assert_eq!(
+                error.failure_evidence().stage.as_deref(),
+                Some("base-image-import")
+            );
+            assert_eq!(
+                error.failure_evidence().diagnostic.as_deref(),
+                Some(diagnostic)
+            );
+            assert!(!format!("{:?}", error.failure_evidence()).contains("private"));
+            assert!(!format!("{:?}", error.failure_evidence()).contains("secret"));
         }
     }
 
@@ -1994,10 +1999,10 @@ mod tests {
             (ProcessError::Cancelled, "controller-cancelled"),
         ] {
             let evidence = RecipeBuildError::Process(error).failure_evidence();
-            assert_eq!(evidence["stage"], "bounded-build-process");
-            assert_eq!(evidence["diagnostic"], diagnostic);
-            assert!(!evidence.to_string().contains("private"));
-            assert!(!evidence.to_string().contains("secret"));
+            assert_eq!(evidence.stage.as_deref(), Some("bounded-build-process"));
+            assert_eq!(evidence.diagnostic.as_deref(), Some(diagnostic));
+            assert!(!format!("{evidence:?}").contains("private"));
+            assert!(!format!("{evidence:?}").contains("secret"));
         }
     }
 

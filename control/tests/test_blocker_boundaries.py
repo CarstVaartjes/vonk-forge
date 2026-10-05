@@ -102,16 +102,16 @@ def test_rust_results_are_keyed_by_the_enclosing_function() -> None:
         """
         impl Executor for RecipeExecutor {
             fn execute(&self) -> ExecutionResult {
-                return waiting_for_operator("stop remains unconfirmed");
+                return unconfirmed(WaitReason::StopUnconfirmed, "stop remains unconfirmed");
             }
         }
         fn other() -> ExecutionResult {
-            ExecutionResult { state: "waiting-for-operator", body: json!({}) }
+            ExecutionResult::unknown(WaitReason::StopUnconfirmed, "x")
         }
-        fn waiting_for_operator(reason: &'static str) -> ExecutionResult {
-            ExecutionResult { state: "waiting-for-operator", body: json!({"reason": reason}) }
+        fn unconfirmed(wait: WaitReason, reason: &'static str) -> ExecutionResult {
+            ExecutionResult::unknown(wait, reason)
         }
-        // waiting_for_operator("a comment is not a site")
+        // unconfirmed(WaitReason::StopUnconfirmed, "a comment is not a site")
         """
     )
     sites = scan_rust_waits(source, path="rust/crates/vonk-agent/src/executor.rs")

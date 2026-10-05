@@ -15,7 +15,7 @@ use url::Url;
 use vonk_agent_protocol::generated::{
     ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, HostHelperGrantResponse,
     HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, IssuedCertificateResponse,
-    PackageActivationGrantRequest, RenewRequest, TelemetryRequest,
+    PackageActivationGrantRequest, RenewRequest, SecurityRefusalReason, TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
@@ -34,6 +34,7 @@ use crate::{
     pair::verify_ca_pin,
     runtime_identity::AgentRuntimeIdentity,
     telemetry::{TelemetrySample, valid_report_batch},
+    vocabulary,
 };
 
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -1665,7 +1666,7 @@ impl AgentHttpClient {
                 .map(str::to_owned);
             let body = bounded_body(response).await?;
             let code = if status == StatusCode::FORBIDDEN && is_rotation_conflict(&body) {
-                Some("agent.certificate.rotation.conflict".to_owned())
+                Some(SecurityRefusalReason::AgentCertificateRotationConflict.to_string())
             } else {
                 header_code
             };
@@ -2069,8 +2070,8 @@ fn controller_error(
 ) -> ControllerError {
     let status_code = status.as_u16();
     let code = supplied_code.unwrap_or_else(|| match status_code {
-        401 => "controller.authentication_required".to_owned(),
-        403 => "controller.request_rejected".to_owned(),
+        401 => SecurityRefusalReason::ControllerAuthenticationRequired.to_string(),
+        403 => SecurityRefusalReason::ControllerRequestRejected.to_string(),
         408 => "controller.timeout".to_owned(),
         429 => "controller.rate_limited".to_owned(),
         500..=599 => "controller.unavailable".to_owned(),
@@ -2171,10 +2172,12 @@ fn is_rotation_conflict(body: &[u8]) -> bool {
     };
     let code = value.get("code").and_then(serde_json::Value::as_str);
     let detail = value.get("detail").and_then(serde_json::Value::as_str);
-    matches!(
-        code,
-        Some("agent.certificate.rotation.conflict") | Some("agent_certificate_rotation_conflict")
-    ) || matches!(
+    code.is_some_and(|code| {
+        vocabulary::is(
+            code,
+            SecurityRefusalReason::AgentCertificateRotationConflict,
+        ) || code == "agent_certificate_rotation_conflict"
+    }) || matches!(
         detail,
         Some("a different certificate rotation is already staged")
     )

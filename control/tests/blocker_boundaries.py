@@ -279,17 +279,19 @@ def scan_python_waits(source: str, *, path: str) -> list[WaitSite]:
 
 _RUST_FN = re.compile(r"^\s*(?:pub(?:\([a-z]+\))?\s+)?(?:async\s+)?fn\s+(\w+)")
 _RUST_IMPL = re.compile(r"^\s*impl(?:<[^>]*>)?\s+(?:[\w:<>, ]+\s+for\s+)?(\w+)")
-#: The one constructor of the result; each of its callers is its own site.
-_RUST_CONSTRUCTOR = "waiting_for_operator"
-_RUST_WAIT_RESULT = re.compile(
-    r'state:\s*"waiting-for-operator"|AgentResultState::WaitingForOperator'
+#: The constructors of an unknown outcome (a wait reason, never a free body); each
+#: of their callers is its own site, and their own bodies are not.
+_RUST_CONSTRUCTORS = frozenset({"unconfirmed", "unconfirmed_job"})
+_RUST_WAIT_CALL = re.compile(
+    r"\b(?:unconfirmed|unconfirmed_job)\(|ExecutionResult::[Uu]nknown\("
 )
-_RUST_WAIT_CALL = re.compile(r"\bwaiting_for_operator\(")
 
 
 def scan_rust_waits(source: str, *, path: str) -> list[WaitSite]:
-    """Result states and constructor calls; ``fn waiting_for_operator`` itself is
-    the one constructor and counts as its own site."""
+    """Callers of an unknown-outcome constructor, keyed by their enclosing function.
+
+    The agent builds a wait only through ``ExecutionResult::unknown`` (or the
+    ``unconfirmed`` helpers around it), each naming a typed wait reason."""
 
     sites: list[WaitSite] = []
     function = "<module>"
@@ -301,14 +303,14 @@ def scan_rust_waits(source: str, *, path: str) -> list[WaitSite]:
         declared = _RUST_FN.match(line)
         if declared:
             function = declared.group(1)
-            if declared.group(1) != _RUST_CONSTRUCTOR and not line.startswith("fn "):
+            if declared.group(1) not in _RUST_CONSTRUCTORS and not line.startswith(
+                "fn "
+            ):
                 function = f"{owner}::{function}" if owner else function
         stripped = line.strip()
-        if stripped.startswith("//") or function == _RUST_CONSTRUCTOR:
+        if stripped.startswith("//") or function in _RUST_CONSTRUCTORS:
             continue
-        if _RUST_WAIT_RESULT.search(line) or (
-            _RUST_WAIT_CALL.search(line) and not declared
-        ):
+        if _RUST_WAIT_CALL.search(line) and not declared:
             sites.append(WaitSite(path, function, RUST_RESULT, number))
     return sites
 

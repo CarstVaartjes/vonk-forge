@@ -1412,8 +1412,6 @@ pub enum FailureCode {
     RuntimeObservationUnavailable,
     #[serde(rename = "installation_reconciliation_busy")]
     InstallationReconciliationBusy,
-    #[serde(rename = "installation_storage_temporarily_unavailable")]
-    InstallationStorageTemporarilyUnavailable,
     #[serde(rename = "recipe_reconciliation_dependency_unavailable")]
     RecipeReconciliationDependencyUnavailable,
 }
@@ -1432,9 +1430,6 @@ impl ::std::fmt::Display for FailureCode {
             Self::RecipeUninstallFailed => f.write_str("recipe_uninstall_failed"),
             Self::RuntimeObservationUnavailable => f.write_str("runtime_observation_unavailable"),
             Self::InstallationReconciliationBusy => f.write_str("installation_reconciliation_busy"),
-            Self::InstallationStorageTemporarilyUnavailable => {
-                f.write_str("installation_storage_temporarily_unavailable")
-            }
             Self::RecipeReconciliationDependencyUnavailable => {
                 f.write_str("recipe_reconciliation_dependency_unavailable")
             }
@@ -1457,9 +1452,6 @@ impl ::std::str::FromStr for FailureCode {
             "recipe_uninstall_failed" => Ok(Self::RecipeUninstallFailed),
             "runtime_observation_unavailable" => Ok(Self::RuntimeObservationUnavailable),
             "installation_reconciliation_busy" => Ok(Self::InstallationReconciliationBusy),
-            "installation_storage_temporarily_unavailable" => {
-                Ok(Self::InstallationStorageTemporarilyUnavailable)
-            }
             "recipe_reconciliation_dependency_unavailable" => {
                 Ok(Self::RecipeReconciliationDependencyUnavailable)
             }
@@ -6789,9 +6781,6 @@ impl FailureCode {
             Self::RecipeUninstallFailed => "recipe_uninstall_failed",
             Self::RuntimeObservationUnavailable => "runtime_observation_unavailable",
             Self::InstallationReconciliationBusy => "installation_reconciliation_busy",
-            Self::InstallationStorageTemporarilyUnavailable => {
-                "installation_storage_temporarily_unavailable"
-            }
             Self::RecipeReconciliationDependencyUnavailable => {
                 "recipe_reconciliation_dependency_unavailable"
             }
@@ -6856,8 +6845,6 @@ impl<'de> ::serde::Deserialize<'de> for FailureCode {
             RuntimeObservationUnavailable,
             #[serde(rename = "installation_reconciliation_busy")]
             InstallationReconciliationBusy,
-            #[serde(rename = "installation_storage_temporarily_unavailable")]
-            InstallationStorageTemporarilyUnavailable,
             #[serde(rename = "recipe_reconciliation_dependency_unavailable")]
             RecipeReconciliationDependencyUnavailable,
         }
@@ -6876,9 +6863,6 @@ impl<'de> ::serde::Deserialize<'de> for FailureCode {
             Raw::RecipeUninstallFailed => Self::RecipeUninstallFailed,
             Raw::RuntimeObservationUnavailable => Self::RuntimeObservationUnavailable,
             Raw::InstallationReconciliationBusy => Self::InstallationReconciliationBusy,
-            Raw::InstallationStorageTemporarilyUnavailable => {
-                Self::InstallationStorageTemporarilyUnavailable
-            }
             Raw::RecipeReconciliationDependencyUnavailable => {
                 Self::RecipeReconciliationDependencyUnavailable
             }

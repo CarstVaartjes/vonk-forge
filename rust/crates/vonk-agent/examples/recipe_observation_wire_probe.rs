@@ -10,7 +10,7 @@ use std::io::{self, BufRead};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use vonk_agent::client::{ExactRecipeRunObservation, build_exact_recipe_run_observations};
-use vonk_agent::executor::recipe_start_success_body;
+use vonk_agent::executor::recipe_start_result;
 use vonk_agent::oci::{OciRuntime, RecipeRunStartIdentity};
 use vonk_agent::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
 use vonk_agent::workloads::CompiledExecutionPlan;
@@ -91,7 +91,7 @@ fn persist_binding(
         )?
     };
     let _ = start_plan;
-    let evidence = recipe_start_success_body(&input.request);
+    let evidence = recipe_start_result(&input.request);
     let binding = runtime
         .recipe_run_inspection_plans()?
         .into_iter()

@@ -1,5 +1,6 @@
 use chrono::Utc;
 use thiserror::Error;
+use vonk_agent_protocol::generated::SecurityRefusalReason;
 
 use crate::{
     client::{AgentHttpClient, ClientError},
@@ -10,6 +11,7 @@ use crate::{
         retire_expired_staged, stage_identity, staged_identity_paths,
     },
     pair::{PairingError, validate_issued},
+    vocabulary,
 };
 
 #[derive(Debug, Error)]
@@ -31,12 +33,12 @@ impl RotationError {
 
     pub fn code(&self) -> String {
         match self {
-            Self::ActiveIdentityExpired => "local.identity_expired".to_owned(),
+            Self::ActiveIdentityExpired => SecurityRefusalReason::LocalIdentityExpired.to_string(),
             Self::Client(error) => error
                 .code()
                 .map(str::to_owned)
                 .unwrap_or_else(|| "controller.request_failed".to_owned()),
-            Self::Identity(_) => "local.identity_failed".to_owned(),
+            Self::Identity(_) => SecurityRefusalReason::LocalIdentityFailed.to_string(),
             Self::Issued(_) => "local.issued_identity_invalid".to_owned(),
         }
     }
@@ -111,7 +113,12 @@ pub async fn rotate_if_due(
         // responses retain their original status, code, and decision.
         Err(error)
             if error.status() == Some(403)
-                && error.code() == Some("agent.certificate.rotation.conflict") =>
+                && error.code().is_some_and(|code| {
+                    vocabulary::is(
+                        code,
+                        SecurityRefusalReason::AgentCertificateRotationConflict,
+                    )
+                }) =>
         {
             active_client.recover_renewal(&pending.csr_pem).await?
         }

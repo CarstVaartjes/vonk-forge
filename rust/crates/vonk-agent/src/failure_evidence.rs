@@ -1,9 +1,9 @@
 //! Bounded, sanitized observations captured locally after an operation fails.
 //! Fixed local systemd query only; no network, environment dumps or directory scans.
 
+use crate::outcome::{Failure, RefusalBound};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::{
     collections::VecDeque,
     fs::File,
@@ -12,6 +12,7 @@ use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
+use vonk_agent_protocol::generated::AgentOperation;
 
 const LOG_BYTES: usize = 2048;
 const LOG_LINES: usize = 32;
@@ -287,16 +288,20 @@ pub fn sanitize_tail(tail: &FailureLogTail) -> FailureLogTail {
 pub fn diagnostic_logs(
     process_logs: Option<&FailureProcessLogs>,
     diagnostic: Option<&str>,
-) -> Option<Value> {
+) -> Option<FailureProcessLogs> {
     if let Some(logs) = process_logs {
-        return serde_json::to_value(logs).ok();
+        return Some(logs.clone());
     }
-    diagnostic.map(|detail| {
-        serde_json::json!({
-            "stdout": log_tail(&[]),
-            "stderr": log_tail(detail.as_bytes()),
-        })
-    })
+    diagnostic.map(detail_logs)
+}
+
+/// A single bounded detail string as the evidence of a failure that captured no
+/// process output: the detail is the stderr tail, stdout is empty.
+pub fn detail_logs(detail: &str) -> FailureProcessLogs {
+    FailureProcessLogs {
+        stdout: log_tail(&[]),
+        stderr: log_tail(detail.as_bytes()),
+    }
 }
 
 pub fn category(code: &str) -> FailureCategory {
@@ -520,28 +525,26 @@ pub fn collect(phase: &str, code: &str, stdout: &[u8], stderr: &[u8]) -> Failure
     evidence
 }
 
-pub fn from_failure(operation: &str, body: &Value) -> FailureDiagnostics {
-    let phase = body
-        .get("stage")
-        .and_then(Value::as_str)
-        .unwrap_or(operation);
-    let code = ["error_code", "diagnostic", "helper_error_code"]
-        .iter()
-        .filter_map(|key| body.get(*key).and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let mut value = collect(phase, &code, &[], &[]);
-    if let Some(logs) = body.get("diagnostic_logs").filter(|value| !value.is_null()) {
-        if let Ok(logs) = serde_json::from_value::<FailureProcessLogs>(logs.clone()) {
-            value.stdout = logs.stdout;
-            value.stderr = logs.stderr;
-        } else {
-            value
-                .collector_errors
-                .push("process-log-evidence-invalid".into());
-        }
+pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDiagnostics {
+    let phase = failure
+        .stage
+        .clone()
+        .unwrap_or_else(|| operation.to_string());
+    let code = [
+        failure.code.map(|code| code.to_string()),
+        failure.diagnostic.clone(),
+        failure.helper_error_code.clone(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ");
+    let mut value = collect(&phase, &code, &[], &[]);
+    if let Some(logs) = &failure.process_logs {
+        value.stdout = logs.stdout.clone();
+        value.stderr = logs.stderr.clone();
     }
-    if let Some(property) = refusal_property(body) {
+    if let Some(property) = failure.refusal_bound.as_ref().and_then(refusal_property) {
         value.preflight.push(property);
     }
     value
@@ -549,13 +552,10 @@ pub fn from_failure(operation: &str, body: &Value) -> FailureDiagnostics {
 
 /// The refusing rule and the measured bound of a refused request, when the
 /// failure carries them. Only the stable rule code and two bounded integers
-/// cross; the offending argument itself is never read from the body.
-fn refusal_property(body: &Value) -> Option<FailureProperty> {
-    let bound = body.get("refusal_bound")?.as_object()?;
-    let rule = bound.get("rule")?.as_str()?;
-    let observed = bound.get("observed")?.as_u64()?;
-    let limit = bound.get("limit").and_then(Value::as_u64);
-    let rule: String = rule
+/// cross; the offending argument itself is never read.
+fn refusal_property(bound: &RefusalBound) -> Option<FailureProperty> {
+    let rule: String = bound
+        .rule
         .chars()
         .filter(|character| character.is_ascii_alphanumeric() || *character == '_')
         .take(64)
@@ -563,7 +563,8 @@ fn refusal_property(body: &Value) -> Option<FailureProperty> {
     if rule.is_empty() {
         return None;
     }
-    let value = match limit {
+    let observed = bound.observed;
+    let value = match bound.limit {
         Some(limit) => format!("rule={rule} limit={limit} observed={observed}"),
         None => format!("rule={rule} observed={observed}"),
     };
@@ -777,11 +778,11 @@ mod tests {
         // not be read must not arrive as a tail with nothing in it.
         let logs = diagnostic_logs(None, Some("the container log command failed"));
         let value = logs.expect("a detail is evidence");
-        assert_eq!(value["stdout"]["text"], "");
+        assert_eq!(value.stdout.text, "");
         assert!(
-            value["stderr"]["text"]
-                .as_str()
-                .unwrap_or_default()
+            value
+                .stderr
+                .text
                 .contains("the container log command failed")
         );
     }
@@ -803,16 +804,18 @@ mod tests {
     #[test]
     fn every_failure_family_produces_bounded_diagnostics() {
         for operation in [
-            "recipe.build.v1",
-            "artifact.distribution.v1",
-            "recipe.install",
-            "recipe.start",
-            "recipe.job.run.v1",
-            "agent.upgrade.v1",
+            AgentOperation::RecipeBuildV1,
+            AgentOperation::ArtifactDistributionV1,
+            AgentOperation::RecipeInstall,
+            AgentOperation::RecipeStart,
+            AgentOperation::RecipeJobRunV1,
+            AgentOperation::AgentUpgradeV1,
         ] {
             let result = from_failure(
-                operation,
-                &serde_json::json!({"diagnostic":"permission-denied", "stage":"prepare"}),
+                &operation,
+                &Failure::new("failed")
+                    .diagnostic("permission-denied")
+                    .stage("prepare"),
             );
             assert!(matches!(result.category, FailureCategory::PlatformPolicy));
             assert_eq!(result.phase, "prepare");
