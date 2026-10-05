@@ -284,6 +284,17 @@ none keeps a second list. Add a word to the contract and regenerate; never spell
 one by hand (the vocabulary-literal ratchet in
 [testing and CI](testing-and-ci.md) fails the change).
 
+The stored `state` of a lifecycle subject speaks the nine words of
+`LifecycleState` (`queued`, `running`, `observing`, `backoff`, `succeeded`,
+`failed`, `cancelled`, `superseded`, `needs-operator`). The retired spellings
+(`waiting-for-operator`, `cancelling`, `waiting`, `partial`, `expired`) live only
+in the contract's alias table, `STATE_ALIASES`, which says what each one means
+per subject. Every reader of a stored state goes through
+`vonk_agent_protocol.adopt_state(subject, stored)`, so a row written before the
+rename is adopted when it is read; `input_state(word)` (and the generated
+`STATE_INPUT_ALIASES`) lets an API filter or CLI argument still send a retired
+word for one release. The agent wire keeps its four result words.
+
 Every agent operation result is one `OperationOutcome`
 (`agent_protocol/src/vonk_agent_protocol/outcome.py`), tagged by `kind`:
 

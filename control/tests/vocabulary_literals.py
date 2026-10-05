@@ -57,6 +57,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     OperatorActionName,
     SecurityRefusalReason,
+    StateAlias,
     WaitReason,
 )
 
@@ -70,6 +71,41 @@ PYTHON_ROOTS = (
 )
 #: Generated Python (never hand-edited) is not scanned.
 PYTHON_EXCLUDED_PREFIXES = ("src/cluster_profiles/generated_control/",)
+#: Sites whose ``expired`` / ``partial`` / ``waiting`` belong to a state machine that
+#: is not a lifecycle subject (a certificate, an enrollment grant, a distribution
+#: assignment, a recipe installation or model file record, a catalog sync), counted
+#: per file.  The legacy-state tier subtracts them, so the baseline holds only
+#: lifecycle debt and ends at zero; a count that no longer matches fails as stale.
+NON_LIFECYCLE_STATE_SITES: dict[str, tuple[int, str]] = {
+    "control/src/vonk_control/artifact_reference_scan.py": (
+        2,
+        "distribution assignment",
+    ),
+    "control/src/vonk_control/attempt_residues.py": (
+        2,
+        "installation; distribution assignment",
+    ),
+    "control/src/vonk_control/catalog_api.py": (1, "catalog sync state"),
+    "control/src/vonk_control/catalog_sync.py": (1, "catalog sync state"),
+    "control/src/vonk_control/catalog_sync_contract.py": (1, "catalog sync state"),
+    "control/src/vonk_control/disk_reservations.py": (1, "recipe installation state"),
+    "control/src/vonk_control/distribution.py": (1, "distribution assignment"),
+    "control/src/vonk_control/enrollment.py": (1, "enrollment grant"),
+    "control/src/vonk_control/enrollment_contract.py": (1, "enrollment grant"),
+    "control/src/vonk_control/fleet_projection.py": (
+        3,
+        "certificate and installation state",
+    ),
+    "control/src/vonk_control/library_contract.py": (
+        3,
+        "installation and install_state",
+    ),
+    "control/src/vonk_control/library_projection.py": (1, "installation state"),
+    "control/src/vonk_control/metrics.py": (1, "certificate state"),
+    "control/src/vonk_control/model_cache_contract.py": (1, "model file state"),
+    "control/src/vonk_control/recipe_action_plans.py": (1, "installation state"),
+    "control/src/vonk_control/unused_storage_collection.py": (1, "installation state"),
+}
 #: The contract itself, and the one place that still reads an untyped agent body.
 ALLOWED_FILES = frozenset(
     {
@@ -92,7 +128,10 @@ _TYPESCRIPT_STRING = re.compile(r"""(["'])((?:(?!\1)[^\\\n])*)\1""")
 
 DISTINCTIVE = "distinctive"
 STORED_STATE = "stored_state"
-TIERS = (DISTINCTIVE, STORED_STATE)
+#: Retired spellings of a stored state that are also ordinary words
+#: (``waiting``, ``partial``, ``cancelling``, ``expired``), found by context.
+LEGACY_STATE = "legacy_state"
+TIERS = (DISTINCTIVE, STORED_STATE, LEGACY_STATE)
 
 #: The lifecycle state words that persisted rows of the legacy kinds still carry.
 STORED_STATE_WORDS = frozenset(
@@ -109,6 +148,15 @@ _CORE_ONLY_WORDS = frozenset(
     {LifecycleState.OBSERVING.value, LifecycleState.BACKOFF.value}
 )
 _SEPARATORS = ("-", "_", ".")
+
+#: The retired state spellings the distinctive tier cannot see (it already finds
+#: ``waiting-for-operator`` in any context).  Only :data:`STATE_ALIASES` may spell
+#: them; they are read as a *state* when the statement that holds them also names
+#: a state (``row.state``, ``state=``, ``_STORED_STATES``, ``State.RUNNING``).
+LEGACY_STATE_WORDS = frozenset(
+    alias.value for alias in StateAlias if alias is not StateAlias.WAITING_FOR_OPERATOR
+)
+_STATE_CONTEXT = re.compile(r"state", re.IGNORECASE)
 
 
 def _vocabulary_words() -> frozenset[str]:
@@ -163,6 +211,64 @@ def _docstring_ids(tree: ast.Module) -> set[int]:
     return found
 
 
+def _header(statement: ast.stmt) -> list[ast.AST]:
+    """The part of a statement that is not a nested block of statements."""
+
+    if isinstance(statement, (ast.If, ast.While)):
+        return [statement.test]
+    if isinstance(statement, (ast.For, ast.AsyncFor)):
+        return [statement.target, statement.iter]
+    if isinstance(statement, (ast.With, ast.AsyncWith)):
+        return list(statement.items)
+    if isinstance(statement, ast.Match):
+        return [statement.subject]
+    if isinstance(
+        statement,
+        (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Try, ast.TryStar),
+    ):
+        return []
+    return [statement]
+
+
+def _names_a_state(statement: ast.stmt) -> bool:
+    """Whether a statement names a state: an identifier, attribute, keyword or key."""
+
+    for part in _header(statement):
+        for node in ast.walk(part):
+            if isinstance(node, ast.Name) and _STATE_CONTEXT.search(node.id):
+                return True
+            if isinstance(node, ast.Attribute) and _STATE_CONTEXT.search(node.attr):
+                return True
+            if (
+                isinstance(node, ast.keyword)
+                and node.arg
+                and _STATE_CONTEXT.search(node.arg)
+            ):
+                return True
+            if isinstance(node, ast.Constant) and node.value == "state":
+                return True
+    return False
+
+
+def _legacy_state_literals(
+    tree: ast.Module, docstrings: set[int]
+) -> Iterator[ast.Constant]:
+    """Retired state spellings in a statement that names a state."""
+
+    for statement in ast.walk(tree):
+        if not isinstance(statement, ast.stmt) or not _names_a_state(statement):
+            continue
+        for part in _header(statement):
+            for node in ast.walk(part):
+                if (
+                    isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                    and node.value in LEGACY_STATE_WORDS
+                    and id(node) not in docstrings
+                ):
+                    yield node
+
+
 def _python_files() -> Iterator[Path]:
     for root in PYTHON_ROOTS:
         yield from sorted((REPO_ROOT / root).rglob("*.py"))
@@ -178,7 +284,8 @@ def scan_python(
         relative = path.relative_to(root).as_posix()
         if relative in ALLOWED_FILES or relative.startswith(PYTHON_EXCLUDED_PREFIXES):
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=relative)
         docstrings = _docstring_ids(tree)
         for node in ast.walk(tree):
             if (
@@ -188,6 +295,16 @@ def scan_python(
                 and (tier := tier_of(node.value)) is not None
             ):
                 counts[(tier, relative)] += 1
+        found = (
+            sum(1 for _ in _legacy_state_literals(tree, docstrings))
+            if any(
+                f'"{word}"' in source or f"'{word}'" in source
+                for word in LEGACY_STATE_WORDS
+            )
+            else 0
+        )
+        if found:
+            counts[(LEGACY_STATE, relative)] += found
     return counts
 
 
@@ -218,6 +335,19 @@ def load_baseline() -> dict[str, dict[str, int]]:
     return {tier: dict(document[tier]) for tier in TIERS}
 
 
+def floor_problems(counts: Counter[tuple[str, str]]) -> list[str]:
+    """Non-lifecycle floors that the repository no longer holds exactly."""
+
+    found: list[str] = []
+    for path, (floor, reason) in sorted(NON_LIFECYCLE_STATE_SITES.items()):
+        if counts.get((LEGACY_STATE, path), 0) < floor:
+            found.append(
+                f"{path}: fewer than the {floor} non-lifecycle legacy-state site(s) "
+                f"({reason}) recorded in NON_LIFECYCLE_STATE_SITES; lower the floor"
+            )
+    return found
+
+
 def problems(
     counts: Counter[tuple[str, str]], baseline: dict[str, dict[str, int]]
 ) -> list[str]:
@@ -226,7 +356,17 @@ def problems(
     found: list[str] = []
     for tier in TIERS:
         recorded = baseline[tier]
-        current = {path: n for (t, path), n in counts.items() if t == tier}
+        current = {
+            path: n
+            - (
+                NON_LIFECYCLE_STATE_SITES[path][0]
+                if tier == LEGACY_STATE and path in NON_LIFECYCLE_STATE_SITES
+                else 0
+            )
+            for (t, path), n in counts.items()
+            if t == tier
+        }
+        current = {path: n for path, n in current.items() if n > 0}
         for path in sorted(current.keys() | recorded.keys()):
             now, before = current.get(path, 0), recorded.get(path, 0)
             if now > before:
@@ -253,7 +393,9 @@ def lowered_baseline(
         updated[tier] = {}
         for path, before in baseline[tier].items():
             now = counts.get((tier, path), 0)
-            if now:
+            if tier == LEGACY_STATE:
+                now -= NON_LIFECYCLE_STATE_SITES.get(path, (0, ""))[0]
+            if now > 0:
                 updated[tier][path] = min(now, before)
     return updated
 
@@ -280,9 +422,10 @@ def main(argv: list[str]) -> int:
         for (tier, path), n in sorted(counts.items()):
             print(f"{tier}\t{n}\t{path}")
         return 0
-    for line in problems(counts, load_baseline()):
+    found = floor_problems(counts) + problems(counts, load_baseline())
+    for line in found:
         print(line)
-    return 1 if problems(counts, load_baseline()) else 0
+    return 1 if found else 0
 
 
 if __name__ == "__main__":

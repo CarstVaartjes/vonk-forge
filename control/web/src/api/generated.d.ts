@@ -4094,14 +4094,16 @@ export interface components {
         };
         /**
          * LifecycleState
-         * @description The eight lifecycle states.
+         * @description The nine lifecycle states: the one vocabulary a stored ``state`` speaks.
          *
-         *     ``waiting``, ``partial``, ``cancelling`` and ``expired`` of the legacy kinds
-         *     map onto these: waiting and partial work is ``backoff`` or ``observing``, a
-         *     cancelling row is a non-terminal row with ``cancel_requested_at`` set.
+         *     ``superseded`` is a definite, non-failed end: a newer request replaced the
+         *     work, so nothing is left for anyone to do.  The legacy spellings
+         *     (``waiting``, ``partial``, ``cancelling``, ``expired``,
+         *     ``waiting-for-operator``) are *aliases*: see :data:`STATE_ALIASES`, the one
+         *     table that says what each of them means, per subject.
          * @enum {string}
          */
-        LifecycleState: "queued" | "running" | "observing" | "backoff" | "succeeded" | "failed" | "cancelled" | "needs-operator";
+        LifecycleState: "queued" | "running" | "observing" | "backoff" | "succeeded" | "failed" | "cancelled" | "superseded" | "needs-operator";
         /**
          * LifecycleSubject
          * @description The persisted models whose ``state`` the lifecycle core owns.
@@ -4131,6 +4133,7 @@ export interface components {
             outcome_kind: components["schemas"]["OutcomeKind"];
             security_refusal_reason: components["schemas"]["SecurityRefusalReason"];
             state: components["schemas"]["LifecycleState"];
+            state_alias: components["schemas"]["StateAlias"];
             state_write_kind: components["schemas"]["StateWriteKind"];
             stop_outcome: components["schemas"]["StopOutcome"];
             wait_reason: components["schemas"]["WaitReason"];
@@ -7741,6 +7744,17 @@ export interface components {
             /** Role */
             role: string;
         };
+        /**
+         * StateAlias
+         * @description The retired spellings of a stored lifecycle state.
+         *
+         *     They are accepted as input for one release (API filters, CLI arguments) and
+         *     adopted when an old row is read; nothing writes them any more.  This is the
+         *     only place the words may be spelled: the vocabulary ratchet allows them
+         *     nowhere else.
+         * @enum {string}
+         */
+        StateAlias: "waiting-for-operator" | "cancelling" | "waiting" | "partial" | "expired";
         /**
          * StateWriteKind
          * @description The shapes of a lifecycle state write the writers ratchet recognises.

@@ -3558,7 +3558,7 @@
       "type": "string"
     },
     "LifecycleState": {
-      "description": "The eight lifecycle states.\n\n``waiting``, ``partial``, ``cancelling`` and ``expired`` of the legacy kinds\nmap onto these: waiting and partial work is ``backoff`` or ``observing``, a\ncancelling row is a non-terminal row with ``cancel_requested_at`` set.",
+      "description": "The nine lifecycle states: the one vocabulary a stored ``state`` speaks.\n\n``superseded`` is a definite, non-failed end: a newer request replaced the\nwork, so nothing is left for anyone to do.  The legacy spellings\n(``waiting``, ``partial``, ``cancelling``, ``expired``,\n``waiting-for-operator``) are *aliases*: see :data:`STATE_ALIASES`, the one\ntable that says what each of them means, per subject.",
       "enum": [
         "queued",
         "running",
@@ -3567,6 +3567,7 @@
         "succeeded",
         "failed",
         "cancelled",
+        "superseded",
         "needs-operator"
       ],
       "title": "LifecycleState",
@@ -3632,6 +3633,9 @@
         "state": {
           "$ref": "#/$defs/LifecycleState"
         },
+        "state_alias": {
+          "$ref": "#/$defs/StateAlias"
+        },
         "state_write_kind": {
           "$ref": "#/$defs/StateWriteKind"
         },
@@ -3657,6 +3661,7 @@
         "blocker_category",
         "wait_verdict",
         "lifecycle_subject",
+        "state_alias",
         "state_write_kind",
         "migration_step",
         "error_category",
@@ -6566,6 +6571,18 @@
       ],
       "title": "SourceBundleManifest",
       "type": "object"
+    },
+    "StateAlias": {
+      "description": "The retired spellings of a stored lifecycle state.\n\nThey are accepted as input for one release (API filters, CLI arguments) and\nadopted when an old row is read; nothing writes them any more.  This is the\nonly place the words may be spelled: the vocabulary ratchet allows them\nnowhere else.",
+      "enum": [
+        "waiting-for-operator",
+        "cancelling",
+        "waiting",
+        "partial",
+        "expired"
+      ],
+      "title": "StateAlias",
+      "type": "string"
     },
     "StateWriteKind": {
       "description": "The shapes of a lifecycle state write the writers ratchet recognises.",

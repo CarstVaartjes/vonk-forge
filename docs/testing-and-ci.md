@@ -381,7 +381,19 @@ or one of the stored state words `queued`, `running`, `succeeded`, `failed`,
 `cancelled`. `tools/vocabulary-literals-baseline.json` records what predates the
 guard per file, and a new literal, a higher count or an unlowered count fails; the
 same test requires the web app (`control/web/src`, except generated files and tests)
-to spell none and to import `vocabulary.generated.ts` instead. The Rust agent has
+to spell none and to import `vocabulary.generated.ts` instead.
+
+A third tier, `legacy_state`, keeps the retired state spellings that are ordinary
+words (`waiting`, `partial`, `cancelling`, `expired`) out of lifecycle code: a literal
+equal to one of them in a statement that also names a state (`row.state`, `state=`,
+`*_STATES`, `State.X`) counts, and `tools/vocabulary-literals-baseline.json` holds
+what remains per file, falling to zero as each kind stores the core words. Sites that
+belong to a state machine that is not a lifecycle subject (a certificate, an
+enrollment grant, an installation record) are listed with a reason in
+`NON_LIFECYCLE_STATE_SITES`. `waiting-for-operator` is already found in any context by the distinctive
+tier. Only the contract's alias table (`STATE_ALIASES`) may spell them.
+
+The Rust agent has
 the equivalent check in `rust/crates/vonk-agent/tests/protocol_literals.rs`: no
 vocabulary word in a string literal and no `json!` result body outside tests.
 

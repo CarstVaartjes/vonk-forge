@@ -2559,6 +2559,8 @@ pub enum LifecycleState {
     Failed,
     #[serde(rename = "cancelled")]
     Cancelled,
+    #[serde(rename = "superseded")]
+    Superseded,
     #[serde(rename = "needs-operator")]
     NeedsOperator,
 }
@@ -2572,6 +2574,7 @@ impl ::std::fmt::Display for LifecycleState {
             Self::Succeeded => f.write_str("succeeded"),
             Self::Failed => f.write_str("failed"),
             Self::Cancelled => f.write_str("cancelled"),
+            Self::Superseded => f.write_str("superseded"),
             Self::NeedsOperator => f.write_str("needs-operator"),
         }
     }
@@ -2587,6 +2590,7 @@ impl ::std::str::FromStr for LifecycleState {
             "succeeded" => Ok(Self::Succeeded),
             "failed" => Ok(Self::Failed),
             "cancelled" => Ok(Self::Cancelled),
+            "superseded" => Ok(Self::Superseded),
             "needs-operator" => Ok(Self::NeedsOperator),
             _ => Err("invalid value".into()),
         }
@@ -2676,6 +2680,7 @@ pub struct LifecycleVocabulary {
     pub outcome_kind: OutcomeKind,
     pub security_refusal_reason: SecurityRefusalReason,
     pub state: LifecycleState,
+    pub state_alias: StateAlias,
     pub state_write_kind: StateWriteKind,
     pub stop_outcome: StopOutcome,
     pub wait_reason: WaitReason,
@@ -4645,6 +4650,57 @@ pub struct SourceBundleManifest {
     pub schema_version: u8,
     pub sha256: ::std::string::String,
     pub total_bytes: u32,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum StateAlias {
+    #[serde(rename = "waiting-for-operator")]
+    WaitingForOperator,
+    #[serde(rename = "cancelling")]
+    Cancelling,
+    #[serde(rename = "waiting")]
+    Waiting,
+    #[serde(rename = "partial")]
+    Partial,
+    #[serde(rename = "expired")]
+    Expired,
+}
+impl ::std::fmt::Display for StateAlias {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::WaitingForOperator => f.write_str("waiting-for-operator"),
+            Self::Cancelling => f.write_str("cancelling"),
+            Self::Waiting => f.write_str("waiting"),
+            Self::Partial => f.write_str("partial"),
+            Self::Expired => f.write_str("expired"),
+        }
+    }
+}
+impl ::std::str::FromStr for StateAlias {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "waiting-for-operator" => Ok(Self::WaitingForOperator),
+            "cancelling" => Ok(Self::Cancelling),
+            "waiting" => Ok(Self::Waiting),
+            "partial" => Ok(Self::Partial),
+            "expired" => Ok(Self::Expired),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for StateAlias {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for StateAlias {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum StateWriteKind {
@@ -8125,6 +8181,7 @@ impl LifecycleState {
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
+            Self::Superseded => "superseded",
             Self::NeedsOperator => "needs-operator",
         }
     }
@@ -8177,6 +8234,8 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleState {
             Failed,
             #[serde(rename = "cancelled")]
             Cancelled,
+            #[serde(rename = "superseded")]
+            Superseded,
             #[serde(rename = "needs-operator")]
             NeedsOperator,
         }
@@ -8190,6 +8249,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleState {
             Raw::Succeeded => Self::Succeeded,
             Raw::Failed => Self::Failed,
             Raw::Cancelled => Self::Cancelled,
+            Raw::Superseded => Self::Superseded,
             Raw::NeedsOperator => Self::NeedsOperator,
         })
     }
@@ -8285,6 +8345,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             pub outcome_kind: OutcomeKind,
             pub security_refusal_reason: SecurityRefusalReason,
             pub state: LifecycleState,
+            pub state_alias: StateAlias,
             pub state_write_kind: StateWriteKind,
             pub stop_outcome: StopOutcome,
             pub wait_reason: WaitReason,
@@ -8307,6 +8368,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             outcome_kind: raw.outcome_kind,
             security_refusal_reason: raw.security_refusal_reason,
             state: raw.state,
+            state_alias: raw.state_alias,
             state_write_kind: raw.state_write_kind,
             stop_outcome: raw.stop_outcome,
             wait_reason: raw.wait_reason,
@@ -10730,6 +10792,73 @@ impl<'de> ::serde::Deserialize<'de> for SourceBundleManifest {
             schema_version: raw.schema_version,
             sha256: raw.sha256,
             total_bytes: raw.total_bytes,
+        })
+    }
+}
+impl StateAlias {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::WaitingForOperator => "waiting-for-operator",
+            Self::Cancelling => "cancelling",
+            Self::Waiting => "waiting",
+            Self::Partial => "partial",
+            Self::Expired => "expired",
+        }
+    }
+}
+impl ::std::ops::Deref for StateAlias {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for StateAlias {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for StateAlias {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for StateAlias {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("StateAlias", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "waiting-for-operator")]
+            WaitingForOperator,
+            #[serde(rename = "cancelling")]
+            Cancelling,
+            #[serde(rename = "waiting")]
+            Waiting,
+            #[serde(rename = "partial")]
+            Partial,
+            #[serde(rename = "expired")]
+            Expired,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::WaitingForOperator => Self::WaitingForOperator,
+            Raw::Cancelling => Self::Cancelling,
+            Raw::Waiting => Self::Waiting,
+            Raw::Partial => Self::Partial,
+            Raw::Expired => Self::Expired,
         })
     }
 }

@@ -99,7 +99,7 @@ def test_generated_python_is_not_scanned(tmp_path: Path) -> None:
 def test_a_new_literal_a_raised_count_and_a_fallen_count_each_fail(
     tmp_path: Path,
 ) -> None:
-    baseline = {"distinctive": {REL: 1}, "stored_state": {}}
+    baseline = {"distinctive": {REL: 1}, "stored_state": {}, "legacy_state": {}}
 
     held = _python(tmp_path, 'X = "waiting-for-operator"\n')
     assert scan.problems(held, baseline) == []
@@ -107,7 +107,9 @@ def test_a_new_literal_a_raised_count_and_a_fallen_count_each_fail(
     raised = _python(tmp_path, 'X = "waiting-for-operator"\nY = "needs-operator"\n')
     assert "use the contract enum" in scan.problems(raised, baseline)[0]
 
-    unlisted = scan.problems(held, {"distinctive": {}, "stored_state": {}})
+    unlisted = scan.problems(
+        held, {"distinctive": {}, "stored_state": {}, "legacy_state": {}}
+    )
     assert "use the contract enum" in unlisted[0]
 
     fallen = _python(tmp_path, "X = 1\n")
@@ -115,13 +117,21 @@ def test_a_new_literal_a_raised_count_and_a_fallen_count_each_fail(
 
 
 def test_lowering_the_baseline_never_raises_a_count(tmp_path: Path) -> None:
-    baseline = {"distinctive": {REL: 3}, "stored_state": {REL: 1}}
+    baseline = {
+        "distinctive": {REL: 3},
+        "stored_state": {REL: 1},
+        "legacy_state": {},
+    }
     counts = _python(tmp_path, 'X = "waiting-for-operator"\nY = "needs-operator"\n')
     counts[("stored_state", REL)] = 5
 
     lowered = scan.lowered_baseline(counts, baseline)
 
-    assert lowered == {"distinctive": {REL: 2}, "stored_state": {REL: 1}}
+    assert lowered == {
+        "distinctive": {REL: 2},
+        "stored_state": {REL: 1},
+        "legacy_state": {},
+    }
 
 
 def test_typescript_sources_may_not_spell_the_words(tmp_path: Path) -> None:
@@ -146,6 +156,8 @@ def test_typescript_sources_may_not_spell_the_words(tmp_path: Path) -> None:
     assert counts == Counter({"control/web/src/pages/example.tsx": 2})
 
 
+# Parses and walks every Python module of the repository three times over.
+@pytest.mark.slow(30)
 def test_the_repository_holds_the_python_ratchet() -> None:
     assert scan.problems(scan.scan_python(), scan.load_baseline()) == []
 
@@ -166,3 +178,44 @@ def test_the_baseline_is_sorted_and_positive(tier: str) -> None:
     baseline = scan.load_baseline()[tier]
     assert list(baseline) == sorted(baseline)
     assert all(count > 0 for count in baseline.values())
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'if row.state == "expired":\n    pass\n',
+        'ACTIVE_STATES = ("queued", "waiting")\n',
+        'x = Job(state="cancelling")\n',
+        'ok = attempt.state in {"expired", State.FAILED}\n',
+        'm = {"partial": State.BACKOFF}\n',
+    ],
+)
+def test_a_retired_state_spelling_is_found_where_a_statement_names_a_state(
+    tmp_path: Path, source: str
+) -> None:
+    assert _python(tmp_path, source)[("legacy_state", REL)] == 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'activity = "waiting"\n',
+        'phase = "partial"\n',
+        'label = "cancelling"  # a progress word, not a stored state\n',
+        'def f(state):\n    """expired"""\n    return 1\n',
+        "def f(row):\n    row.state = 1\n    return 'waiting'\n",
+    ],
+)
+def test_the_same_words_elsewhere_are_prose(tmp_path: Path, source: str) -> None:
+    assert ("legacy_state", REL) not in _python(tmp_path, source)
+
+
+def test_only_the_alias_table_may_spell_the_retired_words(tmp_path: Path) -> None:
+    contract = "agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py"
+    assert not _python(tmp_path, 'STORED_STATE = "waiting"\n', contract)
+    assert _python(tmp_path, 'STORED_STATE = "waiting"\n')
+
+
+@pytest.mark.slow(30)
+def test_the_non_lifecycle_floors_match_the_repository() -> None:
+    assert scan.floor_problems(scan.scan_python()) == []

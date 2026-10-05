@@ -9,6 +9,7 @@ export const LifecycleState = {
   SUCCEEDED: "succeeded",
   FAILED: "failed",
   CANCELLED: "cancelled",
+  SUPERSEDED: "superseded",
   NEEDS_OPERATOR: "needs-operator",
 } as const;
 export type LifecycleState = (typeof LifecycleState)[keyof typeof LifecycleState];
@@ -100,6 +101,15 @@ export const LifecycleSubject = {
   FLEET_PROFILE_APPLICATION: "FleetProfileApplication",
 } as const;
 export type LifecycleSubject = (typeof LifecycleSubject)[keyof typeof LifecycleSubject];
+
+export const StateAlias = {
+  WAITING_FOR_OPERATOR: "waiting-for-operator",
+  CANCELLING: "cancelling",
+  WAITING: "waiting",
+  PARTIAL: "partial",
+  EXPIRED: "expired",
+} as const;
+export type StateAlias = (typeof StateAlias)[keyof typeof StateAlias];
 
 export const StateWriteKind = {
   ATTRIBUTE: "attribute",
@@ -231,6 +241,15 @@ export const FailureCode = {
   RECIPE_RECONCILIATION_DEPENDENCY_UNAVAILABLE: "recipe_reconciliation_dependency_unavailable",
 } as const;
 export type FailureCode = (typeof FailureCode)[keyof typeof FailureCode];
+
+/** What a retired state spelling means, accepted as input for one release. */
+export const STATE_INPUT_ALIASES = {
+  "waiting-for-operator": LifecycleState.NEEDS_OPERATOR,
+  "cancelling": LifecycleState.OBSERVING,
+  "waiting": LifecycleState.OBSERVING,
+  "partial": LifecycleState.BACKOFF,
+  "expired": LifecycleState.FAILED,
+} as const;
 
 /** The stored spelling of an agent result that waits for an operator. */
 export const LEGACY_WAIT_STATE = AgentResultState.WAITING_FOR_OPERATOR;
