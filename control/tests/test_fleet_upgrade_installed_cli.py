@@ -159,7 +159,7 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
             assert len(jobs) == 1 and jobs[0].id == job_id
             assert set(children) == {NODE_A, NODE_B}
             assert children[NODE_A].state == "waiting-for-operator"
-            assert children[NODE_A].retry_disposition == "retry"
-            assert children[NODE_A].retry_due_at is not None
+            assert children[NODE_A].next_action_at is not None
+            assert children[NODE_A].next_action_at is not None
             assert children[NODE_B].state == "running"
         assert peer.dropped_responses == [("POST", "/api/fleet/upgrade")]

@@ -58,6 +58,7 @@ class FakeAdapter:
     advertised: tuple[str, ...] = ()
     observed: Effect = Effect.UNKNOWN
     stop_result: StopResult = StopResult.UNCONFIRMED
+    fence_until: datetime | None = None
     calls: list[str] = field(default_factory=list)
 
     def adopt(self, stored: Lifecycle) -> Lifecycle:
@@ -65,6 +66,9 @@ class FakeAdapter:
 
     def irreversible(self, row: Lifecycle) -> bool:
         return self.is_irreversible
+
+    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+        return self.fence_until
 
     def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
         self.calls.append("execute")
@@ -321,7 +325,7 @@ def test_an_operator_chooses_among_the_advertised_actions() -> None:
     resumed = transition(waiting, OperatorAction("resume"), adapter, NOW).row
     assert resumed.state is State.QUEUED and resumed.retry_count == 0
     retired = transition(waiting, OperatorAction("retire"), adapter, NOW).row
-    assert retired.state is State.CANCELLED and retired.effect is Effect.UNKNOWN
+    assert retired.state is State.FAILED and retired.effect is Effect.UNKNOWN
     stopped = transition(waiting, OperatorAction("stop"), adapter, NOW)
     assert stopped.row.cancel_requested and stopped.commands == (Stop(),)
 
@@ -379,8 +383,11 @@ class MemoryStore:
         ]
         return sorted(due, key=lambda row: row.next_action_at or now)[:limit]
 
-    def save(self, row: Lifecycle) -> None:
-        self.rows[row.id] = row
+    def save(self, before: Lifecycle, after: Lifecycle) -> bool:
+        if self.rows[before.id] != before:
+            return False
+        self.rows[after.id] = after
+        return True
 
     def record_residue(self, row: Lifecycle, reason: str) -> None:
         self.residues.append((row.id, reason))
@@ -427,18 +434,20 @@ def test_a_cancel_reaches_a_terminal_state_within_the_stop_budget(
         store, {"fake": adapter}, clock=lambda: clock[0], enabled=True
     )
     first = transition(row, CancelRequested(request_key="k"), adapter, NOW)
-    store.save(first.row)
+    store.save(row, first.row)
     seen = [first.row.state]
     for command in first.commands:
         if isinstance(command, Stop):
             confirmed = stop_result is StopResult.CONFIRMED
+            before = store.rows[row.id]
             store.save(
+                before,
                 transition(
-                    store.rows[row.id],
+                    before,
                     Observed(Effect.STOPPED if confirmed else Effect.UNKNOWN),
                     adapter,
                     NOW,
-                ).row
+                ).row,
             )
             seen.append(store.rows[row.id].state)
     ticks = 0
@@ -541,3 +550,32 @@ def test_an_executor_failure_is_an_unknown_not_an_exception() -> None:
     Reconciler(store, {"fake": adapter}, clock=lambda: LATER, enabled=True).reconcile()
     assert store.rows[row.id].state is State.OBSERVING
     assert Execute() == Execute()
+
+
+def test_a_definite_report_ends_the_row_even_when_a_cancel_is_pending() -> None:
+    """A build whose completion raced its cancel must show its real outcome."""
+
+    adapter = FakeAdapter(is_irreversible=True, advertised=("stop",))
+    running = _row(state=State.RUNNING, cancel_requested_at=NOW, cancel_request_key="k")
+    for outcome, expected in (
+        (Outcome.OK, State.SUCCEEDED),
+        (Outcome.CANCELLED, State.CANCELLED),
+        (Outcome.FAILED, State.FAILED),
+    ):
+        decision = transition(running, Reported(outcome, fence="f1"), adapter, NOW)
+        assert decision.row.state is expected and decision.commands == ()
+        assert decision.row.cancel_requested_at == NOW
+    uncertain = transition(
+        running, Reported(Outcome.UNCERTAIN, fence="f1"), adapter, NOW
+    )
+    assert uncertain.row.state is State.OBSERVING  # the cancel path, not a retry
+
+
+def test_a_retry_never_starts_before_the_kinds_safety_fence() -> None:
+    fence = NOW + timedelta(seconds=960)
+    adapter = FakeAdapter(is_irreversible=False, fence_until=fence)
+    running = _row(state=State.RUNNING, lease_deadline=NOW - timedelta(seconds=1))
+    decision = transition(running, LeaseLapsed(), adapter, NOW)
+    assert decision.row.state is State.BACKOFF
+    assert decision.row.next_action_at is not None
+    assert decision.row.next_action_at >= fence

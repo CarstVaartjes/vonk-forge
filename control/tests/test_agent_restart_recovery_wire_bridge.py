@@ -430,8 +430,8 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         jobs.record_result(interrupted)
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.retry_due_at is not None
-        due = stored.retry_due_at
+        assert stored is not None and stored.next_action_at is not None
+        due = stored.next_action_at
     clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
     second = claim_agent(
         jobs,

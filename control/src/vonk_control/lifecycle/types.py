@@ -48,10 +48,17 @@ class Effect(StrEnum):
 
 
 class Outcome(StrEnum):
-    """What an executor reported."""
+    """What an executor reported.
+
+    ``ok``, ``cancelled`` and a ``failed`` that is not ``retryable`` are
+    *definite*: the executor says what happened, and the row ends there.
+    ``uncertain`` (and a retryable failure) says the effect may or may not have
+    happened, which rules 1 and 2 resolve.
+    """
 
     OK = "ok"
     FAILED = "failed"
+    CANCELLED = "cancelled"
     UNCERTAIN = "uncertain"
 
 
@@ -132,11 +139,15 @@ class Reported:
     retryable: bool = False
     effect: Effect | None = None
     reason: str | None = None
+    #: A dependency's ``Retry-After``: the retry may not start before it.
+    retry_after: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class LeaseLapsed:
     """The running attempt can no longer report."""
+
+    reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +171,7 @@ class OperatorAction:
     """A person chose an advertised action (``resume``, ``retire``, ``stop``)."""
 
     name: str
+    reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

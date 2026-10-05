@@ -170,6 +170,71 @@ def test_dual_node_active_attempts_share_the_same_lock_order(
             assert session.get(Job, parent.id).state == "succeeded"
 
 
+def _lapse_both_orders(sessions, services, clock):
+    """Claim one order on each node, then let both leases lapse."""
+
+    claims = [_claim(service, index) for index, service in enumerate(services)]
+    assert all(claim is not None for claim in claims)
+    clock.now += timedelta(seconds=45)
+    return claims
+
+
+def test_dual_node_reconcile_passes_share_the_claim_lock_order(queue, postgres_engine):
+    """The reconciler locks target nodes, then parents, then the order, as a claim
+    does, so two passes (two workers) cannot deadlock on a two-node job."""
+
+    sessions, parent, services, _ = queue
+    clock = _Clock(NOW)
+    for service in services:
+        service._clock = clock
+    _lapse_both_orders(sessions, services, clock)
+
+    _concurrent_node_lock_calls(
+        postgres_engine,
+        [
+            lambda: services[0].reconcile_orders(),
+            lambda: services[1].reconcile_orders(),
+        ],
+    )
+
+    with sessions() as session:
+        rows = list(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == parent.id)
+            )
+        )
+        assert {row.state for row in rows} == {"waiting-for-operator"}
+        assert all(row.next_action_at is not None for row in rows)  # each retried
+
+
+def test_a_reconcile_pass_and_a_claim_on_the_other_node_do_not_deadlock(
+    queue, postgres_engine
+):
+    _, _, services, _ = queue
+    clock = _Clock(NOW)
+    for service in services:
+        service._clock = clock
+    first = _claim(services[0], 0)
+    assert first is not None
+    clock.now += timedelta(seconds=45)  # node 0's lease lapsed; node 1 has not claimed
+
+    results = _concurrent_node_lock_calls(
+        postgres_engine,
+        [lambda: services[0].reconcile_orders(), lambda: _claim(services[1], 1)],
+    )
+
+    assert results[0] is True
+    assert results[1] is not None  # the claim on the other node still succeeds
+
+
+class _Clock:
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
 def _before_first_node_lock(engine, mutation):
     def before(_conn, _cursor, statement, _parameters, _context, _many):
         if (

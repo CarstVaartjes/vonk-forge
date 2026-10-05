@@ -76,6 +76,8 @@ from .install_admission import (
 from .install_admission import (
     require_admissible as require_install_admissible,
 )
+from .lifecycle import CancelRequested, Outcome
+from .lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
 from .logging import redact_text
 from .models import (
     AgentNode,
@@ -2275,11 +2277,15 @@ class RecipeOperationService:
                 job.state = "cancelled"
                 job.status_reason = "superseded before agent issuance"
                 job.updated_at = now
+                adapter = AgentOperationAdapter(session)
                 for child in children:
-                    child.state = "cancelled"
-                    child.status_reason = "superseded before agent issuance"
-                    child.retry_due_at = None
-                    child.updated_at = now
+                    adapter.settle(
+                        child,
+                        None,
+                        job,
+                        CancelRequested(reason="superseded before agent issuance"),
+                        now,
+                    )
                 retired = True
         return retired
 
@@ -3910,8 +3916,13 @@ class RecipeOperationService:
             )
             if operation is None:
                 raise RecipeOperationConflict("node is not part of operation group")
-            operation.state = "succeeded" if succeeded else "failed"
-            operation.updated_at = now
+            AgentOperationAdapter(session).record_outcome(
+                operation,
+                None,
+                job,
+                Outcome.OK if succeeded else Outcome.FAILED,
+                now,
+            )
             cleanup_queued = self._project_node_result(
                 session,
                 job,
@@ -4002,8 +4013,7 @@ class RecipeOperationService:
         if (
             state == "failed"
             and operation.state == "waiting-for-operator"
-            and operation.retry_disposition == "retry"
-            and operation.retry_disposition_attempt == operation.current_attempt
+            and retry_scheduled(operation) is not None
             and isinstance(result, Mapping)
         ):
             parsed = validate_result_for_operation(operation.kind, result, state=state)
@@ -4158,8 +4168,9 @@ class RecipeOperationService:
                     raise RecipeOperationConflict(
                         "recipe build cleanup authority changed"
                     )
-                original.state = "cancelled"
-                original.updated_at = now
+                AgentOperationAdapter(session).record_outcome(
+                    original, None, original_job, Outcome.CANCELLED, now
+                )
                 original_job.state = "cancelled"
                 original_job.result = cancellation.model_copy(
                     update={"cancelled": True}
@@ -4176,7 +4187,9 @@ class RecipeOperationService:
                 # attempt's outcome, but only its own cancellation governs it.
                 # A later attempt may already own this build and its capacity.
                 if cancellation.cancelled is True:
-                    operation.state = "cancelled"
+                    AgentOperationAdapter(session).record_outcome(
+                        operation, None, job, Outcome.CANCELLED, now
+                    )
                     job.state = "cancelled"
                 else:
                     job.state = "waiting-for-operator"
@@ -4404,8 +4417,9 @@ class RecipeOperationService:
                 recovery_error = error
                 for child in children:
                     if child.state not in _TERMINAL_JOB_STATES:
-                        child.state = "failed"
-                        child.updated_at = now
+                        AgentOperationAdapter(session).record_outcome(
+                            child, None, job, Outcome.FAILED, now
+                        )
             phase_index = _current_phase_index(children, phases)
             if phase_index is not None:
                 phase_operations = {
@@ -4959,8 +4973,9 @@ class RecipeOperationService:
             )
             for child in children:
                 if child.state == "queued" and child.current_attempt == 0:
-                    child.state = "cancelled"
-                    child.updated_at = now
+                    AgentOperationAdapter(session).record_outcome(
+                        child, None, job, Outcome.CANCELLED, now
+                    )
             if any(
                 child.state in {"running", "waiting-for-operator"} for child in children
             ):
@@ -5410,8 +5425,9 @@ class RecipeOperationService:
             build.error = cancellation.reason
             build.updated_at = now
             if child.current_attempt == 0:
-                child.state = "cancelled"
-                child.updated_at = now
+                AgentOperationAdapter(session).record_outcome(
+                    child, None, job, Outcome.CANCELLED, now
+                )
                 job.state = "cancelled"
                 job.result = cancellation.model_copy(
                     update={"cancelled": True}
@@ -5897,12 +5913,14 @@ class RecipeOperationService:
             source_job.state = "cancelled"
             source_job.status_reason = reason
             source_job.updated_at = now
-            source_operation.state = "cancelled"
-            source_operation.status_reason = reason
-            source_operation.retry_disposition = None
-            source_operation.retry_disposition_attempt = None
-            source_operation.retry_due_at = None
-            source_operation.updated_at = now
+            AgentOperationAdapter(session).record_outcome(
+                source_operation,
+                None,
+                source_job,
+                Outcome.CANCELLED,
+                now,
+                reason=reason,
+            )
         reachable_nodes = tuple(
             session.scalars(
                 select(RunNode)
@@ -7162,9 +7180,9 @@ class RecipeOperationService:
         )
         retry_due_at = min(
             (
-                _aware(child.retry_due_at)
-                for child in waiting_children
-                if child.retry_due_at is not None
+                due
+                for due in (retry_scheduled(child) for child in waiting_children)
+                if due is not None
             ),
             default=None,
         )

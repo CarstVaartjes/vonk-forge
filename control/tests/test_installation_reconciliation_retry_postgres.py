@@ -134,11 +134,8 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
         assert stored.state == "waiting-for-operator"
         assert stored.current_attempt == fenced_attempt(sessions, first).attempt
         assert stored.workload_intent_ordinal == 1
-        assert stored.retry_disposition == "retry"
-        assert (
-            stored.retry_disposition_attempt == fenced_attempt(sessions, first).attempt
-        )
-        due = stored.retry_due_at
+        assert stored.next_action_at is not None
+        due = stored.next_action_at
         assert due is not None
         assert parent_row.payload["workload_intent_ordinal"] == 1
         first_attempt = session.scalar(

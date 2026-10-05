@@ -15,7 +15,13 @@ from .core import (
     never_executed,
     transition,
 )
-from .reconciler import LifecycleStore, Reconciler, ReconcileReport
+from .reconciler import (
+    LifecycleStore,
+    Reconciler,
+    ReconcileReport,
+    Settled,
+    settle,
+)
 from .types import (
     TERMINAL_STATES,
     CancelRequested,
@@ -66,6 +72,7 @@ __all__ = [
     "Reconciler",
     "RecordResidue",
     "Reported",
+    "Settled",
     "State",
     "Stop",
     "StopResult",
@@ -73,5 +80,6 @@ __all__ = [
     "Tick",
     "blind_retry_is_safe",
     "never_executed",
+    "settle",
     "transition",
 ]

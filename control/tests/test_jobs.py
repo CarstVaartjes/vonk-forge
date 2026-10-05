@@ -246,21 +246,15 @@ def test_exact_bounded_reconciliation_route_quota_is_accepted(service) -> None:
     assert accepted.payload == payload
 
 
-def test_matching_fence_can_heartbeat_wait_and_fail(service) -> None:
+def test_matching_fence_can_heartbeat_and_fail(service) -> None:
     jobs, _ = service
     jobs.enqueue("install", "operator", "abc", ["spk_1"], {})
     attempt = jobs.claim("worker", 10, kinds=("install",))
     assert attempt is not None
     renewed = jobs.heartbeat(attempt, 20)
     assert renewed.lease_deadline > attempt.lease_deadline
-    jobs.wait_for_operator(renewed, "confirm console fingerprint")
-    assert jobs.get(renewed.job_id).state == "waiting-for-operator"
-
-    jobs.resume(renewed.job_id)
-    retry = jobs.claim("worker", 10, kinds=("install",))
-    assert retry is not None
-    jobs.fail(retry, "bounded failure")
-    assert jobs.get(retry.job_id).state == "failed"
+    jobs.fail(renewed, "bounded failure")
+    assert jobs.get(renewed.job_id).state == "failed"
 
 
 @pytest.mark.parametrize(
@@ -290,24 +284,3 @@ def test_generic_worker_claim_skips_coordinator_owned_jobs(service, kind) -> Non
     assert stored.state == "queued"
     assert stored.current_attempt == 0
     assert stored.payload == {"immutable": "upgrade-plan"}
-
-
-def test_concurrent_operator_resume_has_one_winner(service) -> None:
-    jobs, _ = service
-    jobs.enqueue("install", "operator", "abc", ["spk_1"], {})
-    attempt = jobs.claim("worker", 10, kinds=("install",))
-    assert attempt is not None
-    jobs.wait_for_operator(attempt, "confirm console fingerprint")
-
-    def resume() -> str:
-        try:
-            jobs.resume(attempt.job_id)
-            return "won"
-        except ValueError:
-            return "conflict"
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        outcomes = list(pool.map(lambda _index: resume(), range(8)))
-
-    assert outcomes.count("won") == 1
-    assert outcomes.count("conflict") == 7

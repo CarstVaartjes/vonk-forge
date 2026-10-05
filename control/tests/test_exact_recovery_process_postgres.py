@@ -112,11 +112,11 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
         with sessions() as session:
             stored = session.get(AgentOperation, operation.id)
             assert stored is not None
-            assert stored.retry_due_at is not None, (
+            assert stored.next_action_at is not None, (
                 "current exact intent must retain an automatic retry after "
                 f"interruption {failure_number}"
             )
-            due = stored.retry_due_at.astimezone(UTC)
+            due = stored.next_action_at.astimezone(UTC)
             assert due > clock.now
             assert stored.status_reason is not None
             assert due.isoformat() in stored.status_reason

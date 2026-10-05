@@ -909,6 +909,20 @@ def verify_schema_is_current(connection: Connection) -> None:
     reconcile_schema(connection)
 
 
+def adopt_legacy_rows(connection: Connection) -> None:
+    """Move rows written before a model change onto their current encoding.
+
+    Idempotent and bounded; it runs inside the startup advisory lock, after the
+    schema is current.  Rows it misses are adopted lazily by their kind's
+    lifecycle adapter, so a gap here heals instead of stranding a row.
+    """
+    from .lifecycle.agent_operation import adopt_legacy_orders
+
+    adopted = adopt_legacy_orders(connection)
+    if adopted:
+        _LOGGER.info("Adopted %d Spark orders onto the lifecycle schedule", adopted)
+
+
 def initialize_database(
     database_url: str,
     *,
@@ -934,6 +948,7 @@ def initialize_database(
                     try:
                         with engine.begin() as schema_connection:
                             verify_schema_is_current(schema_connection)
+                            adopt_legacy_rows(schema_connection)
                     except SQLAlchemyError as error:
                         raise RuntimeError(
                             "Controller startup schema reconciliation failed and the "

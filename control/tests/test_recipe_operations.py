@@ -881,9 +881,7 @@ def test_restart_interrupted_install_result_keeps_lifecycle_pending_until_retry(
         )
         assert child is not None
         child.state = "waiting-for-operator"
-        child.retry_disposition = "retry"
-        child.retry_disposition_attempt = child.current_attempt
-        child.retry_due_at = NOW + timedelta(seconds=2)
+        child.next_action_at = NOW + timedelta(seconds=2)
         child.status_reason = "exact lifecycle retry scheduled"
         service.consume_agent_result(
             session,
@@ -974,9 +972,7 @@ def test_retry_scheduled_start_observation_failure_keeps_the_run_pending(
         )
         assert child is not None
         child.state = "waiting-for-operator"
-        child.retry_disposition = "retry"
-        child.retry_disposition_attempt = child.current_attempt
-        child.retry_due_at = NOW + timedelta(seconds=2)
+        child.next_action_at = NOW + timedelta(seconds=2)
         service.consume_agent_result(
             session,
             child,
@@ -1876,8 +1872,7 @@ def test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting
     with sessions.begin() as session:
         stored = _required(session.get(AgentOperation, target.id))
         stored.state = "waiting-for-operator"
-        stored.retry_disposition = "retry"
-        stored.retry_disposition_attempt = stored.current_attempt
+        stored.next_action_at = now[0]
         parent = _required(session.get(Job, start.id))
         parent.result = {
             **(parent.result or {}),

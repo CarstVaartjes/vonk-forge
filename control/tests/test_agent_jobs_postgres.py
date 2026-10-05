@@ -27,7 +27,7 @@ from vonk_control.operation_api import durable_operation_services
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.run_admission import RunAdmissionBusy
 
-from .agent_fences import fenced_attempt, fenced_operation
+from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import exercise_upgrade_reconnect
@@ -138,7 +138,9 @@ def test_postgres_resume_transition_has_one_concurrent_winner(
     operation = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     original = claim_agent(jobs, NODE_A, "serial-a")
     assert original is not None
-    jobs.wait_for_operator(original.fence, "operator must inspect the stopped effect")
+    park_for_operator(
+        sessions, jobs, original.fence, "operator must inspect the stopped effect"
+    )
     first = durable_operation_services(
         sessions,
         tmp_path / "routes-a",
@@ -285,7 +287,7 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
         parent_row = session.get(Job, parent_job.id)
         assert stored is not None and parent_row is not None
         assert stored.state == "waiting-for-operator"
-        due = stored.retry_due_at
+        due = stored.next_action_at
         if not auto_retry:
             assert due is None
             assert parent_row.state == "waiting-for-operator"
@@ -324,18 +326,18 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
                 parent_row = session.get(Job, parent_job.id)
                 assert stored is not None and parent_row is not None
                 assert stored.current_attempt == attempt_number
-                assert stored.retry_due_at is not None
+                assert stored.next_action_at is not None
                 # A transfer restarting without progress is throttled to a
                 # slower, still bounded rate; every other kind keeps the
                 # ordinary short backoff.
                 ceiling = 750 if kind == "artifact.distribution.v1" else 60
                 assert (
                     clock.now
-                    < stored.retry_due_at
+                    < stored.next_action_at
                     <= clock.now + timedelta(seconds=ceiling)
                 )
                 assert parent_row.state == "queued"
-                due = stored.retry_due_at
+                due = stored.next_action_at
             clock.now = due.replace(tzinfo=UTC)
             second = claim_agent(
                 jobs,
@@ -510,10 +512,9 @@ def test_postgres_expired_mutating_operation_schedules_bounded_exact_retry(
         gated = session.get(AgentOperation, operation.id)
         assert gated is not None
         assert gated.state == "waiting-for-operator"
-        assert gated.retry_disposition == "retry"
-        assert gated.retry_disposition_attempt == 1
-        assert gated.retry_due_at is not None
-        due = gated.retry_due_at
+        assert gated.next_action_at is not None
+        assert gated.next_action_at is not None
+        due = gated.next_action_at
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id,
@@ -568,10 +569,9 @@ def test_postgres_new_stop_supersedes_parked_old_retry_without_starvation(
         old_job = session.get(Job, old_parent.id)
         node = session.get(AgentNode, NODE_A)
         assert old_row is not None and old_job is not None and node is not None
-        old_row.retry_due_at = clock.now
+        old_row.next_action_at = clock.now
         if exhausted:
-            old_row.retry_disposition = None
-            old_row.retry_disposition_attempt = None
+            old_row.next_action_at = None
             old_job.state = "waiting-for-operator"
         node.workload_intent_ordinal = 2
     new_parent = parent(sessions, clock)
@@ -590,7 +590,7 @@ def test_postgres_new_stop_supersedes_parked_old_retry_without_starvation(
         old_row = session.get(AgentOperation, old.id)
         old_job = session.get(Job, old_parent.id)
         assert old_row is not None and old_job is not None
-        assert old_row.retry_disposition is None and old_row.retry_due_at is None
+        assert old_row.next_action_at is None and old_row.next_action_at is None
         assert (
             isinstance(old_job.result, dict)
             and old_job.result.get("cancel_requested") is True
@@ -1061,9 +1061,7 @@ def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(ser
         parked = session.get(AgentOperation, operation.id)
         assert parked is not None
         parked.current_attempt = 5
-        parked.retry_disposition = None
-        parked.retry_disposition_attempt = None
-        parked.retry_due_at = None
+        parked.next_action_at = None
         previous = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.fence == original.fence
@@ -1092,9 +1090,9 @@ def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(ser
         assert list(pool.map(claim_from, services)) == [None, None]
     with sessions() as session:
         parked = session.get(AgentOperation, operation.id)
-        assert parked is not None and parked.retry_due_at is not None
+        assert parked is not None and parked.next_action_at is not None
         assert parked.current_attempt == 5
-        due = parked.retry_due_at
+        due = parked.next_action_at
     clock.now = due
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(claim_from, services))
