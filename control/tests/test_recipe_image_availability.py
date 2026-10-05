@@ -1900,7 +1900,7 @@ def test_failure_without_step_keeps_structured_retry_fields(tmp_path: Path) -> N
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _build_runtime()),
         builder=builder,
-        clock=lambda: datetime.now(UTC),
+        clock=lambda: datetime(2026, 9, 6, 12, tzinfo=UTC),
     )
     queued = service.start("revision-no-step", actor="operator", request_id="n" * 36)
     assert service.run_pending() == 1
@@ -2986,7 +2986,8 @@ def test_accepted_cancellation_is_idempotent_and_prevents_queued_dispatch(
         request_id=cancel_key,
         reason="stop queued preparation",
     )
-    assert accepted.state == "cancelling"
+    # Rule 4: a preparation that never ran and holds nothing ends at once.
+    assert accepted.state == "cancelled"
     assert accepted.cancellation is not None
     replay = service.cancel(
         operation.id,
@@ -3508,7 +3509,9 @@ def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
         assert waiting.failure is not None and waiting.failure["retryable"] is True
         delays.append(waiting.failure["retry_after_seconds"])
         now[0] += timedelta(hours=1)
-    assert delays == sorted(delays)
+    # The core's one bounded, jittered clock: it grows, never past its cap.
+    assert min(delays) >= 1 and max(delays) <= 90
+    assert delays[-1] > delays[0]
     assert max(delays) <= 900
     assert service.run_pending() == 1
     assert service.get(accepted.id).state == "succeeded"

@@ -104,9 +104,12 @@ class CommandOutcome:
             context = "preview"
         elif getattr(args, "follow", False):
             context = "await"
-        elif getattr(args, "model_action", None) == "cancel" and operation_state(
-            result
-        ) in {"cancelling", "cancelled"}:
+        elif "cancel" in {
+            getattr(args, "model_action", None),
+            getattr(args, "recipe_action", None),
+        } and operation_state(result) in {"cancelling", "cancelled"}:
+            # An accepted cancel succeeded whether it is still being driven or
+            # already ended (work that never ran is cancelled at once).
             context = "read"
         observation = getattr(args, "observation", None)
         return cls(

@@ -73,6 +73,9 @@ from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
 from .content_identity import ImageContent, same_image
 from .failure_classification import is_redownload, is_security_failure
+from .lifecycle.core import STOP_BUDGET
+from .lifecycle.image_availability import ImageAvailabilityAdapter
+from .lifecycle.types import State
 from .model_cache import (
     ModelCacheConflict,
     ModelCacheError,
@@ -175,7 +178,6 @@ _TERMINAL_FAILURE_CODES = frozenset(
         "runtime_image.source_mismatch",
     }
 )
-_MAX_RETRY_SECONDS = 900
 
 
 def _removal_retry_is_due(
@@ -742,6 +744,7 @@ class RecipeImageAvailabilityService:
         self._transport = transport
         self._builder = builder
         self._clock = clock
+        self._lifecycle = ImageAvailabilityAdapter(clock=clock)
         self._model_cache = model_cache
         self._max_parallel = max_parallel
         self._builder_admission = builder_admission
@@ -1892,11 +1895,10 @@ class RecipeImageAvailabilityService:
                     )
                 now = self._clock()
                 now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-                operation = Job(
+                operation = self._lifecycle.new_job(
                     id=operation_id,
                     request_id=request_id,
                     kind=REMOVE_OPERATION_KIND,
-                    state="queued",
                     actor=actor,
                     authority_revision=revision_id,
                     targets=[],
@@ -2154,9 +2156,7 @@ class RecipeImageAvailabilityService:
             )
             updated_owner = owner.model_copy(update={"checkpoint": updated_checkpoint})
             operation.payload = updated_owner.model_dump(mode="json")
-            operation.state = "running"
-            operation.status_reason = None
-            operation.updated_at = now
+            self._lifecycle.advance_removal(operation, now)
             return pending_bytes
 
     def _complete_recipe_image_removal(
@@ -2209,9 +2209,7 @@ class RecipeImageAvailabilityService:
             )
             updated_owner = owner.model_copy(update={"checkpoint": updated_checkpoint})
             operation.payload = updated_owner.model_dump(mode="json")
-            operation.state = "running"
-            operation.status_reason = None
-            operation.updated_at = now
+            self._lifecycle.advance_removal(operation, now)
             return True
 
     def _advance_recipe_model_child(
@@ -2365,9 +2363,7 @@ class RecipeImageAvailabilityService:
             )
             updated_owner = owner.model_copy(update={"checkpoint": updated_checkpoint})
             operation.payload = updated_owner.model_dump(mode="json")
-            operation.state = "running"
-            operation.status_reason = None
-            operation.updated_at = now
+            self._lifecycle.advance_removal(operation, now)
             return True
 
     def _record_recipe_removal_failure(
@@ -2402,11 +2398,19 @@ class RecipeImageAvailabilityService:
                 delay: int | None = None
                 if retryable:
                     retry_attempts += 1
-                    delay = min(
-                        60,
-                        max(1, retry_after_seconds, 2 ** min(retry_attempts, 6)),
+                    # The core's bounded backoff decides when; the owner's
+                    # delay is only the floor (one retry clock).
+                    ended = self._lifecycle.fail(
+                        operation,
+                        now,
+                        retryable=True,
+                        reason="recipe removal will be retried",
+                        retry_after=now + timedelta(seconds=retry_after_seconds),
+                        count=retry_attempts - 1,
                     )
-                    retry_time = _iso(now + timedelta(seconds=delay))
+                    due = ended.next_action_at or now
+                    delay = max(0, int((due - now).total_seconds() + 0.999))
+                    retry_time = _iso(due)
                 safe = sanitize_failure_evidence({"code": code, "detail": detail})
                 failure = read_stored_model(
                     AvailabilityOperationFailure,
@@ -2425,9 +2429,15 @@ class RecipeImageAvailabilityService:
                 operation.payload = owner.model_copy(
                     update={"checkpoint": updated_checkpoint}
                 ).model_dump(mode="json")
-                operation.state = "partial" if retryable else "failed"
+                if not retryable:
+                    self._lifecycle.fail(
+                        operation,
+                        now,
+                        retryable=False,
+                        reason=failure.detail,
+                        count=retry_attempts,
+                    )
                 operation.status_reason = failure.detail
-                operation.updated_at = now
                 return True
         except DBAPIError as error:
             translated = retryable_artifact_database_error(error)
@@ -2522,9 +2532,7 @@ class RecipeImageAvailabilityService:
                     next_actions=[],
                 )
                 operation.result = result.model_dump(mode="json")
-                operation.state = "succeeded"
-                operation.status_reason = None
-                operation.updated_at = now
+                self._lifecycle.succeed(operation, now)
                 updated_owner = owner.model_copy(
                     update={
                         "checkpoint": checkpoint.model_copy(update={"failure": None})
@@ -2711,9 +2719,10 @@ class RecipeImageAvailabilityService:
                 mode="json", exclude_none=True
             )
             job.payload = payload
-        job.state = "cancelling"
-        job.status_reason = normalized_reason
-        job.updated_at = now
+        # Rule 4 through the core: work that never ran and holds nothing ends
+        # ``cancelled`` at once; anything else is ``cancelling`` until the
+        # reconcile pass has released it (or its budget is spent).
+        self._lifecycle.request_cancel(job, cancellation_id, normalized_reason, now)
         return cancellation
 
     def _stored_cancellation(
@@ -3120,6 +3129,38 @@ class RecipeImageAvailabilityService:
             raise
 
     def _reconcile_availability_cancellation(self, operation_id: str) -> bool:
+        changed = self._reconcile_cancellation_pass(operation_id)
+        return self._end_spent_cancellation(operation_id) or changed
+
+    def _end_spent_cancellation(self, operation_id: str) -> bool:
+        """Rule 4: a cancel whose budget is spent ends ``cancelled``, effect unknown.
+
+        Whatever is still outstanding (a lease, a child that does not stop) keeps
+        its own lifecycle; the claim is fenced by the ended state.
+        """
+
+        now = self._clock()
+        try:
+            with self._sessions.begin() as session:
+                current = session.scalar(
+                    select(Job)
+                    .where(Job.id == operation_id, Job.kind == OPERATION_KIND)
+                    .with_for_update(nowait=True)
+                    .execution_options(populate_existing=True)
+                )
+                if current is None or current.state != "cancelling":
+                    return False
+                row = self._lifecycle.lifecycle(current, now)
+                if row.observe_count < STOP_BUDGET:
+                    return False
+                ended = self._lifecycle.settle_cancel(current, now, outstanding=True)
+                return ended.terminal
+        except DBAPIError as error:
+            if getattr(error.orig, "sqlstate", None) == "55P03":
+                return False
+            raise
+
+    def _reconcile_cancellation_pass(self, operation_id: str) -> bool:
         with self._sessions() as session:
             operation = session.get(Job, operation_id)
             if (
@@ -3206,9 +3247,8 @@ class RecipeImageAvailabilityService:
                 or current_payload.get("removal_fence") is not None
             ):
                 return child_changed
-            current.state = "cancelled"
+            self._lifecycle.settle_cancel(current, now, outstanding=False)
             current.status_reason = cancellation.reason
-            current.updated_at = now
             return True
 
     def claim_update(self, owner: str) -> RecipeUpdateClaim | None:
@@ -3529,11 +3569,10 @@ class RecipeImageAvailabilityService:
                     ) from error
                 self._lock_build_consumer(session, payload)
                 now = self._clock()
-                operation = Job(
+                operation = self._lifecycle.new_job(
                     id=str(uuid.uuid4()),
                     request_id=request_id,
                     kind=OPERATION_KIND,
-                    state="queued",
                     actor=actor,
                     authority_revision=recipe_revision_id,
                     targets=[recipe_revision_id],
@@ -4014,11 +4053,10 @@ class RecipeImageAvailabilityService:
             encoded = json.dumps(
                 payload, sort_keys=True, separators=(",", ":")
             ).encode()
-            operation = Job(
+            operation = self._lifecycle.new_job(
                 id=str(uuid.uuid4()),
                 request_id=request_id,
                 kind=OPERATION_KIND,
-                state="queued",
                 actor=actor,
                 authority_revision=previous_authority,
                 targets=previous_targets,
@@ -4139,9 +4177,12 @@ class RecipeImageAvailabilityService:
                                 continue
                         except ValueError:
                             pass
-                operation.state = "running"
-                operation.current_attempt = int(operation.current_attempt) + 1
-                operation.updated_at = now
+                self._lifecycle.claim(
+                    operation,
+                    owner_id,
+                    now + timedelta(seconds=self._claim_lease_seconds),
+                    now,
+                )
                 operation.payload = dict(payload) | {
                     "claim_owner": owner_id,
                     "claim_until": lease_until,
@@ -4278,9 +4319,7 @@ class RecipeImageAvailabilityService:
         }
         operation.payload = updated
         operation.result = None
-        operation.state = "cancelled"
-        operation.status_reason = detail[:512]
-        operation.updated_at = now
+        self._lifecycle.supersede(operation, detail[:512], now)
         return True
 
     def _cancel_older_preparations(
@@ -4644,14 +4683,12 @@ class RecipeImageAvailabilityService:
             }
             with self._removal_lock, self._sessions.begin() as session:
                 operation = self._require_claim(session, claim)
-                operation.state = "succeeded"
                 operation.result = result
-                operation.updated_at = self._clock()
+                self._lifecycle.succeed(operation, self._clock())
                 completed_payload = dict(operation.payload)
                 completed_payload.pop("failure", None)
                 completed_payload.pop("retry_after_at", None)
                 completed_payload.pop("blockers", None)
-                operation.status_reason = None
                 operation.payload = completed_payload | {
                     "stage": "available",
                     "claim_owner": None,
@@ -4839,13 +4876,14 @@ class RecipeImageAvailabilityService:
         with self._sessions.begin() as session:
             operation = self._require_claim(session, claim)
             now = self._clock()
-            operation.state = "partial"
-            operation.updated_at = now
             payload = dict(operation.payload) | {
                 "claim_owner": None,
                 "claim_until": None,
-                "retry_after_at": _iso(now + timedelta(seconds=1)),
             }
+            # A dependency wait, not a failure: the core's first backoff step.
+            self._lifecycle.defer(
+                operation, now, now + timedelta(seconds=1), payload=payload
+            )
             self._record_blockers(
                 operation,
                 payload,
@@ -5252,16 +5290,42 @@ class RecipeImageAvailabilityService:
             retry = dict(retry) if isinstance(retry, Mapping) else {}
             automatic_attempts = int(retry.get("automatic_attempts", 0))
             dependency_wait = str(code) in _DEPENDENCY_WAIT_CODES
-            if retryable and retry_after is None:
-                retry_after = (
-                    5
-                    if dependency_wait
-                    else min(_MAX_RETRY_SECONDS, 2 ** min(automatic_attempts, 10))
-                )
             bounded = retryable
             retry["automatic_attempts"] = automatic_attempts + int(not dependency_wait)
             now = self._clock()
             now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+            # The core decides the retry (rule 1) on its one bounded, jittered
+            # clock; the error's own delay (``Retry-After``) is only the floor.
+            floor = (
+                now + timedelta(seconds=retry_after)
+                if retry_after is not None
+                else None
+            )
+            if isinstance(preserved_retry_time, str):
+                try:
+                    preserved = datetime.fromisoformat(preserved_retry_time)
+                except ValueError:
+                    preserved = None
+                if preserved is not None:
+                    preserved = (
+                        preserved
+                        if preserved.tzinfo is not None
+                        else preserved.replace(tzinfo=UTC)
+                    )
+                    floor = preserved if floor is None else max(floor, preserved)
+            decided = self._lifecycle.plan_failure(
+                operation,
+                now,
+                retryable=retryable,
+                retry_after=floor,
+                count=automatic_attempts,
+            )
+            if decided.state is State.BACKOFF and decided.next_action_at is not None:
+                retry_after = max(
+                    0, int((decided.next_action_at - now).total_seconds() + 0.999)
+                )
+                preserved_retry_time = _iso(decided.next_action_at)
+            # A definite end keeps whatever the error itself stated.
             required_bytes = getattr(error, "required_bytes", None)
             free_bytes = getattr(error, "free_bytes", None)
             shortfall_bytes = getattr(error, "shortfall_bytes", None)
@@ -5333,30 +5397,13 @@ class RecipeImageAvailabilityService:
                 # The failed effect is settled; a later execution claim may
                 # create a new child. Observation waits retain the exact child.
                 payload.pop("build_dependency", None)
-            if isinstance(preserved_retry_time, str):
-                try:
-                    parsed_retry_time = datetime.fromisoformat(preserved_retry_time)
-                except ValueError:
-                    parsed_retry_time = None
-                if parsed_retry_time is not None:
-                    payload["retry_after_at"] = _iso(parsed_retry_time)
-                elif retry_after is not None:
-                    payload["retry_after_at"] = _iso(
-                        now + timedelta(seconds=retry_after)
-                    )
-                else:
-                    payload.pop("retry_after_at", None)
-            elif retry_after is not None:
-                payload["retry_after_at"] = _iso(now + timedelta(seconds=retry_after))
-            else:
-                payload.pop("retry_after_at", None)
+            payload.pop("retry_after_at", None)
             payload["claim_owner"] = None
             payload["claim_until"] = None
+            self._lifecycle.commit(
+                operation, decided, now, reason=str(detail), payload=payload
+            )
             operation.payload = payload
-            operation.state = "queued" if bounded else "failed"
-            operation.status_reason = str(detail)[:1024]
-            operation.updated_at = self._clock()
-            operation.current_attempt = int(operation.current_attempt)
 
     def _view(self, operation: Job) -> RecipeImageAvailabilityView:
         payload = operation.payload if isinstance(operation.payload, Mapping) else {}
