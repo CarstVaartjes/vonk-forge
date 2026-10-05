@@ -3214,7 +3214,8 @@
           "recipe_uninstall_failed",
           "runtime_observation_unavailable",
           "installation_reconciliation_busy",
-          "recipe_reconciliation_dependency_unavailable"
+          "recipe_reconciliation_dependency_unavailable",
+          "retained_container_foreign"
         ],
         "title": "FailureCode",
         "type": "string"

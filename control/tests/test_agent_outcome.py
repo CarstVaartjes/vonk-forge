@@ -340,6 +340,35 @@ def test_a_typed_report_keeps_its_state_word_and_projects_to_the_stored_body() -
     assert outcome is typed.result
 
 
+def test_a_foreign_container_refusal_is_retried_visibly_and_never_blocks() -> None:
+    # Wrong implementation: the start failed without a kind, the Controller read
+    # an invalid contract and the load ended on a container that may be gone.
+    typed = _message(
+        "failed",
+        {
+            "kind": "failed",
+            "code": "retained_container_foreign",
+            "reason": "container vonk-x occupies the name this start needs",
+            "failure_kind": "resource-prerequisite",
+            "retry_after_seconds": 30,
+            "evidence": {
+                "stage": "retained-container",
+                "diagnostic": "container=vonk-x",
+            },
+        },
+    )
+
+    stored, outcome = stored_report("recipe.start", typed)
+
+    assert isinstance(outcome, OutcomeFailed)
+    assert outcome.code is FailureCode.RETAINED_CONTAINER_FOREIGN
+    body = dict(stored.result)
+    assert body["error_code"] == "retained_container_foreign"
+    assert body["failure_kind"] == "resource-prerequisite"
+    assert body["diagnostic"] == "container=vonk-x"
+    assert _safe_retry_failure("recipe.start", "failed", body)
+
+
 def test_an_outcome_that_contradicts_its_state_is_refused() -> None:
     with pytest.raises(AgentProtocolError):
         agent_outcome(

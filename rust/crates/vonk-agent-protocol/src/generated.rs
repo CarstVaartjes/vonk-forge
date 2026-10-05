@@ -1414,6 +1414,8 @@ pub enum FailureCode {
     InstallationReconciliationBusy,
     #[serde(rename = "recipe_reconciliation_dependency_unavailable")]
     RecipeReconciliationDependencyUnavailable,
+    #[serde(rename = "retained_container_foreign")]
+    RetainedContainerForeign,
 }
 impl ::std::fmt::Display for FailureCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -1433,6 +1435,7 @@ impl ::std::fmt::Display for FailureCode {
             Self::RecipeReconciliationDependencyUnavailable => {
                 f.write_str("recipe_reconciliation_dependency_unavailable")
             }
+            Self::RetainedContainerForeign => f.write_str("retained_container_foreign"),
         }
     }
 }
@@ -1455,6 +1458,7 @@ impl ::std::str::FromStr for FailureCode {
             "recipe_reconciliation_dependency_unavailable" => {
                 Ok(Self::RecipeReconciliationDependencyUnavailable)
             }
+            "retained_container_foreign" => Ok(Self::RetainedContainerForeign),
             _ => Err("invalid value".into()),
         }
     }
@@ -6784,6 +6788,7 @@ impl FailureCode {
             Self::RecipeReconciliationDependencyUnavailable => {
                 "recipe_reconciliation_dependency_unavailable"
             }
+            Self::RetainedContainerForeign => "retained_container_foreign",
         }
     }
 }
@@ -6847,6 +6852,8 @@ impl<'de> ::serde::Deserialize<'de> for FailureCode {
             InstallationReconciliationBusy,
             #[serde(rename = "recipe_reconciliation_dependency_unavailable")]
             RecipeReconciliationDependencyUnavailable,
+            #[serde(rename = "retained_container_foreign")]
+            RetainedContainerForeign,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -6866,6 +6873,7 @@ impl<'de> ::serde::Deserialize<'de> for FailureCode {
             Raw::RecipeReconciliationDependencyUnavailable => {
                 Self::RecipeReconciliationDependencyUnavailable
             }
+            Raw::RetainedContainerForeign => Self::RetainedContainerForeign,
         })
     }
 }

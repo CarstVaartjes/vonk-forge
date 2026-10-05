@@ -2083,7 +2083,7 @@ export interface components {
          * @description Closed codes of a definite failed outcome reported by the agent.
          * @enum {string}
          */
-        FailureCode: "operation_failed" | "operation_cancelled" | "agent_upgrade_failed" | "artifact_distribution_failed" | "recipe_build_failed" | "recipe_job_run_failed" | "recipe_install_failed" | "recipe_start_failed" | "recipe_stop_failed" | "recipe_uninstall_failed" | "runtime_observation_unavailable" | "installation_reconciliation_busy" | "recipe_reconciliation_dependency_unavailable";
+        FailureCode: "operation_failed" | "operation_cancelled" | "agent_upgrade_failed" | "artifact_distribution_failed" | "recipe_build_failed" | "recipe_job_run_failed" | "recipe_install_failed" | "recipe_start_failed" | "recipe_stop_failed" | "recipe_uninstall_failed" | "runtime_observation_unavailable" | "installation_reconciliation_busy" | "recipe_reconciliation_dependency_unavailable" | "retained_container_foreign";
         /** FailureDiagnostics */
         FailureDiagnostics: {
             /**

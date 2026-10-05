@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
-from vonk_agent_protocol import AgentFailureKind
+from vonk_agent_protocol import AgentFailureKind, FailureCode
 
 FailureKind = AgentFailureKind
 
@@ -44,6 +44,12 @@ def kind_for_agent_error(evidence: Mapping[str, object]) -> FailureKind:
             return FailureKind(raw_kind)
         except ValueError:
             return FailureKind.INVALID_CONTRACT
+    if evidence.get("error_code") == FailureCode.RETAINED_CONTAINER_FOREIGN.value:
+        # Another party's container holds the name the start needs and was left
+        # untouched: a prerequisite that clears when it is gone, never a broken
+        # contract.  The agent states the kind itself; this keeps a body that
+        # carries only the code from ending the load.
+        return FailureKind.RESOURCE_PREREQUISITE
     if (
         evidence.get("uncertain") is True
         or evidence.get("error_code") == "operation_outcome_uncertain"
