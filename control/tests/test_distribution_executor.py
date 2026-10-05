@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import DistributionObject
+from vonk_agent_protocol import DistributionObject, LifecycleState
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_control.agent_jobs import AgentJobService
@@ -956,7 +956,7 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
         artifacts=[artifact],
         interrupt_after_bytes=1024,
     )
-    assert seeded.state == "partial"
+    assert seeded.state == LifecycleState.BACKOFF
     artifact_set = seeded.artifact_set_sha256
     assert artifact_set
     manifest = service.manifest_for_artifact_set(artifact_set)

@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from . import model_cache_states
 from .agent_jobs import AgentJobService, abandon_idempotent_job_in_session
 from .bounded_json import sequence
 from .content_identity import ImageContent, same_image
@@ -1611,7 +1612,9 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
 
     @staticmethod
     def _cache_state(state: object) -> str:
-        if state == "partial":
+        if model_cache_states.operation_is_backoff(
+            state if isinstance(state, str) else None
+        ):
             return "running"
         if state == "cancelled":
             return "failed"

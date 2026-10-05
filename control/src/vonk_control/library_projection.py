@@ -24,6 +24,7 @@ from vonk_forge_contracts import (
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
+from . import model_cache_states
 from .auth import CursorCodec, CursorError
 from .catalog_queries import active_head_revision
 from .library_assessment import unassessed
@@ -488,7 +489,7 @@ class LibraryProjection:
         projected_state = {
             "queued": "queued",
             "running": "running",
-            "partial": "partial",
+            model_cache_states.BACKOFF: model_cache_states.BACKOFF,
             "succeeded": "succeeded",
             "failed": "failed",
             "cancelled": "failed",
@@ -661,7 +662,7 @@ class LibraryProjection:
             )
             controller = (
                 "preparing"
-                if state in {"queued", "running", "partial"}
+                if state in model_cache_states.LIVE
                 else ("cached" if state == "succeeded" else "failed")
             )
             for digest in digest_values:

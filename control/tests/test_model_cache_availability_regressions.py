@@ -15,6 +15,7 @@ from pathlib import Path
 import httpx2
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.bounded_json import (
     require_integer,
     require_mapping,
@@ -309,7 +310,7 @@ def test_two_services_claim_distinct_operations_and_expired_lease_is_recovered(
     with sessions() as session:
         decided = session.get(ModelCacheOperation, operation_a.id)
         assert decided is not None
-        assert decided.state == "partial"
+        assert decided.state == LifecycleState.BACKOFF
         assert decided.next_action_at is not None
     fresh._clock = lambda: datetime.now(UTC) + timedelta(minutes=5)
     assert fresh._claim_operations(limit=1, respect_backoff=True) == [
@@ -657,7 +658,7 @@ def test_close_checkpoints_active_transfer_and_fresh_service_resumes(
     release.set()
     closer.join(3)
     assert not closer.is_alive()
-    assert service.get_operation(operation.id).state == "partial"
+    assert service.get_operation(operation.id).state == LifecycleState.BACKOFF
 
     def resumed_handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, request=request, content=b"resume-me")

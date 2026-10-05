@@ -40,6 +40,7 @@ from vonk_agent_protocol import (
     OperationMemberProgress,
     SecurityRefusalReason,
     canonical_message,
+    input_state,
 )
 from vonk_forge_contracts import (
     ModelDefinition,
@@ -49,6 +50,7 @@ from vonk_forge_contracts import (
 )
 from vonk_forge_contracts.model import GitHubReleaseSource, ModelReference
 
+from . import model_cache_states
 from .agent_operation_facts import aware as _aware
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -1989,7 +1991,7 @@ class ModelCacheService:
                 ModelCacheOperation.artifact_set_sha256 == set_digest,
                 ModelCacheOperation.id != exclude_operation_id,
                 ModelCacheOperation.kind.in_(["download", "repair"]),
-                ModelCacheOperation.state.in_(["queued", "running", "partial"]),
+                ModelCacheOperation.state.in_(model_cache_states.LIVE),
             )
         )
         row = session.get(ModelCacheSet, set_digest)
@@ -2711,7 +2713,7 @@ class ModelCacheService:
             select(ModelCacheOperation.id)
             .where(
                 ModelCacheOperation.kind == "download",
-                ModelCacheOperation.state.in_(("queued", "running", "partial")),
+                ModelCacheOperation.state.in_(model_cache_states.LIVE),
                 ModelCacheOperation.artifact_set_sha256.in_(list(selected_sets)),
             )
             .order_by(ModelCacheOperation.id)
@@ -2917,7 +2919,7 @@ class ModelCacheService:
                     "a selected cache identity is not covered by its stored removal plan",
                     retryable=True,
                 )
-            if operation.state not in {"queued", "running", "partial"}:
+            if operation.state not in model_cache_states.LIVE:
                 raise ArtifactLifecycleError(
                     "artifact.removal_owner_unresolved",
                     "a selected cache identity remains fenced by a non-active removal owner",
@@ -2947,7 +2949,7 @@ class ModelCacheService:
                     asset_sha256=identity_digest,
                     owner_kind="model-cache-operation",
                     owner_id=operation.id,
-                    state=operation.state,
+                    state=model_cache_states.adopted(operation.state),
                     detail="accepted model removal retains this deletion fence",
                     reason=reason,
                 )
@@ -3694,7 +3696,7 @@ class ModelCacheService:
             if (
                 operation is None
                 or operation.kind != "remove"
-                or operation.state not in {"queued", "running", "partial"}
+                or operation.state not in model_cache_states.LIVE
             ):
                 return None
             payload = self._payload_or_none(operation)
@@ -3732,7 +3734,7 @@ class ModelCacheService:
             if (
                 operation is None
                 or operation.kind != "remove"
-                or operation.state not in {"queued", "running", "partial"}
+                or operation.state not in model_cache_states.LIVE
             ):
                 return False
             payload = self._payload_or_none(operation)
@@ -3799,7 +3801,7 @@ class ModelCacheService:
                 .where(
                     ModelCacheOperation.id == operation_id,
                     ModelCacheOperation.kind == "remove",
-                    ModelCacheOperation.state.in_(("queued", "running", "partial")),
+                    ModelCacheOperation.state.in_(model_cache_states.LIVE),
                 )
                 .with_for_update(skip_locked=True)
                 .execution_options(populate_existing=True)
@@ -3863,7 +3865,7 @@ class ModelCacheService:
                     select(ModelCacheOperation.id)
                     .where(
                         ModelCacheOperation.kind == "remove",
-                        ModelCacheOperation.state.in_(("queued", "running", "partial")),
+                        ModelCacheOperation.state.in_(model_cache_states.LIVE),
                     )
                     .where(
                         or_(
@@ -3972,7 +3974,7 @@ class ModelCacheService:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None or operation.kind != "remove":
                 return False
-            if operation.state not in {"queued", "running", "partial"}:
+            if operation.state not in model_cache_states.LIVE:
                 return False
             checkpoint = _operation_removal(operation)
             if isinstance(checkpoint, Residue):
@@ -4141,7 +4143,7 @@ class ModelCacheService:
             payload = self._payload_or_retire(operation, now=now)
             if payload is None or payload.get("removal_fence") != fence:
                 return False
-            if operation.state not in {"queued", "running", "partial"}:
+            if operation.state not in model_cache_states.LIVE:
                 return False
             wait = self._finish_model_removal_in_session(session, operation, now=now)
         if wait is not None:
@@ -7747,7 +7749,7 @@ class ModelCacheService:
                     select(ModelCacheOperation)
                     .where(
                         ModelCacheOperation.kind == "download",
-                        ModelCacheOperation.state.in_(["queued", "running", "partial"]),
+                        ModelCacheOperation.state.in_(model_cache_states.LIVE),
                     )
                     .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
                 )
@@ -7821,7 +7823,7 @@ class ModelCacheService:
             return False
         if (
             operation.kind != "download"
-            or operation.state not in {"queued", "running", "partial"}
+            or operation.state not in model_cache_states.LIVE
             or operation.request_key == cancellation.request_key
         ):
             raise ModelCacheConflict(
@@ -8043,13 +8045,13 @@ class ModelCacheService:
                 )
         model_digest = payload.get("model_content_sha256")
         stored_review_digest = payload.get("review_digest")
-        waiting = operation.state in {"queued", "partial", "failed"}
+        waiting = operation.state in model_cache_states.WAITING_OR_FAILED
         blockers = tuple(read_blockers(payload.get("blockers"))) if waiting else ()
         # The one retry clock is the column; a row written before the core still
         # carries it in the payload until its next transition.
         next_attempt = (
             _iso(operation.next_action_at or legacy_retry_due(payload))
-            if blockers and operation.state in {"queued", "partial"}
+            if blockers and operation.state in model_cache_states.WAITING
             else None
         )
         view = CacheOperationView(
@@ -8059,7 +8061,7 @@ class ModelCacheService:
             state=(
                 "cancelling"
                 if cancellation is not None and operation.state != "cancelled"
-                else operation.state
+                else model_cache_states.adopted(operation.state)
             ),
             attempt=int(operation.attempt),
             model_content_sha256=(
@@ -8120,9 +8122,7 @@ class ModelCacheService:
                     .where(
                         ModelCacheOperation.kind.in_(["download", "repair", "remove"])
                     )
-                    .where(
-                        ModelCacheOperation.state.in_(["queued", "running", "partial"])
-                    )
+                    .where(ModelCacheOperation.state.in_(model_cache_states.LIVE))
                 ),
                 "cache operation count",
             )
@@ -8533,7 +8533,7 @@ class ModelCacheService:
                         .where(ModelCacheOperation.kind.in_(["download", "repair"]))
                         .where(
                             ModelCacheOperation.state.in_(
-                                ["queued", "running", "partial", "failed"]
+                                (*model_cache_states.LIVE, "failed")
                             )
                         )
                         .order_by(ModelCacheOperation.updated_at.desc())
@@ -8545,9 +8545,7 @@ class ModelCacheService:
                 session.scalars(
                     select(ModelCacheOperation.id)
                     .where(ModelCacheOperation.kind.in_(["download", "repair"]))
-                    .where(
-                        ModelCacheOperation.state.in_(["queued", "running", "partial"])
-                    )
+                    .where(ModelCacheOperation.state.in_(model_cache_states.LIVE))
                     .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
                 )
             )
@@ -8559,7 +8557,7 @@ class ModelCacheService:
                     .where(
                         ModelCacheOperation.id == operation_id,
                         ModelCacheOperation.kind.in_(["download", "repair"]),
-                        ModelCacheOperation.state.in_(["queued", "running", "partial"]),
+                        ModelCacheOperation.state.in_(model_cache_states.LIVE),
                     )
                     .with_for_update(skip_locked=True)
                     # The cooldown scan may have cached this row before another
@@ -8961,20 +8959,16 @@ class ModelCacheService:
             raise ValueError("operation state filter is invalid")
         if node_id is not None:
             return {"operations": (), "total": 0, "_next_boundary": None}
-        allowed_states = {
-            "queued",
-            "running",
-            "partial",
-            "succeeded",
-            "failed",
-            "cancelled",
-        }
-        if state is not None and state not in allowed_states:
+        # A filter may still name a retired spelling (one release).
+        named = None if state is None else input_state(state)
+        if state is not None and named is None:
             return {"operations": (), "total": 0, "_next_boundary": None}
         with self._session() as session:
             filters = []
-            if state is not None:
-                filters.append(ModelCacheOperation.state == state)
+            if named is not None:
+                filters.append(
+                    ModelCacheOperation.state.in_(model_cache_states.words(named))
+                )
             if request_id is not None:
                 filters.append(ModelCacheOperation.request_key == request_id)
             boundary = None if after is None else (_datetime(after[0]), after[1])
@@ -9073,7 +9067,7 @@ class ModelCacheService:
                     .where(
                         ModelCacheOperation.artifact_set_sha256 == manifest.digest,
                         ModelCacheOperation.kind.in_(["download", "repair"]),
-                        ModelCacheOperation.state.in_(["queued", "running", "partial"]),
+                        ModelCacheOperation.state.in_(model_cache_states.LIVE),
                     )
                 )
             if present or active or row is None:
@@ -9989,7 +9983,7 @@ class ModelCacheService:
             operations = list(
                 session.scalars(
                     select(ModelCacheOperation).where(
-                        ModelCacheOperation.state.in_(["queued", "running", "partial"])
+                        ModelCacheOperation.state.in_(model_cache_states.LIVE)
                     )
                 )
             )

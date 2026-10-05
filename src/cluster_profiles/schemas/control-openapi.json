@@ -9010,9 +9010,10 @@
             "enum": [
               "queued",
               "running",
-              "partial",
+              "backoff",
               "succeeded",
-              "failed"
+              "failed",
+              "cancelled"
             ],
             "title": "State",
             "type": "string"
@@ -10581,18 +10582,27 @@
             "type": "string"
           },
           "state": {
-            "enum": [
-              "accepted",
-              "queued",
-              "running",
-              "partial",
-              "cancelling",
-              "succeeded",
-              "failed",
-              "cancelled"
+            "anyOf": [
+              {
+                "enum": [
+                  "accepted",
+                  "cancelling"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "queued",
+                  "running",
+                  "backoff",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ],
+                "type": "string"
+              }
             ],
-            "title": "State",
-            "type": "string"
+            "title": "State"
           },
           "total_bytes": {
             "anyOf": [

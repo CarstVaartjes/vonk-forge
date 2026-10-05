@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import canonical_message
 
+from . import model_cache_states
 from .artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -455,7 +456,7 @@ def model_set_reference_findings(
         select(ModelCacheOperation)
         .where(
             ModelCacheOperation.kind.in_(("download", "repair")),
-            ModelCacheOperation.state.in_(("queued", "running", "partial")),
+            ModelCacheOperation.state.in_(model_cache_states.LIVE),
         )
         .order_by(ModelCacheOperation.id)
     ):

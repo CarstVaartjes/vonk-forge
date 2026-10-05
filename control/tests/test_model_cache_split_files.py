@@ -21,6 +21,7 @@ import vonk_control.model_cache as model_cache_module
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_agent_protocol import LifecycleState
 from vonk_control.catalog_entities import _execution_projection
 from vonk_control.model_cache import (
     ArtifactPart,
@@ -289,7 +290,7 @@ def test_a_retained_complete_part_is_appended_after_an_interrupted_transfer(
     interrupted = _start(
         service, artifact, KEY.format(5), interrupt_after_bytes=1_100_000
     )
-    assert interrupted.state == "partial"
+    assert interrupted.state == LifecycleState.BACKOFF
     assert service.resume_operations() == 1
     hub.requests.clear()
     service.run_pending()
