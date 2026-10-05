@@ -846,14 +846,14 @@ def legacy_supersession(
     """``(code, successor)`` of a legacy ended row that was really a supersession."""
 
     text = (reason or "").strip()
-    if stored == "failed" and text.startswith(RETRY_REASON_PREFIX):
+    if stored == State.FAILED.value and text.startswith(RETRY_REASON_PREFIX):
         successor = text[len(RETRY_REASON_PREFIX) :].split(";", 1)[0].strip()
         try:
             uuid.UUID(successor)
         except ValueError:
             return None
         return ("superseded-by-retry", successor)
-    if stored == "cancelled":
+    if stored == State.CANCELLED.value:
         if text.startswith("Pending profile intent was superseded: "):
             return ("effects-changed-during-admission", None)
         if text.startswith(_LEGACY_INTENT_PREFIXES):

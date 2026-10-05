@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol import LifecycleState, OperationProgress
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .endpoint_contract import EndpointResponse
@@ -121,7 +121,12 @@ FleetProfileSupersedeCode = Literal[
 ]
 #: Application states from which nothing more happens; one name for every consumer.
 FLEET_PROFILE_ENDED_STATES = frozenset(
-    {"succeeded", "failed", "cancelled", "superseded"}
+    {
+        LifecycleState.SUCCEEDED.value,
+        LifecycleState.FAILED.value,
+        LifecycleState.CANCELLED.value,
+        "superseded",
+    }
 )
 FleetProfileChildPhase = Literal[
     "model-download",

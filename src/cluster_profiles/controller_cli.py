@@ -3799,6 +3799,9 @@ def _profile(
             successor = current.get("superseded_by")
             if (
                 operation_state(current) != "superseded"
+                # Only the Controller's own retry continues the same work; a
+                # later intent another request accepted is reported as ended.
+                or current.get("reason_code") != "superseded-by-retry"
                 or not isinstance(successor, str)
                 or not successor
                 or successor in chain
