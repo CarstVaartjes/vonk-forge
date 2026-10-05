@@ -123,7 +123,9 @@ def _server_process(
         stderr=subprocess.PIPE,
         text=True,
     )
-    deadline = time.monotonic() + 15
+    # A bound on a hang, not a speed claim: a loaded runner imports the whole
+    # Controller before it can answer.
+    deadline = time.monotonic() + 60
     while not ready.exists():
         if process.poll() is not None:
             stdout, stderr = process.communicate(timeout=5)

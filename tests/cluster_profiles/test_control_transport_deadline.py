@@ -372,7 +372,8 @@ raise SystemExit(cli.main(sys.argv[3:], control_client=client))
         text=True,
     )
     try:
-        assert state["started"].wait(5), "child never reached the response boundary"
+        # Starting the child is a bound on a hang; promptness is asserted below.
+        assert state["started"].wait(30), "child never reached the response boundary"
         process.send_signal(signal.SIGINT)
         # An interrupted command owes no output; it must only stop promptly.
         output, error = process.communicate(timeout=3)
