@@ -557,6 +557,7 @@ from .spark_fit_node_memory_kind_type_0 import SparkFitNodeMemoryKindType0
 from .spark_fit_node_memory_pool_type_0 import SparkFitNodeMemoryPoolType0
 from .spark_group import SparkGroup
 from .spark_group_node import SparkGroupNode
+from .state_alias import StateAlias
 from .state_write_kind import StateWriteKind
 from .stop_impact import StopImpact
 from .stop_outcome import StopOutcome
@@ -1128,6 +1129,7 @@ __all__ = (
     "SparkFitNodeMemoryPoolType0",
     "SparkGroup",
     "SparkGroupNode",
+    "StateAlias",
     "StateWriteKind",
     "StopImpact",
     "StopOutcome",

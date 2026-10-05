@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import ClassVar
 
 from vonk_agent_protocol import (
+    TERMINAL_LIFECYCLE_STATES,
     LifecycleEffect,
     LifecycleEventKind,
     LifecycleState,
@@ -33,7 +34,7 @@ StopResult = StopOutcome
 EventKind = LifecycleEventKind
 ActionName = OperatorActionName
 
-TERMINAL_STATES = frozenset({State.SUCCEEDED, State.FAILED, State.CANCELLED})
+TERMINAL_STATES = TERMINAL_LIFECYCLE_STATES
 
 
 @dataclass(frozen=True, slots=True)

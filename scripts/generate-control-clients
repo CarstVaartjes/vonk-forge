@@ -91,6 +91,18 @@ def typescript_vocabulary() -> str:
             f"(typeof {words.__name__})[keyof typeof {words.__name__}];"
         )
         lines.append("")
+    from vonk_agent_protocol import INPUT_ALIASES
+
+    lines.append(
+        "/** What a retired state spelling means, accepted as input for one release. */"
+    )
+    lines.append("export const STATE_INPUT_ALIASES = {")
+    lines.extend(
+        f"  {json.dumps(alias.value)}: LifecycleState.{state.name},"
+        for alias, state in INPUT_ALIASES.items()
+    )
+    lines.append("} as const;")
+    lines.append("")
     lines.append(
         "/** The stored spelling of an agent result that waits for an operator. */"
     )

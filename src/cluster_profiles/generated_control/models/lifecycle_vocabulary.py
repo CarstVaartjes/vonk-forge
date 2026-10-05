@@ -36,6 +36,8 @@ from ..models.outcome_kind import check_outcome_kind
 from ..models.outcome_kind import OutcomeKind
 from ..models.security_refusal_reason import check_security_refusal_reason
 from ..models.security_refusal_reason import SecurityRefusalReason
+from ..models.state_alias import check_state_alias
+from ..models.state_alias import StateAlias
 from ..models.state_write_kind import check_state_write_kind
 from ..models.state_write_kind import StateWriteKind
 from ..models.stop_outcome import check_stop_outcome
@@ -104,11 +106,19 @@ class LifecycleVocabulary:
                 tombstone fencing, credential denial and the digest-bound destructive-effect
                 checks of Run/Switch.  ``failure_classification`` derives its code set from
                 this enum, so the Controller and the contract cannot disagree.
-            state (LifecycleState): The eight lifecycle states.
+            state (LifecycleState): The nine lifecycle states: the one vocabulary a stored ``state`` speaks.
 
-                ``waiting``, ``partial``, ``cancelling`` and ``expired`` of the legacy kinds
-                map onto these: waiting and partial work is ``backoff`` or ``observing``, a
-                cancelling row is a non-terminal row with ``cancel_requested_at`` set.
+                ``superseded`` is a definite, non-failed end: a newer request replaced the
+                work, so nothing is left for anyone to do.  The legacy spellings
+                (``waiting``, ``partial``, ``cancelling``, ``expired``,
+                ``waiting-for-operator``) are *aliases*: see :data:`STATE_ALIASES`, the one
+                table that says what each of them means, per subject.
+            state_alias (StateAlias): The retired spellings of a stored lifecycle state.
+
+                They are accepted as input for one release (API filters, CLI arguments) and
+                adopted when an old row is read; nothing writes them any more.  This is the
+                only place the words may be spelled: the vocabulary ratchet allows them
+                nowhere else.
             state_write_kind (StateWriteKind): The shapes of a lifecycle state write the writers ratchet recognises.
             stop_outcome (StopOutcome): Whether an idempotent stop confirmed that the effect is gone.
             wait_reason (WaitReason): Typed reason codes for an effect that cannot be confirmed (the *unknown* kind).
@@ -132,6 +142,7 @@ class LifecycleVocabulary:
     outcome_kind: OutcomeKind
     security_refusal_reason: SecurityRefusalReason
     state: LifecycleState
+    state_alias: StateAlias
     state_write_kind: StateWriteKind
     stop_outcome: StopOutcome
     wait_reason: WaitReason
@@ -170,6 +181,8 @@ class LifecycleVocabulary:
 
         state: str = self.state
 
+        state_alias: str = self.state_alias
+
         state_write_kind: str = self.state_write_kind
 
         stop_outcome: str = self.stop_outcome
@@ -196,6 +209,7 @@ class LifecycleVocabulary:
             "outcome_kind": outcome_kind,
             "security_refusal_reason": security_refusal_reason,
             "state": state,
+            "state_alias": state_alias,
             "state_write_kind": state_write_kind,
             "stop_outcome": stop_outcome,
             "wait_reason": wait_reason,
@@ -279,6 +293,11 @@ class LifecycleVocabulary:
 
 
 
+        state_alias = check_state_alias(d.pop("state_alias"))
+
+
+
+
         state_write_kind = check_state_write_kind(d.pop("state_write_kind"))
 
 
@@ -314,6 +333,7 @@ class LifecycleVocabulary:
             outcome_kind=outcome_kind,
             security_refusal_reason=security_refusal_reason,
             state=state,
+            state_alias=state_alias,
             state_write_kind=state_write_kind,
             stop_outcome=stop_outcome,
             wait_reason=wait_reason,

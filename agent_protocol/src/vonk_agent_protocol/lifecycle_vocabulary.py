@@ -6,24 +6,31 @@ publishes it through :class:`LifecycleVocabulary` into ``wire.json``, and
 ``scripts/generate-agent-wire`` turns that into Rust types, so no consumer
 spells one of these words by hand.
 
-Stored state values are *not* the subject here: the Controller's persisted
-``state`` columns keep their current spellings (``waiting-for-operator`` and the
-rest) until each kind migrates onto the core.  The word for that legacy
-spelling lives here too (:data:`LEGACY_WAIT_STATE`) so a guard can allow
-exactly one place to know it.
+The stored ``state`` of a lifecycle subject speaks :class:`LifecycleState`.  The
+retired spellings (``waiting-for-operator``, ``cancelling``, ``waiting``,
+``partial``, ``expired``) live in :data:`STATE_ALIASES` and nowhere else: a
+reader of an old row adopts it through :func:`adopt_state`, a caller that still
+sends one is understood through :func:`input_state`, for one release.  The agent
+wire keeps its own four result words (:class:`AgentResultState`) for agents
+already deployed; :data:`LEGACY_WAIT_STATE` is the wire spelling of "unknown".
 """
 
 from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import NamedTuple
 
 from .wire_model import WireEnum, WireModel
 
 
 class LifecycleState(WireEnum):
-    """The eight lifecycle states.
+    """The nine lifecycle states: the one vocabulary a stored ``state`` speaks.
 
-    ``waiting``, ``partial``, ``cancelling`` and ``expired`` of the legacy kinds
-    map onto these: waiting and partial work is ``backoff`` or ``observing``, a
-    cancelling row is a non-terminal row with ``cancel_requested_at`` set.
+    ``superseded`` is a definite, non-failed end: a newer request replaced the
+    work, so nothing is left for anyone to do.  The legacy spellings
+    (``waiting``, ``partial``, ``cancelling``, ``expired``,
+    ``waiting-for-operator``) are *aliases*: see :data:`STATE_ALIASES`, the one
+    table that says what each of them means, per subject.
     """
 
     QUEUED = "queued"
@@ -33,6 +40,7 @@ class LifecycleState(WireEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    SUPERSEDED = "superseded"
     NEEDS_OPERATOR = "needs-operator"
 
 
@@ -152,6 +160,139 @@ class LifecycleSubject(WireEnum):
     MODEL_CACHE_OPERATION = "ModelCacheOperation"
     ARTIFACT_JOB = "ArtifactJob"
     FLEET_PROFILE_APPLICATION = "FleetProfileApplication"
+
+
+class StateAlias(WireEnum):
+    """The retired spellings of a stored lifecycle state.
+
+    They are accepted as input for one release (API filters, CLI arguments) and
+    adopted when an old row is read; nothing writes them any more.  This is the
+    only place the words may be spelled: the vocabulary ratchet allows them
+    nowhere else.
+    """
+
+    WAITING_FOR_OPERATOR = "waiting-for-operator"
+    CANCELLING = "cancelling"
+    WAITING = "waiting"
+    PARTIAL = "partial"
+    EXPIRED = "expired"
+
+
+class AdoptedState(NamedTuple):
+    """What a stored word means in the core vocabulary.
+
+    ``cancel_requested`` is true for a word that said "a cancel is under way":
+    the row is non-terminal and the kind records the cancel request
+    (``cancel_requested_at``) in its own storage.
+    """
+
+    state: LifecycleState
+    cancel_requested: bool = False
+
+
+_NEEDS_OPERATOR = AdoptedState(LifecycleState.NEEDS_OPERATOR)
+_CANCELLING = AdoptedState(LifecycleState.OBSERVING, cancel_requested=True)
+_WAITING = AdoptedState(LifecycleState.OBSERVING)
+#: Work that stopped part-way and is retried by itself, not yet settled.
+_PARTIAL = AdoptedState(LifecycleState.BACKOFF)
+#: An attempt whose lease lapsed: the attempt ended, the operation decides next.
+_EXPIRED = AdoptedState(LifecycleState.FAILED)
+
+#: What each retired spelling means, per subject whose stored ``state`` the core
+#: owns.  One subject may not use every word (a job never lapses a lease), and a
+#: word two subjects share may mean different things (``partial`` work in the
+#: model cache backs off); that is why the table is per subject.  Words outside
+#: the core vocabulary that a kind keeps on purpose (``draft``) are not here.
+STATE_ALIASES: Mapping[LifecycleSubject, Mapping[StateAlias, AdoptedState]] = {
+    LifecycleSubject.JOB: {
+        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
+        StateAlias.WAITING: _WAITING,
+        StateAlias.CANCELLING: _CANCELLING,
+        StateAlias.EXPIRED: _EXPIRED,
+    },
+    LifecycleSubject.JOB_ATTEMPT: {
+        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
+        StateAlias.EXPIRED: _EXPIRED,
+    },
+    LifecycleSubject.AGENT_OPERATION: {
+        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
+        StateAlias.WAITING: _WAITING,
+        StateAlias.CANCELLING: _CANCELLING,
+        StateAlias.EXPIRED: _EXPIRED,
+    },
+    LifecycleSubject.AGENT_OPERATION_ATTEMPT: {
+        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
+        StateAlias.EXPIRED: _EXPIRED,
+    },
+    LifecycleSubject.MODEL_CACHE_OPERATION: {
+        StateAlias.PARTIAL: _PARTIAL,
+        StateAlias.CANCELLING: _CANCELLING,
+        StateAlias.WAITING: _WAITING,
+    },
+    LifecycleSubject.ARTIFACT_JOB: {
+        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
+        StateAlias.CANCELLING: _CANCELLING,
+    },
+    LifecycleSubject.FLEET_PROFILE_APPLICATION: {
+        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
+        StateAlias.WAITING: _WAITING,
+        StateAlias.CANCELLING: _CANCELLING,
+        StateAlias.EXPIRED: _EXPIRED,
+    },
+}
+
+#: What an alias means when the subject is not known (an API filter, a CLI
+#: argument): the same word, the same meaning, for every subject that uses it.
+INPUT_ALIASES: Mapping[StateAlias, LifecycleState] = {
+    StateAlias.WAITING_FOR_OPERATOR: LifecycleState.NEEDS_OPERATOR,
+    StateAlias.CANCELLING: LifecycleState.OBSERVING,
+    StateAlias.WAITING: LifecycleState.OBSERVING,
+    StateAlias.PARTIAL: LifecycleState.BACKOFF,
+    StateAlias.EXPIRED: LifecycleState.FAILED,
+}
+
+#: The core states a row can be in once it ended.
+TERMINAL_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(
+    {
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+        LifecycleState.SUPERSEDED,
+    }
+)
+
+
+def adopt_state(subject: LifecycleSubject, stored: str) -> AdoptedState | None:
+    """The core meaning of a stored ``state`` word, or ``None`` for a foreign word.
+
+    Every reader of a stored lifecycle state goes through this one function: a
+    word of the core vocabulary is itself, a retired spelling is adopted by the
+    subject's alias row, and a word the subject keeps on purpose outside the
+    vocabulary (``draft``) is ``None`` and read by its owner.
+    """
+
+    try:
+        return AdoptedState(LifecycleState(stored))
+    except ValueError:
+        pass
+    try:
+        alias = StateAlias(stored)
+    except ValueError:
+        return None
+    return STATE_ALIASES.get(subject, {}).get(alias)
+
+
+def input_state(word: str) -> LifecycleState | None:
+    """A state named by a caller: a core word, or a retired spelling (one release)."""
+
+    try:
+        return LifecycleState(word)
+    except ValueError:
+        pass
+    try:
+        return INPUT_ALIASES[StateAlias(word)]
+    except (ValueError, KeyError):
+        return None
 
 
 class StateWriteKind(WireEnum):
@@ -371,6 +512,7 @@ class LifecycleVocabulary(WireModel):
     blocker_category: BlockerCategory
     wait_verdict: WaitVerdict
     lifecycle_subject: LifecycleSubject
+    state_alias: StateAlias
     state_write_kind: StateWriteKind
     migration_step: MigrationStep
     error_category: ErrorCategory
@@ -381,8 +523,12 @@ class LifecycleVocabulary(WireModel):
 
 
 __all__ = [
+    "INPUT_ALIASES",
     "LEGACY_WAIT_STATE",
     "SECURITY_REFUSAL_SUFFIXES",
+    "STATE_ALIASES",
+    "TERMINAL_LIFECYCLE_STATES",
+    "AdoptedState",
     "AgentResultState",
     "BlockerCategory",
     "ErrorCategory",
@@ -398,9 +544,12 @@ __all__ = [
     "OperatorSurface",
     "OutcomeKind",
     "SecurityRefusalReason",
+    "StateAlias",
     "StateWriteKind",
     "StopOutcome",
     "WaitReason",
     "WaitVerdict",
+    "adopt_state",
     "error_category_of",
+    "input_state",
 ]
