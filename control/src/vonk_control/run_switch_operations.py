@@ -263,6 +263,7 @@ from .strict_json import (
     read_stored_model,
     warn_unreadable_once,
 )
+from .unused_storage_collection import spark_eviction_capacity
 
 # Persisted progress and catalog documents arrive as decoded JSON, so the
 # contract's closed value sets are read back through the declared alias instead
@@ -5990,15 +5991,38 @@ class RunSwitchOperationService:
                         disk_free_after = disk_free - reserved_disk - required_disk
                         if disk_free_after < 0:
                             holders = describe_disk_charges(session, charges)
-                            node_blockers.append(
-                                _as_reason(
-                                    "run-switch.insufficient-disk",
-                                    f"The operation needs {required_disk} bytes and would leave {disk_free_after} bytes."
-                                    + (f" Disk is {holders}." if holders else ""),
-                                    scope="node",
-                                    node_ids=(item.node_id,),
-                                )
+                            # Cleanup is space-driven: unused installations the
+                            # collector may remove cover a shortfall, so the
+                            # review plans that eviction (the load waits for it)
+                            # and refuses only for what nothing can free.
+                            evictable, kept_sentence = spark_eviction_capacity(
+                                session, item.node_id, now
                             )
+                            if evictable >= -disk_free_after:
+                                node_warnings.append(
+                                    _as_reason(
+                                        "run-switch.disk-eviction-planned",
+                                        f"The operation needs {required_disk} bytes and "
+                                        f"{-disk_free_after} more must be freed; "
+                                        "unused installations on this Spark will be "
+                                        "removed, least recently used first.",
+                                        scope="node",
+                                        node_ids=(item.node_id,),
+                                        severity="warning",
+                                    )
+                                )
+                            else:
+                                node_blockers.append(
+                                    _as_reason(
+                                        "run-switch.insufficient-disk",
+                                        f"The operation needs {required_disk} bytes and would leave {disk_free_after} bytes."
+                                        + (f" Disk is {holders}." if holders else "")
+                                        + f" Only {evictable} bytes of unused installations can be removed. "
+                                        + kept_sentence,
+                                        scope="node",
+                                        node_ids=(item.node_id,),
+                                    )
+                                )
             nodes.append(
                 SparkFitNode(
                     node_id=item.node_id,

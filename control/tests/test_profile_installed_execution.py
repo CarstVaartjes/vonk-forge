@@ -552,3 +552,85 @@ def test_postgres_installed_profile_adopts_committed_child_after_crash(
             ) == [claim_id]
     finally:
         engine.dispose()
+
+
+def _idle_installations(sessions, lifecycle, nodes, count: int, installed_bytes: int):
+    """``count`` more installed-but-not-running installations on the Spark, each
+    holding ``installed_bytes``, as a Spark that has run many recipes does."""
+
+    with sessions.begin() as session:
+        original = session.scalar(select(RecipeInstallation))
+        assert original is not None
+        member = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == original.id
+            )
+        )
+        assert member is not None
+        for index in range(count):
+            copy = RecipeInstallation(
+                **{
+                    column.name: getattr(original, column.name)
+                    for column in RecipeInstallation.__table__.columns
+                }
+            )
+            copy.id = str(uuid4())
+            copy.model_content_sha256 = f"{index + 1:064x}"
+            session.add(copy)
+            session.flush()
+            clone = InstallationNode(
+                **{
+                    column.name: getattr(member, column.name)
+                    for column in InstallationNode.__table__.columns
+                }
+            )
+            clone.id = str(uuid4())
+            clone.installation_id = copy.id
+            clone.installed_bytes = installed_bytes
+            session.add(clone)
+
+
+def test_a_review_plans_the_eviction_of_many_unused_installations_instead_of_refusing(
+    tmp_path: Path,
+) -> None:
+    """Disk that is short but coverable by unused installations is not a refusal:
+    the review is allowed and says the eviction is planned. Catches the review
+    that refused (``run-switch.insufficient-disk``) with hundreds of GiB of
+    installed-but-not-running installations on the Spark."""
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4()))
+    _, planner = _profile_service(sessions, lifecycle)
+    request = _request(sessions, nodes[0])
+    needed = planner.preview(request, actor="admin").fit.nodes[0].disk_required_bytes
+    assert needed is not None
+    _idle_installations(
+        sessions, lifecycle, nodes, count=12, installed_bytes=needed * 100
+    )
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = 0
+
+    review = planner.preview(request, actor="admin")
+
+    codes = {reason.code for reason in (*review.blockers, *review.warnings)}
+    assert "run-switch.insufficient-disk" not in codes, review.blockers
+    assert "run-switch.disk-eviction-planned" in codes
+    after = review.fit.nodes[0].disk_free_after_bytes
+    assert after is not None and after < 0
+
+    # Genuinely unevictable: nothing unused can cover it, and the reason says why.
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = 0
+        for member in session.scalars(select(InstallationNode)):
+            member.installed_bytes = 1
+    refused = planner.preview(request, actor="admin")
+    blocker = next(
+        reason
+        for reason in refused.blockers
+        if reason.code == "run-switch.insufficient-disk"
+    )
+    assert "can be removed" in blocker.detail

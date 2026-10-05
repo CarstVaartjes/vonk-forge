@@ -52,6 +52,7 @@ from vonk_control.unused_storage_collection import (
     ACTOR,
     GRACE,
     UnusedStorageCollector,
+    spark_eviction_capacity,
 )
 
 from .runtime_image_fixtures import place_test_image
@@ -1740,3 +1741,36 @@ def test_a_refusal_says_what_stays_and_why(world: Catalog) -> None:
     assert relief is not None and relief.code == STORAGE_INSUFFICIENT
     assert f"{80 * GIB} bytes of installations stay because" in relief.detail
     assert "saved profile" in relief.detail
+
+
+def test_a_review_counts_every_unused_installation_and_names_what_stays(
+    world: Catalog,
+) -> None:
+    """The read-only capacity a review plans eviction from: every installed but
+    not running installation counts, a running one and a profile's recipe do
+    not, and nothing is requested or removed. Catches a review that refuses a
+    load while hundreds of GiB of unused installations could be evicted."""
+
+    old = world.revision("glm", 1)
+    head = world.revision("glm", 2, head="active")
+    world.revision("llama", 1, head="active")
+    idle = []
+    for age in range(2, 14):
+        installation, _ = world.workload(
+            old, run="stopped", touched=NOW - timedelta(days=age)
+        )
+        _size(world, installation, 20 * GIB, model=f"{age:064x}")
+        idle.append(installation)
+    running, _ = world.workload(old, run="running")
+    _size(world, running, 50 * GIB, model="e" * 64)
+    pointed, _ = world.workload(head, run="stopped")
+    _size(world, pointed, 70 * GIB, model="f" * 64)
+    _profile(world, "vonk-forge/glm")
+    lifecycle = FakeLifecycle(world.sessions)
+
+    with world.sessions() as session:
+        freeable, kept = spark_eviction_capacity(session, NODE, NOW)
+
+    assert freeable == 12 * 20 * GIB
+    assert str(50 * GIB) in kept or str(70 * GIB) in kept
+    assert lifecycle.removed == []

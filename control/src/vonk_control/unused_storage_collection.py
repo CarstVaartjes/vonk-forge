@@ -209,7 +209,12 @@ _KEPT_WORDS = {
 }
 
 _STORAGE_WAIT_CODES = frozenset(
-    {"run-switch.insufficient-disk", STORAGE_EVICTING, STORAGE_INSUFFICIENT}
+    {
+        "run-switch.insufficient-disk",
+        "run-switch.disk-eviction-planned",
+        STORAGE_EVICTING,
+        STORAGE_INSUFFICIENT,
+    }
 )
 
 
@@ -224,6 +229,24 @@ def _kept_sentence(kept_bytes: Mapping[str, int]) -> str:
         if size > 0
     ]
     return ("; ".join(parts[:2]) + ". ") if parts else ""
+
+
+def spark_eviction_capacity(
+    session: Session, node_id: str, now: datetime
+) -> tuple[int, str]:
+    """What unused installations on a Spark could free, read-only, and what stays.
+
+    A review asks this to plan the eviction a load needs instead of refusing it:
+    the bytes the collector can remove (least recently used first) and a
+    sentence naming what it must keep, so a refusal names what blocks. It
+    registers no demand and removes nothing.
+    """
+
+    kept_bytes: Counter[str] = Counter()
+    items = UnusedStorageCollector._spark_items(
+        session, node_id, _Evidence.read(session, now), Counter(), kept_bytes
+    )
+    return sum(item.freeable for item in items), _kept_sentence(kept_bytes)
 
 
 def _waits_for_storage(application: FleetProfileApplication) -> bool:
@@ -932,8 +955,8 @@ class UnusedStorageCollector:
 
     # -- installations ------------------------------------------------------------
 
+    @staticmethod
     def _spark_items(
-        self,
         session: Session,
         node_id: str,
         evidence: _Evidence,
