@@ -13,7 +13,7 @@ use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
 };
 
-use crate::outcome::ExecutionResult;
+use crate::outcome::{ExecutionResult, UnknownEvidence};
 
 const STATE_SCHEMA_VERSION: &str = "3";
 
@@ -570,6 +570,8 @@ impl StateStore {
             let finished = ExecutionResult::unknown(
                 WaitReason::AgentRestartInterrupted,
                 "agent restarted with an operation in progress",
+                UnknownEvidence::at("agent-restart")
+                    .because("the agent restarted before the operation's result was recorded"),
             )
             .finish_for(&operation);
             let result = AgentResult {

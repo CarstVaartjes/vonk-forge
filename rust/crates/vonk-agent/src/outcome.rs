@@ -122,11 +122,65 @@ impl Failure {
     }
 }
 
+/// What an executor knows about the effect it could not establish: where it
+/// stopped and why. An unknown outcome with no evidence leaves the Controller
+/// nothing to observe and nothing to show, so [`ExecutionResult::unknown`]
+/// cannot be built without it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownEvidence {
+    /// The step that could not be confirmed (a short, stable word).
+    pub stage: &'static str,
+    /// A bounded, non-sensitive cause: an error category or helper code.
+    pub diagnostic: Option<String>,
+    /// The privileged helper's own verdict, when it gave one.
+    pub helper_error_code: Option<String>,
+}
+
+impl UnknownEvidence {
+    pub fn at(stage: &'static str) -> Self {
+        Self {
+            stage,
+            diagnostic: None,
+            helper_error_code: None,
+        }
+    }
+
+    pub fn because(mut self, diagnostic: impl Into<String>) -> Self {
+        self.diagnostic = Some(diagnostic.into());
+        self
+    }
+
+    pub fn helper(mut self, code: impl Into<String>) -> Self {
+        self.helper_error_code = Some(code.into());
+        self
+    }
+
+    fn into_wire(self) -> OutcomeEvidence {
+        OutcomeEvidence {
+            diagnostics: None,
+            diagnostic: self
+                .diagnostic
+                .as_deref()
+                .map(sanitize_text)
+                .map(|text| text.chars().take(512).collect::<String>())
+                .filter(|text| !text.is_empty()),
+            helper_error_code: self
+                .helper_error_code
+                .map(|code| code.chars().take(128).collect::<String>())
+                .filter(|code| !code.is_empty()),
+            helper_exit_code: None,
+            package_activation: None,
+            stage: Some(self.stage.to_owned()),
+        }
+    }
+}
+
 /// An effect the executor could not establish.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unconfirmed {
     pub wait_reason: WaitReason,
     pub reason: String,
+    pub evidence: UnknownEvidence,
     pub receipt: Option<RecipeJobRunResult>,
 }
 
@@ -162,11 +216,17 @@ impl ExecutionResult {
         Self::Failed(Failure::new(reason).code(FailureCode::OperationCancelled))
     }
 
-    /// The effect could not be established.
-    pub fn unknown(wait_reason: WaitReason, reason: impl Into<String>) -> Self {
+    /// The effect could not be established. The evidence says where it stopped;
+    /// the Controller observes the effect and decides.
+    pub fn unknown(
+        wait_reason: WaitReason,
+        reason: impl Into<String>,
+        evidence: UnknownEvidence,
+    ) -> Self {
         Self::Unknown(Unconfirmed {
             wait_reason,
             reason: reason.into(),
+            evidence,
             receipt: None,
         })
     }
@@ -211,7 +271,7 @@ impl ExecutionResult {
                 wait_reason: unconfirmed.wait_reason,
                 reason: bounded_reason(&unconfirmed.reason),
                 retry_after_seconds: None,
-                evidence: None,
+                evidence: Some(unconfirmed.evidence.into_wire()),
                 receipt: unconfirmed.receipt,
             }),
         };

@@ -1720,10 +1720,16 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         })
     }
 
+    /// Record the ACL transition of an installation's model files.
+    ///
+    /// The step reads and verifies only: it works on a copy of the receipt and
+    /// changes the stored one in a single atomic write at the end, so a failed
+    /// attempt leaves the transition and the installation untouched and the
+    /// same call can be repeated until it succeeds.
     pub fn finish_installation_acl_transition(
         &self,
         installation_id: &str,
-        mut transition: InstallationAclTransition,
+        transition: &InstallationAclTransition,
     ) -> Result<(), OciError> {
         if transition.installation_id != installation_id {
             return Err(OciError::Artifact);
@@ -1733,11 +1739,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         let previous_receipt = transition.receipt.clone();
-        for (entry, (path, file, before)) in transition
-            .receipt
-            .entries
-            .iter_mut()
-            .zip(transition.files.iter())
+        let mut receipt = transition.receipt.clone();
+        for (entry, (path, file, before)) in receipt.entries.iter_mut().zip(transition.files.iter())
         {
             let after = file.metadata()?;
             let shared = shared_store_inode(self.data_root, &entry.sha256);
@@ -1761,13 +1764,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
             entry.ctime_ns = timestamp_ns(after.ctime(), after.ctime_nsec());
         }
-        if transition.receipt == previous_receipt {
+        if receipt == previous_receipt {
             return Ok(());
         }
         atomic_write(
             &installation,
             INSTALLATION_METADATA_FILE,
-            &serde_json::to_vec(&transition.receipt)?,
+            &serde_json::to_vec(&receipt)?,
         )?;
         File::open(&installation)?.sync_all()?;
         Ok(())
@@ -3442,7 +3445,7 @@ mod tests {
             ],
         );
         runtime
-            .finish_installation_acl_transition(&installation_id, transition)
+            .finish_installation_acl_transition(&installation_id, &transition)
             .unwrap();
         runtime.verify_installation(&installation_id).unwrap();
         runtime.verify_installation(&installation_id).unwrap();
@@ -3462,7 +3465,7 @@ mod tests {
         fs::write(&primary, b"changed").unwrap();
         assert!(
             runtime
-                .finish_installation_acl_transition(&installation_id, transition)
+                .finish_installation_acl_transition(&installation_id, &transition)
                 .is_err()
         );
     }
@@ -3965,7 +3968,7 @@ mod tests {
 
         let transition = runtime.begin_installation_acl_transition(FIRST).unwrap();
         runtime
-            .finish_installation_acl_transition(FIRST, transition)
+            .finish_installation_acl_transition(FIRST, &transition)
             .unwrap();
         runtime.verify_installation(FIRST).unwrap();
     }

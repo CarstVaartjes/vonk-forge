@@ -325,6 +325,17 @@ enum. A Controller older than the typed outcome refuses a typed result, which th
 agent keeps and retries; agent upgrades are issued by the Controller, so the
 Controller is always at least as new as the agent it upgrades.
 
+An effect the agent cannot confirm is the `Unknown` arm, and it is never a bare
+wait: `ExecutionResult::unknown` takes an `UnknownEvidence` (the stage that
+stopped and a bounded cause or helper code), which reaches the Controller as the
+outcome's `evidence`. Work that is safe to repeat is repeated locally first (the
+model-custody step of a start, three bounded retries on transient storage
+errors), and a proven mismatch (a retained run whose identity is not the
+authorized start's, a foreign container the helper cannot confirm) is a
+definite `Failed` outcome with that evidence, never a wait and never a removal
+of something the agent does not own. `rust/crates/vonk-agent/tests/wait_actions.rs`
+requires an advertised action for every wait reason the agent constructs.
+
 The three error categories, `SecurityRefusal`, `InvalidRequest` and
 `UnknownError`, are the only things a lifecycle adapter may raise or report, each
 with its own closed reason set; the blocker allowlist's `security-edge` and

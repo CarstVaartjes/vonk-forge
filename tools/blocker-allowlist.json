@@ -20,7 +20,7 @@
       "control/src/vonk_control/run_switch_operations.py"
     ]
   },
-  "max_debt": 12,
+  "max_debt": 10,
   "debt_ceiling": {
     "total": 285,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
@@ -39,20 +39,6 @@
       "irreversible_effect": "inherits",
       "verdict": "DERIVED",
       "reason": "Read-side projection of an existing Job state onto a typed owner view; it creates no wait.",
-      "sites": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "RejectingExecutor::execute",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "any not enabled by this build"
-      ],
-      "trigger": "operation not enabled by this agent build",
-      "advertised_action": "none",
-      "irreversible_effect": "none (never executed)",
-      "verdict": "SELF-HEAL",
-      "reason": "Never-executed work must not wait for an operator: do not claim it, or report a retryable unsupported-capability failure.",
       "sites": 1
     },
     {
@@ -82,7 +68,7 @@
       "irreversible_effect": "workload may still hold GPU memory; Stop is idempotent",
       "verdict": "SELF-HEAL",
       "reason": "Stop is idempotent and restart-safe: the unknown outcome carries a typed wait reason, and the Controller retries it instead of parking it.",
-      "sites": 3
+      "sites": 4
     },
     {
       "path": "rust/crates/vonk-agent/src/executor.rs",
@@ -93,11 +79,11 @@
         "recipe.uninstall"
       ],
       "trigger": "container runtime stop or stop metadata unconfirmed",
-      "advertised_action": "automatic: typed unknown outcome (wait reason stop-unconfirmed or stop-metadata-unconfirmed), retried by the Controller after observing",
+      "advertised_action": "automatic: typed unknown outcome with evidence (wait reason stop-unconfirmed or stop-metadata-unconfirmed), retried by the Controller after observing",
       "irreversible_effect": "container may still run; re-stop is idempotent",
       "verdict": "SELF-HEAL",
       "reason": "Stop and uninstall are idempotent: the Controller treats any waiting result as an uncertain effect and retries after observing.",
-      "sites": 9
+      "sites": 7
     },
     {
       "path": "rust/crates/vonk-agent/src/executor.rs",
@@ -111,21 +97,7 @@
       "irreversible_effect": "job process may still run",
       "verdict": "KEEP",
       "reason": "Real uncertain irreversible effect.",
-      "sites": 9
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "RecipeExecutor::execute",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "recipe.start"
-      ],
-      "trigger": "retained workload identity does not match the authorized start / foreign or uninspectable exact container",
-      "advertised_action": "none advertised: typed unknown outcome (wait reason retained-identity-mismatch)",
-      "irreversible_effect": "container with another identity occupies the exact name; removing it is destructive",
-      "verdict": "FIX-ACTION",
-      "reason": "Keep, but advertise an explicit action (adopt, replace-with-newest-intent, or remove) and carry failure_kind.",
-      "sites": 9
+      "sites": 7
     },
     {
       "path": "rust/crates/vonk-agent/src/executor.rs",
@@ -135,11 +107,11 @@
         "recipe.start"
       ],
       "trigger": "cancelled workload model custody (installation ACL transition) unconfirmed",
-      "advertised_action": "automatic: typed unknown outcome (wait reason model-custody-unconfirmed), retried by the Controller after observing",
+      "advertised_action": "automatic: typed unknown outcome with evidence (wait reason model-custody-unconfirmed), retried by the Controller after observing",
       "irreversible_effect": "ACL on shared model files may stay granted",
       "verdict": "SELF-HEAL",
-      "reason": "finish_installation_acl_transition is an idempotent local step: retry it; wait only after bounded failures.",
-      "sites": 9
+      "reason": "finish_installation_acl_transition is an idempotent local step: the agent repeats it (bounded, three retries on transient storage errors) and only a persistent failure reports unknown with evidence (stage model-custody, error category) for the Controller to observe.",
+      "sites": 7
     },
     {
       "path": "rust/crates/vonk-agent/src/state.rs",
