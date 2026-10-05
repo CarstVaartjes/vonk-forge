@@ -21,6 +21,35 @@ Operational JSON logs are rotated by Docker's local driver. Remote output is
 redacted and truncated before persistence. Full sanitized job evidence is
 content-addressed and available only to operator/administrator API roles.
 
+## Worker memory
+
+The worker publishes no port. A sampler thread writes its own memory report
+every 15 seconds to `diagnostics/worker-memory.json` on the shared control state
+volume, and the API exports it on `/metrics`:
+
+| Metric | Meaning |
+| --- | --- |
+| `vonk_worker_rss_bytes`, `_peak_rss_bytes`, `_children_rss_bytes` | Resident memory of the worker process, its peak, and its child processes (skopeo). |
+| `vonk_worker_cgroup_bytes{kind}` | Container memory split into `anon`, `file`, `shmem`, `kernel`, `current`. |
+| `vonk_worker_python_allocated_blocks`, `vonk_worker_threads` | Python heap size proxy and thread count. |
+| `vonk_worker_component_entries{component}` | Entries in each named long-lived cache or queue (`WorkerMemoryComponent`). |
+| `vonk_worker_trace_state{state}`, `vonk_worker_traced_bytes`, `vonk_worker_trace_growth_bytes{rank,location}` | Last allocation trace: the 25 code locations that gained the most Python heap. |
+| `vonk_worker_memory_report_age_seconds` | Age of the report; no worker series are exported once it is older than two minutes. |
+
+Read RSS against the other series. High `anon` with a high
+`vonk_worker_traced_bytes` and a named `location` is a retained Python object.
+High RSS with a low traced figure is allocator fragmentation or native memory.
+High `file` is page cache and high `shmem` is the tmpfs `/tmp`; neither is a
+worker heap leak. Child memory is counted separately in
+`vonk_worker_children_rss_bytes`.
+
+Allocation tracing is off until RSS passes 2 GiB (it re-arms after another
+1 GiB of growth). It samples for two minutes, publishes the result, logs
+`worker.memory_trace_captured`, and stops. To trace on demand, create
+`diagnostics/worker-memory.trace-request` in the control state volume
+(`docker exec <worker> touch /state/diagnostics/worker-memory.trace-request`);
+the worker consumes the file and traces once.
+
 ## Routes stuck in maintenance
 
 Inspect the current recipe operation and affected-node Fleet connection,

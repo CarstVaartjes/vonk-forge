@@ -23,6 +23,7 @@ from .models import (
 )
 from .operation_progress import project_progress
 from .strict_json import read_stored_model
+from .worker_memory_contract import WorkerMemoryReport, WorkerTraceState
 
 if TYPE_CHECKING:
     from .fleet_projection import FleetSnapshot
@@ -127,6 +128,94 @@ def runnable_job_ages(
     return ages
 
 
+def _label_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+
+
+def _worker_memory_lines(report: WorkerMemoryReport, age: float | None) -> list[str]:
+    """Bounded gauges from the worker's own report.
+
+    Components and cgroup kinds are enums, and the traced allocation list is
+    capped at 25 code locations that are replaced wholesale on each capture.
+    """
+
+    lines = [
+        "# HELP vonk_worker_rss_bytes Resident memory of the control worker process.",
+        "# TYPE vonk_worker_rss_bytes gauge",
+        f"vonk_worker_rss_bytes {report.rss_bytes}",
+        "# HELP vonk_worker_threads Threads in the control worker process.",
+        "# TYPE vonk_worker_threads gauge",
+        f"vonk_worker_threads {report.threads}",
+        "# HELP vonk_worker_python_allocated_blocks Live Python allocator blocks.",
+        "# TYPE vonk_worker_python_allocated_blocks gauge",
+        f"vonk_worker_python_allocated_blocks {report.python_allocated_blocks}",
+    ]
+    if report.peak_rss_bytes is not None:
+        lines += [
+            "# HELP vonk_worker_peak_rss_bytes Peak resident memory of the worker.",
+            "# TYPE vonk_worker_peak_rss_bytes gauge",
+            f"vonk_worker_peak_rss_bytes {report.peak_rss_bytes}",
+        ]
+    if report.children_rss_bytes is not None:
+        lines += [
+            "# HELP vonk_worker_children_rss_bytes Resident memory of worker child processes.",
+            "# TYPE vonk_worker_children_rss_bytes gauge",
+            f"vonk_worker_children_rss_bytes {report.children_rss_bytes}",
+        ]
+    if age is not None:
+        lines += [
+            "# HELP vonk_worker_memory_report_age_seconds Age of the worker memory report.",
+            "# TYPE vonk_worker_memory_report_age_seconds gauge",
+            f"vonk_worker_memory_report_age_seconds {age:g}",
+        ]
+    if report.cgroup:
+        lines += [
+            "# HELP vonk_worker_cgroup_bytes Worker container memory by kind (anon, file, shmem).",
+            "# TYPE vonk_worker_cgroup_bytes gauge",
+        ]
+        lines += [
+            f'vonk_worker_cgroup_bytes{{kind="{item.kind.value}"}} {item.bytes}'
+            for item in report.cgroup
+        ]
+    if report.components:
+        lines += [
+            "# HELP vonk_worker_component_entries Entries held by a named worker cache or queue.",
+            "# TYPE vonk_worker_component_entries gauge",
+        ]
+        lines += [
+            f'vonk_worker_component_entries{{component="{item.component.value}"}} '
+            f"{item.entries}"
+            for item in report.components
+        ]
+    trace = report.trace
+    lines += [
+        "# HELP vonk_worker_trace_state Allocation tracing state (off, sampling, captured).",
+        "# TYPE vonk_worker_trace_state gauge",
+    ]
+    lines += [
+        f'vonk_worker_trace_state{{state="{state.value}"}} '
+        f"{1 if state is trace.state else 0}"
+        for state in WorkerTraceState
+    ]
+    if trace.traced_bytes is not None:
+        lines += [
+            "# HELP vonk_worker_traced_bytes Python heap bytes seen by the last trace.",
+            "# TYPE vonk_worker_traced_bytes gauge",
+            f"vonk_worker_traced_bytes {trace.traced_bytes}",
+        ]
+    if trace.top:
+        lines += [
+            "# HELP vonk_worker_trace_growth_bytes Heap bytes gained at a code location since the last trace began.",
+            "# TYPE vonk_worker_trace_growth_bytes gauge",
+        ]
+        lines += [
+            f'vonk_worker_trace_growth_bytes{{rank="{rank}",'
+            f'location="{_label_value(item.location)}"}} {item.growth_bytes}'
+            for rank, item in enumerate(trace.top, start=1)
+        ]
+    return lines
+
+
 class MetricsRegistry:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -156,6 +245,22 @@ class MetricsRegistry:
         self._agent_operations: dict[tuple[str, str], int] = {}
         self._stalled_operations: dict[str, int] = {}
         self._agent_leases: dict[tuple[str, str], float] = {}
+        self._worker_memory: WorkerMemoryReport | None = None
+        self._worker_memory_age: float | None = None
+
+    def set_worker_memory(
+        self, report: WorkerMemoryReport | None, now: datetime | None = None
+    ) -> None:
+        """Replace the worker's last published memory report; ``None`` clears it."""
+
+        age = (
+            None
+            if report is None or now is None
+            else max(0.0, (_aware(now) - _aware(report.recorded_at)).total_seconds())
+        )
+        with self._lock:
+            self._worker_memory = report
+            self._worker_memory_age = age
 
     @staticmethod
     def _number(value: float, field: str) -> float:
@@ -364,6 +469,8 @@ class MetricsRegistry:
             agent_operations = dict(self._agent_operations)
             stalled_operations = dict(self._stalled_operations)
             agent_leases = dict(self._agent_leases)
+            worker_memory = self._worker_memory
+            worker_memory_age = self._worker_memory_age
         lines = [
             "# HELP vonk_route_state Current inference route state.",
             "# TYPE vonk_route_state gauge",
@@ -558,6 +665,8 @@ class MetricsRegistry:
             lines.append(
                 f"vonk_api_request_duration_seconds_count{{{labels}}} {len(values)}"
             )
+        if worker_memory is not None:
+            lines.extend(_worker_memory_lines(worker_memory, worker_memory_age))
         lines.append("# EOF")
         return "\n".join(lines) + "\n"
 

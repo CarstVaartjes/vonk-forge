@@ -139,6 +139,7 @@ from .runtime_image_preparation import (
     read_runtime_image_reference_intent,
 )
 from .strict_json import read_stored_model, serialize_json_value
+from .worker_memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:
     from .recipe_update_batches import RecipeUpdateClaim
@@ -4374,6 +4375,14 @@ class RecipeImageAvailabilityService:
         """Execute one claim; callers may run claims in their own bounded pool."""
 
         self._run(claim)
+
+    def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
+        with self._identity_locks_guard:
+            return {
+                WorkerMemoryComponent.IMAGE_PREPARATION_IDENTITY_LOCKS: len(
+                    self._identity_locks
+                )
+            }
 
     def _identity_lock(self, identity_key: str | None) -> threading.Lock:
         if not identity_key:

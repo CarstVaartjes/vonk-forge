@@ -77,6 +77,18 @@ RECIPE_IMAGE_PARALLEL_PREPARATIONS = 4
 # Cheap: an unchanged release answers 304 to a conditional request.
 RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS = 60
 DISTRIBUTED_START_TIMEOUT_SECONDS = 3600
+# The worker samples its own memory this often; the report is a few hundred
+# bytes and the sample reads /proc, so it is always on. Allocation tracing is
+# not: it starts only once resident memory passes the threshold (or an operator
+# asks), samples for a short window, publishes the top growth and stops, then
+# re-arms only after resident memory has grown by another step.
+WORKER_MEMORY_SAMPLE_INTERVAL_SECONDS = 15
+WORKER_MEMORY_TRACE_RSS_BYTES = 2 * 1024**3
+WORKER_MEMORY_TRACE_REARM_BYTES = 1024**3
+WORKER_MEMORY_TRACE_WINDOW_SECONDS = 120
+WORKER_MEMORY_TRACE_FRAMES = 5
+# A report older than this no longer describes the running worker.
+WORKER_MEMORY_REPORT_MAX_AGE_SECONDS = 120
 
 
 @dataclass(frozen=True, slots=True)

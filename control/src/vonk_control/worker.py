@@ -19,6 +19,7 @@ from sqlalchemy.exc import DBAPIError, OperationalError
 
 from .jobs import JobService
 from .logging import log_event, redact_text
+from .worker_memory_contract import WorkerMemoryComponent
 
 _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -194,6 +195,7 @@ class Worker:
         background_services: Sequence[Callable[[], object]] = (),
         background_closers: Sequence[Callable[[], object]] = (),
         loop_heartbeat: Callable[[], object] | None = None,
+        memory_sources: Sequence[object] = (),
     ) -> None:
         self._jobs = jobs
         self._worker_id = worker_id
@@ -205,6 +207,7 @@ class Worker:
         self._background_services = tuple(background_services)
         self._background_closers = tuple(background_closers)
         self._loop_heartbeat = loop_heartbeat
+        self._memory_sources = tuple(memory_sources)
         self._source_cursor = 0
         self._closed = False
 
@@ -220,6 +223,26 @@ class Worker:
             close = getattr(self._model_cache, "close", None)
             if callable(close):
                 close()
+
+    def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
+        """Sizes of the long-lived collections the worker's services hold.
+
+        Each source exposes ``memory_footprint()``; one that fails is skipped so
+        the report still carries the rest.
+        """
+
+        sizes: dict[WorkerMemoryComponent, int] = {}
+        for source in self._memory_sources:
+            footprint: Callable[[], Mapping[WorkerMemoryComponent, int]] | None = (
+                getattr(source, "memory_footprint", None)
+            )
+            if not callable(footprint):
+                continue
+            try:
+                sizes.update(footprint())
+            except Exception:
+                _LOGGER.warning("memory footprint source failed", exc_info=True)
+        return sizes
 
     def run_once(self) -> bool:
         # Housekeeping runs before all work, so one failing maintenance task
@@ -491,6 +514,7 @@ def assemble_production_worker(
     )
     worker_background_services = tuple(background_services)
     worker_background_closers = tuple(background_closers)
+    memory_sources: list[object] = [model_cache, artifact_phase_executor]
     close_artifact_executor = getattr(artifact_phase_executor, "close", None)
     if callable(close_artifact_executor):
         worker_background_closers += (close_artifact_executor,)
@@ -534,6 +558,7 @@ def assemble_production_worker(
         fleet_profiles.bind_preparation_canceller(
             image_production.service.cancel_profile_preparation
         )
+        memory_sources += [image_production.service, image_production.scheduler]
         worker_background_services += (image_production.scheduler.tick,)
         worker_background_closers += (image_production.close,)
     # Frees disk when it is short (a Spark or the NAS runs low, or work was
@@ -555,6 +580,7 @@ def assemble_production_worker(
         image_blobs=image_store_collector,
         demands=storage_demands,
     )
+    memory_sources += [storage_demands, storage_collector]
     fleet_profiles.bind_storage_relief(storage_collector.relief_for_spark)
     worker_background_services += (
         storage_collector.tick,
@@ -591,6 +617,7 @@ def assemble_production_worker(
         background_services=worker_background_services,
         background_closers=worker_background_closers,
         loop_heartbeat=loop_heartbeat,
+        memory_sources=memory_sources,
     )
 
 
@@ -625,7 +652,19 @@ if __name__ == "__main__":
         MODEL_CACHE_PARALLEL_DOWNLOADS,
         MODEL_CACHE_RESERVE_BYTES,
         RECIPE_IMAGE_PARALLEL_PREPARATIONS,
+        WORKER_MEMORY_SAMPLE_INTERVAL_SECONDS,
+        WORKER_MEMORY_TRACE_FRAMES,
+        WORKER_MEMORY_TRACE_REARM_BYTES,
+        WORKER_MEMORY_TRACE_RSS_BYTES,
+        WORKER_MEMORY_TRACE_WINDOW_SECONDS,
         Settings,
+    )
+    from .worker_memory import (
+        LinuxProcessProbe,
+        WorkerMemoryMonitor,
+        start_worker_memory_sampler,
+        worker_memory_report_path,
+        worker_memory_trace_request_path,
     )
 
     configure_controller_logging()
@@ -706,6 +745,22 @@ if __name__ == "__main__":
     )
     watchdog = WorkerWatchdog(timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS)
     watchdog_stop = threading.Event()
+    memory_monitor = WorkerMemoryMonitor(
+        report_path=worker_memory_report_path(settings.state_path),
+        trace_request_path=worker_memory_trace_request_path(settings.state_path),
+        probe=LinuxProcessProbe(),
+        components=worker.memory_footprint,
+        clock=clock,
+        trace_rss_bytes=WORKER_MEMORY_TRACE_RSS_BYTES,
+        trace_rearm_bytes=WORKER_MEMORY_TRACE_REARM_BYTES,
+        trace_window_seconds=WORKER_MEMORY_TRACE_WINDOW_SECONDS,
+        trace_frames=WORKER_MEMORY_TRACE_FRAMES,
+    )
+    memory_thread = start_worker_memory_sampler(
+        memory_monitor,
+        interval_seconds=WORKER_MEMORY_SAMPLE_INTERVAL_SECONDS,
+        stop=watchdog_stop,
+    )
 
     def monitor_worker_loop() -> None:
         while not watchdog_stop.wait(5):
@@ -746,4 +801,5 @@ if __name__ == "__main__":
     finally:
         watchdog_stop.set()
         watchdog_thread.join(timeout=2)
+        memory_thread.join(timeout=2)
         worker.close()
