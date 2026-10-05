@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
-from .logging import redact_text
+from .lifecycle.job import JobAdapter
 from .models import AgentOperation, Job, JobAttempt
 
 _SENSITIVE = re.compile(r"(?i)(password|secret|token|private.?key|authorization)")
@@ -165,6 +165,9 @@ def _canonical_targets(value: object) -> list[str]:
         raise ValueError("job targets must be a JSON array of strings") from error
 
 
+_ADAPTER = JobAdapter()
+
+
 class JobService:
     def __init__(
         self,
@@ -191,10 +194,9 @@ class JobService:
         clean_targets = _canonical_targets(targets)
         clean, encoded = _canonical_payload(payload, kind=kind)
         now = self._clock()
-        job = Job(
+        job = _ADAPTER.new_job(
             request_id=request_id or str(uuid.uuid4()),
             kind=kind,
-            state="queued",
             actor=actor,
             authority_revision=authority_revision,
             targets=clean_targets,
@@ -258,10 +260,9 @@ class JobService:
         clean_targets = _canonical_targets(targets)
         clean, encoded = _canonical_payload(payload, kind=kind)
         now = self._clock()
-        job = Job(
+        job = _ADAPTER.new_job(
             request_id=request_id or str(uuid.uuid4()),
             kind=kind,
-            state="queued",
             actor=actor,
             authority_revision=authority_revision,
             targets=clean_targets,
@@ -347,30 +348,18 @@ class JobService:
             if job is None:
                 return None
             clean_targets = _canonical_targets(job.targets)
-            if job.current_attempt:
-                old = session.scalar(
-                    select(JobAttempt).where(
-                        JobAttempt.job_id == job.id,
-                        JobAttempt.attempt == job.current_attempt,
-                    )
-                )
-                if old is not None:
-                    old.state = "expired"
-            job.current_attempt += 1
-            job.state = "running"
-            job.updated_at = now
             deadline = now + timedelta(seconds=lease_seconds)
             fence = str(uuid.uuid4())
-            session.add(
-                JobAttempt(
-                    job_id=job.id,
-                    attempt=job.current_attempt,
-                    fence=fence,
-                    worker_id=worker_id,
-                    lease_deadline=deadline,
-                    state="running",
-                )
+            claimed = _ADAPTER.claim(
+                session,
+                job,
+                worker_id=worker_id,
+                fence=fence,
+                lease_deadline=deadline,
+                now=now,
             )
+            if claimed is None:
+                return None
             return AttemptFence(
                 job.id,
                 job.current_attempt,
@@ -406,8 +395,7 @@ class JobService:
         with self._sessions.begin() as session:
             job, attempt = self._active(session, fence)
             deadline = self._clock() + timedelta(seconds=lease_seconds)
-            attempt.lease_deadline = deadline
-            job.updated_at = self._clock()
+            _ADAPTER.heartbeat(job, attempt, deadline, self._clock())
             return AttemptFence(
                 fence.job_id,
                 fence.attempt,
@@ -429,11 +417,14 @@ class JobService:
     ) -> None:
         with self._sessions.begin() as session:
             job, attempt = self._active(session, fence)
-            attempt.state = state
-            job.state = state
-            job.result = dict(result) if result is not None else None
-            job.status_reason = redact_text(reason)[:1024] if reason else None
-            job.updated_at = self._clock()
+            _ADAPTER.finish(
+                job,
+                attempt,
+                succeeded=state == "succeeded",
+                result=result,
+                reason=reason,
+                now=self._clock(),
+            )
 
     def succeed(self, fence: AttemptFence, result: Mapping[str, object]) -> None:
         clean, _ = _canonical_payload(result)

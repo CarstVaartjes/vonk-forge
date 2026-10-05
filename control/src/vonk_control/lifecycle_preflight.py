@@ -18,6 +18,7 @@ from sqlalchemy import select
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
 from .failure_classification import is_security_failure
+from .lifecycle.job import JobAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
 from .recovery_policy import RecoveryPolicy
 from .runtime_preflight import (
@@ -297,11 +298,11 @@ class LifecyclePreflight:
                 if child is None:
                     digest = request_digest(request)
                     payload = request.model_dump(mode="json")
-                    child = Job(
+                    child = JobAdapter.new_job(
+                        state="running",
                         id=str(uuid.uuid4()),
                         request_id=key,
                         kind="runtime.preflight.v1",
-                        state="running",
                         actor=actor,
                         authority_revision=digest,
                         targets=[node_id],

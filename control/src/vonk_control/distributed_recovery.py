@@ -23,6 +23,7 @@ from .distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )
+from .lifecycle.job import JobAdapter
 from .litellm import LiteLlmGeneration
 from .models import (
     STOPPABLE_RUN_STATES,
@@ -1891,11 +1892,11 @@ def _enqueue_recovery_stop(
             "distributed recovery start authority was superseded"
         )
     job_payload["workload_intent_ordinal"] = start_ordinal
-    job = Job(
+    job = JobAdapter.new_job(
+        state="running",
         id=job_id,
         request_id=request_id,
         kind="recipe.stop",
-        state="running",
         actor="system:distributed-recovery",
         authority_revision=run.plan_digest.removeprefix("sha256:"),
         targets=targets,

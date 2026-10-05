@@ -19,8 +19,7 @@ from pydantic import (
     ValidationError,
     model_serializer,
 )
-from sqlalchemy import String, and_, cast, false, func, or_, select, true, update
-from sqlalchemy.engine import CursorResult
+from sqlalchemy import String, and_, cast, false, func, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
@@ -57,6 +56,7 @@ from .fleet_profile_contract import (
     FleetProfileEndpointsView,
 )
 from .lifecycle.agent_operation import retry_scheduled
+from .lifecycle.job import JobAdapter
 from .logging import redact_text
 from .models import (
     AgentCertificate,
@@ -2139,30 +2139,14 @@ class _DurableOperationProjection:
             if job.state != "waiting-for-operator":
                 raise ValueError("job is not waiting for operator")
             now = self._clock()
-            result = session.execute(
-                update(Job)
-                .where(
-                    Job.id == job_id,
-                    Job.state == "waiting-for-operator",
-                )
-                .values(
-                    state="queued",
-                    status_reason=None,
-                    updated_at=now,
-                )
-                .execution_options(synchronize_session=False)
-            )
-            if not isinstance(result, CursorResult) or result.rowcount != 1:
-                raise ValueError("job is not waiting for operator")
             # The parent transition alone does not release the parked child:
             # the claim predicate requires the operation's own retry
             # authorisation.  It is written in this same transaction so an
             # exhausted budget rolls the parent transition back and no
             # half-queued job that can never be claimed is committed.
             authorize_operator_resume_in_session(session, job_id, now)
-            job.state = "queued"
-            job.status_reason = None
-            job.updated_at = now
+            if not JobAdapter(session, clock=self._clock).resume(session, job, now):
+                raise ValueError("job is not waiting for operator")
 
     def retire_job(self, job_id: str) -> None:
         """Retire an exhausted order and retain its effects for exact cleanup.
