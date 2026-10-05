@@ -185,7 +185,8 @@ def test_build_engine_bounds_every_wait_only_on_postgres(monkeypatch) -> None:
                 "pool_timeout": 30.0,
                 "connect_args": {
                     "options": (
-                        "-c lock_timeout=30000"
+                        "-c application_name=vonk:control"
+                        " -c lock_timeout=30000"
                         " -c statement_timeout=120000"
                         " -c transaction_timeout=300000"
                         " -c idle_in_transaction_session_timeout=60000"

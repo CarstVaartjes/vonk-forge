@@ -551,6 +551,12 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     activity.add_argument("--request-id", type=_uuid_argument)
     _add_output(activity)
 
+    locks = fleet_actions.add_parser(
+        "locks",
+        help="Admission locks held now and the transactions that hold them",
+    )
+    _add_output(locks)
+
     evidence = fleet_actions.add_parser(
         "evidence", help="Download the diagnostics of one failed operation attempt"
     )
@@ -2564,6 +2570,8 @@ def _fleet(
             request_id=args.request_id,
         )
         return client.request("GET", "/api/operations", query=query or None)
+    if action == "locks":
+        return client.request("GET", "/api/fleet/locks")
     if action == "evidence":
         operation_id = _quoted(args.operation_id)
         attempt = args.attempt

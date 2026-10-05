@@ -180,7 +180,14 @@ def require_admissible(plan: InstallPlan) -> None:
         )
         raise InstallPreflightExpired(blocker.code, blocker.detail)
     if codes and codes <= _RETRYABLE_INSTALL_BLOCKERS:
-        raise InstallAdmissionBusy("install is waiting for inventory or capacity")
+        causes = "; ".join(
+            f"{node.node_id} {reason.code}: {reason.detail}"[:160]
+            for node in plan.nodes
+            for reason in node.blockers
+        )[:600]
+        raise InstallAdmissionBusy(
+            f"install is waiting for inventory or capacity ({causes})"
+        )
     raise InstallPlanConflict(
         "install.plan_invalid: install plan is blocked by current admission evidence"
     )

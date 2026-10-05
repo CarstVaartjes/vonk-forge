@@ -294,7 +294,16 @@ def require_admissible(plan: RunPlan) -> None:
         return
     codes = {reason.code for item in plan.nodes for reason in item.blockers}
     if codes and codes <= _RETRYABLE_PLAN_BLOCKERS:
-        raise RunAdmissionBusy("run is waiting for current inventory or capacity")
+        # Name the cause: this wait is not lock contention, and "busy" alone
+        # sent an operator looking for a lock holder that did not exist.
+        causes = "; ".join(
+            f"{item.node_id} {reason.code}: {reason.detail}"[:160]
+            for item in plan.nodes
+            for reason in item.blockers
+        )[:600]
+        raise RunAdmissionBusy(
+            f"run is waiting for current inventory or capacity ({causes})"
+        )
     raise RunPlanConflict(
         "run.plan_invalid: run plan is blocked by current admission evidence"
     )

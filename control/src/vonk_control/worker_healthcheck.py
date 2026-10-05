@@ -50,7 +50,7 @@ def main() -> None:
 
     settings = Settings.from_env_and_secrets()
     verify_worker_ready(
-        session_factory(build_engine(settings.database_url)),
+        session_factory(build_engine(settings.database_url, component="healthcheck")),
         process_instance_id=current_worker_instance_id(),
         now=datetime.now(UTC),
     )

@@ -155,6 +155,26 @@ def test_production_service_builder_does_not_enable_missing_authorities() -> Non
     assert services.upgrades is None
 
 
+def test_fleet_locks_is_administrator_only_and_empty_on_sqlite() -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    services = FleetOperatorServices(sessions=sessionmaker(create_engine("sqlite://")))
+    admin = TestClient(_app(Actor("admin", "administrator"), services=services))
+    response = admin.get("/api/fleet/locks")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"held": [], "open_transactions": []}
+    for role in ("operator", "viewer"):
+        refused = TestClient(_app(Actor(role, role), services=services)).get(
+            "/api/fleet/locks"
+        )
+        assert refused.status_code == 403
+    unavailable = TestClient(_app(Actor("admin", "administrator"))).get(
+        "/api/fleet/locks"
+    )
+    assert unavailable.status_code == 503
+
+
 def test_fleet_node_detail_preserves_typed_live_observations() -> None:
     from vonk_control.fleet_projection import FleetNode, FleetSnapshot
 

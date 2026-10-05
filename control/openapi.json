@@ -3649,6 +3649,95 @@
         "title": "FleetEnrollRequest",
         "type": "object"
       },
+      "FleetLockHolder": {
+        "additionalProperties": false,
+        "properties": {
+          "holder": {
+            "maxLength": 128,
+            "title": "Holder",
+            "type": "string"
+          },
+          "namespace": {
+            "maxLength": 64,
+            "title": "Namespace",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "transaction_age_seconds": {
+            "title": "Transaction Age Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "namespace",
+          "holder",
+          "transaction_age_seconds"
+        ],
+        "title": "FleetLockHolder",
+        "type": "object"
+      },
+      "FleetLocksResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "held": {
+            "items": {
+              "$ref": "#/components/schemas/FleetLockHolder"
+            },
+            "maxItems": 1000,
+            "title": "Held",
+            "type": "array"
+          },
+          "open_transactions": {
+            "items": {
+              "$ref": "#/components/schemas/FleetOpenTransaction"
+            },
+            "maxItems": 100,
+            "title": "Open Transactions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "held",
+          "open_transactions"
+        ],
+        "title": "FleetLocksResponse",
+        "type": "object"
+      },
       "FleetLogEntry": {
         "additionalProperties": false,
         "properties": {
@@ -3910,6 +3999,56 @@
           "hostname"
         ],
         "title": "FleetNodeIdentity",
+        "type": "object"
+      },
+      "FleetOpenTransaction": {
+        "additionalProperties": false,
+        "properties": {
+          "application_name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Name"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "transaction_age_seconds": {
+            "title": "Transaction Age Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "transaction_age_seconds"
+        ],
+        "title": "FleetOpenTransaction",
         "type": "object"
       },
       "FleetProfileAdmissionDecision": {
@@ -23340,6 +23479,72 @@
         ],
         "summary": "Revoke Enrollment",
         "x-vonk-request-body": "none"
+      }
+    },
+    "/api/fleet/locks": {
+      "get": {
+        "operationId": "getFleetAdmissionLocks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetLocksResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Fleet Locks"
       }
     },
     "/api/fleet/stream": {

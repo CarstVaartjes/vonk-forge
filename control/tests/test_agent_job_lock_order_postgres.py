@@ -223,8 +223,13 @@ def test_a_reconcile_pass_and_a_claim_on_the_other_node_do_not_deadlock(
         [lambda: services[0].reconcile_orders(), lambda: _claim(services[1], 1)],
     )
 
-    assert results[0] is True
     assert results[1] is not None  # the claim on the other node still succeeds
+    # The pass never queues for a node another transaction holds (a queued
+    # writer would refuse every admission behind it): it either decided the
+    # order or skipped it because the claim held the other node.  A skipped
+    # order is decided by the next pass, once the claim has committed.
+    if results[0] is not True:
+        assert services[0].reconcile_orders() is True
 
 
 class _Clock:

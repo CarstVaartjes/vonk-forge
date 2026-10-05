@@ -102,6 +102,8 @@ from .fleet_action_response import FleetActionResponse
 from .fleet_action_response_action import FleetActionResponseAction
 from .fleet_change_event import FleetChangeEvent
 from .fleet_enroll_request import FleetEnrollRequest
+from .fleet_lock_holder import FleetLockHolder
+from .fleet_locks_response import FleetLocksResponse
 from .fleet_log_entry import FleetLogEntry
 from .fleet_log_entry_level import FleetLogEntryLevel
 from .fleet_log_entry_source import FleetLogEntrySource
@@ -109,6 +111,7 @@ from .fleet_log_response import FleetLogResponse
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
 from .fleet_node_labels import FleetNodeLabels
+from .fleet_open_transaction import FleetOpenTransaction
 from .fleet_profile_admission_decision import FleetProfileAdmissionDecision
 from .fleet_profile_application_cancel_request import FleetProfileApplicationCancelRequest
 from .fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent
@@ -674,6 +677,8 @@ __all__ = (
     "FleetActionResponseAction",
     "FleetChangeEvent",
     "FleetEnrollRequest",
+    "FleetLockHolder",
+    "FleetLocksResponse",
     "FleetLogEntry",
     "FleetLogEntryLevel",
     "FleetLogEntrySource",
@@ -681,6 +686,7 @@ __all__ = (
     "FleetNode",
     "FleetNodeIdentity",
     "FleetNodeLabels",
+    "FleetOpenTransaction",
     "FleetProfileAdmissionDecision",
     "FleetProfileApplicationCancellationIntent",
     "FleetProfileApplicationCancellationIntentCause",
