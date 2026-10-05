@@ -20,10 +20,12 @@ changed:
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import timedelta
 
 import pytest
+from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
@@ -130,8 +132,6 @@ class _World:
 
 
 def _json(value) -> str:
-    import json
-
     return json.dumps(value, default=str)
 
 
@@ -344,8 +344,12 @@ def test_a_cancel_completes_when_the_stop_cannot_be_confirmed(tmp_path) -> None:
         assert child is not None and child.state not in {"cancelled", "failed"}
 
 
-def test_the_cancel_budget_is_the_cores_not_a_per_kind_clock() -> None:
-    assert CANCEL_BUDGET == timedelta(seconds=660)  # the agent cancellation authority
+def test_the_cancel_budget_is_the_one_cancellation_authority_of_an_agent_order() -> (
+    None
+):
+    """One constant (``agent_operation_facts``), not a copy per kind."""
+
+    assert CANCEL_BUDGET == timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
 
 
 def test_a_cancel_survives_a_restart_in_the_middle(tmp_path) -> None:
@@ -363,21 +367,22 @@ def test_a_cancel_survives_a_restart_in_the_middle(tmp_path) -> None:
 
 
 def test_a_cancel_completes_when_its_evidence_cannot_be_read(tmp_path) -> None:
+    """Unreadable evidence of what was issued is an unknown effect, not a reason to
+    park the cancel: the load ends ``cancelled`` and the document is retained."""
+
     world = _World(tmp_path)
     world.cancel()
-    world.edit(
-        progress={
-            **world.row().progress,
-            "intended_profile": {"unreadable": True},
-        }
-    )
+    damaged = {**world.row().progress, "intended_profile": {"unreadable": True}}
+    world.edit(progress=damaged)
     for _ in range(6):
         world.now[0] += timedelta(seconds=15)
         world.service.tick()
-        if world.row().state in {"cancelled", "failed"}:
+        if world.row().state == "cancelled":
             break
-    # unreadable evidence is retained as such; the load does not park for a person
-    assert world.row().state != "waiting-for-operator"
+    ended = world.row()
+    assert ended.state == "cancelled"
+    assert "effect is unknown" in (ended.status_reason or "")
+    assert ended.progress["intended_profile"] == {"unreadable": True}  # retained
 
 
 def test_a_repeated_cancel_request_replays_and_a_different_one_is_refused(

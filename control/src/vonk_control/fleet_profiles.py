@@ -6960,11 +6960,17 @@ class FleetProfileService:
                 plan = _persisted_profile_plan(row)
                 current = _persisted_profile_progress(row)
             except FleetProfileConflict as error:
-                row.status_reason = (
-                    "Cancellation is blocked because persisted effect evidence "
-                    f"cannot be reconciled: {str(error)[:360]}"
-                )[:512]
-                row.updated_at = now
+                # A cancel always completes: evidence that cannot be read is an
+                # unknown effect, recorded as such (the document is retained
+                # untouched), not a reason to park the load for a person.
+                self._lifecycle.cancelled(
+                    row,
+                    "Profile application cancelled; its persisted effect evidence "
+                    f"could not be read, so its effect is unknown: {str(error)[:300]}",
+                    now,
+                    effect=_LifecycleEffect.UNKNOWN,
+                    session=session,
+                )
                 return True
             intent = current.cancellation
             if intent is None or intent.state != "cancelling":
