@@ -22,7 +22,7 @@ use crate::{
     health::{wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome, HostRuntimePlan},
     oci::{OciError, OciRuntime, RecipeRunStartIdentity},
-    outcome::{ExecutionResult, Failure, RefusalBound},
+    outcome::{ExecutionResult, Failure, RefusalBound, UnknownEvidence},
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
@@ -166,20 +166,27 @@ pub trait Executor {
     ) -> ExecutionResult;
 }
 
+/// A test stand-in for an agent build that does not run an operation.
+///
+/// No production path builds it: the agent binary runs `ControlExecutor`, so an
+/// operation is either executed or reported with its own typed outcome. Were a
+/// build ever to claim an operation it cannot run, the answer is a definite
+/// failure (retrying cannot make the build grow the capability), never a wait
+/// for an operator.
+#[cfg(test)]
 pub struct RejectingExecutor;
 
+#[cfg(test)]
 #[async_trait(?Send)]
 impl Executor for RejectingExecutor {
     async fn execute(
         &self,
-        _claim: &AgentClaim,
+        claim: &AgentClaim,
         _lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         _cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> ExecutionResult {
-        ExecutionResult::unknown(
-            WaitReason::OperationNotEnabled,
-            "operation is not enabled by this agent build",
-        )
+        let _ = claim;
+        failed("operation is not enabled by this agent build")
     }
 }
 
@@ -223,6 +230,9 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
                 Ok(()) => ExecutionResult::unknown(
                     WaitReason::AgentUpgradeAwaitingIdentity,
                     crate::agent_upgrade::UPGRADE_AWAITING_IDENTITY_REASON,
+                    UnknownEvidence::at("agent-upgrade-installed").because(
+                        "the package is installed; the new agent's identity is not yet confirmed",
+                    ),
                 ),
                 Err(error) => {
                     let reason = match error.diagnostic() {
@@ -669,6 +679,8 @@ impl<R> RecipeExecutor<'_, R> {
             return Err(unconfirmed(
                 WaitReason::StopUnconfirmed,
                 "workload stop remains unconfirmed",
+                UnknownEvidence::at("stop-plan")
+                    .because("no exact stop plan could be derived from the claim"),
             ));
         };
         if stop_plan
@@ -676,23 +688,60 @@ impl<R> RecipeExecutor<'_, R> {
             .lifecycle
             .stop_timeout_seconds
             != stop_timeout_seconds
-            || self
-                .execute_host_runtime_plan(claim, Vec::new(), HostRuntimePlan::Stop(stop_plan))
-                .await
-                .is_err()
         {
             return Err(unconfirmed(
                 WaitReason::StopUnconfirmed,
                 "workload stop remains unconfirmed",
+                UnknownEvidence::at("stop-plan")
+                    .because("the stop timeout differs from the authorized plan"),
             ));
         }
-        if self.runtime.complete_stop(run_id).is_err() {
+        if let Err(error) = self
+            .execute_host_runtime_plan(claim, Vec::new(), HostRuntimePlan::Stop(stop_plan))
+            .await
+        {
+            return Err(unconfirmed(
+                WaitReason::StopUnconfirmed,
+                "workload stop remains unconfirmed",
+                host_runtime_evidence("stop", &error),
+            ));
+        }
+        if let Err(error) = self.runtime.complete_stop(run_id) {
             return Err(unconfirmed(
                 WaitReason::CleanupUnconfirmed,
                 "workload local cleanup remains unconfirmed",
+                UnknownEvidence::at("stop-cleanup").because(error.safe_category()),
             ));
         }
         Ok(())
+    }
+
+    /// Finish the model-custody ACL transition of a start.
+    ///
+    /// The step is a local verify-and-record that is safe to repeat, so a
+    /// transient storage error is retried a few times before the caller reports
+    /// anything. Only a persistent failure is left for the Controller to observe.
+    async fn settle_acl_transition(
+        &self,
+        installation_id: &str,
+        transition: &crate::oci::InstallationAclTransition,
+    ) -> Result<(), OciError>
+    where
+        R: ProcessRunner,
+    {
+        let mut attempt = 0_u32;
+        loop {
+            match self
+                .runtime
+                .finish_installation_acl_transition(installation_id, transition)
+            {
+                Err(OciError::Io(_)) if attempt < ACL_SETTLE_RETRIES => {
+                    attempt += 1;
+                    tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt))).await;
+                }
+                other => return other,
+            }
+        }
     }
 
     async fn cancel_start_run(
@@ -1436,7 +1485,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             &request,
                             started,
                             WaitReason::JobStopUnconfirmed,
+                            "job-cancel-stop",
                             "controller cancellation could not stop the active job",
+                            None,
                         );
                     }
                 };
@@ -1446,16 +1497,20 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         &request,
                         started,
                         WaitReason::JobStopUnconfirmed,
+                        "job-stop",
                         "job runtime could not be stopped safely",
+                        None,
                     );
                 }
-                if outcome.is_err() {
+                if let Err(error) = &outcome {
                     job_scope_cleanup.retain();
                     return unconfirmed_job(
                         &request,
                         started,
                         WaitReason::JobStateUncertain,
+                        "job-state",
                         "job runtime execution or cleanup state is uncertain",
+                        Some(error.preflight_code()),
                     );
                 }
                 let (exit_code, exit_reason) = match outcome {
@@ -1833,12 +1888,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         {
                             return temporary_runtime_observation_failure();
                         }
-                        Err(_) => {
-                            return unconfirmed(
-                                WaitReason::RetainedIdentityMismatch,
-                                "retained workload identity does not match the authorized start",
-                            );
+                        Err(crate::oci::OciError::ReconciliationBusy) => {
+                            return temporary_runtime_observation_failure();
                         }
+                        Err(error) => return retained_identity_failure(&error),
                     }
                 };
                 let retained_existing = retained_plan.is_some();
@@ -2002,14 +2055,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
                             .await;
                         if let Some(transition) = acl_transition.take()
-                            && self
-                                .runtime
-                                .finish_installation_acl_transition(&installation_id, transition)
-                                .is_err()
+                            && let Err(error) = self
+                                .settle_acl_transition(&installation_id, &transition)
+                                .await
                         {
                             return unconfirmed(
                                 WaitReason::ModelCustodyUnconfirmed,
                                 "cancelled workload model custody remains unconfirmed",
+                                UnknownEvidence::at("model-custody").because(error.safe_category()),
                             );
                         }
                         return stopped;
@@ -2024,17 +2077,15 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 )
                                 .await;
                             if let Some(transition) = acl_transition.take()
-                                && self
-                                    .runtime
-                                    .finish_installation_acl_transition(
-                                        &installation_id,
-                                        transition,
-                                    )
-                                    .is_err()
+                                && let Err(error) = self
+                                    .settle_acl_transition(&installation_id, &transition)
+                                    .await
                             {
                                 return unconfirmed(
                                     WaitReason::ModelCustodyUnconfirmed,
                                     "cancelled workload model custody remains unconfirmed",
+                                    UnknownEvidence::at("model-custody")
+                                        .because(error.safe_category()),
                                 );
                             }
                             return stopped;
@@ -2043,12 +2094,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             if temporary_observation_error(&error) {
                                 return temporary_runtime_observation_failure();
                             }
-                            // A foreign or uninspectable exact container
-                            // requires reconciliation.
-                            return unconfirmed(
-                                WaitReason::RuntimeEffectUnconfirmed,
-                                "retained workload runtime effect could not be confirmed",
-                            );
+                            // A foreign or uninspectable exact container: the
+                            // helper's verdict is the evidence, and removing a
+                            // container this agent does not own is never its
+                            // call. The start fails definitively with that
+                            // evidence and the Controller decides what to do
+                            // with the run.
+                            return runtime_observation_failure(&error);
                         }
                         if !collective_readiness
                             && let Err(uncertain) = self
@@ -2075,8 +2127,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
                 if let Some(transition) = acl_transition.take()
                     && self
-                        .runtime
-                        .finish_installation_acl_transition(&installation_id, transition)
+                        .settle_acl_transition(&installation_id, &transition)
+                        .await
                         .is_err()
                 {
                     if let Err(uncertain) = self
@@ -2251,24 +2303,25 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 if self.runtime.prepare_stop(&run_id).is_err() {
                     return failed("container runtime could not prepare workload stop");
                 }
-                if self
+                if let Err(error) = self
                     .execute_host_runtime_plan(
                         claim,
                         Vec::new(),
                         HostRuntimePlan::Stop(request.clone()),
                     )
                     .await
-                    .is_err()
                 {
                     unconfirmed(
                         WaitReason::StopUnconfirmed,
                         "container runtime stop remains unconfirmed",
+                        host_runtime_evidence("stop", &error),
                     )
                 } else {
-                    if self.runtime.complete_stop(&run_id).is_err() {
+                    if let Err(error) = self.runtime.complete_stop(&run_id) {
                         return unconfirmed(
                             WaitReason::StopMetadataUnconfirmed,
                             "container runtime stop metadata remains unconfirmed",
+                            UnknownEvidence::at("stop-metadata").because(error.safe_category()),
                         );
                     }
                     if *cancellation.borrow() {
@@ -2431,8 +2484,31 @@ fn retryable_reconciliation_storage_error(error: &OciError) -> bool {
 }
 
 /// The effect could not be established; the Controller observes it.
-fn unconfirmed(wait_reason: WaitReason, reason: &'static str) -> ExecutionResult {
-    ExecutionResult::unknown(wait_reason, reason)
+fn unconfirmed(
+    wait_reason: WaitReason,
+    reason: &'static str,
+    evidence: UnknownEvidence,
+) -> ExecutionResult {
+    ExecutionResult::unknown(wait_reason, reason, evidence)
+}
+
+/// The transient storage errors of the model-custody step that are retried
+/// before a start reports it unconfirmed or failed.
+const ACL_SETTLE_RETRIES: u32 = 3;
+
+/// Where a privileged runtime call stopped: the helper's own code when it gave
+/// one, otherwise the bounded category of the failure.
+fn host_runtime_evidence(
+    stage: &'static str,
+    error: &crate::host_runtime::HostRuntimeError,
+) -> UnknownEvidence {
+    let evidence = UnknownEvidence::at(stage).because(error.preflight_code());
+    match error {
+        crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
+            evidence.helper(code.clone())
+        }
+        _ => evidence,
+    }
 }
 
 fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) -> bool {
@@ -2456,6 +2532,20 @@ fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) ->
         HostRuntimeError::HelperProtocolBound { .. } => false,
         HostRuntimeError::StopUncertain => false,
     }
+}
+
+/// The agent's own retained record of this run does not match the authorized
+/// start (another generation, another installation, unreadable metadata). That
+/// is proven locally, so the start fails with a definite code; the cause is the
+/// bounded stage and category, never the content of the record. Nothing is
+/// removed: the retained run may belong to a container that is still running.
+fn retained_identity_failure(error: &OciError) -> ExecutionResult {
+    let (stage, category) = error.safe_start_context();
+    ExecutionResult::Failed(
+        Failure::new("retained workload identity does not match the authorized start")
+            .stage("retained-identity")
+            .diagnostic(format!("stage={stage}; category={category}")),
+    )
 }
 
 fn temporary_runtime_observation_failure() -> ExecutionResult {
@@ -2757,11 +2847,14 @@ fn unconfirmed_job(
     request: &vonk_agent_protocol::RecipeJobRunRequest,
     started: Instant,
     wait_reason: WaitReason,
+    stage: &'static str,
     reason: &'static str,
+    cause: Option<String>,
 ) -> ExecutionResult {
     ExecutionResult::Unknown(crate::outcome::Unconfirmed {
         wait_reason,
         reason: reason.to_owned(),
+        evidence: UnknownEvidence::at(stage).because(cause.unwrap_or_else(|| reason.to_owned())),
         receipt: Some(job_receipt(
             request,
             JOB_CANCEL_EXIT_CODE,
@@ -4963,6 +5056,64 @@ mod tests {
                 .unwrap()
                 .contains("private-value")
         );
+    }
+
+    #[test]
+    fn a_retained_identity_mismatch_is_a_definite_start_failure_with_its_evidence() {
+        // Wrong implementation: the mismatch was reported as a wait with no
+        // evidence and no action, and a re-issued start met the same retained
+        // record again.
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let failed = failed_outcome(
+            &start_claim,
+            super::retained_identity_failure(&crate::oci::OciError::Runtime),
+        );
+
+        assert_eq!(failed.code, FailureCode::RecipeStartFailed);
+        assert_eq!(failed.failure_kind, None);
+        let evidence = evidence_of(&failed);
+        assert_eq!(evidence.stage.as_deref(), Some("retained-identity"));
+        assert!(
+            evidence
+                .diagnostic
+                .as_deref()
+                .is_some_and(|text| text.contains("category=runtime")),
+            "the cause is the bounded category, got {:?}",
+            evidence.diagnostic
+        );
+    }
+
+    #[test]
+    fn an_unconfirmed_stop_carries_the_helper_verdict_as_evidence() {
+        // Wrong implementation: the stop error was discarded, so the wait said
+        // "remains unconfirmed" and nothing more.
+        let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+            code: "operation_io".to_owned(),
+            diagnostic: None,
+            process_logs: None,
+        };
+        let evidence = super::host_runtime_evidence("stop", &error);
+
+        assert_eq!(evidence.stage, "stop");
+        assert_eq!(evidence.helper_error_code.as_deref(), Some("operation_io"));
+        assert_eq!(evidence.diagnostic.as_deref(), Some("helper_operation_io"));
+    }
+
+    #[tokio::test]
+    async fn a_never_enabled_operation_fails_definitively_and_never_waits() {
+        // Wrong implementation: the unsupported-operation executor reported a
+        // wait for an operator about work that never ran.
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(start_claim.deadline);
+        let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
+        let result = RejectingExecutor
+            .execute(&start_claim, lease_deadline, cancellation)
+            .await;
+
+        assert_eq!(result.state(), AgentResultState::Failed);
+        assert_eq!(failed_outcome(&start_claim, result).failure_kind, None);
     }
 
     #[test]

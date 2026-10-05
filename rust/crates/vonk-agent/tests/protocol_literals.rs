@@ -168,6 +168,66 @@ fn the_agent_builds_no_protocol_body_from_loose_json() {
     );
 }
 
+/// The sibling crates that also speak the agent protocol, scanned for `json!`.
+const PROTOCOL_CRATES: [&str; 2] = ["vonk-agent-helper", "vonk-agent-protocol"];
+
+/// `json!` that remains in a protocol crate's non-test code, with a ceiling that
+/// only falls. Each entry builds a document that is not a protocol message.
+const JSON_RESIDUE: [(&str, usize); 1] = [
+    // The exported JSON Schema document itself, assembled once at build time.
+    ("vonk-agent-protocol/src/wire_schema.rs", 1),
+];
+
+fn protocol_crate_sources() -> Vec<(String, String)> {
+    fn walk(directory: &Path, found: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, found);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                found.push(path);
+            }
+        }
+    }
+    let crates = root().join("..");
+    let mut files = Vec::new();
+    for name in PROTOCOL_CRATES {
+        walk(&crates.join(name).join("src"), &mut files);
+    }
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let name = path
+                .strip_prefix(&crates)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            (name, production_code(&fs::read_to_string(&path).unwrap()))
+        })
+        .collect()
+}
+
+#[test]
+fn the_protocol_crates_build_no_message_from_loose_json_beyond_the_listed_residue() {
+    let mut observed = std::collections::BTreeMap::new();
+    for (name, code) in protocol_crate_sources() {
+        let count = json_macro_sites(&code);
+        if count > 0 {
+            observed.insert(name, count);
+        }
+    }
+    let ceiling: std::collections::BTreeMap<String, usize> = JSON_RESIDUE
+        .iter()
+        .map(|(name, count)| ((*name).to_owned(), *count))
+        .collect();
+    assert_eq!(
+        observed, ceiling,
+        "json! in the protocol crates must match JSON_RESIDUE exactly: a new site is a loose \
+         protocol body (use the generated types); a removed one lowers the ceiling"
+    );
+}
+
 #[test]
 fn the_agent_spells_no_vocabulary_word_by_hand() {
     let vocabulary = vocabulary();
