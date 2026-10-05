@@ -3039,7 +3039,7 @@ def test_claim_endpoint_long_poll_wakes_when_work_is_enqueued(agent_system) -> N
         # Synchronize on the observable event instead of sleeping: the claim
         # is parked on the availability condition once it has a waiter.
         deadline = time.monotonic() + 20
-        while not services._available._waiters:
+        while not services.operations._available._waiters:
             assert not waiting.done(), "claim returned before work existed"
             assert time.monotonic() < deadline, "claim never began waiting"
             time.sleep(0.005)
