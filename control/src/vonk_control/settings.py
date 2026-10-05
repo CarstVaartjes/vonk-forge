@@ -86,12 +86,13 @@ class DatabaseWaitBudgets:
     The engine applies the connection and pool budgets per connection. The
     admission budget narrows ``lock_timeout`` inside admission transactions so
     implicit foreign-key and unique-index waits are rescheduled promptly.
-    Invariants: admission lock <= lock <= statement <= transaction, and
+    Invariants: admission lock <= patient admission lock <= lock <= statement <= transaction, and
     idle-in-transaction <= transaction.
     """
 
     lock_timeout_ms: int = 30_000
     admission_lock_timeout_ms: int = 750
+    patient_admission_lock_timeout_ms: int = 5_000
     statement_timeout_ms: int = 120_000
     transaction_timeout_ms: int = 300_000
     idle_in_transaction_timeout_ms: int = 60_000

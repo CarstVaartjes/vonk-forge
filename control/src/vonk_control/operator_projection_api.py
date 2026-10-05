@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import traceback
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
 
@@ -61,6 +62,7 @@ _SELECTOR_PATTERN = r"^[^\x00-\x1f\x7f]{1,256}$"
 
 FLEET_OPERATION_IDS = {
     ("get", "/api/fleet"): "getFleetStatus",
+    ("get", "/api/fleet/locks"): "getFleetAdmissionLocks",
     ("get", "/api/fleet/{selector}"): "getFleetNode",
     ("get", "/api/fleet/{selector}/loginfo"): "getFleetLogInfo",
     ("post", "/api/fleet/{selector}/rename"): "renameFleetNode",
@@ -119,6 +121,33 @@ class FleetActionResponse(StrictJSONModel):
         if self.request_key is None:
             document.pop("request_key", None)
         return document
+
+
+class FleetLockHolder(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    node_id: str | None = Field(default=None, max_length=128)
+    namespace: str = Field(max_length=64)
+    holder: str = Field(max_length=128)
+    state: str | None = Field(default=None, max_length=64)
+    transaction_age_seconds: float
+    query: str | None = Field(default=None, max_length=256)
+
+
+class FleetOpenTransaction(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    application_name: str | None = Field(default=None, max_length=128)
+    state: str | None = Field(default=None, max_length=64)
+    transaction_age_seconds: float
+    query: str | None = Field(default=None, max_length=256)
+
+
+class FleetLocksResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    held: list[FleetLockHolder] = Field(max_length=1_000)
+    open_transactions: list[FleetOpenTransaction] = Field(max_length=100)
 
 
 class FleetLogEntry(StrictJSONModel):
@@ -207,7 +236,9 @@ class FleetOperatorServices:
         enrollment: FleetEnrollmentProvider | None = None,
         upgrades: FleetUpgradeProvider | None = None,
         logs: FleetLogProvider | None = None,
+        sessions: sessionmaker[Session] | None = None,
     ) -> None:
+        self.sessions = sessions
         self.enrollment = enrollment
         self.upgrades = upgrades
         self.logs = logs
@@ -623,6 +654,7 @@ def build_fleet_operator_services(
         enrollment=enrollment,
         upgrades=upgrades,
         logs=retained_logs,
+        sessions=sessions,
     )
 
 
@@ -771,6 +803,34 @@ def install_operator_projection_routes(
     )
     def fleet_status(_actor: Actor = authenticated) -> FleetSnapshot:
         return snapshot()
+
+    @app.get(
+        "/api/fleet/locks",
+        response_model=FleetLocksResponse,
+        responses=bounded_error_responses(401, 403, 503),
+        operation_id="getFleetAdmissionLocks",
+    )
+    def fleet_locks(actor: Actor = authenticated) -> FleetLocksResponse:
+        if actor.role != "administrator":
+            raise HTTPException(status_code=403, detail="insufficient role")
+        if fleet_services is None or fleet_services.sessions is None:
+            raise HTTPException(status_code=503, detail="fleet locks unavailable")
+        from .admission_locking import report_admission_locks
+
+        try:
+            with fleet_services.sessions() as session:
+                report = report_admission_locks(session)
+                session.rollback()
+            return FleetLocksResponse.model_validate(
+                {
+                    "held": [asdict(item) for item in report.held],
+                    "open_transactions": [
+                        asdict(item) for item in report.open_transactions
+                    ],
+                }
+            )
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
+            raise _operator_error(error) from None
 
     @app.get(
         "/api/fleet/{selector}/loginfo",

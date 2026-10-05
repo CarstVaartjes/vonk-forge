@@ -31,7 +31,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .admission_locking import AdmissionLockBusy
+from .admission_locking import AdmissionLockBusy, busy_detail, patient_admission
 from .agent_jobs import AgentJobService
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -551,6 +551,20 @@ _PHASES: tuple[RunSwitchPhaseKind, ...] = (
     "start",
     "final_verify",
 )
+
+
+def _refused_retries(progress: Mapping[str, object]) -> int:
+    """How many times in a row admission was refused for capacity (0 if not)."""
+
+    reason = progress.get("retry_reason")
+    attempt = progress.get("retry_attempt")
+    if (
+        isinstance(reason, str)
+        and reason.endswith(".capacity_busy")
+        and type(attempt) is int
+    ):
+        return attempt
+    return 0
 
 
 def _now(clock: Any) -> datetime:
@@ -7542,14 +7556,15 @@ class RunSwitchOperationService:
             return True
         else:
             try:
-                execution = self._phase_executor.execute(
-                    plan,
-                    phase,
-                    item_index=item_index,
-                    actor=actor,
-                    request_key=request_key,
-                    progress=progress,
-                )
+                with patient_admission(_refused_retries(progress)):
+                    execution = self._phase_executor.execute(
+                        plan,
+                        phase,
+                        item_index=item_index,
+                        actor=actor,
+                        request_key=request_key,
+                        progress=progress,
+                    )
             except _RunSwitchBuildParentChanged:
                 return False
             except RunSwitchInstallPreflightExpired as expired:
@@ -7563,7 +7578,11 @@ class RunSwitchOperationService:
                 RecipeBuildAdmissionBusy,
             ) as busy:
                 return self._hold_capacity_writer(
-                    operation_id, phase_index, item_index, reason=busy.code
+                    operation_id,
+                    phase_index,
+                    item_index,
+                    reason=busy.code,
+                    detail=busy_detail(busy),
                 )
             except RunSwitchPostStopEvidencePending as pending:
                 return self._hold_capacity_writer(

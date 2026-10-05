@@ -1480,6 +1480,48 @@ def _artifact_job(payload: Mapping[str, object], action: str) -> None:
         raise ValueError(f"no recipe job presentation for {action}")
 
 
+def _age(value: object) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "unavailable"
+    return f"{value:.1f}"
+
+
+def _locks(payload: Mapping[str, object]) -> None:
+    held = _records(payload, "held")
+    if not held:
+        print("No admission locks are held.")
+    else:
+        _table(
+            ("Node", "Holder", "State", "Age (s)", "Query"),
+            [
+                (
+                    row.get("node_id") or row.get("namespace"),
+                    row.get("holder"),
+                    row.get("state"),
+                    _age(row.get("transaction_age_seconds")),
+                    row.get("query"),
+                )
+                for row in held
+            ],
+        )
+    transactions = _records(payload, "open_transactions")
+    if transactions:
+        print()
+        print("Open transactions:")
+        _table(
+            ("Application", "State", "Age (s)", "Query"),
+            [
+                (
+                    row.get("application_name"),
+                    row.get("state"),
+                    _age(row.get("transaction_age_seconds")),
+                    row.get("query"),
+                )
+                for row in transactions
+            ],
+        )
+
+
 def _activity(
     payload: Mapping[str, object], filters: Mapping[str, object] | None
 ) -> None:
@@ -1753,6 +1795,8 @@ def render_payload(
             _job(payload)
         elif action == "activity":
             _activity(payload, activity_filters)
+        elif action == "locks":
+            _locks(payload)
         elif action == "evidence":
             _field("Operation", payload.get("operation_id"))
             _field("Attempt", payload.get("attempt"))

@@ -5,10 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.engine import Row
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .admission_locking import is_admission_contention, label_transaction
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .models import (
     AgentNode,
@@ -19,6 +21,14 @@ from .models import (
 )
 
 _MAX_MAINTENANCE_LIMIT = 25_000
+#: One pass deletes at most this many rows per table.  Maintenance holds rows
+#: that admission locks (agent nodes, inventory snapshots) for as long as its
+#: transaction lives, so a pass is small and frequent instead of one large batch
+#: that kept admission refused for seconds out of every fifteen.
+_DEFAULT_MAINTENANCE_LIMIT = 500
+#: Maintenance never queues for a row an admission holds: a queued writer refuses
+#: every NOWAIT admission behind it.
+_MAINTENANCE_LOCK_TIMEOUT_MS = 250
 _SQL_KEY_CHUNK = 250
 _MAINTENANCE_INTERVAL = timedelta(seconds=15)
 #: Raw samples serve the live Fleet view only; history lives in Prometheus.
@@ -41,7 +51,25 @@ def _validated_limit(value: int, *, label: str) -> int:
     return value
 
 
-def _lock_nodes(session: Session, node_ids: list[str]) -> None:
+def _polite(session: Session, name: str) -> None:
+    """Label this maintenance transaction and bound every lock wait it makes."""
+
+    if session.connection().dialect.name != "postgresql":
+        return
+    label_transaction(session, name)
+    session.execute(
+        text("SELECT set_config('lock_timeout', :t, true)"),
+        {"t": f"{_MAINTENANCE_LOCK_TIMEOUT_MS}ms"},
+    )
+
+
+def _lock_nodes(session: Session, node_ids: list[str]) -> set[str]:
+    """Lock the nodes whose samples are pruned; return those that were free.
+
+    A node an admission (or anything else) holds is skipped, never waited for:
+    its samples are simply pruned on a later pass.
+    """
+
     ordered = sorted(set(node_ids))
     if session.connection().dialect.name == "sqlite":
         for node_id in ordered:
@@ -50,14 +78,18 @@ def _lock_nodes(session: Session, node_ids: list[str]) -> None:
                 .where(AgentNode.node_id == node_id)
                 .values(node_id=AgentNode.node_id)
             )
-        return
+        return set(ordered)
+    locked: set[str] = set()
     for chunk in TelemetryMaintenance._chunks(ordered):
-        session.scalars(
-            select(AgentNode.node_id)
-            .where(AgentNode.node_id.in_(chunk))
-            .order_by(AgentNode.node_id)
-            .with_for_update(of=AgentNode)
-        ).all()
+        locked.update(
+            session.scalars(
+                select(AgentNode.node_id)
+                .where(AgentNode.node_id.in_(chunk))
+                .order_by(AgentNode.node_id)
+                .with_for_update(of=AgentNode, skip_locked=True)
+            ).all()
+        )
+    return locked
 
 
 def _raw_candidate_statement(
@@ -90,7 +122,7 @@ class TelemetryMaintenance:
         self._sessions = sessions
         self._clock = clock
 
-    def run_once(self, delete_limit: int = 25_000) -> None:
+    def run_once(self, delete_limit: int = _DEFAULT_MAINTENANCE_LIMIT) -> None:
         limit = _validated_limit(delete_limit, label="delete limit")
         now = _aware_utc(self._clock(), label="telemetry maintenance clock")
         events = FleetEventRepository(self._sessions, clock=lambda: now)
@@ -99,18 +131,26 @@ class TelemetryMaintenance:
             raw_candidates = session.execute(
                 _raw_candidate_statement(cutoff=cutoff, limit=limit)
             ).all()
-        with self._sessions.begin() as session:
-            self._prune_raw(
+        for stage in (
+            lambda session: self._prune_raw(
                 session,
                 cutoff=cutoff,
                 limit=limit,
                 events=events,
                 candidates=raw_candidates,
-            )
-        with self._sessions.begin() as session:
-            self._prune_events(session, now=now, limit=limit)
-        with self._sessions.begin() as session:
-            self._prune_inventory(session, cutoff=cutoff, limit=limit)
+            ),
+            lambda session: self._prune_events(session, now=now, limit=limit),
+            lambda session: self._prune_inventory(session, cutoff=cutoff, limit=limit),
+        ):
+            try:
+                with self._sessions.begin() as session:
+                    _polite(session, "telemetry-maintenance")
+                    stage(session)
+            except OperationalError as error:
+                if not is_admission_contention(error):
+                    raise
+                # Something else owns the rows; retention is eventually
+                # consistent, so this stage runs again on the next pass.
 
     @staticmethod
     def _prune_inventory(session: Session, *, cutoff: datetime, limit: int) -> None:
@@ -138,6 +178,7 @@ class TelemetryMaintenance:
                 )
                 .order_by(NodeInventorySnapshot.observed_at, NodeInventorySnapshot.id)
                 .limit(limit)
+                .with_for_update(of=NodeInventorySnapshot, skip_locked=True)
             )
         )
         for chunk in TelemetryMaintenance._chunks(stale):
@@ -173,11 +214,12 @@ class TelemetryMaintenance:
         events: FleetEventRepository,
         candidates: Sequence[Row[str, str, datetime]],
     ) -> None:
-        sample_ids = [sample_id for sample_id, _node_id, _observed_at in candidates]
-        _lock_nodes(
+        free = _lock_nodes(
             session,
             [node_id for _sample_id, node_id, _observed_at in candidates],
         )
+        candidates = [row for row in candidates if row[1] in free]
+        sample_ids = [sample_id for sample_id, _node_id, _observed_at in candidates]
 
         locked_rows = []
         for chunk in TelemetryMaintenance._chunks(sample_ids):

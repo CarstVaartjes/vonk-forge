@@ -140,6 +140,7 @@ vonkctl fleet loginfo Atlas --since 15m --lines 100 --follow
 vonkctl fleet progress JOB_ID --follow
 vonkctl fleet activity --state waiting-for-operator --limit 20
 vonkctl fleet evidence OPERATION_ID --output evidence.json
+vonkctl fleet locks
 vonkctl fleet resume JOB_ID --yes
 ```
 
@@ -226,6 +227,12 @@ unrelated operations. Inspect its exact operation for the detailed failure.
 Pending profile cancellation appears as `cancelling`, with its cancellation
 request key, actor, and completed, pending, or unissued effects. Filtering Activity
 by `--state cancelling` uses that same owner state.
+
+`fleet locks` (administrator only, read only, never blocks) lists the admission
+locks held now with their holder, state and transaction age, and the open
+database transactions that could hold a row lock; use it when a load reports
+`admission.capacity_busy`. It is empty on a SQLite Controller. `--json` returns
+`{"held": [...], "open_transactions": [...]}`.
 
 `fleet resume JOB_ID --yes` first checks the owner's advertised resume action.
 The Controller rechecks current authorization and the intent of every target

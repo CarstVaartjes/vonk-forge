@@ -86,7 +86,7 @@ class RecipeOperationWorker:
             # person is decided before the owners above them read its state.
             progressed = self._order_reconcile()
         if self._build_cleanup is not None:
-            progressed = self._build_cleanup()
+            progressed = self._build_cleanup() or progressed
         if self._retirement_cleanup is not None:
             progressed = self._retirement_cleanup() or progressed
         if self._residue_cleanup is not None:

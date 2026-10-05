@@ -1256,7 +1256,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
 
     if settings is None:
         settings = Settings.from_env_and_secrets()
-    sessions = session_factory(build_engine(settings.database_url))
+    sessions = session_factory(build_engine(settings.database_url, component="api"))
     # Planning, profile choices, and preparation share the same managed OCI root.
     runtime_image_storage = FilesystemRuntimeImageStorage(settings.agent_artifact_root)
 

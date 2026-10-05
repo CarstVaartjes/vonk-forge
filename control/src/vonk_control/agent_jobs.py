@@ -38,6 +38,7 @@ from .admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     acquire_admission_keys,
+    label_transaction,
     lock_admission_rows,
     node_admission_key,
 )
@@ -1700,41 +1701,80 @@ class AgentJobService:
             )
         progressed = False
         for operation_id, node_id, parent_job_id in candidates:
-            with self._claim_lock, self._sessions.begin() as session:
-                scopes = self._lock_operation_scopes(session, (operation_id,), node_id)
-                if scopes is None or scopes[operation_id][0] != parent_job_id:
-                    continue
-                operation = session.scalar(
-                    select(StoredOperation)
-                    .where(StoredOperation.id == operation_id)
-                    .with_for_update(of=StoredOperation)
-                    .execution_options(populate_existing=True)
-                )
-                node = session.get(AgentNode, node_id)
-                if operation is None or node is None or operation.state != "running":
-                    continue
-                attempt = session.scalar(
-                    select(AgentOperationAttempt)
-                    .where(
-                        AgentOperationAttempt.operation_id == operation.id,
-                        AgentOperationAttempt.attempt == operation.current_attempt,
+            # Decide without a lock whether there is anything to do: an order
+            # whose attempt is still live (an open launch budget, say) is looked
+            # at every pass, and taking the node's rows for each look kept the
+            # node busy for the admissions that need it.
+            if not self._sweep_would_act(operation_id, node_id):
+                continue
+            try:
+                with self._claim_lock, self._sessions.begin() as session:
+                    label_transaction(session, "order-sweep")
+                    scopes = self._lock_operation_scopes(
+                        session, (operation_id,), node_id, nowait=True
                     )
-                    .with_for_update(of=AgentOperationAttempt)
-                )
-                now = self._clock()
-                if _attempt_is_live(operation, attempt, now) or (
-                    operation.workload_intent_ordinal is not None
-                    and operation.workload_intent_ordinal
-                    != node.workload_intent_ordinal
-                ):
-                    continue
-                self._reconcile_dead_running_operation(
-                    session, operation, attempt, node, now, superseded_by=None
-                )
-                progressed = True
+                    if scopes is None or scopes[operation_id][0] != parent_job_id:
+                        continue
+                    operation = session.scalar(
+                        select(StoredOperation)
+                        .where(StoredOperation.id == operation_id)
+                        .with_for_update(of=StoredOperation)
+                        .execution_options(populate_existing=True)
+                    )
+                    node = session.get(AgentNode, node_id)
+                    if (
+                        operation is None
+                        or node is None
+                        or operation.state != "running"
+                    ):
+                        continue
+                    attempt = session.scalar(
+                        select(AgentOperationAttempt)
+                        .where(
+                            AgentOperationAttempt.operation_id == operation.id,
+                            AgentOperationAttempt.attempt == operation.current_attempt,
+                        )
+                        .with_for_update(of=AgentOperationAttempt)
+                    )
+                    now = self._clock()
+                    if _attempt_is_live(operation, attempt, now) or (
+                        operation.workload_intent_ordinal is not None
+                        and operation.workload_intent_ordinal
+                        != node.workload_intent_ordinal
+                    ):
+                        continue
+                    self._reconcile_dead_running_operation(
+                        session, operation, attempt, node, now, superseded_by=None
+                    )
+                    progressed = True
+            except AdmissionLockBusy:
+                continue  # an admission owns the node; the next pass retries
         if progressed:
             self.notify_available()
         return progressed
+
+    def _sweep_would_act(self, operation_id: str, node_id: str) -> bool:
+        """Unlocked pre-check for the sweep; the locked pass decides again."""
+
+        with self._sessions() as session:
+            operation = session.get(StoredOperation, operation_id)
+            node = session.get(AgentNode, node_id)
+            if operation is None or node is None or operation.state != "running":
+                return False
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == operation.current_attempt,
+                )
+            )
+            return not (
+                _attempt_is_live(operation, attempt, self._clock())
+                or (
+                    operation.workload_intent_ordinal is not None
+                    and operation.workload_intent_ordinal
+                    != node.workload_intent_ordinal
+                )
+            )
 
     @staticmethod
     def request_superseded_workload_cancellation_in_session(
@@ -3491,8 +3531,16 @@ class AgentJobService:
         session: Session,
         operation_ids: tuple[str, ...],
         node_id: str,
+        *,
+        nowait: bool = False,
     ) -> dict[str, tuple[str, tuple[str, ...]]] | None:
-        """Lock hinted target nodes, then parents; callers pin and refresh operations."""
+        """Lock hinted target nodes, then parents; callers pin and refresh operations.
+
+        ``nowait`` is for background writers: they must never queue for a node an
+        admission is trying to take (a queued writer refuses every NOWAIT
+        admission behind it), so a busy node raises ``AdmissionLockBusy`` and the
+        caller skips it until the next pass.
+        """
         rows = (
             session.execute(
                 select(
@@ -3515,7 +3563,7 @@ class AgentJobService:
             if scope is None or node_id not in scope or operation_node != node_id:
                 return None
             scopes[operation_id] = (parent_id, scope)
-        if not cls._lock_target_scopes(session, scopes, node_id):
+        if not cls._lock_target_scopes(session, scopes, node_id, nowait=nowait):
             return None
         return scopes
 
@@ -4581,8 +4629,15 @@ class _OrderStore:
             )
 
     def save(self, before: Lifecycle, after: Lifecycle) -> bool:
+        try:
+            return self._save(before, after)
+        except AdmissionLockBusy:
+            return False  # an admission owns the node; the next pass reads afresh
+
+    def _save(self, before: Lifecycle, after: Lifecycle) -> bool:
         service = self._service
         with service._claim_lock, service._sessions.begin() as session:
+            label_transaction(session, "order-reconcile")
             hint = session.execute(
                 select(StoredOperation.node_id, StoredOperation.parent_job_id).where(
                     StoredOperation.id == before.id
@@ -4591,7 +4646,9 @@ class _OrderStore:
             if hint is None:
                 return False
             node_id, parent_job_id = hint
-            scopes = service._lock_operation_scopes(session, (before.id,), node_id)
+            scopes = service._lock_operation_scopes(
+                session, (before.id,), node_id, nowait=True
+            )
             if scopes is None or scopes[before.id][0] != parent_job_id:
                 return False
             order = session.scalar(

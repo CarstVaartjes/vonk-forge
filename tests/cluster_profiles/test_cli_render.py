@@ -808,3 +808,35 @@ def test_profile_cancel_renders_the_application(application, capsys):
     assert application["id"] in output
     assert str(application["state"]) in output
     assert str(application["cancellation"]["state"]) in output
+
+
+def test_fleet_locks_renders_holders_and_open_transactions(capsys):
+    render_payload(
+        {
+            "held": [
+                {
+                    "node_id": "spk_" + "a" * 32,
+                    "namespace": "node",
+                    "holder": "run-admission",
+                    "state": "idle in transaction",
+                    "transaction_age_seconds": 12.34,
+                    "query": "SELECT 1",
+                }
+            ],
+            "open_transactions": [
+                {
+                    "application_name": "vonk-worker",
+                    "state": "active",
+                    "transaction_age_seconds": 1.0,
+                    "query": "UPDATE jobs",
+                }
+            ],
+        },
+        "fleet",
+        action="locks",
+    )
+    output = capsys.readouterr().out
+    assert "run-admission" in output and "12.3" in output
+    assert "Open transactions:" in output and "vonk-worker" in output
+    render_payload({"held": [], "open_transactions": []}, "fleet", action="locks")
+    assert "No admission locks are held." in capsys.readouterr().out

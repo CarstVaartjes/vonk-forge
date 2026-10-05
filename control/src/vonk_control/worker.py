@@ -630,7 +630,7 @@ if __name__ == "__main__":
     configure_controller_logging()
     settings = Settings.from_env_and_secrets()
     wait_for_database(settings.database_url)
-    sessions = session_factory(build_engine(settings.database_url))
+    sessions = session_factory(build_engine(settings.database_url, component="worker"))
 
     def clock() -> datetime:
         return datetime.now(UTC)
