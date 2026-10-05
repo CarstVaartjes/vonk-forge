@@ -228,7 +228,6 @@ export const FailureCode = {
   RECIPE_UNINSTALL_FAILED: "recipe_uninstall_failed",
   RUNTIME_OBSERVATION_UNAVAILABLE: "runtime_observation_unavailable",
   INSTALLATION_RECONCILIATION_BUSY: "installation_reconciliation_busy",
-  INSTALLATION_STORAGE_TEMPORARILY_UNAVAILABLE: "installation_storage_temporarily_unavailable",
   RECIPE_RECONCILIATION_DEPENDENCY_UNAVAILABLE: "recipe_reconciliation_dependency_unavailable",
 } as const;
 export type FailureCode = (typeof FailureCode)[keyof typeof FailureCode];

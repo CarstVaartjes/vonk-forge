@@ -312,6 +312,19 @@ an untyped agent body. It exists for one release so agents already on the Sparks
 keep working; delete it together with the legacy untyped members of
 `AgentResultPayload` once no deployable agent package predates the typed outcome.
 
+The Rust agent builds every operation result from the generated types.
+`rust/crates/vonk-agent/src/outcome.rs` holds the one in-process type an executor
+returns (`ExecutionResult`: `Done` with the typed success body, `Failed` with a
+`Failure` draft, `Unknown` with a closed `WaitReason`), and
+`ExecutionResult::finish` is the only place that turns it into the protocol
+message: sanitized text, a stable code per operation, bounded diagnostics. There
+is no `json!` result body in the agent, and
+`rust/crates/vonk-agent/tests/protocol_literals.rs` fails the build if one
+appears or if the agent spells a vocabulary word instead of using the generated
+enum. A Controller older than the typed outcome refuses a typed result, which the
+agent keeps and retries; agent upgrades are issued by the Controller, so the
+Controller is always at least as new as the agent it upgrades.
+
 The three error categories, `SecurityRefusal`, `InvalidRequest` and
 `UnknownError`, are the only things a lifecycle adapter may raise or report, each
 with its own closed reason set; the blocker allowlist's `security-edge` and

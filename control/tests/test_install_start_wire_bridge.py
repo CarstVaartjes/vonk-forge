@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     DistributionAssignment,
     RecipeStartResult,
 )
+from vonk_control.agent_outcome import stored_report
 from vonk_control.distribution import DistributionService, MemoryObjectSource
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.models import AgentOperation, InstallationNode, RunNode
@@ -73,7 +74,12 @@ def _bridge(probe: Path, rows: tuple[AgentOperation, ...]) -> tuple[AgentResult,
     assert completed.returncode == 0, completed.stderr
     output_lines = [line for line in completed.stdout.splitlines() if line.strip()]
     assert len(output_lines) == len(rows), completed.stdout
-    parsed = tuple(AgentResult.parse(json.loads(line)) for line in output_lines)
+    # The real agent speaks the typed outcome; the Controller stores it in the
+    # shape its consumers read, exactly as its ingress does.
+    parsed = tuple(
+        stored_report(row.kind, AgentResult.parse(json.loads(line)))[0]
+        for row, line in zip(rows, output_lines, strict=True)
+    )
     for row, result in zip(rows, parsed, strict=True):
         assert result.state == "succeeded"
         document = result.result.model_dump(mode="json", exclude_none=True)

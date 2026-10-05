@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
+use vonk_agent_protocol::generated::{FailureCode, SecurityRefusalReason};
 use vonk_agent_protocol::{
     AgentClaim, HostRuntimeAction, HostRuntimeRequest, HostRuntimeRequestRule, RecipeJobRunRequest,
     RecipeReconciliationIdentity, RecipeRunInspectionRequest, RecipeStartRequest,
@@ -18,6 +19,8 @@ use vonk_agent_protocol::{
 
 use crate::client::{AgentHttpClient, ClientError};
 use crate::failure_evidence::{FailureProcessLogs, sanitize_tail};
+use crate::outcome::{GRANT_REFUSALS, HELPER_IDENTITY_REFUSALS};
+use crate::vocabulary;
 
 /// The frame ceiling is owned by the wire contract so the agent, the upgrade
 /// channel and the privileged helper cannot drift.
@@ -150,11 +153,13 @@ impl HostRuntimeError {
     pub fn preflight_code(&self) -> String {
         match self {
             Self::Io(_) => "helper_io_failed".to_owned(),
-            Self::Controller(ClientError::Protocol) => "helper_grant_invalid".to_owned(),
+            Self::Controller(ClientError::Protocol) => {
+                SecurityRefusalReason::HelperGrantInvalid.to_string()
+            }
             Self::Controller(ClientError::Controller(error))
                 if matches!(error.status, 401 | 403) =>
             {
-                "helper_grant_unauthorized".to_owned()
+                SecurityRefusalReason::HelperGrantUnauthorized.to_string()
             }
             Self::Controller(_) => "helper_grant_unavailable".to_owned(),
             Self::HelperProtocol(cause) if stable_runtime_error_code(cause.code()) => {
@@ -510,14 +515,7 @@ fn require_bound_response(
 /// Every other code is produced after the helper knows the request, so an
 /// unbound reply claiming one is a reply this agent cannot account for.
 fn unbound_rejection_is_expected(code: &str) -> bool {
-    matches!(
-        code,
-        "grant_invalid"
-            | "grant_node_mismatch"
-            | "grant_unauthorized"
-            | "peer_identity_invalid"
-            | "request_invalid"
-    )
+    vocabulary::is_any(code, &GRANT_REFUSALS) || code == "request_invalid"
 }
 
 /// The executed-outcome contract. A successful helper reply carries no
@@ -581,32 +579,33 @@ fn stable_runtime_error_code(value: &str) -> bool {
     // reported each of them as an opaque protocol error even when the helper had
     // said which check refused -- which is how a live privileged start became
     // unattributable.
-    matches!(
-        value,
-        "operation_failed"
-            | "operation_invalid"
+    vocabulary::is_any(value, &GRANT_REFUSALS)
+        || vocabulary::is_any(value, &HELPER_IDENTITY_REFUSALS)
+        || vocabulary::is(value, SecurityRefusalReason::RequestReplayed)
+        || vocabulary::is_any(
+            value,
+            &[
+                FailureCode::OperationFailed,
+                FailureCode::InstallationReconciliationBusy,
+            ],
+        )
+        || matches!(
+            value,
+            "operation_invalid"
             | "operation_unsafe_path"
-            | "operation_invalid_artifact"
             | "operation_command_failed"
             | "operation_stop_uncertain"
             | "operation_io"
             | "runtime_image_load_failed"
             | "runtime_image_inspect_failed"
-            | "runtime_image_identity_invalid"
             | "runtime_image_receipt_failed"
             | "runtime_process_exited"
             | "runtime_run_missing"
             | "runtime_fabric_unavailable"
             | "runtime_fabric_firewall_rejected"
             | "runtime_endpoint_firewall_rejected"
-            | "installation_reconciliation_busy"
             | "installation_reconciliation_storage_unavailable"
-            | "grant_invalid"
-            | "grant_node_mismatch"
-            | "grant_unauthorized"
-            | "peer_identity_invalid"
             | "request_invalid"
-            | "request_replayed"
             | "request_ledger_failed"
             // The agent's own helper-protocol causes share the `helper_<code>`
             // namespace, so this allowlist stays the single owner of the codes
@@ -631,7 +630,7 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "request_storage_invalid"
             | "system_clock_invalid"
             | "inspection_outcome_invalid"
-    )
+        )
 }
 
 fn write_request(root: &Path, digest: &str, body: &[u8]) -> Result<PathBuf, HostRuntimeError> {

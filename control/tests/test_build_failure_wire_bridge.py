@@ -14,6 +14,8 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
+    FailureCode,
+    OutcomeFailed,
     RecipeBuildRequest,
     canonical_message,
 )
@@ -258,12 +260,12 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             ),
         )
         assert result.state == "failed"
-        failure = AgentFailureResult.model_validate_json(
-            canonical_message(result.result)
-        )
-        assert failure.status == "failed"
-        assert failure.error_code == "recipe_build_failed"
-        assert failure.stage == "source-bundle-fetch"
+        # The real agent reports a typed definite failure.
+        failure = result.result
+        assert isinstance(failure, OutcomeFailed)
+        assert failure.code is FailureCode.RECIPE_BUILD_FAILED
+        assert failure.evidence is not None
+        assert failure.evidence.stage == "source-bundle-fetch"
         assert failure.failure_kind is expected_kind
         assert failure.retry_after_seconds == expected_retry_after
         assert source_server.requests == [f"/agent/source-bundles/{source_sha256}"]

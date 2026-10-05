@@ -14,11 +14,9 @@ use std::{
 };
 
 use vonk_agent::{
-    executor::{
-        recipe_empty_success_body, recipe_install_success_body, recipe_start_success_body,
-        runtime_arguments_for_plan,
-    },
+    executor::{recipe_install_success, recipe_start_success, runtime_arguments_for_plan},
     oci::{RuntimeStartPlan, start_arguments_for_paths},
+    outcome::ExecutionResult,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentResult, DistributionAssignment, RecipeOperationRequest, RecipeStartRequest,
@@ -81,7 +79,7 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
                 .compiled_execution_plan
                 .validate()
                 .map_err(|_| "compiled execution plan is invalid".to_owned())?;
-            recipe_install_success_body(request.expected_bytes)
+            recipe_install_success(request.expected_bytes)
         }
         RecipeOperationRequest::Start(request) => {
             let spec = request.compiled_execution_plan.clone();
@@ -90,20 +88,24 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
             // Projecting the runtime plan still proves the launch is derivable.
             let plan = runtime_plan(&request, &spec)?;
             let _ = runtime_arguments_for_plan(&plan, &plan.main);
-            recipe_start_success_body(&request)
+            recipe_start_success(&request)
         }
-        RecipeOperationRequest::Stop(_request) => recipe_empty_success_body(),
-        RecipeOperationRequest::Uninstall(_request) => recipe_empty_success_body(),
+        RecipeOperationRequest::Stop(_request) => {
+            ExecutionResult::done(vonk_agent_protocol::generated::RecipeStopResult::default())
+        }
+        RecipeOperationRequest::Uninstall(_request) => {
+            ExecutionResult::done(vonk_agent_protocol::generated::RecipeUninstallResult::default())
+        }
         _ => return Err(
             "probe only accepts recipe.install, recipe.start, recipe.stop, and recipe.uninstall"
                 .to_owned(),
         ),
     };
+    let finished = result.finish(claim);
     let message = AgentResult {
         fence: claim.fence,
-        result: serde_json::from_value(result)
-            .map_err(|_| "canonical agent result is invalid".to_owned())?,
-        state: vonk_agent_protocol::generated::AgentResultState::Succeeded,
+        result: finished.result,
+        state: finished.state,
     };
     message
         .validate()

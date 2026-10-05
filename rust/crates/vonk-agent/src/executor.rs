@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, Utc};
 use futures_util::{StreamExt, stream};
-use serde_json::{Value, json};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
@@ -22,14 +22,19 @@ use crate::{
     health::{wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome, HostRuntimePlan},
     oci::{OciError, OciRuntime, RecipeRunStartIdentity},
+    outcome::{ExecutionResult, Failure, RefusalBound},
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
+    vocabulary,
     workloads::{
         CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, same_installed_workload,
     },
 };
-use vonk_agent_protocol::generated::AgentFailureKind;
+use vonk_agent_protocol::generated::{
+    AgentFailureKind, AgentInstallResult, AgentOperation, ArtifactDistributionResult, FailureCode,
+    RecipeReconcileResult, RecipeStartResult, RecipeStopResult, RecipeUninstallResult, WaitReason,
+};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, OperationProgress,
     ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
@@ -151,11 +156,6 @@ impl LoopClient for AgentHttpClient {
     }
 }
 
-pub struct ExecutionResult {
-    pub state: &'static str,
-    pub body: Value,
-}
-
 #[async_trait(?Send)]
 pub trait Executor {
     async fn execute(
@@ -172,14 +172,14 @@ pub struct RejectingExecutor;
 impl Executor for RejectingExecutor {
     async fn execute(
         &self,
-        claim: &AgentClaim,
+        _claim: &AgentClaim,
         _lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         _cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> ExecutionResult {
-        ExecutionResult {
-            state: "waiting-for-operator",
-            body: json!({"operation": claim.operation, "reason": "operation is not enabled by this agent build"}),
-        }
+        ExecutionResult::unknown(
+            WaitReason::OperationNotEnabled,
+            "operation is not enabled by this agent build",
+        )
     }
 }
 
@@ -218,36 +218,24 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
         lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> ExecutionResult {
-        if claim.operation == "agent.upgrade.v1" {
+        if claim.operation == AgentOperation::AgentUpgradeV1 {
             return match self.upgrades.execute(claim).await {
-                Ok(()) => ExecutionResult {
-                    state: "waiting-for-operator",
-                    body: json!({
-                        "reason": crate::agent_upgrade::UPGRADE_AWAITING_IDENTITY_REASON,
-                    }),
-                },
+                Ok(()) => ExecutionResult::unknown(
+                    WaitReason::AgentUpgradeAwaitingIdentity,
+                    crate::agent_upgrade::UPGRADE_AWAITING_IDENTITY_REASON,
+                ),
                 Err(error) => {
                     let reason = match error.diagnostic() {
                         Some(detail) if !detail.is_empty() => format!("{error}: {detail}"),
                         _ => error.to_string(),
                     };
-                    let mut body = json!({"reason": reason});
-                    if let Some(detail) = error.diagnostic() {
-                        body["diagnostic_logs"] = json!({
-                            "stdout": crate::failure_evidence::log_tail(&[]),
-                            "stderr": crate::failure_evidence::log_tail(detail.as_bytes()),
-                        });
-                    }
+                    let mut failure = Failure::new(reason)
+                        .process_logs(error.diagnostic().map(crate::failure_evidence::detail_logs));
                     if let Some((code, exit_code)) = error.helper_diagnostics() {
-                        body["helper_error_code"] = json!(code);
-                        if let Some(exit_code) = exit_code {
-                            body["helper_exit_code"] = json!(exit_code);
-                        }
+                        failure = failure
+                            .helper(code, exit_code.and_then(|code| u32::try_from(code).ok()));
                     }
-                    ExecutionResult {
-                        state: "failed",
-                        body,
-                    }
+                    ExecutionResult::Failed(failure)
                 }
             };
         }
@@ -663,6 +651,9 @@ impl<R> RecipeExecutor<'_, R> {
         })
     }
 
+    // The error is the finished result the caller returns as it is; it is moved
+    // once, never copied, so its size does not matter here.
+    #[allow(clippy::result_large_err)]
     async fn stop_start_run(
         &self,
         claim: &AgentClaim,
@@ -675,7 +666,10 @@ impl<R> RecipeExecutor<'_, R> {
     {
         let Some(stop_plan) = exact_stop_plan_from_claim(claim, run_id, cancel_pending_start)
         else {
-            return Err(waiting_for_operator("workload stop remains unconfirmed"));
+            return Err(unconfirmed(
+                WaitReason::StopUnconfirmed,
+                "workload stop remains unconfirmed",
+            ));
         };
         if stop_plan
             .compiled_execution_plan
@@ -687,10 +681,14 @@ impl<R> RecipeExecutor<'_, R> {
                 .await
                 .is_err()
         {
-            return Err(waiting_for_operator("workload stop remains unconfirmed"));
+            return Err(unconfirmed(
+                WaitReason::StopUnconfirmed,
+                "workload stop remains unconfirmed",
+            ));
         }
         if self.runtime.complete_stop(run_id).is_err() {
-            return Err(waiting_for_operator(
+            return Err(unconfirmed(
+                WaitReason::CleanupUnconfirmed,
                 "workload local cleanup remains unconfirmed",
             ));
         }
@@ -712,10 +710,7 @@ impl<R> RecipeExecutor<'_, R> {
         {
             return uncertain;
         }
-        ExecutionResult {
-            state: "cancelled",
-            body: json!({"reason": "controller cancellation confirmed after exact workload stop", "error_code": "operation_cancelled"}),
-        }
+        ExecutionResult::cancelled("controller cancellation confirmed after exact workload stop")
     }
 }
 
@@ -833,33 +828,36 @@ pub fn runtime_arguments_digest(arguments: &[String]) -> Result<String, Protocol
     canonical_json(&arguments.to_vec()).map(|value| hex_sha256(&value))
 }
 
-pub fn recipe_install_success_body(installed_bytes: u64) -> Value {
-    json!({"installed_bytes": installed_bytes})
-}
-
-/// Stop, uninstall and reconciliation succeed with an empty result.
-pub fn recipe_empty_success_body() -> Value {
-    json!({})
+pub fn recipe_install_success(installed_bytes: u64) -> ExecutionResult {
+    ExecutionResult::done(AgentInstallResult { installed_bytes })
 }
 
 /// The serving rank reports its endpoint; every other rank, and every
-/// rank-launch phase, reports `{}`.
-pub fn recipe_start_success_body(request: &RecipeStartRequest) -> Value {
+/// rank-launch phase, reports an empty result.
+pub fn recipe_start_success(request: &RecipeStartRequest) -> ExecutionResult {
+    ExecutionResult::done(recipe_start_result(request))
+}
+
+/// The start result of a rank: its endpoint when it serves one.
+pub fn recipe_start_result(request: &RecipeStartRequest) -> RecipeStartResult {
     let placement = request.placement();
-    match (placement.endpoint_address, placement.port, &request.phase) {
+    let endpoint = match (placement.endpoint_address, placement.port, &request.phase) {
         (Some(address), Some(port), None | Some(RecipeStartPhase::CollectiveReadiness)) => {
             let host = match address {
                 std::net::IpAddr::V4(address) => address.to_string(),
                 std::net::IpAddr::V6(address) => format!("[{address}]"),
             };
-            json!({"endpoint": format!("http://{host}:{port}")})
+            Some(format!("http://{host}:{port}"))
         }
-        _ => json!({}),
-    }
+        _ => None,
+    };
+    RecipeStartResult { endpoint }
 }
 
-pub fn distribution_success_evidence(evidence: DistributionDownloadEvidence) -> Value {
-    json!({"downloaded_bytes": evidence.downloaded_bytes})
+pub fn distribution_success(evidence: DistributionDownloadEvidence) -> ExecutionResult {
+    ExecutionResult::done(ArtifactDistributionResult {
+        downloaded_bytes: evidence.downloaded_bytes,
+    })
 }
 
 fn before_phase_deadline(
@@ -1019,20 +1017,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     {
                         // HostRuntimeError exposes only bounded, stable
                         // categories, never helper stderr or credentials.
-                        return ExecutionResult {
-                            state: "failed",
-                            body: json!({
-                                "reason": format!(
-                                    "runtime image could not be pulled: {error}"
-                                ),
-                                "helper_error_code": runtime_helper_code(&error),
-                            }),
-                        };
+                        return ExecutionResult::Failed(
+                            Failure::new(format!("runtime image could not be pulled: {error}"))
+                                .helper(runtime_helper_code(&error), None),
+                        );
                     }
-                    ExecutionResult {
-                        state: "succeeded",
-                        body: distribution_success_evidence(evidence),
-                    }
+                    distribution_success(evidence)
                 }
                 Err(error) => distribution_failure_result(&error),
             };
@@ -1119,17 +1109,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 if started.elapsed() >= Duration::from_secs(60) || result.validate().is_err() {
                     return failed("runtime preflight exceeded the bounded deadline");
                 }
-                ExecutionResult {
-                    state: "succeeded",
-                    body: serde_json::to_value(result).expect("typed preflight serializes"),
-                }
+                ExecutionResult::done(result)
             }
             RecipeOperationRequest::BuildCleanup(request) => {
                 match crate::recipe_builder::cleanup_build(self.runtime.runner, &request) {
-                    Ok(evidence) => ExecutionResult {
-                        state: "succeeded",
-                        body: serde_json::to_value(evidence).expect("typed cleanup evidence"),
-                    },
+                    Ok(evidence) => ExecutionResult::done(evidence),
                     Err(_) => failed("recipe build cleanup could not confirm the service stopped"),
                 }
             }
@@ -1221,17 +1205,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         // converts them into its layered store; the local
                         // archive is no longer needed.
                         let _ = std::fs::remove_file(builder.layout_path(request.build_id));
-                        ExecutionResult {
-                            state: "succeeded",
-                            body: serde_json::to_value(evidence).unwrap_or_else(
-                                |_| json!({"reason": "build evidence serialization failed"}),
-                            ),
-                        }
+                        ExecutionResult::done(evidence)
                     }
-                    Err(error) => ExecutionResult {
-                        state: "failed",
-                        body: error.failure_evidence(),
-                    },
+                    Err(error) => ExecutionResult::Failed(error.failure_evidence()),
                 }
             }
             RecipeOperationRequest::JobRun(request) => {
@@ -1456,43 +1432,31 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                     InterruptibleJob::Cancelled { stopped: false } => {
                         job_scope_cleanup.retain();
-                        return ExecutionResult {
-                            state: "waiting-for-operator",
-                            body: job_result_body(
-                                &request,
-                                JOB_CANCEL_EXIT_CODE,
-                                started,
-                                empty_job_output_manifest(),
-                                Some("controller cancellation could not stop the active job"),
-                            ),
-                        };
+                        return unconfirmed_job(
+                            &request,
+                            started,
+                            WaitReason::JobStopUnconfirmed,
+                            "controller cancellation could not stop the active job",
+                        );
                     }
                 };
                 if outcome.as_ref().is_ok_and(|outcome| outcome.stop_uncertain) {
                     job_scope_cleanup.retain();
-                    return ExecutionResult {
-                        state: "waiting-for-operator",
-                        body: job_result_body(
-                            &request,
-                            JOB_CANCEL_EXIT_CODE,
-                            started,
-                            empty_job_output_manifest(),
-                            Some("job runtime could not be stopped safely"),
-                        ),
-                    };
+                    return unconfirmed_job(
+                        &request,
+                        started,
+                        WaitReason::JobStopUnconfirmed,
+                        "job runtime could not be stopped safely",
+                    );
                 }
                 if outcome.is_err() {
                     job_scope_cleanup.retain();
-                    return ExecutionResult {
-                        state: "waiting-for-operator",
-                        body: job_result_body(
-                            &request,
-                            JOB_CANCEL_EXIT_CODE,
-                            started,
-                            empty_job_output_manifest(),
-                            Some("job runtime execution or cleanup state is uncertain"),
-                        ),
-                    };
+                    return unconfirmed_job(
+                        &request,
+                        started,
+                        WaitReason::JobStateUncertain,
+                        "job runtime execution or cleanup state is uncertain",
+                    );
                 }
                 let (exit_code, exit_reason) = match outcome {
                     Ok(outcome) => match outcome.exit_code {
@@ -1599,8 +1563,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                     return cancelled_job(&request, started, "controller cancellation requested");
                 }
-                let body =
-                    job_result_body(&request, exit_code, started, output_manifest, exit_reason);
+                let receipt =
+                    job_receipt(&request, exit_code, started, output_manifest, exit_reason);
                 if job_scope_cleanup.finish().is_err() {
                     return failed_job(
                         &request,
@@ -1609,13 +1573,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "job scope cleanup failed",
                     );
                 }
-                ExecutionResult {
-                    state: if exit_code == 0 {
-                        "succeeded"
-                    } else {
-                        "failed"
-                    },
-                    body,
+                if exit_code == 0 {
+                    ExecutionResult::done(receipt)
+                } else {
+                    job_failure(receipt)
                 }
             }
             RecipeOperationRequest::Install(request) => {
@@ -1695,10 +1656,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "controller cancellation observed after installation settled",
                     );
                 }
-                ExecutionResult {
-                    state: "succeeded",
-                    body: recipe_install_success_body(installed_bytes),
-                }
+                recipe_install_success(installed_bytes)
             }
             RecipeOperationRequest::Reconcile(request) => {
                 self.report_phase(claim, "reconciling-installation").await;
@@ -1711,14 +1669,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Err(OciError::ReconciliationBusy) => {
                         return temporary_reconciliation_failure(
                             "installation-reconciliation-lock",
-                            "installation_reconciliation_busy",
-                            "installation_reconciliation_busy",
+                            FailureCode::InstallationReconciliationBusy,
+                            FailureCode::InstallationReconciliationBusy.to_string(),
                         );
                     }
                     Err(error) if retryable_reconciliation_storage_error(&error) => {
                         return temporary_reconciliation_failure(
                             "installation-checkpoint-storage",
-                            "recipe_reconciliation_dependency_unavailable",
+                            FailureCode::RecipeReconciliationDependencyUnavailable,
                             "installation_storage_temporarily_unavailable",
                         );
                     }
@@ -1747,18 +1705,18 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     if matches!(
                         error,
                         crate::host_runtime::HostRuntimeError::HelperRejected { ref code, .. }
-                            if code == "installation_reconciliation_busy"
+                            if vocabulary::is(code, FailureCode::InstallationReconciliationBusy)
                     ) {
                         return temporary_reconciliation_failure(
                             "helper-runtime-reconciliation-lock",
-                            "installation_reconciliation_busy",
-                            "installation_reconciliation_busy",
+                            FailureCode::InstallationReconciliationBusy,
+                            FailureCode::InstallationReconciliationBusy.to_string(),
                         );
                     }
                     if temporary_observation_error(&error) {
                         return temporary_reconciliation_failure(
                             "helper-runtime-reconciliation",
-                            "recipe_reconciliation_dependency_unavailable",
+                            FailureCode::RecipeReconciliationDependencyUnavailable,
                             error.preflight_code(),
                         );
                     }
@@ -1778,14 +1736,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Err(OciError::ReconciliationBusy) => {
                         return temporary_reconciliation_failure(
                             "installation-reconciliation-lock",
-                            "installation_reconciliation_busy",
-                            "installation_reconciliation_busy",
+                            FailureCode::InstallationReconciliationBusy,
+                            FailureCode::InstallationReconciliationBusy.to_string(),
                         );
                     }
                     Err(error) if retryable_reconciliation_storage_error(&error) => {
                         return temporary_reconciliation_failure(
                             "installation-checkpoint-storage",
-                            "recipe_reconciliation_dependency_unavailable",
+                            FailureCode::RecipeReconciliationDependencyUnavailable,
                             "installation_storage_temporarily_unavailable",
                         );
                     }
@@ -1804,10 +1762,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "receipt-incomplete",
                     );
                 }
-                ExecutionResult {
-                    state: "succeeded",
-                    body: serde_json::json!({}),
-                }
+                ExecutionResult::done(RecipeReconcileResult::default())
             }
             RecipeOperationRequest::Start(request) => {
                 self.report_phase(claim, "starting").await;
@@ -1879,7 +1834,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             return temporary_runtime_observation_failure();
                         }
                         Err(_) => {
-                            return waiting_for_operator(
+                            return unconfirmed(
+                                WaitReason::RetainedIdentityMismatch,
                                 "retained workload identity does not match the authorized start",
                             );
                         }
@@ -2051,7 +2007,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 .finish_installation_acl_transition(&installation_id, transition)
                                 .is_err()
                         {
-                            return waiting_for_operator(
+                            return unconfirmed(
+                                WaitReason::ModelCustodyUnconfirmed,
                                 "cancelled workload model custody remains unconfirmed",
                             );
                         }
@@ -2075,7 +2032,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                     )
                                     .is_err()
                             {
-                                return waiting_for_operator(
+                                return unconfirmed(
+                                    WaitReason::ModelCustodyUnconfirmed,
                                     "cancelled workload model custody remains unconfirmed",
                                 );
                             }
@@ -2087,7 +2045,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             }
                             // A foreign or uninspectable exact container
                             // requires reconciliation.
-                            return waiting_for_operator(
+                            return unconfirmed(
+                                WaitReason::RuntimeEffectUnconfirmed,
                                 "retained workload runtime effect could not be confirmed",
                             );
                         }
@@ -2197,16 +2156,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             None => failed("rank process did not remain stable after launch"),
                         };
                     }
-                    let body = recipe_start_success_body(&request);
+                    let success = recipe_start_success(&request);
                     if *cancellation.borrow() {
                         return self
                             .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
                             .await;
                     }
-                    return ExecutionResult {
-                        state: "succeeded",
-                        body,
-                    };
+                    return success;
                 }
                 let runtime_guard = async {
                     loop {
@@ -2281,16 +2237,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                     return failed("workload did not become ready before its deadline");
                 }
-                let body = recipe_start_success_body(&request);
+                let success = recipe_start_success(&request);
                 if *cancellation.borrow() {
                     return self
                         .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
                         .await;
                 }
-                ExecutionResult {
-                    state: "succeeded",
-                    body,
-                }
+                success
             }
             RecipeOperationRequest::Stop(request) => {
                 self.report_phase(claim, "stopping").await;
@@ -2307,23 +2260,23 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     .await
                     .is_err()
                 {
-                    waiting_for_operator("container runtime stop remains unconfirmed")
+                    unconfirmed(
+                        WaitReason::StopUnconfirmed,
+                        "container runtime stop remains unconfirmed",
+                    )
                 } else {
                     if self.runtime.complete_stop(&run_id).is_err() {
-                        return waiting_for_operator(
+                        return unconfirmed(
+                            WaitReason::StopMetadataUnconfirmed,
                             "container runtime stop metadata remains unconfirmed",
                         );
                     }
                     if *cancellation.borrow() {
-                        ExecutionResult {
-                            state: "cancelled",
-                            body: json!({"reason": "controller cancellation confirmed after exact workload stop", "error_code": "operation_cancelled"}),
-                        }
+                        ExecutionResult::cancelled(
+                            "controller cancellation confirmed after exact workload stop",
+                        )
                     } else {
-                        ExecutionResult {
-                            state: "succeeded",
-                            body: recipe_empty_success_body(),
-                        }
+                        ExecutionResult::done(RecipeStopResult::default())
                     }
                 }
             }
@@ -2341,10 +2294,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 "controller cancellation observed with installation absent",
                             );
                         }
-                        return ExecutionResult {
-                            state: "succeeded",
-                            body: recipe_empty_success_body(),
-                        };
+                        return ExecutionResult::done(RecipeUninstallResult::default());
                     }
                     Ok(Some(recipe_digest)) if recipe_digest == request.recipe_content_sha256 => {}
                     Ok(Some(_)) | Err(_) => {
@@ -2436,45 +2386,33 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "controller cancellation observed after uninstallation settled",
                     );
                 }
-                ExecutionResult {
-                    state: "succeeded",
-                    body: recipe_empty_success_body(),
-                }
+                ExecutionResult::done(RecipeUninstallResult::default())
             }
         }
     }
 }
 
 fn failed(reason: &'static str) -> ExecutionResult {
-    ExecutionResult {
-        state: "failed",
-        body: json!({"reason": reason}),
-    }
+    ExecutionResult::failed(reason)
 }
 
 fn cancelled(reason: &'static str) -> ExecutionResult {
-    ExecutionResult {
-        state: "cancelled",
-        body: json!({"reason": reason, "error_code": "operation_cancelled"}),
-    }
+    ExecutionResult::cancelled(reason)
 }
 
 fn temporary_reconciliation_failure(
     stage: &'static str,
-    error_code: &'static str,
+    code: FailureCode,
     diagnostic: impl Into<String>,
 ) -> ExecutionResult {
-    ExecutionResult {
-        state: "failed",
-        body: json!({
-            "diagnostic": diagnostic.into(),
-            "error_code": error_code,
-            "failure_kind": "temporary-dependency",
-            "reason": "installation reconciliation is waiting for its local owner",
-            "retry_after_seconds": 2,
-            "stage": stage,
-        }),
-    }
+    ExecutionResult::Failed(
+        Failure::new("installation reconciliation is waiting for its local owner")
+            .code(code)
+            .kind(AgentFailureKind::TemporaryDependency)
+            .retry_after(Some(2))
+            .stage(stage)
+            .diagnostic(diagnostic),
+    )
 }
 
 fn retryable_reconciliation_storage_error(error: &OciError) -> bool {
@@ -2492,11 +2430,9 @@ fn retryable_reconciliation_storage_error(error: &OciError) -> bool {
     })
 }
 
-fn waiting_for_operator(reason: &'static str) -> ExecutionResult {
-    ExecutionResult {
-        state: "waiting-for-operator",
-        body: json!({"reason": reason}),
-    }
+/// The effect could not be established; the Controller observes it.
+fn unconfirmed(wait_reason: WaitReason, reason: &'static str) -> ExecutionResult {
+    ExecutionResult::unknown(wait_reason, reason)
 }
 
 fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) -> bool {
@@ -2523,15 +2459,12 @@ fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) ->
 }
 
 fn temporary_runtime_observation_failure() -> ExecutionResult {
-    ExecutionResult {
-        state: "failed",
-        body: json!({
-            "reason": "exact workload runtime observation is temporarily unavailable",
-            "error_code": "runtime_observation_unavailable",
-            "failure_kind": "temporary-dependency",
-            "retry_after_seconds": 5,
-        }),
-    }
+    ExecutionResult::Failed(
+        Failure::new("exact workload runtime observation is temporarily unavailable")
+            .code(FailureCode::RuntimeObservationUnavailable)
+            .kind(AgentFailureKind::TemporaryDependency)
+            .retry_after(Some(5)),
+    )
 }
 
 /// Refuse a start whose observation failed, carrying what the helper captured.
@@ -2549,26 +2482,18 @@ fn runtime_observation_failure(error: &crate::host_runtime::HostRuntimeError) ->
         }
         _ => format!("exact workload runtime observation failed: {error}"),
     };
-    let mut body = json!({"reason": reason});
-    if let Some(logs) =
-        crate::failure_evidence::diagnostic_logs(error.process_logs(), error.diagnostic())
-    {
-        body["diagnostic_logs"] = logs;
-    }
+    let mut failure = Failure::new(reason).process_logs(crate::failure_evidence::diagnostic_logs(
+        error.process_logs(),
+        error.diagnostic(),
+    ));
     if let crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } = error {
-        body["helper_error_code"] = json!(code);
+        failure = failure.helper(code.clone(), None);
     }
-    ExecutionResult {
-        state: "failed",
-        body,
-    }
+    ExecutionResult::Failed(failure)
 }
 
 fn failed_owned(reason: String) -> ExecutionResult {
-    ExecutionResult {
-        state: "failed",
-        body: json!({"reason": reason}),
-    }
+    ExecutionResult::failed(reason)
 }
 
 fn failed_stage(
@@ -2576,10 +2501,7 @@ fn failed_stage(
     stage: &'static str,
     diagnostic: &'static str,
 ) -> ExecutionResult {
-    ExecutionResult {
-        state: "failed",
-        body: json!({"reason": reason, "stage": stage, "diagnostic": diagnostic}),
-    }
+    ExecutionResult::Failed(Failure::new(reason).stage(stage).diagnostic(diagnostic))
 }
 
 fn failed_stage_owned(
@@ -2587,10 +2509,7 @@ fn failed_stage_owned(
     stage: &'static str,
     diagnostic: String,
 ) -> ExecutionResult {
-    ExecutionResult {
-        state: "failed",
-        body: json!({"reason": reason, "stage": stage, "diagnostic": diagnostic}),
-    }
+    ExecutionResult::Failed(Failure::new(reason).stage(stage).diagnostic(diagnostic))
 }
 
 /// Bound the safe control-plane facts of a refused Controller request.
@@ -2629,32 +2548,26 @@ fn controller_denial_diagnostic(error: &ClientError) -> String {
 /// The incident's `invalid-authority` outcome reported only that the
 /// distribution failed, so the denied request and status were unrecoverable.
 fn distribution_failure_result(error: &ClientError) -> ExecutionResult {
-    let mut body = json!({
-        "reason": "Controller distribution could not be verified and retained",
-        "failure_kind": if error.retryable()
-            // A grant that merely ran out of time is renewed by the next
-            // attempt's claim; it is a wait, not a denial of authority.
-            || error.code() == Some("distribution.expired")
-        {
-            "temporary-dependency"
-        } else if matches!(error.status(), Some(401 | 403)) {
-            "invalid-authority"
-        } else {
-            "integrity-failure"
-        },
-        "stage": "artifact-distribution",
-    });
-    if let Some(seconds) = error.retry_after_seconds() {
-        body["retry_after_seconds"] = json!(seconds);
-    }
+    let failure_kind = if error.retryable()
+        // A grant that merely ran out of time is renewed by the next
+        // attempt's claim; it is a wait, not a denial of authority.
+        || error.code() == Some("distribution.expired")
+    {
+        AgentFailureKind::TemporaryDependency
+    } else if matches!(error.status(), Some(401 | 403)) {
+        AgentFailureKind::InvalidAuthority
+    } else {
+        AgentFailureKind::IntegrityFailure
+    };
+    let mut failure = Failure::new("Controller distribution could not be verified and retained")
+        .kind(failure_kind)
+        .retry_after(error.retry_after_seconds())
+        .stage("artifact-distribution");
     let diagnostic = controller_denial_diagnostic(error);
     if !diagnostic.is_empty() {
-        body["diagnostic"] = json!(diagnostic);
+        failure = failure.diagnostic(diagnostic);
     }
-    ExecutionResult {
-        state: "failed",
-        body,
-    }
+    ExecutionResult::Failed(failure)
 }
 
 fn recipe_build_client_failure_kind(error: &ClientError) -> AgentFailureKind {
@@ -2691,24 +2604,15 @@ fn recipe_build_client_failure_result(
     reason: &'static str,
 ) -> ExecutionResult {
     let failure_kind = recipe_build_client_failure_kind(error);
-    let mut body = json!({
-        "failure_kind": failure_kind,
-        "reason": reason,
-        "stage": stage,
-    });
-    if failure_kind == AgentFailureKind::TemporaryDependency
-        && let Some(seconds) = error.retry_after_seconds()
-    {
-        body["retry_after_seconds"] = json!(seconds);
+    let mut failure = Failure::new(reason).kind(failure_kind).stage(stage);
+    if failure_kind == AgentFailureKind::TemporaryDependency {
+        failure = failure.retry_after(error.retry_after_seconds());
     }
     let diagnostic = controller_denial_diagnostic(error);
     if !diagnostic.is_empty() {
-        body["diagnostic"] = json!(diagnostic);
+        failure = failure.diagnostic(diagnostic);
     }
-    ExecutionResult {
-        state: "failed",
-        body,
-    }
+    ExecutionResult::Failed(failure)
 }
 
 enum InterruptibleJob<T> {
@@ -2807,16 +2711,27 @@ fn failed_job(
     started: Instant,
     reason: &'static str,
 ) -> ExecutionResult {
-    ExecutionResult {
-        state: "failed",
-        body: job_result_body(
-            request,
-            exit_code,
-            started,
-            empty_job_output_manifest(),
-            Some(reason),
-        ),
-    }
+    job_failure(job_receipt(
+        request,
+        exit_code,
+        started,
+        empty_job_output_manifest(),
+        Some(reason),
+    ))
+}
+
+/// A job whose process ran and exited nonzero (or never ran): a definite failure
+/// that keeps its receipt.
+fn job_failure(receipt: RecipeJobRunResult) -> ExecutionResult {
+    let reason = receipt
+        .reason
+        .clone()
+        .unwrap_or_else(|| "job adapter exited unsuccessfully".to_owned());
+    ExecutionResult::Failed(
+        Failure::new(reason)
+            .code(FailureCode::RecipeJobRunFailed)
+            .receipt(receipt),
+    )
 }
 
 fn cancelled_job(
@@ -2824,16 +2739,37 @@ fn cancelled_job(
     started: Instant,
     reason: &'static str,
 ) -> ExecutionResult {
-    ExecutionResult {
-        state: "cancelled",
-        body: job_result_body(
+    ExecutionResult::Failed(
+        Failure::new(reason)
+            .code(FailureCode::OperationCancelled)
+            .receipt(job_receipt(
+                request,
+                JOB_CANCEL_EXIT_CODE,
+                started,
+                empty_job_output_manifest(),
+                Some(reason),
+            )),
+    )
+}
+
+/// A job whose stop or final state could not be confirmed: its receipt is kept.
+fn unconfirmed_job(
+    request: &vonk_agent_protocol::RecipeJobRunRequest,
+    started: Instant,
+    wait_reason: WaitReason,
+    reason: &'static str,
+) -> ExecutionResult {
+    ExecutionResult::Unknown(crate::outcome::Unconfirmed {
+        wait_reason,
+        reason: reason.to_owned(),
+        receipt: Some(job_receipt(
             request,
             JOB_CANCEL_EXIT_CODE,
             started,
             empty_job_output_manifest(),
             Some(reason),
-        ),
-    }
+        )),
+    })
 }
 
 fn output_manifest_with_digest(
@@ -2859,13 +2795,13 @@ fn empty_job_output_manifest() -> RecipeJobOutputManifest {
     .expect("canonical empty job manifest")
 }
 
-fn job_result_body(
+fn job_receipt(
     request: &vonk_agent_protocol::RecipeJobRunRequest,
     exit_code: u32,
     started: Instant,
     output_manifest: RecipeJobOutputManifest,
     reason: Option<&str>,
-) -> Value {
+) -> RecipeJobRunResult {
     let result = RecipeJobRunResult {
         job_id: request.job_id,
         run_id: request.run_id,
@@ -2884,7 +2820,7 @@ fn job_result_body(
         diagnostics: None,
     };
     debug_assert!(result.validate().is_ok());
-    serde_json::to_value(result).unwrap_or_default()
+    result
 }
 
 fn collect_job_outputs(
@@ -3171,10 +3107,7 @@ where
                 let _cancel_on_exit = cancel_on_exit;
                 heartbeats.await
             });
-            let executed = normalize_execution_result(
-                &claim,
-                executor.execute(&claim, lease_deadline, cancellation).await,
-            );
+            let executed = executor.execute(&claim, lease_deadline, cancellation).await;
             let _ = stop_heartbeat.send(());
             let heartbeat_result = heartbeat_task
                 .await
@@ -3183,7 +3116,7 @@ where
             // The executor owns the effect and its quiescence proof. Preserve
             // its exact cancelled or uncertain outcome; a heartbeat alone
             // cannot turn an in-flight runtime effect into a terminal result.
-            let result = state.finish(&claim, executed.state, executed.body)?;
+            let result = state.finish(&claim, executed)?;
             heartbeat_result?;
             result
         }
@@ -3254,7 +3187,7 @@ fn runtime_helper_code(error: &crate::host_runtime::HostRuntimeError) -> String 
 }
 
 fn runtime_failure(reason: &str, error: &crate::host_runtime::HostRuntimeError) -> ExecutionResult {
-    let mut result = failed_owned(match error.diagnostic() {
+    let failure = Failure::new(match error.diagnostic() {
         // A refusal that names its own cause (for example which argument the
         // Spark firewall rejected) belongs in the text an operator reads first,
         // not only in the attached diagnostic logs. A container's own output
@@ -3263,22 +3196,19 @@ fn runtime_failure(reason: &str, error: &crate::host_runtime::HostRuntimeError) 
             format!("{reason}: {}: {detail}", error.preflight_code())
         }
         _ => format!("{reason}: {}", error.preflight_code()),
-    });
-    if let Some((limit, observed)) = error.refusal_bound() {
-        // Bounded integers only: the refusing rule and the measured bound. The
-        // offending argument itself never crosses this boundary.
-        result.body["refusal_bound"] = json!({
-            "rule": error.preflight_code(),
-            "limit": limit,
-            "observed": observed,
-        });
-    }
-    if let Some(logs) =
-        crate::failure_evidence::diagnostic_logs(error.process_logs(), error.diagnostic())
-    {
-        result.body["diagnostic_logs"] = logs;
-    }
-    result
+    })
+    .process_logs(crate::failure_evidence::diagnostic_logs(
+        error.process_logs(),
+        error.diagnostic(),
+    ))
+    // Bounded integers only: the refusing rule and the measured bound. The
+    // offending argument itself never crosses this boundary.
+    .refusal_bound(error.refusal_bound().map(|(limit, observed)| RefusalBound {
+        rule: error.preflight_code(),
+        limit,
+        observed,
+    }));
+    ExecutionResult::Failed(failure)
 }
 
 fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
@@ -3286,172 +3216,6 @@ fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
     failed_owned(format!(
         "container runtime could not prepare the workload (stage={stage}; category={category})"
     ))
-}
-
-fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> ExecutionResult {
-    if executed.state != "failed" {
-        return executed;
-    }
-    if claim.operation == "recipe.job.run.v1" {
-        let diagnostics = crate::failure_evidence::from_failure(&claim.operation, &executed.body);
-        let mut executed = executed;
-        if let Some(reason) = executed.body.get("reason").and_then(Value::as_str) {
-            executed.body["reason"] = Value::String(crate::failure_evidence::sanitize_text(reason));
-        }
-        if let Ok(value) = serde_json::to_value(diagnostics) {
-            executed.body["diagnostics"] = value;
-        }
-        return executed;
-    }
-    let reason = executed
-        .body
-        .get("reason")
-        .and_then(Value::as_str)
-        .unwrap_or("agent operation failed");
-    let reason: String = crate::failure_evidence::sanitize_text(reason)
-        .chars()
-        .take(1024)
-        .collect();
-    let error_code = executed
-        .body
-        .get("error_code")
-        .and_then(Value::as_str)
-        .filter(|code| {
-            (claim.operation == "recipe.start" && *code == "runtime_observation_unavailable")
-                || (claim.operation == "recipe.reconcile"
-                    && matches!(
-                        *code,
-                        "installation_reconciliation_busy"
-                            | "recipe_reconciliation_dependency_unavailable"
-                    ))
-        })
-        .unwrap_or_else(|| match claim.operation.as_str() {
-            "agent.upgrade.v1" => "agent_upgrade_failed",
-            "artifact.distribution.v1" => "artifact_distribution_failed",
-            "recipe.build.v1" => "recipe_build_failed",
-            "recipe.job.run.v1" => "recipe_job_run_failed",
-            "recipe.install" => "recipe_install_failed",
-            "recipe.start" => "recipe_start_failed",
-            "recipe.stop" => "recipe_stop_failed",
-            "recipe.uninstall" => "recipe_uninstall_failed",
-            _ => "operation_failed",
-        });
-    let mut body = json!({
-        "error_code": error_code,
-        "reason": reason,
-        "status": "failed",
-    });
-    if let Some(kind) = executed.body.get("failure_kind").and_then(Value::as_str) {
-        body["failure_kind"] = Value::String(kind.to_owned());
-    }
-    if let Some(seconds) = executed
-        .body
-        .get("retry_after_seconds")
-        .and_then(Value::as_u64)
-    {
-        body["retry_after_seconds"] = json!(seconds);
-    }
-    for field in ["stage", "diagnostic"] {
-        if let Some(value) = executed.body.get(field).and_then(Value::as_str) {
-            body[field] = Value::String(crate::failure_evidence::sanitize_text(value));
-        }
-    }
-    if claim.operation == "agent.upgrade.v1" {
-        if let Some(code) = executed
-            .body
-            .get("helper_error_code")
-            .and_then(Value::as_str)
-            .filter(|code| {
-                matches!(
-                    *code,
-                    "package_verification_failed"
-                        | "package_metadata_failed"
-                        | "package_custody_failed"
-                        | "package_install_failed"
-                )
-            })
-        {
-            body["helper_error_code"] = Value::String(code.to_owned());
-        }
-        if body.get("helper_error_code").and_then(Value::as_str) == Some("package_install_failed")
-            && let Some(exit_code) = executed
-                .body
-                .get("helper_exit_code")
-                .and_then(Value::as_i64)
-                .filter(|code| (0..=255).contains(code))
-        {
-            body["helper_exit_code"] = Value::from(exit_code);
-        }
-    }
-    if claim.operation == "artifact.distribution.v1"
-        && let Some(code) = executed
-            .body
-            .get("helper_error_code")
-            .and_then(Value::as_str)
-            .filter(|code| stable_runtime_helper_error_code(code))
-    {
-        body["helper_error_code"] = Value::String(code.to_owned());
-    }
-    let diagnostics = crate::failure_evidence::from_failure(&claim.operation, &executed.body);
-    if let Ok(value) = serde_json::to_value(diagnostics) {
-        body["diagnostics"] = value;
-    }
-    ExecutionResult {
-        state: "failed",
-        body,
-    }
-}
-
-fn stable_runtime_helper_error_code(value: &str) -> bool {
-    matches!(
-        value,
-        "operation_failed"
-            | "operation_invalid"
-            | "operation_unsafe_path"
-            | "operation_invalid_artifact"
-            | "operation_command_failed"
-            | "operation_stop_uncertain"
-            | "operation_io"
-            | "runtime_image_load_failed"
-            | "runtime_image_inspect_failed"
-            | "runtime_image_identity_invalid"
-            | "runtime_image_receipt_failed"
-            | "runtime_helper_unavailable"
-            | "runtime_authority_unavailable"
-            | "runtime_helper_protocol_invalid"
-            // Any host runtime call can be refused before the helper trusts the
-            // grant, the image import included. Dropping those codes here left
-            // the normalized failure with no cause at all.
-            | "grant_invalid"
-            | "grant_node_mismatch"
-            | "grant_unauthorized"
-            | "peer_identity_invalid"
-            | "request_invalid"
-            | "request_replayed"
-            | "request_ledger_failed"
-            // An agent-side helper-protocol cause keeps its own code here or
-            // normalization silently drops it from the Controller's failure
-            // body.
-            | "runtime_helper_request_encoding_invalid"
-            | "runtime_helper_call_join_failed"
-            | "runtime_helper_message_framing_invalid"
-            | "runtime_helper_response_unbound"
-            | "runtime_helper_rejection_malformed"
-            | "runtime_helper_outcome_malformed"
-            | "runtime_helper_request_document_invalid"
-            | "runtime_helper_request_schema_version_invalid"
-            | "runtime_helper_request_attempt_invalid"
-            | "runtime_helper_request_arguments_presence_invalid"
-            | "runtime_helper_request_plan_binding_invalid"
-            | "runtime_helper_request_installation_identity_invalid"
-            | "runtime_helper_request_bytes_invalid"
-            | "runtime_helper_request_plan_bytes_invalid"
-            | "runtime_helper_request_argument_nul_byte"
-            | "runtime_helper_request_storage_invalid"
-            | "runtime_helper_system_clock_invalid"
-            | "runtime_helper_inspection_outcome_invalid"
-            | "runtime_helper_stop_uncertain"
-    )
 }
 
 fn phase_progress(phase: &str) -> OperationProgress {
@@ -3639,18 +3403,18 @@ mod tests {
         ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, HeartbeatFailure, InterruptibleJob,
         LoopClient, ReadinessOutcome, RecipeExecutor, RecipeObservationError, RejectingExecutor,
         RunOncePolicy, classify_heartbeat_failure, controller_denial_diagnostic,
-        distribution_failure_result, distribution_success_evidence, exact_stop_plan_from_claim,
-        first_report_of_run, normalize_execution_result, output_media_type,
-        parse_compiled_execution_plan, readiness_identity, recipe_build_client_failure_result,
-        recipe_install_success_body, report_complete_recipe_run_observations,
-        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
-        runtime_observation_failure, temporary_observation_error,
+        distribution_failure_result, distribution_success, exact_stop_plan_from_claim,
+        first_report_of_run, output_media_type, parse_compiled_execution_plan, readiness_identity,
+        recipe_build_client_failure_result, recipe_install_success,
+        report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
+        run_once_with_heartbeat_interval, runtime_observation_failure, temporary_observation_error,
         temporary_runtime_observation_failure, wait_for_launch_stability,
         wait_ready_with_runtime_guard_and_cancellation,
     };
     use crate::{
         client::{AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence},
         oci::OciRuntime,
+        outcome::Failure,
         process::{ProcessError, ProcessOutput, ProcessRunner, Program},
         runtime_identity::AgentRuntimeIdentity,
         state::{BeginDecision, StateStore},
@@ -3671,7 +3435,11 @@ mod tests {
     };
     use tempfile::tempdir;
     use uuid::Uuid;
-    use vonk_agent_protocol::generated::{AgentClaimPayload, AgentFailureKind, AgentFailureResult};
+    use vonk_agent_protocol::generated::AgentClaimPayload;
+    use vonk_agent_protocol::generated::{
+        AgentFailureKind, AgentResultResult, AgentResultState, FailureCode, OutcomeDoneResult,
+        OutcomeEvidence, OutcomeFailed,
+    };
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, AgentResult, RecipeJobOutputMapping,
         RecipeOperationRequest,
@@ -4287,29 +4055,30 @@ mod tests {
     fn failed_recipe_build_preserves_only_safe_classified_evidence() {
         let mut build_claim = claim();
         build_claim.operation = "recipe.build.v1".parse().unwrap();
-        let result = normalize_execution_result(
-            &build_claim,
-            ExecutionResult {
-                state: "failed",
-                body: json!({
-                    "diagnostic": "temporary-storage-exhausted",
-                    "host_path": "/private/secret",
-                    "reason": "Podman could not import the verified base image (temporary-storage-exhausted)",
-                    "stage": "base-image-import",
-                }),
-            },
+        let reason =
+            "Podman could not import the verified base image (temporary-storage-exhausted)";
+        let result = ExecutionResult::Failed(
+            Failure::new(reason)
+                .stage("base-image-import")
+                .diagnostic("temporary-storage-exhausted"),
         );
 
+        let failed = failed_outcome(&build_claim, result);
+
+        assert_eq!(failed.code, FailureCode::RecipeBuildFailed);
+        assert_eq!(failed.reason, reason);
+        let evidence = evidence_of(&failed);
+        assert_eq!(evidence.stage.as_deref(), Some("base-image-import"));
         assert_eq!(
-            checked_failure_body(result.body),
-            json!({
-                "diagnostic": "temporary-storage-exhausted",
-                "error_code": "recipe_build_failed",
-                "reason": "Podman could not import the verified base image (temporary-storage-exhausted)",
-                "stage": "base-image-import",
-                "status": "failed",
-            })
+            evidence.diagnostic.as_deref(),
+            Some("temporary-storage-exhausted")
         );
+        // Only the declared evidence fields exist on the typed failure: there is
+        // no key through which a host path or any other detail could cross.
+        let wire = serde_json::to_value(&failed).unwrap();
+        let mut keys: Vec<_> = wire.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["code", "evidence", "kind", "reason"]);
     }
 
     #[test]
@@ -4366,54 +4135,59 @@ mod tests {
                 stage,
                 "build dependency could not be confirmed",
             );
-            let result = normalize_execution_result(&build_claim, result);
-            let failure: AgentFailureResult = serde_json::from_value(result.body.clone()).unwrap();
+            let failure = failed_outcome(&build_claim, result);
 
-            assert_eq!(result.state, "failed");
-            assert_eq!(failure.status.as_deref(), Some("failed"));
-            assert_eq!(failure.error_code.as_deref(), Some("recipe_build_failed"));
-            assert_eq!(failure.stage.as_deref(), Some(stage));
+            assert_eq!(failure.code, FailureCode::RecipeBuildFailed);
+            assert_eq!(evidence_of(&failure).stage.as_deref(), Some(stage));
             assert_eq!(failure.failure_kind, Some(expected_kind));
             assert_eq!(failure.retry_after_seconds, expected_retry_after);
-            assert_eq!(
-                failure.reason.as_deref(),
-                Some("build dependency could not be confirmed")
-            );
+            assert_eq!(failure.reason, "build dependency could not be confirmed");
         }
     }
 
     #[test]
     fn distribution_result_is_controller_safe() {
-        let body = distribution_success_evidence(DistributionDownloadEvidence {
+        let success = distribution_success(DistributionDownloadEvidence {
             model_digests: vec!["d".repeat(64)],
             model_paths: vec![std::path::PathBuf::from("/run/private/model.bin")],
             oci_image_digest: format!("sha256:{}", "b".repeat(64)),
             oci_image_config_digest: format!("sha256:{}", "c".repeat(64)),
             downloaded_bytes: 456,
         });
-        assert_eq!(body, json!({"downloaded_bytes": 456}));
+        // Only the byte count crosses; the local paths and digests stay behind.
+        let ExecutionResult::Done(OutcomeDoneResult::ArtifactDistributionResult(body)) = &success
+        else {
+            panic!("a distribution reports its artifact distribution result");
+        };
+        assert_eq!(body.downloaded_bytes, 456);
 
+        let mut distribution_claim = claim();
+        distribution_claim.operation = "artifact.distribution.v1".parse().unwrap();
+        let finished = success.finish(&distribution_claim);
         let result = AgentResult {
             fence: Uuid::new_v4(),
-            result: serde_json::from_value(body).unwrap(),
-            state: "succeeded".parse().unwrap(),
+            result: finished.result,
+            state: finished.state,
         };
         result.validate().unwrap();
+        result
+            .validate_for_operation(&distribution_claim.operation)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&result.result).unwrap(),
+            json!({"kind": "done", "result": {"downloaded_bytes": 456}})
+        );
     }
 
     #[test]
     fn distribution_failure_uses_operation_specific_result_code() {
         let mut distribution_claim = claim();
         distribution_claim.operation = "artifact.distribution.v1".parse().unwrap();
-        let result = normalize_execution_result(
+        let failed = failed_outcome(
             &distribution_claim,
-            ExecutionResult {
-                state: "failed",
-                body: json!({"reason": "distribution object digest mismatch"}),
-            },
+            ExecutionResult::failed("distribution object digest mismatch"),
         );
-        assert_eq!(result.body["error_code"], "artifact_distribution_failed");
-        assert_eq!(result.body["status"], "failed");
+        assert_eq!(failed.code, FailureCode::ArtifactDistributionFailed);
     }
 
     #[test]
@@ -4457,16 +4231,24 @@ mod tests {
         }));
 
         let raw = distribution_failure_result(&error);
-        assert_eq!(raw.state, "failed");
-        assert_eq!(raw.body["failure_kind"], "invalid-authority");
-        assert_eq!(raw.body["stage"], "artifact-distribution");
+        assert_eq!(raw.state(), AgentResultState::Failed);
+        let failure = raw.failure().expect("a failure");
+        assert_eq!(
+            failure.failure_kind,
+            Some(AgentFailureKind::InvalidAuthority)
+        );
+        assert_eq!(failure.stage.as_deref(), Some("artifact-distribution"));
 
-        let result = normalize_execution_result(&distribution_claim, raw);
+        let failed = failed_outcome(&distribution_claim, raw);
 
-        assert_eq!(result.body["error_code"], "artifact_distribution_failed");
-        assert_eq!(result.body["failure_kind"], "invalid-authority");
-        assert_eq!(result.body["stage"], "artifact-distribution");
-        let diagnostic = result.body["diagnostic"].as_str().unwrap();
+        assert_eq!(failed.code, FailureCode::ArtifactDistributionFailed);
+        assert_eq!(
+            failed.failure_kind,
+            Some(AgentFailureKind::InvalidAuthority)
+        );
+        let evidence = evidence_of(&failed);
+        assert_eq!(evidence.stage.as_deref(), Some("artifact-distribution"));
+        let diagnostic = evidence.diagnostic.as_deref().unwrap();
         assert!(diagnostic.contains("http_status=401"));
         assert!(diagnostic.contains("request_id=req-401"));
     }
@@ -4494,13 +4276,14 @@ mod tests {
             summary: None,
         }));
 
+        let kind = |result: ExecutionResult| result.failure().unwrap().failure_kind;
         assert_eq!(
-            distribution_failure_result(&expired).body["failure_kind"],
-            "temporary-dependency"
+            kind(distribution_failure_result(&expired)),
+            Some(AgentFailureKind::TemporaryDependency)
         );
         assert_eq!(
-            distribution_failure_result(&revoked).body["failure_kind"],
-            "invalid-authority"
+            kind(distribution_failure_result(&revoked)),
+            Some(AgentFailureKind::InvalidAuthority)
         );
     }
 
@@ -4575,8 +4358,11 @@ mod tests {
 
         let result = executor.execute(&claim, lease_deadline, cancellation).await;
 
-        assert_eq!(result.state, "succeeded");
-        assert_eq!(result.body, json!({}));
+        assert_eq!(result.state(), AgentResultState::Succeeded);
+        assert!(matches!(
+            result,
+            ExecutionResult::Done(OutcomeDoneResult::RecipeUninstallResult(_))
+        ));
         assert!(!installation.exists());
         // Model cleanup frees the store's copy once no installation links it.
         assert!(stored_model.iter().all(|object| !object.exists()));
@@ -4734,19 +4520,15 @@ mod tests {
             })),
         };
         let result = runtime_observation_failure(&error);
-        assert_eq!(result.state, "failed");
-        let reason = result.body["reason"].as_str().unwrap_or_default();
+        assert_eq!(result.state(), AgentResultState::Failed);
+        let failure = result.failure().expect("a failure");
+        let reason = failure.reason.as_str();
         assert!(reason.contains("runtime_process_exited"), "{reason}");
         // Both streams arrive as themselves: merging them into one tail is what
         // discarded the stream that was written first.
-        let stdout = result.body["diagnostic_logs"]["stdout"]["text"]
-            .as_str()
-            .unwrap_or_default();
-        assert!(stdout.contains("listening on 8888"), "{stdout}");
-        let stderr = result.body["diagnostic_logs"]["stderr"]["text"]
-            .as_str()
-            .unwrap_or_default();
-        assert!(stderr.contains("ModuleNotFoundError"), "{stderr}");
+        let logs = failure.process_logs.as_ref().expect("captured output");
+        assert!(logs.stdout.text.contains("listening on 8888"));
+        assert!(logs.stderr.text.contains("ModuleNotFoundError"));
     }
     #[tokio::test]
     async fn collective_readiness_exits_when_the_controller_cancels() {
@@ -4965,10 +4747,7 @@ mod tests {
                 }
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
-            ExecutionResult {
-                state: "succeeded",
-                body: recipe_install_success_body(1),
-            }
+            recipe_install_success(1)
         }
     }
 
@@ -4994,10 +4773,7 @@ mod tests {
                 }
                 thread::sleep(Duration::from_millis(1));
             }
-            ExecutionResult {
-                state: "failed",
-                body: json!({"reason": "build process ended"}),
-            }
+            ExecutionResult::failed("build process ended")
         }
     }
 
@@ -5017,10 +4793,8 @@ mod tests {
             lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
             cancellation: tokio::sync::watch::Receiver<bool>,
         ) -> ExecutionResult {
-            let mut result = self.0.execute(claim, lease_deadline, cancellation).await;
-            result.state = "cancelled";
-            result.body = json!({"reason": "exact workload stop confirmed", "error_code": "operation_cancelled"});
-            result
+            self.0.execute(claim, lease_deadline, cancellation).await;
+            ExecutionResult::cancelled("exact workload stop confirmed")
         }
     }
 
@@ -5043,10 +4817,7 @@ mod tests {
             .await
             .expect("heartbeat task did not make progress");
             *self.observed_deadline.lock().unwrap() = Some(*lease_deadline.borrow());
-            ExecutionResult {
-                state: "succeeded",
-                body: super::recipe_install_success_body(0),
-            }
+            recipe_install_success(0)
         }
     }
 
@@ -5060,10 +4831,7 @@ mod tests {
             _lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
             _cancellation: tokio::sync::watch::Receiver<bool>,
         ) -> ExecutionResult {
-            ExecutionResult {
-                state: "failed",
-                body: json!({"reason": "rootless image build failed"}),
-            }
+            ExecutionResult::failed("rootless image build failed")
         }
     }
 
@@ -5101,20 +4869,28 @@ mod tests {
             _cancellation: tokio::sync::watch::Receiver<bool>,
         ) -> ExecutionResult {
             self.events.lock().unwrap().push("execute");
-            ExecutionResult {
-                state: "succeeded",
-                body: super::recipe_install_success_body(0),
-            }
+            recipe_install_success(0)
         }
     }
 
-    fn checked_failure_body(mut body: serde_json::Value) -> serde_json::Value {
-        let diagnostics = body.as_object_mut().unwrap().remove("diagnostics").unwrap();
-        serde_json::from_value::<crate::failure_evidence::FailureDiagnostics>(diagnostics)
-            .unwrap()
-            .validate()
-            .unwrap();
-        body
+    /// What the Controller receives for a failed result: the finished outcome,
+    /// whose bounded diagnostics must be valid.
+    fn failed_outcome(claim: &AgentClaim, result: ExecutionResult) -> OutcomeFailed {
+        let AgentResultResult::OutcomeFailed(failed) = result.finish(claim).result else {
+            panic!("expected a failed outcome");
+        };
+        if let Some(diagnostics) = failed
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.diagnostics.as_ref())
+        {
+            diagnostics.validate().unwrap();
+        }
+        failed
+    }
+
+    fn evidence_of(failed: &OutcomeFailed) -> &OutcomeEvidence {
+        failed.evidence.as_ref().expect("failure evidence")
     }
 
     fn claim() -> AgentClaim {
@@ -5153,14 +4929,10 @@ mod tests {
             ))),
         };
         let failure = super::runtime_preparation_failure(&error);
-        let normalized = super::normalize_execution_result(&start_claim, failure);
-        let result: vonk_agent_protocol::generated::AgentFailureResult =
-            serde_json::from_value(normalized.body).unwrap();
+        let failed = failed_outcome(&start_claim, failure);
         assert_eq!(
-            result.reason.as_deref(),
-            Some(
-                "container runtime could not prepare the workload (stage=output-storage; category=storage-permission-denied)"
-            )
+            failed.reason,
+            "container runtime could not prepare the workload (stage=output-storage; category=storage-permission-denied)"
         );
     }
 
@@ -5180,16 +4952,9 @@ mod tests {
         };
         let failed =
             super::runtime_failure("rank process did not remain stable after launch", &error);
-        let result = super::normalize_execution_result(&start_claim, failed);
-        let body: vonk_agent_protocol::generated::AgentFailureResult =
-            serde_json::from_value(result.body).unwrap();
-        assert!(
-            body.reason
-                .as_deref()
-                .unwrap()
-                .contains("helper_runtime_process_exited")
-        );
-        let diagnostics = body.diagnostics.as_ref().unwrap();
+        let body = failed_outcome(&start_claim, failed);
+        assert!(body.reason.contains("helper_runtime_process_exited"));
+        let diagnostics = evidence_of(&body).diagnostics.as_ref().unwrap();
         diagnostics.validate().unwrap();
         assert!(diagnostics.stdout.text.contains("starting the engine core"));
         assert!(diagnostics.stderr.text.contains("ModuleNotFoundError"));
@@ -5212,10 +4977,8 @@ mod tests {
         );
         let failed =
             super::runtime_failure("container runtime could not start the workload", &error);
-        let result = super::normalize_execution_result(&start_claim, failed);
-        let body: vonk_agent_protocol::generated::AgentFailureResult =
-            serde_json::from_value(result.body).unwrap();
-        let reason = body.reason.as_deref().unwrap();
+        let body = failed_outcome(&start_claim, failed);
+        let reason = body.reason.as_str();
         assert!(
             reason.contains(
                 "container runtime could not start the workload: helper_outcome_malformed"
@@ -5237,10 +5000,8 @@ mod tests {
         );
         let failed =
             super::runtime_failure("container runtime could not start the workload", &error);
-        let result = super::normalize_execution_result(&start_claim, failed);
-        let body: vonk_agent_protocol::generated::AgentFailureResult =
-            serde_json::from_value(result.body).unwrap();
-        let reason = body.reason.as_deref().unwrap();
+        let body = failed_outcome(&start_claim, failed);
+        let reason = body.reason.as_str();
         assert!(
             reason.contains(
                 "container runtime could not start the workload: helper_request_document_invalid"
@@ -5267,8 +5028,8 @@ mod tests {
         };
         let failed =
             super::runtime_failure("container runtime could not start the workload", &error);
-        let result = super::normalize_execution_result(&start_claim, failed);
-        let reason = result.body["reason"].as_str().unwrap_or_default();
+        let result = failed_outcome(&start_claim, failed);
+        let reason = result.reason.as_str();
         assert!(
             reason.contains("helper_runtime_fabric_firewall_rejected")
                 && reason.contains("host endpoint port 8000 is not authorized")
@@ -5286,10 +5047,8 @@ mod tests {
         let error = crate::host_runtime::HostRuntimeError::StopUncertain;
         let failed =
             super::runtime_failure("container runtime could not start the workload", &error);
-        let result = super::normalize_execution_result(&start_claim, failed);
-        let body: vonk_agent_protocol::generated::AgentFailureResult =
-            serde_json::from_value(result.body).unwrap();
-        let reason = body.reason.as_deref().unwrap();
+        let body = failed_outcome(&start_claim, failed);
+        let reason = body.reason.as_str();
         assert!(
             reason
                 .contains("container runtime could not start the workload: helper_stop_uncertain"),
@@ -5312,10 +5071,8 @@ mod tests {
         };
         let failed =
             super::runtime_failure("container runtime could not start the workload", &error);
-        let result = super::normalize_execution_result(&start_claim, failed);
-        let body: vonk_agent_protocol::generated::AgentFailureResult =
-            serde_json::from_value(result.body).unwrap();
-        let diagnostics = body.diagnostics.as_ref().unwrap();
+        let body = failed_outcome(&start_claim, failed);
+        let diagnostics = evidence_of(&body).diagnostics.as_ref().unwrap();
         let refusal = diagnostics
             .preflight
             .iter()
@@ -5324,12 +5081,7 @@ mod tests {
         assert!(refusal.value.contains("request_bytes_invalid"));
         assert!(refusal.value.contains(&format!("limit={limit}")));
         assert!(refusal.value.contains(&format!("observed={}", limit + 1)));
-        assert!(
-            body.reason
-                .as_deref()
-                .unwrap()
-                .contains("helper_request_bytes_invalid")
-        );
+        assert!(body.reason.contains("helper_request_bytes_invalid"));
     }
 
     #[test]
@@ -5365,18 +5117,15 @@ mod tests {
                 code.starts_with("runtime_helper_"),
                 "a pull failure code stays in the runtime_helper_ namespace, got {code}"
             );
-            let result = super::normalize_execution_result(
+            let result = failed_outcome(
                 &pull_claim,
-                ExecutionResult {
-                    state: "failed",
-                    body: json!({
-                        "reason": "runtime image pull failed",
-                        "helper_error_code": code,
-                    }),
-                },
+                ExecutionResult::Failed(
+                    Failure::new("runtime image pull failed").helper(code.clone(), None),
+                ),
             );
             assert_eq!(
-                result.body["helper_error_code"], code,
+                evidence_of(&result).helper_error_code.as_deref(),
+                Some(code.as_str()),
                 "{code} must survive normalization rather than be silently dropped"
             );
         }
@@ -5390,18 +5139,19 @@ mod tests {
             "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
         ))
         .unwrap();
-        let mut body = envelope["result"].clone();
-        body["exit_code"] = json!(1);
-        body["reason"] = json!("runtime failed");
-        let result = normalize_execution_result(
+        let mut receipt: vonk_agent_protocol::RecipeJobRunResult =
+            serde_json::from_value(envelope["result"].clone()).unwrap();
+        receipt.exit_code = 1;
+        receipt.reason = Some("runtime failed".to_owned());
+        let result = failed_outcome(
             &job_claim,
-            ExecutionResult {
-                state: "failed",
-                body,
-            },
+            ExecutionResult::Failed(
+                Failure::new("runtime failed")
+                    .code(FailureCode::RecipeJobRunFailed)
+                    .receipt(receipt),
+            ),
         );
-        let typed: vonk_agent_protocol::RecipeJobRunResult =
-            serde_json::from_value(result.body).unwrap();
+        let typed = result.receipt.expect("the receipt is kept");
         typed.validate().unwrap();
         assert_eq!(typed.exit_code, 1);
         assert!(typed.diagnostics.is_some());
@@ -5566,9 +5316,7 @@ mod tests {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         ));
-        let result = state
-            .finish(&claim, "succeeded", recipe_install_success_body(0))
-            .unwrap();
+        let result = state.finish(&claim, recipe_install_success(0)).unwrap();
 
         assert!(matches!(
             client.submit_result(&result).await,
@@ -5616,9 +5364,7 @@ mod tests {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         ));
-        let result = state
-            .finish(&claim, "succeeded", recipe_install_success_body(0))
-            .unwrap();
+        let result = state.finish(&claim, recipe_install_success(0)).unwrap();
 
         let Err(ClientError::ResultRejected(error)) = client.submit_result(&result).await else {
             panic!("a 422 must be a typed result rejection");
@@ -5674,9 +5420,7 @@ mod tests {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         ));
-        let result = state
-            .finish(&claim, "succeeded", recipe_install_success_body(0))
-            .unwrap();
+        let result = state.finish(&claim, recipe_install_success(0)).unwrap();
         assert_eq!(state.pending_results().unwrap().len(), 1);
 
         let client = RefusingResultClient {
@@ -5790,9 +5534,7 @@ mod tests {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         ));
-        state
-            .finish(&claim, "succeeded", recipe_install_success_body(0))
-            .unwrap()
+        state.finish(&claim, recipe_install_success(0)).unwrap()
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -5983,16 +5725,13 @@ mod tests {
         let results = client.results.lock().unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].state.as_str(), "cancelled");
-        let vonk_agent_protocol::generated::AgentResultResult::AgentFailureResult(body) =
+        let vonk_agent_protocol::generated::AgentResultResult::OutcomeFailed(body) =
             &results[0].result
         else {
             panic!("cancelled start outcome lost its typed failure result");
         };
-        assert_eq!(
-            body.reason.as_deref(),
-            Some("exact workload stop confirmed")
-        );
-        assert_eq!(body.error_code.as_deref(), Some("operation_cancelled"));
+        assert_eq!(body.reason, "exact workload stop confirmed");
+        assert_eq!(body.code, FailureCode::OperationCancelled);
     }
 
     #[tokio::test]
@@ -6365,71 +6104,75 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(
-            checked_failure_body(
-                serde_json::to_value(&client.results.lock().unwrap()[0].result).unwrap()
-            ),
-            json!({
-                "error_code": "recipe_install_failed",
-                "reason": "rootless image build failed",
-                "status": "failed"
-            })
-        );
+        let results = client.results.lock().unwrap();
+        assert_eq!(results[0].state, AgentResultState::Failed);
+        let AgentResultResult::OutcomeFailed(failed) = &results[0].result else {
+            panic!("a failed executor reports a typed failure");
+        };
+        assert_eq!(failed.code, FailureCode::RecipeInstallFailed);
+        assert_eq!(failed.reason, "rootless image build failed");
+        failed
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.diagnostics.as_ref())
+            .expect("bounded diagnostics")
+            .validate()
+            .unwrap();
     }
 
     #[test]
     fn exact_start_observation_failure_keeps_retry_contract() {
         let mut start_claim = claim();
         start_claim.operation = "recipe.start".parse().unwrap();
-        let result =
-            normalize_execution_result(&start_claim, temporary_runtime_observation_failure());
-        assert_eq!(result.state, "failed");
-        assert_eq!(result.body["error_code"], "runtime_observation_unavailable");
-        assert_eq!(result.body["failure_kind"], "temporary-dependency");
-        assert_eq!(result.body["retry_after_seconds"], 5);
+        let result = failed_outcome(&start_claim, temporary_runtime_observation_failure());
+        assert_eq!(result.code, FailureCode::RuntimeObservationUnavailable);
+        assert_eq!(
+            result.failure_kind,
+            Some(AgentFailureKind::TemporaryDependency)
+        );
+        assert_eq!(result.retry_after_seconds, Some(5));
     }
 
     #[test]
     fn agent_upgrade_failure_preserves_only_bounded_helper_diagnostics() {
         let mut upgrade_claim = claim();
         upgrade_claim.operation = "agent.upgrade.v1".parse().unwrap();
-        let result = normalize_execution_result(
+        let result = failed_outcome(
             &upgrade_claim,
-            ExecutionResult {
-                state: "failed",
-                body: json!({
-                    "reason": "agent upgrade helper rejected the request: package_install_failed",
-                    "helper_error_code": "package_install_failed",
-                    "helper_exit_code": 75,
-                    "untrusted_detail": "must not cross the controller boundary",
-                }),
-            },
+            ExecutionResult::Failed(
+                Failure::new("agent upgrade helper rejected the request: package_install_failed")
+                    .helper("package_install_failed", Some(75)),
+            ),
         );
 
+        assert_eq!(result.code, FailureCode::AgentUpgradeFailed);
         assert_eq!(
-            checked_failure_body(result.body),
-            json!({
-                "error_code": "agent_upgrade_failed",
-                "reason": "agent upgrade helper rejected the request: package_install_failed",
-                "status": "failed",
-                "helper_error_code": "package_install_failed",
-                "helper_exit_code": 75,
-            })
+            result.reason,
+            "agent upgrade helper rejected the request: package_install_failed"
         );
+        let evidence = evidence_of(&result);
+        assert_eq!(
+            evidence.helper_error_code.as_deref(),
+            Some("package_install_failed")
+        );
+        assert_eq!(evidence.helper_exit_code, Some(75));
 
-        let rejected = normalize_execution_result(
+        // An unlisted helper code, or an exit status outside one byte, is dropped.
+        let rejected = failed_outcome(
             &upgrade_claim,
-            ExecutionResult {
-                state: "failed",
-                body: json!({
-                    "reason": "agent upgrade failed",
-                    "helper_error_code": "arbitrary_host_detail",
-                    "helper_exit_code": 512,
-                }),
-            },
+            ExecutionResult::Failed(
+                Failure::new("agent upgrade failed").helper("arbitrary_host_detail", Some(512)),
+            ),
         );
-        assert!(rejected.body.get("helper_error_code").is_none());
-        assert!(rejected.body.get("helper_exit_code").is_none());
+        assert!(evidence_of(&rejected).helper_error_code.is_none());
+        assert!(evidence_of(&rejected).helper_exit_code.is_none());
+        let out_of_range = failed_outcome(
+            &upgrade_claim,
+            ExecutionResult::Failed(
+                Failure::new("agent upgrade failed").helper("package_install_failed", Some(512)),
+            ),
+        );
+        assert!(evidence_of(&out_of_range).helper_exit_code.is_none());
     }
 
     #[test]
@@ -6443,33 +6186,26 @@ mod tests {
             "grant_unauthorized",
             "request_replayed",
         ] {
-            let result = normalize_execution_result(
+            let result = failed_outcome(
                 &pull_claim,
-                ExecutionResult {
-                    state: "failed",
-                    body: json!({
-                        "reason": "runtime image pull failed",
-                        "helper_error_code": code,
-                        "untrusted_detail": "/root/authority/private-key",
-                    }),
-                },
+                ExecutionResult::Failed(
+                    Failure::new("runtime image pull failed").helper(code, None),
+                ),
             );
 
-            assert_eq!(result.body["helper_error_code"], code);
-            assert!(result.body.get("untrusted_detail").is_none());
+            assert_eq!(
+                evidence_of(&result).helper_error_code.as_deref(),
+                Some(code)
+            );
         }
 
-        let rejected = normalize_execution_result(
+        let rejected = failed_outcome(
             &pull_claim,
-            ExecutionResult {
-                state: "failed",
-                body: json!({
-                    "reason": "runtime image pull failed",
-                    "helper_error_code": "arbitrary_host_detail",
-                }),
-            },
+            ExecutionResult::Failed(
+                Failure::new("runtime image pull failed").helper("arbitrary_host_detail", None),
+            ),
         );
-        assert!(rejected.body.get("helper_error_code").is_none());
+        assert!(evidence_of(&rejected).helper_error_code.is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -6514,11 +6250,13 @@ mod tests {
         let results = client.results.lock().unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].state.as_str(), "cancelled");
-        let vonk_agent_protocol::generated::AgentResultResult::RecipeJobRunResult(result) =
+        let vonk_agent_protocol::generated::AgentResultResult::OutcomeFailed(outcome) =
             &results[0].result
         else {
-            panic!("expected canonical job result");
+            panic!("expected a typed cancelled outcome");
         };
+        assert_eq!(outcome.code, FailureCode::OperationCancelled);
+        let result = outcome.receipt.as_ref().expect("the job receipt is kept");
         result.validate().unwrap();
         assert_eq!(result.job_id, request.job_id);
         assert_eq!(result.run_id, request.run_id);

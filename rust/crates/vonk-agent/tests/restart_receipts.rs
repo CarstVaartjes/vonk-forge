@@ -5,10 +5,12 @@ use serde_json::json;
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::client::ControllerError;
+use vonk_agent::outcome::ExecutionResult;
 use vonk_agent::state::{BeginDecision, StateError, StateStore};
 use vonk_agent::workloads::CompiledExecutionPlan;
 use vonk_agent_protocol::generated::{
-    AgentClaimPayload, AgentFailureKind, AgentOperation, AgentResultResult, RecipeStopPayload,
+    AgentClaimPayload, AgentInstallResult, AgentOperation, AgentResultResult, RecipeStopPayload,
+    RecipeStopResult, WaitReason,
 };
 use vonk_agent_protocol::{AgentClaim, canonical_json};
 
@@ -50,7 +52,9 @@ fn completed_result_is_redelivered_until_acknowledged() {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         );
-        state.finish(&claim, "succeeded", json!({})).unwrap()
+        state
+            .finish(&claim, ExecutionResult::done(RecipeStopResult::default()))
+            .unwrap()
     };
 
     let mut restarted = StateStore::open(&path, NODE_ID).unwrap();
@@ -77,7 +81,9 @@ fn acknowledged_result_is_not_replayed_after_restart() {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         );
-        let result = state.finish(&claim, "succeeded", json!({})).unwrap();
+        let result = state
+            .finish(&claim, ExecutionResult::done(RecipeStopResult::default()))
+            .unwrap();
         state.acknowledge(&result).unwrap();
         result
     };
@@ -111,7 +117,9 @@ fn rejected_result_and_its_refusal_survive_restart() {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         );
-        let result = state.finish(&claim, "succeeded", json!({})).unwrap();
+        let result = state
+            .finish(&claim, ExecutionResult::done(RecipeStopResult::default()))
+            .unwrap();
         state
             .reject_result(&result, &ingress_refusal(), Utc::now())
             .unwrap();
@@ -177,18 +185,14 @@ fn interrupted_mutation_is_not_executed_twice_after_restart() {
     let BeginDecision::Replay(result) = decision else {
         panic!("an interrupted attempt must not execute without fresh Controller authority");
     };
-    let AgentResultResult::AgentFailureResult(failure) = result.result else {
-        panic!("restart must report typed interrupted-effect evidence");
+    let AgentResultResult::OutcomeUnknown(unknown) = result.result else {
+        panic!("restart must report a typed unknown outcome");
     };
+    assert_eq!(unknown.wait_reason, WaitReason::AgentRestartInterrupted);
     assert_eq!(
-        failure.error_code.as_deref(),
-        Some("agent_restart_interrupted")
+        unknown.reason,
+        "agent restarted with an operation in progress"
     );
-    assert_eq!(
-        failure.failure_kind,
-        Some(AgentFailureKind::UncertainEffect)
-    );
-    assert_eq!(failure.uncertain, Some(true));
 }
 
 #[test]
@@ -203,12 +207,17 @@ fn mismatched_result_is_rejected_before_persistence() {
     );
 
     assert!(matches!(
-        state.finish(&claim, "succeeded", json!({"installed_bytes": 0})),
+        state.finish(
+            &claim,
+            ExecutionResult::done(AgentInstallResult { installed_bytes: 0 }),
+        ),
         Err(StateError::Protocol(_))
     ));
     assert!(state.pending_results().unwrap().is_empty());
 
-    let result = state.finish(&claim, "succeeded", json!({})).unwrap();
+    let result = state
+        .finish(&claim, ExecutionResult::done(RecipeStopResult::default()))
+        .unwrap();
     assert_eq!(
         state.pending_results().unwrap(),
         vec![(AgentOperation::RecipeStop, result)]
@@ -226,7 +235,9 @@ fn mismatched_durable_result_is_rejected_before_submission_and_replay() {
             state.begin(&claim, Utc::now()).unwrap(),
             BeginDecision::Execute
         );
-        state.finish(&claim, "succeeded", json!({})).unwrap();
+        state
+            .finish(&claim, ExecutionResult::done(RecipeStopResult::default()))
+            .unwrap();
     }
     let connection = rusqlite::Connection::open(&path).unwrap();
     let raw: Vec<u8> = connection

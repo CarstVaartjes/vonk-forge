@@ -3186,7 +3186,6 @@
           "recipe_uninstall_failed",
           "runtime_observation_unavailable",
           "installation_reconciliation_busy",
-          "installation_storage_temporarily_unavailable",
           "recipe_reconciliation_dependency_unavailable"
         ],
         "title": "FailureCode",

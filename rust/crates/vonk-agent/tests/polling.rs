@@ -1,13 +1,15 @@
 #![forbid(unsafe_code)]
 
 use chrono::{DateTime, FixedOffset, Utc};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tempfile::tempdir;
 use uuid::Uuid;
+use vonk_agent::outcome::ExecutionResult;
 use vonk_agent::state::{BeginDecision, StateError, StateStore};
 use vonk_agent::workloads::CompiledExecutionPlan;
 use vonk_agent_protocol::generated::{
     AgentClaimPayload, AgentOperation, OperationProgress, RecipeInstallPayload, RecipeStopPayload,
+    RecipeStopResult,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, MAX_DOCUMENT_BYTES, RecipeOperationRequest,
@@ -78,7 +80,9 @@ fn claims_fail_closed_on_deadline_and_replay_by_fence() {
     let live = claim(2, "2099-01-01T00:00:00+00:00");
     assert_eq!(state.begin(&live, now).unwrap(), BeginDecision::Execute);
     assert!(matches!(state.begin(&live, now), Err(StateError::Busy)));
-    let result = state.finish(&live, "succeeded", json!({})).unwrap();
+    let result = state
+        .finish(&live, ExecutionResult::done(RecipeStopResult::default()))
+        .unwrap();
     assert_eq!(
         state.begin(&live, now).unwrap(),
         BeginDecision::Replay(Box::new(result))
@@ -107,7 +111,9 @@ fn heartbeat_renewal_is_durable_and_used_by_the_terminal_result() {
     state.apply_heartbeat(&request, &renewed).unwrap();
     drop(state);
     let mut reopened = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
-    reopened.finish(&claim, "succeeded", json!({})).unwrap();
+    reopened
+        .finish(&claim, ExecutionResult::done(RecipeStopResult::default()))
+        .unwrap();
 }
 
 #[test]

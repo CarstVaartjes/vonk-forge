@@ -7,14 +7,13 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use serde_json::Value;
 use thiserror::Error;
-use vonk_agent_protocol::generated::{
-    AgentFailureKind, AgentFailureResult, AgentOperation, AgentResultResult, AgentResultState,
-};
+use vonk_agent_protocol::generated::{AgentOperation, WaitReason};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
 };
+
+use crate::outcome::ExecutionResult;
 
 const STATE_SCHEMA_VERSION: &str = "3";
 
@@ -229,18 +228,15 @@ impl StateStore {
         Ok(decision)
     }
 
+    /// Normalize an executor's typed result and make it durable under the claim's
+    /// fence. The protocol message is built from the generated contract types
+    /// only: there is no loose-JSON body to persist.
     pub fn finish(
         &mut self,
         claim: &AgentClaim,
-        state: &str,
-        result: Value,
+        executed: ExecutionResult,
     ) -> Result<AgentResult, StateError> {
-        if !matches!(
-            state,
-            "succeeded" | "failed" | "cancelled" | "waiting-for-operator"
-        ) {
-            return Err(StateError::ResultState);
-        }
+        let finished = executed.finish(claim);
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -258,9 +254,15 @@ impl StateStore {
         }
         let result = AgentResult {
             fence: claim.fence,
-            result: serde_json::from_value(result).map_err(|_| StateError::ResultState)?,
-            state: state.parse().map_err(|_| StateError::ResultState)?,
+            result: finished.result,
+            state: finished.state,
         };
+        // The wire schema is the contract: a message that its own generated
+        // deserializer refuses (a bound, a pattern, an empty reason) never
+        // becomes a durable result.
+        let document = serde_json::to_value(&result).map_err(|_| StateError::ResultState)?;
+        let result: AgentResult =
+            serde_json::from_value(document).map_err(|_| StateError::ResultState)?;
         result.validate_for_operation(&claim.operation)?;
         let body = canonical_json(&result)?;
         let changed = transaction.execute(
@@ -560,20 +562,20 @@ impl StateStore {
         for (fence, operation) in claims {
             let operation: AgentOperation =
                 operation.parse().map_err(|_| StateError::ResultState)?;
+            // Startup cannot establish whether the host action finished.
+            // Preserve that uncertainty as a typed unknown outcome: the
+            // Controller owns any new attempt and its current intent/authority
+            // checks.
+            let parsed_fence: uuid::Uuid = fence.parse().map_err(|_| StateError::ResultState)?;
+            let finished = ExecutionResult::unknown(
+                WaitReason::AgentRestartInterrupted,
+                "agent restarted with an operation in progress",
+            )
+            .finish_for(&operation);
             let result = AgentResult {
-                fence: fence.parse().map_err(|_| StateError::ResultState)?,
-                // Startup cannot establish whether the host action finished.
-                // Preserve that uncertainty as typed evidence: the Controller
-                // owns any new attempt and its current intent/authority checks.
-                result: AgentResultResult::AgentFailureResult(AgentFailureResult {
-                    error_code: Some("agent_restart_interrupted".to_owned()),
-                    failure_kind: Some(AgentFailureKind::UncertainEffect),
-                    operation: Some(operation),
-                    reason: Some("agent restarted with an operation in progress".to_owned()),
-                    uncertain: Some(true),
-                    ..Default::default()
-                }),
-                state: AgentResultState::WaitingForOperator,
+                fence: parsed_fence,
+                result: finished.result,
+                state: finished.state,
             };
             result.validate_for_operation(&operation)?;
             transaction.execute(

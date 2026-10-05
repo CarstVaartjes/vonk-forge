@@ -16,7 +16,7 @@ use serde::Deserialize;
 use vonk_agent::{
     client::{AgentHttpClient, ClientError},
     config::AgentConfig,
-    executor::{LoopClient, RecipeExecutor, distribution_success_evidence, run_once},
+    executor::{LoopClient, RecipeExecutor, distribution_success, run_once},
     identity::IdentityPaths,
     oci::OciRuntime,
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
@@ -179,7 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &request.data_root.join("distribution"),
         )
         .await?;
-    let result = state.finish(&claim, "succeeded", distribution_success_evidence(evidence))?;
+    let result = state.finish(&claim, distribution_success(evidence))?;
     println!("{}", serde_json::to_string(&result)?);
     Ok(())
 }

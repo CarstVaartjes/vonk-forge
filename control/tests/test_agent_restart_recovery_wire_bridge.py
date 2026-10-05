@@ -24,7 +24,13 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult, ArtifactDistributionResult
+from vonk_agent_protocol import (
+    AgentResult,
+    ArtifactDistributionResult,
+    OutcomeDone,
+    OutcomeUnknown,
+    WaitReason,
+)
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.distribution import DistributionService, MemoryObjectSource
@@ -411,9 +417,14 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
     )
     assert interrupted.fence == first.fence
     assert interrupted.state == "waiting-for-operator"
-    assert interrupted.result["error_code"] == "agent_restart_interrupted"
-    assert interrupted.result["failure_kind"] == "uncertain-effect"
-    assert interrupted.result["uncertain"] is True
+    # The real agent reports the interruption as a typed unknown outcome; the
+    # Controller stores it in the shape every reader already understands.
+    assert isinstance(interrupted.result, OutcomeUnknown)
+    assert interrupted.result.wait_reason is WaitReason.AGENT_RESTART_INTERRUPTED
+    stored_body = interrupted.stored_result()
+    assert stored_body["wait_reason"] == "agent-restart-interrupted"
+    assert stored_body["failure_kind"] == "uncertain-effect"
+    assert stored_body["uncertain"] is True
     if expired_before_recovery:
         clock.now = first.deadline + timedelta(seconds=1)
         assert (
@@ -471,6 +482,7 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         == large_digest
     )
     assert hashlib.sha256(small.read_bytes()).hexdigest() == small_digest
-    assert isinstance(completed.result, ArtifactDistributionResult)
-    assert completed.result.downloaded_bytes > 0
+    assert isinstance(completed.result, OutcomeDone)
+    assert isinstance(completed.result.result, ArtifactDistributionResult)
+    assert completed.result.result.downloaded_bytes > 0
     assert not partial.exists()
