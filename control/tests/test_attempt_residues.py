@@ -18,7 +18,11 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_control.attempt_residues import ADOPTION_WINDOW, AttemptResidueReconciler
+from vonk_control.attempt_residues import (
+    LEFTOVER_GRACE,
+    AttemptResidueReconciler,
+    incomplete_installation_ids,
+)
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.models import (
@@ -33,6 +37,7 @@ from vonk_control.models import (
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import RecipeRouteService
+from vonk_control.reservation_owners import ADOPTION_WINDOW
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .test_profile_build_process_recovery import _complete_agent_work
@@ -600,3 +605,154 @@ def test_an_unexpected_advance_failure_is_shown_and_backed_off(
     monkeypatch.setattr(load.planner, "_advance", lambda job_id: calls.append(job_id))
     load.planner.tick()
     assert calls == []
+
+
+# -- leftover incomplete installations (install.partial) ----------------------
+
+
+def _reconciler(load, *, after: timedelta) -> AttemptResidueReconciler:
+    return AttemptResidueReconciler(
+        load.sessions,
+        abandon_never_installed=load.lifecycle.abandon_never_installed,
+        removal=load.lifecycle,
+        clock=lambda: load.lifecycle._clock() + after,
+    )
+
+
+def _leave_incomplete(
+    load, *, state: str, rank_state: str = "failed", installed_bytes: int = 60
+) -> str:
+    """Turn the failed attempt's plan into an installation with an effect."""
+
+    installation_id = _planned_left_by_failed_copy(load)
+    with load.sessions.begin() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None
+        installation.state = state
+        for node in session.scalars(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation_id
+            )
+        ):
+            node.state = rank_state
+            node.installed_bytes = installed_bytes
+    return installation_id
+
+
+def _uninstalls(load, installation_id: str) -> list[Job]:
+    with load.sessions() as session:
+        return [
+            job
+            for job in session.scalars(
+                select(Job).where(Job.kind == "recipe.uninstall")
+            )
+            if job.payload.get("owner_id") == installation_id
+        ]
+
+
+@pytest.mark.parametrize(
+    ("state", "rank_state"),
+    [
+        ("partial", "failed"),  # installation not installed, rank not installed
+        ("failed", "failed"),
+        ("partial", "installed"),  # only the installation says so
+        ("installed", "failed"),  # rank not installed under an installed group
+    ],
+)
+def test_an_unowned_incomplete_installation_is_uninstalled_after_the_grace(
+    tmp_path: Path, state: str, rank_state: str
+) -> None:
+    load = _load(tmp_path)
+    installation_id = _leave_incomplete(load, state=state, rank_state=rank_state)
+    # Within the grace a retry or a person may still use it.
+    _reconciler(load, after=timedelta(hours=1)).tick()
+    assert not _uninstalls(load, installation_id)
+    _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=1)).tick()
+    assert len(_uninstalls(load, installation_id)) == 1
+    # The queued uninstall owns the Sparks: the sweep does not queue another.
+    _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=2)).tick()
+    assert len(_uninstalls(load, installation_id)) == 1
+
+
+def test_an_installation_short_of_its_payload_is_uninstalled_after_the_grace(
+    tmp_path: Path,
+) -> None:
+    load = _load(tmp_path)
+    installation_id = _leave_incomplete(
+        load, state="installed", rank_state="installed", installed_bytes=1
+    )
+    with load.sessions.begin() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None
+        plan = json.loads(json.dumps(installation.plan))
+        for node in plan["nodes"]:
+            node["required_payload_bytes"] = 1_000
+        installation.plan = plan
+    with load.sessions() as session:
+        assert installation_id in incomplete_installation_ids(session)
+    assert _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=1)).tick()
+    assert len(_uninstalls(load, installation_id)) == 1
+
+
+def test_a_complete_installation_is_never_a_leftover(tmp_path: Path) -> None:
+    load = _load(tmp_path)
+    installation_id = _leave_incomplete(
+        load, state="installed", rank_state="installed", installed_bytes=10**12
+    )
+    with load.sessions() as session:
+        assert installation_id not in incomplete_installation_ids(session)
+    _reconciler(load, after=timedelta(days=30)).tick()
+    assert not _uninstalls(load, installation_id)
+
+
+def test_a_leftover_an_active_operation_owns_is_left_alone(tmp_path: Path) -> None:
+    load = _load(tmp_path)
+    installation_id = _leave_incomplete(load, state="partial")
+    with load.sessions.begin() as session:
+        job = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
+        assert job is not None
+        job.state = "running"
+    _reconciler(load, after=timedelta(days=2)).tick()
+    assert not _uninstalls(load, installation_id)
+
+
+def test_a_superseded_incomplete_installation_goes_without_the_grace(
+    tmp_path: Path,
+) -> None:
+    load = _load(tmp_path)
+    old_id = _leave_incomplete(load, state="partial")
+    with load.sessions.begin() as session:
+        old = session.get(RecipeInstallation, old_id)
+        assert old is not None
+        later = RecipeInstallation(
+            **{
+                column.key: getattr(old, column.key)
+                for column in RecipeInstallation.__table__.columns
+            }
+        )
+        later.id = str(uuid.uuid4())
+        later.plan_digest = "e" * 64
+        later.state = "installed"
+        later.created_at = old.created_at + timedelta(minutes=1)
+        session.add(later)
+        session.flush()
+        for member in session.scalars(
+            select(InstallationNode).where(InstallationNode.installation_id == old_id)
+        ).all():
+            session.add(
+                InstallationNode(
+                    **{
+                        column.key: getattr(member, column.key)
+                        for column in InstallationNode.__table__.columns
+                    }
+                    | {
+                        "id": str(uuid.uuid4()),
+                        "installation_id": later.id,
+                        "state": "installed",
+                    }
+                )
+            )
+    # No wait: the later installation of the same recipe on the same Sparks
+    # means nothing will adopt or complete the older one.
+    assert _reconciler(load, after=timedelta(0)).tick()
+    assert len(_uninstalls(load, old_id)) == 1

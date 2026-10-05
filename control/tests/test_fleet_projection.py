@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine, event, text, update
+from sqlalchemy import create_engine, event, select, text, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
@@ -528,6 +528,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                         "code": "telemetry.missing",
                         "detail": "No telemetry sample is available.",
                         "severity": "warning",
+                        "install_partial": None,
                     }
                 ],
             },
@@ -2010,6 +2011,100 @@ def test_installed_bytes_flag_compares_the_persisted_payload_expectation(
     )
     presence = _installed_presence(sessions, installation_id)
     assert (presence.complete, presence.degraded_reason) == (complete, reason)
+
+
+def _mutated_group(mutate):
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    installation_id = "00000000-0000-4000-8000-000000000511"
+    _installed_byte_group(
+        sessions,
+        installation_id=installation_id,
+        reservation_bytes=120,
+        payload_expectation_bytes=100,
+        installed_bytes=100,
+    )
+    with sessions.begin() as session:
+        mutate(
+            session.get(RecipeInstallation, installation_id),
+            session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            ).one(),
+        )
+    return installation_id, FleetProjection(sessions, clock=lambda: NOW).read()
+
+
+def _set(installation_state=None, rank_state=None, role=None, installed_bytes=None):
+    def mutate(installation, rank):
+        if installation_state is not None:
+            installation.state = installation_state
+        if rank_state is not None:
+            rank.state = rank_state
+        if role is not None:
+            rank.role = role
+        if installed_bytes is not None:
+            rank.installed_bytes = installed_bytes
+
+    return mutate
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason", "group_state", "rank_state", "affected"),
+    [
+        (
+            _set(installation_state="partial"),
+            "installation-not-installed",
+            "partial",
+            "installed",
+            [],
+        ),
+        (
+            _set(installation_state="failed"),
+            "installation-not-installed",
+            "failed",
+            "installed",
+            [],
+        ),
+        (_set(rank_state="failed"), "rank-not-installed", "installed", "failed", [0]),
+        (_set(role="worker"), "rank-membership-mismatch", "installed", "installed", []),
+        (
+            _set(installed_bytes=40),
+            "rank-incomplete-bytes",
+            "installed",
+            "installed",
+            [0],
+        ),
+    ],
+)
+def test_install_partial_names_the_installation_the_rank_and_the_reason(
+    mutation, reason, group_state, rank_state, affected
+) -> None:
+    installation_id, snapshot = _mutated_group(mutation)
+    warnings = [
+        warning
+        for warning in snapshot.nodes[0].warnings
+        if warning.code == "install.partial"
+    ]
+    assert len(warnings) == 1
+    evidence = warnings[0].install_partial
+    assert evidence is not None
+    assert evidence.installation_id == installation_id
+    assert evidence.title == "Byte Recipe"
+    assert evidence.rank == 0
+    assert evidence.reason == reason
+    assert (evidence.group_state, evidence.rank_state) == (group_state, rank_state)
+    assert evidence.affected_ranks == affected
+    assert evidence.required_bytes == 100
+    assert installation_id[:8] in warnings[0].detail
+    assert "rank 0" in warnings[0].detail
+
+
+def test_a_complete_installation_raises_no_install_partial_warning() -> None:
+    _installation_id, snapshot = _mutated_group(_set())
+    assert not [w for w in snapshot.nodes[0].warnings if w.code == "install.partial"]
 
 
 def test_presence_does_not_fire_the_byte_reason_without_a_persisted_expectation() -> (

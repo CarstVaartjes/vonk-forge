@@ -7582,6 +7582,147 @@
         "title": "GitHubReleaseSource",
         "type": "object"
       },
+      "InstallPartialEvidence": {
+        "additionalProperties": false,
+        "description": "Why one recipe installation group on a Spark is not complete.",
+        "properties": {
+          "affected_ranks": {
+            "items": {
+              "maximum": 499.0,
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "title": "Affected Ranks",
+            "type": "array"
+          },
+          "expected_rank_count": {
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Expected Rank Count",
+            "type": "integer"
+          },
+          "group_state": {
+            "enum": [
+              "planned",
+              "installing",
+              "installed",
+              "partial",
+              "failed",
+              "uninstalled"
+            ],
+            "title": "Group State",
+            "type": "string"
+          },
+          "installation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "installed_bytes": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed Bytes"
+          },
+          "present_ranks": {
+            "items": {
+              "maximum": 499.0,
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "title": "Present Ranks",
+            "type": "array"
+          },
+          "rank": {
+            "maximum": 499.0,
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "rank_state": {
+            "enum": [
+              "planned",
+              "installing",
+              "installed",
+              "partial",
+              "failed",
+              "uninstalled"
+            ],
+            "title": "Rank State",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "external-member",
+              "mapping-incomplete",
+              "missing-ranks",
+              "unexpected-ranks",
+              "rank-membership-mismatch",
+              "installation-not-installed",
+              "rank-not-installed",
+              "rank-incomplete-bytes"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "recipe_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Id",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "required_bytes": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Bytes"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "recipe_id",
+          "recipe_revision_id",
+          "title",
+          "rank",
+          "expected_rank_count",
+          "present_ranks",
+          "affected_ranks",
+          "reason",
+          "group_state",
+          "rank_state"
+        ],
+        "title": "InstallPartialEvidence",
+        "type": "object"
+      },
       "InstallationNodeChange": {
         "additionalProperties": false,
         "properties": {
@@ -12218,6 +12359,16 @@
             "title": "Detail",
             "type": "string"
           },
+          "install_partial": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstallPartialEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "severity": {
             "enum": [
               "info",
@@ -14582,6 +14733,16 @@
       "RecipePresence": {
         "additionalProperties": false,
         "properties": {
+          "affected_ranks": {
+            "items": {
+              "maximum": 499.0,
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "title": "Affected Ranks",
+            "type": "array"
+          },
           "complete": {
             "title": "Complete",
             "type": "boolean"
@@ -14631,6 +14792,19 @@
             "title": "Installation Id",
             "type": "string"
           },
+          "installed_bytes": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed Bytes"
+          },
           "member_node_ids": {
             "items": {
               "pattern": "^spk_[0-9a-f]{32}$",
@@ -14679,6 +14853,19 @@
             "minLength": 1,
             "title": "Recipe Revision Id",
             "type": "string"
+          },
+          "required_bytes": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Bytes"
           },
           "role": {
             "maxLength": 64,

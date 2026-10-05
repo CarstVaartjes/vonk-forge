@@ -216,6 +216,10 @@ from .gateway_key_view import GatewayKeyView
 from .get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
 from .git_hub_release_asset import GitHubReleaseAsset
 from .git_hub_release_source import GitHubReleaseSource
+from .install_partial_evidence import InstallPartialEvidence
+from .install_partial_evidence_group_state import InstallPartialEvidenceGroupState
+from .install_partial_evidence_rank_state import InstallPartialEvidenceRankState
+from .install_partial_evidence_reason import InstallPartialEvidenceReason
 from .installation_node_change import InstallationNodeChange
 from .installation_node_payload import InstallationNodePayload
 from .installation_reconcile_request import InstallationReconcileRequest
@@ -761,6 +765,10 @@ __all__ = (
     "InstallationNodeChange",
     "InstallationNodePayload",
     "InstallationReconcileRequest",
+    "InstallPartialEvidence",
+    "InstallPartialEvidenceGroupState",
+    "InstallPartialEvidenceRankState",
+    "InstallPartialEvidenceReason",
     "IntegerParameter",
     "InventoryState",
     "InventoryStateFreshness",
