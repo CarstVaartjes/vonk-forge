@@ -22,6 +22,8 @@ from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .auth import MUTATION_ROLES
 from .catalog_queries import active_head_revision
+from .lifecycle import State
+from .lifecycle.recipe_update_batch import RecipeUpdateBatchAdapter
 from .logging import redact_text
 from .models import CatalogDocumentRevision, Job, User
 from .operation_api import (
@@ -98,6 +100,7 @@ class RecipeUpdateBatches:
     ) -> None:
         self.owner = owner
         self.sessions = sessions
+        self._lifecycle = RecipeUpdateBatchAdapter()
 
     def _document(self, job: Job) -> RecipeUpdateDocument:
         try:
@@ -242,12 +245,12 @@ class RecipeUpdateBatches:
         document = RecipeUpdateDocument(request=scope, children=children)
         now = _now(self.owner._clock())
         document.next_attempt_at = now if children else None
-        job = Job(
+        job = self._lifecycle.new_batch(
+            allowed=bool(children),
             id=str(uuid.uuid4()),
             request_id=request_id,
             actor=actor,
             kind=UPDATE_KIND,
-            state="queued" if children else "succeeded",
             authority_revision=_binding_digest(document),
             targets=revision_ids,
             payload_digest=_binding_digest(document),
@@ -398,10 +401,14 @@ class RecipeUpdateBatches:
                 try:
                     document = self._document(parent)
                 except RecipeImageAvailabilityError:
-                    continue
-                cancellation = document.cancellation
+                    document = None
+                cancellation = None if document is None else document.cancellation
                 actor = parent.actor
-            if cancellation is None:
+            if document is None or cancellation is None:
+                # Unreadable cancel evidence ends the cancel (rule 4): the
+                # document is retained untouched as the residue.
+                if self._cancel_unreadable(operation_id):
+                    progressed += 1
                 continue
             observations: dict[str, RecipeImageAvailabilityView | None] = {}
             for child in document.children:
@@ -457,11 +464,8 @@ class RecipeUpdateBatches:
                         continue
                     observed = value
                 observations[child.request_key] = observed
-            if any(
-                child.state not in _SETTLED and child.request_key not in observations
-                for child in document.children
-            ):
-                continue
+            # A child that could not be observed this pass stays as recorded; the
+            # core's stop budget (not an endless retry) bounds the cancel.
             now = _now(self.owner._clock())
             try:
                 with self.sessions.begin() as session:
@@ -541,19 +545,40 @@ class RecipeUpdateBatches:
                     parent.payload = serialize_json_value(
                         read_update_document(serialize_json_value(current))
                     )
-                    parent.state = (
-                        "cancelled"
-                        if all(child.state in _SETTLED for child in children)
-                        else "cancelling"
+                    self._lifecycle.cancel_progress(
+                        parent,
+                        current,
+                        now,
+                        settled_children=all(
+                            child.state in _SETTLED for child in children
+                        ),
+                        reason=cancellation.reason,
                     )
-                    parent.status_reason = cancellation.reason
-                    parent.updated_at = now
                     progressed += 1
             except DBAPIError as error:
                 if getattr(error.orig, "sqlstate", None) == "55P03":
                     continue
                 raise
         return progressed
+
+    def _cancel_unreadable(self, operation_id: str) -> bool:
+        """End a cancel whose stored document cannot be read (the effect is unknown)."""
+
+        try:
+            with self.sessions.begin() as session:
+                parent = session.scalar(
+                    select(Job)
+                    .where(Job.id == operation_id, Job.kind == UPDATE_KIND)
+                    .with_for_update(nowait=True)
+                )
+                if parent is None or parent.state != "cancelling":
+                    return False
+                self._lifecycle.cancel_unreadable(parent, _now(self.owner._clock()))
+                return True
+        except DBAPIError as error:
+            if getattr(error.orig, "sqlstate", None) == "55P03":
+                return False
+            raise
 
     def activity_provider(self) -> OperationProvider:
         return OperationProvider(
@@ -679,14 +704,14 @@ class RecipeUpdateBatches:
                 try:
                     document = self._document(job)
                 except RecipeImageAvailabilityError as error:
-                    job.state = "failed"
-                    job.status_reason = error.code
+                    # The document is the evidence of what was admitted: retained
+                    # as it is, the batch ends with the reason and is not advanced.
+                    self._lifecycle.reject(job, error.code, now)
                     job.result = {
                         "code": error.code,
                         "detail": error.detail,
                         "retryable": False,
                     }
-                    job.updated_at = now
                     continue
                 if document.claim_until is not None and document.claim_until > now:
                     continue
@@ -695,14 +720,16 @@ class RecipeUpdateBatches:
                     and document.next_attempt_at > now
                 ):
                     continue
-                document.claim_owner = f"{owner}:{uuid.uuid4().hex}"
-                document.claim_until = now + timedelta(
-                    seconds=self.owner._claim_lease_seconds
+                claim_owner = f"{owner}:{uuid.uuid4().hex}"
+                claim_until = now + timedelta(seconds=self.owner._claim_lease_seconds)
+                claimed = self._lifecycle.claimed(
+                    job, document, claim_owner, claim_until, now
                 )
+                if claimed.state is not State.RUNNING:
+                    continue  # a cancel or another claim won: the core refused
+                document.claim_owner = claim_owner
+                document.claim_until = claim_until
                 job.payload = serialize_json_value(document)
-                job.state = "running"
-                job.current_attempt += 1
-                job.updated_at = now
                 return RecipeUpdateClaim(job.id, document.claim_owner)
         return None
 
@@ -855,22 +882,13 @@ class RecipeUpdateBatches:
             document.next_child = (index + 1) % len(document.children)
         with self.sessions.begin() as session:
             job, _ = self._owned(session, claim)
-            states = [child.state for child in document.children]
-            if all(state in _SETTLED for state in states):
-                job.state = (
-                    "succeeded"
-                    if all(state == "succeeded" for state in states)
-                    else ("partial" if "succeeded" in states else "failed")
-                )
+            run_now = _now(self.owner._clock())
+            # The claim ends with this pass; the batch then follows its children.
+            document.claim_owner = document.claim_until = None
+            if all(child.state in _SETTLED for child in document.children):
                 document.next_attempt_at = None
+                self._lifecycle.conclude(job, document, run_now)
             else:
-                job.state = (
-                    "running"
-                    if any(
-                        child.operation_id is not None for child in document.children
-                    )
-                    else "queued"
-                )
                 document.next_attempt_at = min(
                     child.retry_at
                     or (
@@ -879,7 +897,19 @@ class RecipeUpdateBatches:
                     for child in document.children
                     if child.state not in _SETTLED
                 )
-            document.claim_owner = document.claim_until = None
+                self._lifecycle.project(
+                    job,
+                    document,
+                    run_now,
+                    visible=(
+                        "running"
+                        if any(
+                            child.operation_id is not None
+                            for child in document.children
+                        )
+                        else "queued"
+                    ),
+                )
             # Validate the persisted current contract, including JSON-mode fields.
             job.payload = serialize_json_value(
                 read_update_document(serialize_json_value(document))
