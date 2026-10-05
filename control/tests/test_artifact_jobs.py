@@ -542,7 +542,7 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
         service.create(**request)
 
 
-def test_artifact_job_persisted_contract_is_validated_before_projection(
+def test_artifact_job_damaged_contract_is_rebuilt_from_its_recipe_before_projection(
     tmp_path,
 ) -> None:
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
@@ -557,8 +557,12 @@ def test_artifact_job_persisted_contract_is_validated_before_projection(
         assert row is not None
         row.compiled_contract = {"schema_version": 1}
 
-    with pytest.raises(ArtifactJobError, match="compiled artifact contract"):
-        service.get(created.id)
+    # A damaged stored contract is rebuilt from the recipe revision it was
+    # compiled from, and only accepted when it has the digest the job was
+    # created under.
+    rebuilt = service.get(created.id)
+    assert rebuilt.compiled_contract == created.compiled_contract
+    assert rebuilt.contract_sha256 == created.contract_sha256
 
 
 def test_artifact_job_persisted_parameters_are_validated_before_compilation(
@@ -1891,9 +1895,7 @@ def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
 
 
 @pytest.mark.parametrize("evidence", [[], "invalid", {"elapsed_milliseconds": "1"}])
-def test_artifact_cancel_rejects_corrupt_evidence_without_replacing_it(
-    tmp_path, evidence
-):
+def test_artifact_cancel_completes_over_corrupt_evidence(tmp_path, evidence):
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
     )
@@ -1904,15 +1906,11 @@ def test_artifact_cancel_rejects_corrupt_evidence_without_replacing_it(
         row = session.get(ArtifactJob, created.id)
         assert row is not None
         row.result_evidence = evidence
-    with pytest.raises(ArtifactJobError, match="stored artifact result evidence"):
-        service.cancel(
-            created.id, actor="operator", request_id="cancel-corrupt", reason="stop"
-        )
-    with sessions() as session:
-        row = session.get(ArtifactJob, created.id)
-        assert row is not None
-        assert row.result_evidence == evidence
-        assert row.state == created.state
+    # Damaged result evidence is retired as unknown: a cancel still completes.
+    cancelled = service.cancel(
+        created.id, actor="operator", request_id="cancel-corrupt", reason="stop"
+    )
+    assert cancelled.state == "cancelled"
 
 
 def test_artifact_cancel_preserves_declared_engine_evidence_and_meaningful_values(

@@ -46,7 +46,12 @@ from .library_contract import UuidId
 from .lifecycle import CancelRequested, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter
 from .lifecycle.artifact_job import ArtifactJobAdapter
-from .lifecycle.evidence import retire_as_unknown
+from .lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    read_or_rebuild,
+    retire_as_unknown,
+)
 from .models import (
     AgentOperation,
     ArtifactJob,
@@ -54,6 +59,7 @@ from .models import (
     ArtifactJobFile,
     CatalogDocumentRevision,
     ClusterMapping,
+    ClusterMappingNode,
     Job,
     RecipeBuild,
     RecipeInstallation,
@@ -163,7 +169,15 @@ def _result_evidence(value: object) -> dict[str, object] | None:
             ArtifactJobResultEvidence, canonical_message(value), from_json=True
         )
     except (TypeError, ValueError) as error:
-        raise ArtifactJobError("stored artifact result evidence is invalid") from error
+        # Damaged result evidence is no evidence: nothing re-derives it, so it is
+        # retired as unknown and the job is shown without it.
+        retire_as_unknown(
+            "artifact-job.result-evidence",
+            "stored-evidence",
+            BookkeepingReason.PERSISTED_STATE_DAMAGED,
+            f"{type(error).__name__}: {error}",
+        )
+        return None
     return json.loads(canonical_message(evidence))
 
 
@@ -319,6 +333,18 @@ class ArtifactJobView:
 
 def _json_copy(value: object) -> object:
     return json.loads(canonical_message(value))
+
+
+def _record_unservable_run(run_id: str, note: str) -> None:
+    """Record why a run cannot take a job; the run itself is reconciled by the
+    Run/Switch lifecycle, and the submit is refused request-led."""
+
+    retire_as_unknown(
+        "artifact-job.run",
+        run_id,
+        BookkeepingReason.PERSISTED_STATE_DAMAGED,
+        note,
+    )
 
 
 def _recipe_interface(document: Mapping[str, object]) -> str:
@@ -1152,34 +1178,36 @@ class ArtifactJobService:
                 else None
             )
             if installation is None or resolved is None:
+                # The run's installation or recipe revision no longer exists:
+                # a genuine absence, refused request-led with its own code.
                 raise ArtifactJobError("recipe job workload identity is unavailable")
             revision, _recipe = resolved
             node = self._job_node_in_session(session, run)
-            try:
-                stored_run_plan = parse_stored_run_plan(run.plan)
-            except RecipeExecutionContractError as error:
-                raise ArtifactJobError("recipe run plan is invalid") from error
-            planned_node = next(
-                (
-                    item
-                    for item in stored_run_plan.nodes
-                    if item.node_id == node.node_id
-                    and item.rank == node.rank
-                    and item.role == node.role
-                ),
-                None,
-            )
-            if planned_node is None:
-                raise ArtifactJobError("recipe run memory requirement is unavailable")
+            # Rebuild from evidence, not from the stored run plan: the accepted
+            # capacity promise is the run node's own reservation, and the memory
+            # floor is carried by the installed compiled plan.
             try:
                 installation_plan = parse_stored_installation_plan(installation.plan)
             except RecipeExecutionContractError as error:
+                _record_unservable_run(run.id, f"stored installation plan: {error}")
                 raise ArtifactJobError(
                     "installed job execution plan is invalid"
                 ) from error
             if node.node_id not in installation_plan.compiled_execution_plans:
+                _record_unservable_run(run.id, "no compiled plan for the job node")
                 raise ArtifactJobError("installed job execution plan is unavailable")
-            contract = _canonical_contract(artifact_job.compiled_contract)
+            installed_document = installation_plan.compiled_execution_plans[
+                node.node_id
+            ].model_dump(mode="json")
+            placement = installed_document.get("runtime", {}).get("placement", {})
+            floor = placement.get("memory_floor_bytes")
+            if type(floor) is not int:
+                _record_unservable_run(run.id, "installed plan has no memory floor")
+                raise ArtifactJobError("installed job execution plan is invalid")
+            stored_contract = self._stored_contract(session, artifact_job)
+            if isinstance(stored_contract, Residue):
+                raise ArtifactJobError("artifact job contract is unavailable")
+            contract = stored_contract
             try:
                 parameters = _canonical_declared_parameters(
                     contract, artifact_job.parameters
@@ -1206,8 +1234,8 @@ class ArtifactJobService:
                 ),
                 parameters=parameters,
                 timeout_seconds=artifact_job.timeout_seconds,
-                memory_floor_bytes=planned_node.memory_floor_bytes,
-                reserved_memory_bytes=planned_node.required_memory_bytes,
+                memory_floor_bytes=floor,
+                reserved_memory_bytes=node.reserved_memory_bytes,
                 option_choices=mapping_option_choices(
                     mapping.parameters if mapping is not None else {}
                 ),
@@ -1225,7 +1253,7 @@ class ArtifactJobService:
                 "inputs": raw_files,
                 "compiled_execution_plan": invocation,
                 "run_generation": run.run_generation,
-                "output_mappings": _output_mappings(artifact_job.compiled_contract),
+                "output_mappings": _output_mappings(contract),
                 "output_limits": artifact_job.output_limits,
             }
             RecipeJobRunRequest.parse(payload)
@@ -1444,9 +1472,12 @@ class ArtifactJobService:
                 for item in existing
                 if item.name != parsed.name
             ) + (parsed,)
-            _validate_outputs_against_contract(
-                job.compiled_contract, projected, terminal=False
-            )
+            contract = self._stored_contract(session, job)
+            if isinstance(contract, Residue):
+                # The job's contract is unreadable and nothing re-derives it:
+                # its transfers close and the job ends through its own lifecycle.
+                raise ArtifactJobError("artifact job transfer is closed")
+            _validate_outputs_against_contract(contract, projected, terminal=False)
             if parsed.media_type not in limits.allowed_media_types:
                 raise ArtifactJobError("artifact output media type is not allowed")
             if (
@@ -1491,9 +1522,12 @@ class ArtifactJobService:
                 RecipeJobFile.parse(self._file_mapping(item), maximum_bytes=1024**3)
                 for item in existing
             ) + (parsed,)
-            _validate_outputs_against_contract(
-                job.compiled_contract, projected, terminal=False
-            )
+            contract = self._stored_contract(session, job)
+            if isinstance(contract, Residue):
+                # The job's contract is unreadable and nothing re-derives it:
+                # its transfers close and the job ends through its own lifecycle.
+                raise ArtifactJobError("artifact job transfer is closed")
+            _validate_outputs_against_contract(contract, projected, terminal=False)
             if len(existing) + 1 > limits.max_files:
                 raise ArtifactJobError("artifact output file count exceeds the limit")
             if (
@@ -1568,7 +1602,15 @@ class ArtifactJobService:
             .with_for_update(of=ArtifactJob)
         )
         if artifact_job is None:
-            raise ArtifactJobError("artifact job authority is unavailable")
+            # A result for an order whose artifact job row is gone has nothing to
+            # apply: recorded as unknown, and the order's own lifecycle ends it.
+            retire_as_unknown(
+                "artifact-job.result",
+                operation.parent_job_id,
+                BookkeepingReason.ROW_INCOMPLETE,
+                "no artifact job owns this order",
+            )
+            return
         state = getattr(message, "state", None)
         raw_result = getattr(message, "result", None)
         now = self._clock()
@@ -1653,8 +1695,11 @@ class ArtifactJobService:
                     "cancelled artifact result cannot retain uploaded outputs"
                 )
             if succeeded:
+                result_contract = self._stored_contract(session, artifact_job)
+                if isinstance(result_contract, Residue):
+                    raise AgentProtocolError("artifact job contract is unreadable")
                 _validate_outputs_against_contract(
-                    artifact_job.compiled_contract, result.outputs, terminal=True
+                    result_contract, result.outputs, terminal=True
                 )
             if not (succeeded or failed or cancelled):
                 raise AgentProtocolError("artifact result state and exit code disagree")
@@ -1736,22 +1781,35 @@ class ArtifactJobService:
                 select(RunNode).where(RunNode.run_id == run.id).order_by(RunNode.rank)
             )
         )
-        try:
-            plan_nodes = [
-                node.model_dump(mode="json")
+
+        def planned_endpoints() -> set[str]:
+            return {
+                node.node_id
                 for node in parse_stored_run_plan(run.plan).nodes
-            ]
-        except RecipeExecutionContractError as error:
-            raise ArtifactJobError("recipe run plan is invalid") from error
-        endpoint_ids = (
-            {
-                item.get("node_id")
-                for item in plan_nodes
-                if isinstance(item, Mapping) and item.get("endpoint_owner") is True
+                if node.endpoint_owner
             }
-            if isinstance(plan_nodes, list)
-            else set()
+
+        def mapped_endpoints() -> set[str] | None:
+            # Rebuild from evidence: the cluster mapping names each node's role
+            # in the run, independent of the stored run plan.
+            if run.mapping_id is None:
+                return None
+            return set(
+                session.scalars(
+                    select(ClusterMappingNode.node_id).where(
+                        ClusterMappingNode.mapping_id == run.mapping_id,
+                        ClusterMappingNode.endpoint_owner.is_(True),
+                    )
+                )
+            )
+
+        loaded = read_or_rebuild(
+            kind="artifact-job.run-plan",
+            subject=run.id,
+            read=planned_endpoints,
+            rebuild=mapped_endpoints,
         )
+        endpoint_ids = set() if isinstance(loaded, Residue) else loaded
         candidates = [node for node in nodes if node.node_id in endpoint_ids]
         if not candidates and len(nodes) == 1:
             candidates = list(nodes)
@@ -1832,6 +1890,41 @@ class ArtifactJobService:
             value = {"slot": item.slot, **value}
         return value
 
+    def _stored_contract(
+        self, session: Session, job: ArtifactJob
+    ) -> CompiledArtifactContract | Residue:
+        """The job's compiled contract: stored, else recompiled from its recipe.
+
+        The recompiled contract is evidence only when it has the digest the job
+        was created under; otherwise the damaged contract is retired as unknown.
+        """
+
+        def rebuild() -> CompiledArtifactContract | None:
+            run = session.get(RecipeRun, job.run_id)
+            installation = (
+                session.get(RecipeInstallation, run.installation_id)
+                if run is not None
+                else None
+            )
+            resolved = (
+                _active_recipe_revision(session, installation.recipe_revision_id)
+                if installation is not None
+                else None
+            )
+            if resolved is None:
+                return None
+            compiled = _compile_contract(
+                resolved[1].model_dump(mode="json"), job.interface
+            )
+            return compiled if compiled.sha256() == job.contract_sha256 else None
+
+        return read_or_rebuild(
+            kind="artifact-job.contract",
+            subject=job.id,
+            read=lambda: _canonical_contract(job.compiled_contract),
+            rebuild=rebuild,
+        )
+
     def _view_in_session(self, session: Session, job: ArtifactJob) -> ArtifactJobView:
         submission = _artifact_submission_in_session(session, job)
         adapter = ArtifactJobAdapter(session, clock=self._clock)
@@ -1844,7 +1937,11 @@ class ArtifactJobService:
             self._file_mapping(item)
             for item in self._files_in_session(session, job.id, "output")
         )
-        contract = _canonical_contract(job.compiled_contract)
+        contract = self._stored_contract(session, job)
+        if isinstance(contract, Residue):
+            # The stored contract is damaged and nothing re-derives it: the job
+            # is unreadable, which readers see as not found.
+            raise KeyError(job.id)
         manifest = _input_manifest(job)
         view = ArtifactJobView(
             id=job.id,
