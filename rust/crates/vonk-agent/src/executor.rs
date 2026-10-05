@@ -651,6 +651,9 @@ impl<R> RecipeExecutor<'_, R> {
         })
     }
 
+    // The error is the finished result the caller returns as it is; it is moved
+    // once, never copied, so its size does not matter here.
+    #[allow(clippy::result_large_err)]
     async fn stop_start_run(
         &self,
         claim: &AgentClaim,

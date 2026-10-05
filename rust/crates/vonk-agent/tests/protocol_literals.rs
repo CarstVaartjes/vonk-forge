@@ -68,7 +68,7 @@ fn production_code(source: &str) -> String {
         .unwrap_or(source);
     production
         .lines()
-        .map(|line| strip_comment(line))
+        .map(strip_comment)
         .collect::<Vec<_>>()
         .join("\n")
 }
