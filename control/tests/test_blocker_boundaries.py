@@ -22,15 +22,21 @@ from .blocker_boundaries import (
     CONTROL_STATE_ASSIGNMENT,
     RUST_RESULT,
     RaiseSite,
+    UncategorizedRaise,
     WaitSite,
     audited_paths,
+    categorized_classes,
     dump_document,
+    evaluate_guard_gate,
     evaluate_raise_gate,
     evaluate_wait_gate,
     exception_classes,
     failure_code,
+    guard_paths,
     load_allowlist,
     parsed_modules,
+    scan_guard_raises,
+    scan_guard_source,
     scan_python_waits,
     scan_raise_source,
     scan_raises,
@@ -337,6 +343,107 @@ def test_the_repository_holds_at_its_reviewed_blockers() -> None:
     raises = scan_raises()
     assert evaluate_wait_gate(waits, document) == []
     assert evaluate_raise_gate(raises, document) == []
+    assert evaluate_guard_gate(scan_guard_raises(guard_paths(document)), document) == []
+
+
+GUARD_SOURCE = dedent(
+    """
+    class Refused(SecurityRefusalError, RuntimeError): ...
+    class Narrower(Refused): ...
+    class Bad(InvalidRequestError): ...
+    class Wait(UnknownOutcomeError): ...
+    class Plain(RuntimeError): ...
+
+    def go(x):
+        if x == 1:
+            raise Refused("categorized")
+        if x == 2:
+            raise Narrower("a subclass of a categorized type")
+        if x == 3:
+            raise Bad("categorized")
+        if x == 4:
+            raise Wait("categorized")
+        if x == 5:
+            raise RuntimeError("bare")
+        if x == 6:
+            raise ValueError("bare")
+        if x == 7:
+            raise Plain("a local class outside the categories")
+        if x == 8:
+            raise NotImplementedError
+        try:
+            go(1)
+        except Refused as error:
+            raise error
+        except Exception:
+            raise
+        raise _factory("a raise through a factory proves nothing")
+    """
+)
+
+
+def test_the_guard_flags_a_raise_outside_the_three_categories() -> None:
+    categorized = categorized_classes([ast.parse(GUARD_SOURCE)])
+    assert {"Refused", "Narrower", "Bad", "Wait"} <= categorized
+    assert "Plain" not in categorized
+    sites = scan_guard_source(GUARD_SOURCE, path=PATH, categorized=categorized)
+    assert [site.exception_class for site in sites] == [
+        "RuntimeError",
+        "ValueError",
+        "Plain",
+        "_factory",
+    ]
+    assert {site.function for site in sites} == {"go"}
+
+
+def test_the_guard_lets_a_categorized_raise_in_a_lifecycle_module_through() -> None:
+    categorized = categorized_classes([ast.parse(GUARD_SOURCE)])
+    clean = dedent(
+        """
+        def go():
+            raise Refused("security edge")
+        """
+    )
+    assert scan_guard_source(clean, path=PATH, categorized=categorized) == []
+
+
+def _uncategorized(path: str = PATH, count: int = 1) -> list[UncategorizedRaise]:
+    return [
+        UncategorizedRaise(path, "RuntimeError", "go", line) for line in range(count)
+    ]
+
+
+def _guard_document(grandfathered: dict[str, int], ceiling: int) -> dict[str, object]:
+    return {"categorized_raises": {"grandfathered": grandfathered, "ceiling": ceiling}}
+
+
+def test_the_guard_gate_fails_on_new_rising_stale_and_a_rising_ceiling() -> None:
+    document = _guard_document({PATH: 1}, 1)
+    assert evaluate_guard_gate(_uncategorized(), document) == []
+
+    new = evaluate_guard_gate(_uncategorized(AUDITED_PATH), document)
+    assert any("outside the three error categories" in message for message in new)
+
+    more = evaluate_guard_gate(_uncategorized(count=2), document)
+    assert any("rose from 1 to 2" in message for message in more)
+
+    fewer = evaluate_guard_gate([], document)
+    assert any("none left" in message for message in fewer)
+    fell = evaluate_guard_gate(_uncategorized(), _guard_document({PATH: 2}, 2))
+    assert any("fell from 2 to 1" in message for message in fell)
+
+    above = evaluate_guard_gate(_uncategorized(), _guard_document({PATH: 1}, 0))
+    assert any("above the ceiling" in message for message in above)
+    below = evaluate_guard_gate(_uncategorized(), _guard_document({PATH: 1}, 5))
+    assert any("lower categorized_raises.ceiling" in message for message in below)
+
+
+def test_the_lifecycle_core_is_scanned_and_its_debt_is_small() -> None:
+    document = load_allowlist()
+    assert any(entry.endswith("/lifecycle/") for entry in guard_paths(document))
+    recorded = document["categorized_raises"]["grandfathered"]  # type: ignore[index]
+    lifecycle = sum(count for path, count in recorded.items() if "/lifecycle/" in path)
+    assert lifecycle <= 4, "the lifecycle core only falls from here"
 
 
 def test_the_allowlist_keeps_a_few_real_waits() -> None:
@@ -377,8 +484,12 @@ def test_write_counts_lowers_and_never_adds() -> None:
     document = load_allowlist()
     waits = scan_waits()
     raises = scan_raises()
-    assert write_counts(document, waits, raises) == document
-    fewer = write_counts(document, waits[:-3], raises[:-5])
+    guard = scan_guard_raises(guard_paths(document))
+    assert write_counts(document, waits, raises, guard) == document
+    fewer = write_counts(document, waits[:-3], raises[:-5], guard[:-7])
+    assert fewer["categorized_raises"]["ceiling"] == (  # type: ignore[index]
+        document["categorized_raises"]["ceiling"] - 7  # type: ignore[index, operator]
+    )
     assert fewer["max_debt"] <= document["max_debt"]  # type: ignore[operator]
     assert fewer["debt_ceiling"]["total"] <= document["debt_ceiling"]["total"]  # type: ignore[index, operator]
     assert evaluate_wait_gate(waits[:-3], fewer) == []
@@ -388,3 +499,30 @@ def test_write_counts_lowers_and_never_adds() -> None:
 def test_the_committed_file_is_what_the_writer_produces() -> None:
     text = ALLOWLIST_PATH.read_text(encoding="utf-8")
     assert dump_document(json.loads(text)) == text
+
+
+def test_existing_error_types_that_joined_a_category_keep_their_handlers() -> None:
+    from vonk_agent_protocol import (
+        InvalidRequestError,
+        SecurityRefusalError,
+        UnknownOutcomeError,
+    )
+    from vonk_control.admission_locking import AdmissionLockBusy
+    from vonk_control.auth import AuthError, CursorError
+    from vonk_control.jobs import StaleAttempt
+    from vonk_control.passwords import PasswordPolicyError
+    from vonk_control.request_fault import RequestFault
+
+    categorized = categorized_classes(
+        list(parsed_modules(CONTROL_SOURCE_ROOT).values())
+    )
+    for error, category, builtin in (
+        (AuthError("token is invalid"), SecurityRefusalError, ValueError),
+        (StaleAttempt("fence is stale"), SecurityRefusalError, RuntimeError),
+        (CursorError("cursor is invalid"), InvalidRequestError, ValueError),
+        (RequestFault("limit is invalid"), InvalidRequestError, ValueError),
+        (PasswordPolicyError("password is invalid"), InvalidRequestError, ValueError),
+        (AdmissionLockBusy("busy", holder="x"), UnknownOutcomeError, RuntimeError),
+    ):
+        assert isinstance(error, category) and isinstance(error, builtin)
+        assert type(error).__name__ in categorized

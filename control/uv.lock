@@ -1416,7 +1416,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { filename = "vonk_agent_protocol-4.1.0-py3-none-any.whl", hash = "sha256:bcd8ad426be9a6e951d358360bb5132100a03bc2fb76ddb7cfbb8aba01671269" },
+    { filename = "vonk_agent_protocol-4.1.0-py3-none-any.whl", hash = "sha256:9b833eb479dd20308284f01cfc020f45e588db3863c7a07a365841e53c49d353" },
 ]
 
 [package.metadata]

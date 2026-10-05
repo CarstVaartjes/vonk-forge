@@ -72,8 +72,11 @@ from .lifecycle_vocabulary import (
     error_category_of,
 )
 from .outcome import (
+    CATEGORIZED_ERROR_BASES,
+    CategorizedError,
     ErrorCatalog,
     InvalidRequest,
+    InvalidRequestError,
     OperationError,
     OperationOutcome,
     OutcomeCatalog,
@@ -83,7 +86,9 @@ from .outcome import (
     OutcomeResult,
     OutcomeUnknown,
     SecurityRefusal,
+    SecurityRefusalError,
     UnknownError,
+    UnknownOutcomeError,
     outcome_body,
     outcome_state,
 )
@@ -166,6 +171,7 @@ HostRuntimeRequest.model_rebuild(
 )
 
 __all__ = [
+    "CATEGORIZED_ERROR_BASES",
     "ERROR_CODE_PATTERN",
     "LEGACY_WAIT_STATE",
     "MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES",
@@ -190,6 +196,7 @@ __all__ = [
     "ArtifactDistributionPayload",
     "ArtifactDistributionResult",
     "BlockerCategory",
+    "CategorizedError",
     "CompiledExecutionPlan",
     "CompiledExecutionPlanError",
     "CompiledJobInput",
@@ -211,6 +218,7 @@ __all__ = [
     "HostRuntimeRequest",
     "InstallVonkDebOperation",
     "InvalidRequest",
+    "InvalidRequestError",
     "InvalidRequestReason",
     "InventoryRequest",
     "LifecycleEffect",
@@ -265,6 +273,7 @@ __all__ = [
     "RecipeUninstallResult",
     "RestartUnit",
     "SecurityRefusal",
+    "SecurityRefusalError",
     "SecurityRefusalReason",
     "SignedHostHelperGrant",
     "StateWriteKind",
@@ -273,6 +282,7 @@ __all__ = [
     "TelemetryRequest",
     "TelemetrySample",
     "UnknownError",
+    "UnknownOutcomeError",
     "WaitReason",
     "WaitVerdict",
     "WireModel",

@@ -359,6 +359,15 @@ module and category for the sites the allowlist does not list, `--summary` count
 every raise in `control/src` by category and names the ones that are not a family
 (builtin `ValueError`/`KeyError`/`TypeError`, `HTTPException`, factory functions).
 Read the proposal and move any site it got wrong before committing it.
+The same scanner guards the error categories: a `raise` in a lifecycle or
+operation path (`scope.guard_paths`: `control/src/vonk_control/lifecycle/` and the
+modules that own an operation) must use a class derived from
+`SecurityRefusalError`, `InvalidRequestError` or `UnknownOutcomeError`
+(`vonk_agent_protocol`), not a bare `RuntimeError`, `ValueError` or a family
+`Conflict`. Raises that predate the rule are grandfathered per module in
+`categorized_raises.grandfathered`; a module's count and
+`categorized_raises.ceiling` only fall, and an unlisted module may not raise an
+uncategorized error. Converting a raise lowers the count (`--write-baseline`).
 
 A PR that touches lifecycle, raise or allowlist files reports the movement.
 `scripts/lifecycle-counts` prints the four numbers (writers, operator waits,

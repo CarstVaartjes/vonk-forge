@@ -26,7 +26,7 @@ adapter may raise or report; each carries a reason from its own closed set.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
@@ -240,6 +240,99 @@ OperationError = Annotated[
 ]
 
 
+# ------------------------------------------------------------- raisable categories
+
+
+class CategorizedError(Exception):
+    """Base of the three error categories a lifecycle adapter may raise.
+
+    The wire models above say what is *reported*; these exceptions are what is
+    *raised* inside the Controller, so a raise names its category by its type:
+    :class:`SecurityRefusalError`, :class:`InvalidRequestError` or
+    :class:`UnknownOutcomeError`.  An existing error type joins a category by
+    inheriting the base *beside* its current one
+    (``class AuthError(SecurityRefusalError, ValueError)``), which changes
+    no ``except`` clause.  The constructors take the positional arguments of
+    :class:`Exception` unchanged and an optional keyword-only closed reason, so a
+    subclass keeps its own signature.
+    """
+
+    category: ClassVar[ErrorCategory]
+
+
+class SecurityRefusalError(CategorizedError):
+    """A refusal at a security boundary: fails closed, never retried into success."""
+
+    category = ErrorCategory.SECURITY_REFUSAL
+    typed_reason: SecurityRefusalReason | None
+
+    def __init__(
+        self, *args: object, reason: SecurityRefusalReason | None = None
+    ) -> None:
+        super().__init__(*args)
+        self.typed_reason = reason
+
+    def typed_error(self) -> SecurityRefusal | None:
+        """The wire form, or ``None`` while the error names no closed reason."""
+
+        if self.typed_reason is None:
+            return None
+        return SecurityRefusal(
+            category=ErrorCategory.SECURITY_REFUSAL, reason=self.typed_reason
+        )
+
+
+class InvalidRequestError(CategorizedError):
+    """A malformed or out-of-contract request: rejected at submit time, before effects."""
+
+    category = ErrorCategory.INVALID_REQUEST
+    typed_reason: InvalidRequestReason | None
+
+    def __init__(
+        self,
+        *args: object,
+        reason: InvalidRequestReason | None = None,
+        field: str | None = None,
+    ) -> None:
+        super().__init__(*args)
+        self.typed_reason = reason
+        self.typed_field = field
+
+    def typed_error(self) -> InvalidRequest | None:
+        if self.typed_reason is None:
+            return None
+        return InvalidRequest(
+            category=ErrorCategory.INVALID_REQUEST,
+            reason=self.typed_reason,
+            field=self.typed_field,
+        )
+
+
+class UnknownOutcomeError(CategorizedError):
+    """Anything else (bookkeeping, a busy owner, unavailable evidence): observed
+    and reconciled by the lifecycle core, never parked and never a refusal."""
+
+    category = ErrorCategory.UNKNOWN
+    typed_reason: WaitReason | None
+
+    def __init__(self, *args: object, reason: WaitReason | None = None) -> None:
+        super().__init__(*args)
+        self.typed_reason = reason
+
+    def typed_error(self) -> UnknownError | None:
+        if self.typed_reason is None:
+            return None
+        return UnknownError(category=ErrorCategory.UNKNOWN, reason=self.typed_reason)
+
+
+#: The bases a raise in a lifecycle or operation path must derive from.
+CATEGORIZED_ERROR_BASES: tuple[type[CategorizedError], ...] = (
+    SecurityRefusalError,
+    InvalidRequestError,
+    UnknownOutcomeError,
+)
+
+
 class OutcomeCatalog(WireModel):
     """Carrier that publishes the outcome union into the wire schema.
 
@@ -262,13 +355,16 @@ class ErrorCatalog(WireModel):
 
 __all__ = [
     "CANCELLED_STATE",
+    "CATEGORIZED_ERROR_BASES",
     "DONE_STATE",
     "FAILED_STATE",
     "OUTCOME_ARMS",
     "OUTCOME_KINDS",
     "UNKNOWN_STATE",
+    "CategorizedError",
     "ErrorCatalog",
     "InvalidRequest",
+    "InvalidRequestError",
     "OperationError",
     "OperationOutcome",
     "OutcomeCatalog",
@@ -278,7 +374,9 @@ __all__ = [
     "OutcomeResult",
     "OutcomeUnknown",
     "SecurityRefusal",
+    "SecurityRefusalError",
     "UnknownError",
+    "UnknownOutcomeError",
     "outcome_body",
     "outcome_state",
 ]

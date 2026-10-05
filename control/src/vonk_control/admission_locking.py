@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import Select, text
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import UnknownOutcomeError
 
 from .settings import DATABASE_WAIT_BUDGETS
 
@@ -30,7 +31,7 @@ _ROW_LOCK_ORDER = (
 _ROW_LOCK_RANK = {table: rank for rank, table in enumerate(_ROW_LOCK_ORDER)}
 
 
-class AdmissionLockBusy(RuntimeError):
+class AdmissionLockBusy(UnknownOutcomeError, RuntimeError):
     """An admission lock could not be acquired without waiting.
 
     ``holder`` names the kind of work that holds the lock when PostgreSQL could
