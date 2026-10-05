@@ -95,6 +95,13 @@ from .fleet_profile_contract import (
     FleetProfileView,
     profile_switch_child_request_key,
 )
+from .lifecycle.fleet_profile import (
+    FleetProfileAdapter,
+    cancellation_state,
+    doc_state,
+)
+from .lifecycle.types import Effect as _LifecycleEffect
+from .lifecycle.types import State as _LifecycleState
 from .logging import redact_text
 from .models import (
     ACTIVE_RUN_STATES,
@@ -150,7 +157,6 @@ from .recipe_runtime_specs import (
     resolve_recipe_entities,
 )
 from .recipe_update_notice import RecipeUpdateNotice, recipe_update_notice
-from .recovery_policy import RecoveryPolicy
 from .revision_images import revision_archives
 from .run_switch_contract import (
     RunSwitchApplyRequest,
@@ -190,12 +196,22 @@ _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _ACTIVE_INSTALL_STATES = frozenset(
     {"planned", "installing", "installed", "partial", "failed"}
 )
+# A child that waits for an operator (a legacy Run/Switch state, healed by its own
+# tick) is still in progress: the application mirrors it as running and observes
+# it again, never as a wait of its own.
 _CHILD_PENDING_STATES = frozenset(
-    {"queued", "pending", "leased", "running", "starting", "stopping", "installing"}
+    {
+        "queued",
+        "pending",
+        "leased",
+        "running",
+        "starting",
+        "stopping",
+        "installing",
+        "waiting-for-operator",
+    }
 )
-_CHILD_FAILED_STATES = frozenset(
-    {"failed", "expired", "cancelled", "waiting-for-operator"}
-)
+_CHILD_FAILED_STATES = frozenset({"failed", "expired", "cancelled"})
 _PROFILE_ACTIVITY_ACTIVE_STATES = ("queued", "running", "waiting-for-operator")
 # Decoded and database-sourced closed values are read back through the
 # contract's own alias, so a malformed state fails instead of reaching a typed
@@ -213,13 +229,8 @@ _OBSERVED_ASSIGNMENT_LABELS: Mapping[FleetProfileAssignmentState, str] = {
 }
 _PROFILE_PHASE_ADAPTER = TypeAdapter(FleetProfileChildPhase)
 _INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
-_MAX_CACHE_RECOVERY_DELAY_SECONDS = 60
-_MAX_ADMISSION_RETRY_DELAY_SECONDS = 60
 # Integrity and storage-access refusals of a child are not replayed blindly by
 # profile recovery; receipts that do not validate would repeat child effects.
-#: Backoff for re-issuing Stop to older workload effects that have not yet
-#: produced their cancellation receipt.
-_STOP_REISSUE_POLICY = RecoveryPolicy(max_delay_seconds=300)
 _PROFILE_RECOVERY_REFUSED_CODES = frozenset(
     {
         "run-switch.receipt_invalid",
@@ -729,12 +740,6 @@ def _require_recovery_preparation(
         )
 
 
-def _cache_recovery_delay(attempt: int) -> timedelta:
-    # Bound exponent work as well as the retry rate for long-lived intent.
-    exponent = min(attempt - 1, _MAX_CACHE_RECOVERY_DELAY_SECONDS.bit_length())
-    return timedelta(seconds=min(_MAX_CACHE_RECOVERY_DELAY_SECONDS, 2**exponent))
-
-
 def _preview_blocker_codes(preview: FleetProfilePreview) -> list[str]:
     return [reason.code for reason in preview.reasons] + [
         blocker.code
@@ -850,13 +855,6 @@ def _error_summary(error: BaseException) -> str:
     return f"{name}: {text}" if text else name
 
 
-def _admission_retry_delay(attempt: int) -> timedelta:
-    """Bound parked admission retries while preserving the latest intent."""
-
-    exponent = min(attempt - 1, _MAX_ADMISSION_RETRY_DELAY_SECONDS.bit_length())
-    return timedelta(seconds=min(_MAX_ADMISSION_RETRY_DELAY_SECONDS, 2**exponent))
-
-
 def _require_recovery_preparations(
     accepted: FleetProfilePreview, current: FleetProfilePreview
 ) -> None:
@@ -899,6 +897,12 @@ def _operation_state(
         raise FleetProfileConflict(
             "persisted profile child operation state is invalid"
         ) from error
+
+
+def _stored_state(state: _LifecycleState | None) -> str:
+    """The stored label of a profile's aggregate state (``succeeded`` when empty)."""
+
+    return "succeeded" if state is None else state.value
 
 
 def _string_items(value: object, detail: str) -> list[str]:
@@ -1434,6 +1438,24 @@ class RunSwitchFleetProfileAdapter:
             current_item.get("kind") if isinstance(current_item, Mapping) else None
         )
         expected_partial_failure = False
+        if isinstance(active, str) and not self._child_exists(active):
+            # Bookkeeping, not a verdict: the child's record is gone (pruned, or
+            # lost with a database restore).  Its identity is deterministic from
+            # the application and the step, so the step is entered again and the
+            # Run/Switch owner reconciles whatever that child already did, instead
+            # of the load failing for it.
+            _LOGGER.warning(
+                "profile application %s: its Run/Switch child %s is gone; "
+                "issuing the step again",
+                application_id,
+                active,
+            )
+            # (Nothing is flushed yet: the step is issued by its owner in its own
+            # transaction below, and this write is committed with the new child.)
+            state["active_operation_id"] = None
+            state["active_kind"] = None
+            self._write_state(session, application, state)
+            active = None
         if isinstance(active, str):
             try:
                 child = self._run_switch.get(active)
@@ -1442,7 +1464,10 @@ class RunSwitchFleetProfileAdapter:
             # ``waiting`` is an automatically observed Run/Switch state (for
             # example background runtime-image preparation or an overdue start
             # observation); the child resumes on its own, so it is in progress.
-            if child.state in {"queued", "running", "waiting"}:
+            # So is a legacy ``waiting-for-operator`` child (no Run/Switch action
+            # exists; its own tick heals it): the profile mirrors it as running and
+            # observes it again, never as a wait of its own.
+            if child.state in {"queued", "running", "waiting", "waiting-for-operator"}:
                 view = self._view_from_child(application_id, state, child)
                 new_progress = (
                     view.progress.model_dump(mode="json")
@@ -1453,22 +1478,10 @@ class RunSwitchFleetProfileAdapter:
                     state.get("state") != view.state
                     or state.get("child_progress") != new_progress
                 ):
-                    state["state"] = view.state
+                    doc_state(state, view.state)
                     state["child_progress"] = new_progress
                     self._write_state(session, application, state)
                     session.flush()
-                return view
-            if child.state == "waiting-for-operator":
-                view = self._view_from_child(application_id, state, child)
-                state["state"] = "waiting-for-operator"
-                state["status_reason"] = child.status_reason
-                state["child_progress"] = (
-                    view.progress.model_dump(mode="json")
-                    if view.progress is not None
-                    else None
-                )
-                self._write_state(session, application, state)
-                session.flush()
                 return view
             if child.state in {"failed", "cancelled"}:
                 if cancelling:
@@ -1561,16 +1574,13 @@ class RunSwitchFleetProfileAdapter:
                 self._write_state(session, application, state)
                 session.flush()
                 position = state["position"]
-            if child.state != "succeeded" and not expected_partial_failure:
-                if cancelling:
-                    state["state"] = "waiting-for-operator"
-                    state["status_reason"] = (
-                        f"Cancellation cannot reconcile Run/Switch child state "
-                        f"{child.state}"
-                    )[:512]
-                    self._write_state(session, application, state)
-                    session.flush()
-                    return self._view_from_state(application, state)
+            if (
+                child.state != "succeeded"
+                and not expected_partial_failure
+                and not cancelling
+            ):
+                # (A cancel never parks here: a child in a state it cannot read is
+                # recorded as ended below and the cancel goes on, so it completes.)
                 return self._failed_in_session(
                     session,
                     application,
@@ -1588,7 +1598,11 @@ class RunSwitchFleetProfileAdapter:
                     {
                         "operation_id": child.operation_id,
                         "kind": active_kind,
-                        "state": child.state,
+                        # A cancelled load records a child it cannot read as ended
+                        # by the cancel; the receipt vocabulary is closed.
+                        "state": child.state
+                        if child.state in {"succeeded", "failed", "cancelled"}
+                        else "cancelled",
                         "result": (
                             receipt.model_dump(mode="json")
                             if receipt is not None
@@ -1634,8 +1648,18 @@ class RunSwitchFleetProfileAdapter:
                 None,
             )
             failures = sequence(state.get("assignment_failures")) or ()
-            state["state"] = (
-                "failed" if incomplete_model is not None or failures else "succeeded"
+            # The load's state is the aggregate of its children: a recorded failure
+            # (or a model the reviewed plan could not complete) is a failed child;
+            # otherwise every child ended well.
+            doc_state(
+                state,
+                "failed"
+                if incomplete_model is not None or failures
+                else _stored_state(
+                    FleetProfileAdapter.recorded_aggregate(
+                        sequence(state.get("children")) or ()
+                    )
+                ),
             )
             first_failure = next(
                 (
@@ -1711,6 +1735,13 @@ class RunSwitchFleetProfileAdapter:
         session.flush()
         return self._view_from_child(application_id, state, operation)
 
+    def _child_exists(self, operation_id: str) -> bool:
+        try:
+            self._run_switch.get(operation_id)
+        except KeyError:
+            return False
+        return True
+
     def _observe_superseded_agent_effects(
         self,
         session: Session,
@@ -1732,6 +1763,10 @@ class RunSwitchFleetProfileAdapter:
         if cancellation is not None:
             ordinal = cancellation.workload_intent_ordinal
         if ordinal is None:
+            if cancellation is not None:
+                # A cancel of a load that never recorded a workload intent has no
+                # fenced older effects to wait for: its child is what it stops.
+                return None
             raise FleetProfileConflict("Profile switch workload intent is unbound")
         scope_node_ids = _string_items(
             state.get("scope_node_ids", []),
@@ -1759,25 +1794,23 @@ class RunSwitchFleetProfileAdapter:
         # an effect past its observation deadline is not re-stopped every tick.
         raw_attempt = state.get("stop_reissue_attempt")
         attempt = (raw_attempt if type(raw_attempt) is int else 0) + 1
-        backoff = _STOP_REISSUE_POLICY.next_attempt(
-            application.id, attempt, now, ongoing_intent=True
-        )
-        assert backoff is not None
-        due = max(due, backoff)
+        due = max(due, FleetProfileAdapter.next_retry(application.id, attempt, now))
         operation_ids = sorted(effect.operation_id for effect in effects)
         reason = (
             "Reissuing Stop and observing older issued workload cancellation: "
             + ", ".join(operation_ids)
         )
         updated = {
-            "state": "running",
             "status_reason": reason[:512],
             "observation_due_at": due.isoformat(),
             "observation_deadline_at": deadline.isoformat(),
             "pending_operation_ids": operation_ids,
             "stop_reissue_attempt": min(attempt, 32),
         }
-        if any(state.get(key) != value for key, value in updated.items()):
+        if state.get("state") != "running" or any(
+            state.get(key) != value for key, value in updated.items()
+        ):
+            doc_state(state, "running")
             state.update(updated)
             self._write_state(session, application, state)
             session.flush()
@@ -1789,7 +1822,7 @@ class RunSwitchFleetProfileAdapter:
         application: FleetProfileApplication,
         state: dict[str, object],
     ) -> FleetProfileChildOperation:
-        state["state"] = "cancelled"
+        doc_state(state, "cancelled")
         state["status_reason"] = "Profile effects were reconciled after cancellation"
         state["result"] = {
             "children": list(sequence(state.get("children")) or ()),
@@ -1800,7 +1833,7 @@ class RunSwitchFleetProfileAdapter:
         if cancellation is not None:
             progress = _persisted_profile_progress(application)
             progress_data = progress.model_dump(mode="json")
-            progress_data["cancellation"]["state"] = "cancelled"
+            cancellation_state(progress_data, "cancelled")
             application.progress = read_stored_model(
                 FleetProfileApplicationProgress,
                 canonical_message(progress_data),
@@ -2240,7 +2273,7 @@ class RunSwitchFleetProfileAdapter:
         state: dict[str, object],
         reason: str,
     ) -> FleetProfileChildOperation:
-        state["state"] = "failed"
+        doc_state(state, "failed")
         state["status_reason"] = reason[:512]
         self._write_state(session, application, state)
         session.flush()
@@ -2311,7 +2344,9 @@ class RunSwitchFleetProfileAdapter:
             total_bytes=child.progress.total_bytes,
         )
         child_state = _operation_state(
-            "running" if child.state == "waiting" else child.state,
+            "running"
+            if child.state in {"waiting", "waiting-for-operator"}
+            else child.state,
             default="running",
         )
         result = self._child_receipt(child)
@@ -2938,6 +2973,16 @@ class FleetProfileService:
         self._preparation_starter: PreparationStarter | None = None
         self._storage_relief: StorageReliefProvider | None = None
         self._preparation_canceller: PreparationCanceller | None = None
+        # The lifecycle adapter is the only writer of an application's state; its
+        # hooks are this service's own claim release, child stop and observation.
+        self._lifecycle = FleetProfileAdapter(
+            sessions=sessions,
+            clock=clock,
+            stopper=self._stop_children,
+            observer=self._observe_children,
+            after_state=self._release_claims,
+            finish=self._finish_cancel_records,
+        )
         # Round-robin position of the bounded automatic-recovery scan, so rows
         # that stay ineligible cannot starve later due rows.
         self._recovery_cursor: str | None = None
@@ -3056,14 +3101,12 @@ class FleetProfileService:
             return False
         return True
 
-    def _set_application_state(
-        self,
-        session: Session,
-        application: FleetProfileApplication,
-        state: FleetProfileOperationState,
+    def _release_claims(
+        self, session: Session, application: FleetProfileApplication
     ) -> None:
-        """Change parent state and release only unassigned claims atomically."""
-        application.state = state
+        """After every change of an application's state: release only the claims no
+        assignment owns, in the same transaction."""
+
         release_unassigned_profile_claims(
             session, application, now=_aware(self._clock())
         )
@@ -4753,8 +4796,8 @@ class FleetProfileService:
                 assignments=list(preview.resolved_assignments),
             )
             created_at = _next_profile_acceptance_time(session, now)
-            next_retry = now + _admission_retry_delay(1)
-            row = FleetProfileApplication(
+            next_retry = FleetProfileAdapter.next_retry(application_id, 1, now)
+            row = FleetProfileAdapter.new_application(
                 id=application_id,
                 request_key=request_key,
                 profile_id=preview.profile_id,
@@ -4818,8 +4861,10 @@ class FleetProfileService:
             if not _owns_pending_admission(row, progress):
                 return self._application_view(row)
             attempt = progress.admission_attempt + 1
-            next_retry = now + (
-                _admission_retry_delay(attempt) if retry_delay is None else retry_delay
+            next_retry = (
+                FleetProfileAdapter.next_retry(application_id, attempt, now)
+                if retry_delay is None
+                else now + retry_delay
             )
             current_blockers = (
                 list(blockers) if blockers is not None else [make_blocker(code, reason)]
@@ -4848,11 +4893,13 @@ class FleetProfileService:
                 )
             # Admission retries itself at ``admission_retry_at``; no operator
             # action is required, so the row stays queued with its next due time.
-            row.state = "queued"
-            row.status_reason = f"{reason} Next attempt: {next_retry.isoformat()}."[
-                :512
-            ]
-            row.updated_at = now
+            self._lifecycle.project(
+                row,
+                now,
+                state=_LifecycleState.QUEUED,
+                reason=f"{reason} Next attempt: {next_retry.isoformat()}.",
+                session=session,
+            )
             session.flush()
             return self._application_view(row)
 
@@ -5006,22 +5053,24 @@ class FleetProfileService:
                             prior_ordinal = prior_progress.workload_intent_ordinal
                             if prior_ordinal is None or prior_ordinal >= ordinal:
                                 continue
-                        self._set_application_state(session, prior, "cancelled")
-                        prior.status_reason = (
+                        self._lifecycle.cancelled(
+                            prior,
                             "Profile order was replaced before admission by a later "
-                            "scoped intent"
+                            "scoped intent",
+                            now,
+                            session=session,
                         )
-                        prior.updated_at = now
                         continue
                     prior_ordinal = prior_progress.workload_intent_ordinal
                     if prior_ordinal is None or prior_ordinal >= ordinal:
                         continue
-                    self._set_application_state(session, prior, "cancelled")
-                    prior.status_reason = (
+                    self._lifecycle.cancelled(
+                        prior,
                         "Profile order was replaced before admission by a later "
-                        "scoped intent"
+                        "scoped intent",
+                        now,
+                        session=session,
                     )
-                    prior.updated_at = now
                 progress_data = progress.model_dump(mode="json")
                 if progress.workload_intent_ordinal is None:
                     progress_data["workload_intent_ordinal"] = ordinal
@@ -5643,11 +5692,9 @@ class FleetProfileService:
                         # Quarantine the invalid order, retaining its evidence.
                         # Its agent effects were independently fenced above;
                         # malformed history cannot roll back the new authority.
-                        self._set_application_state(
-                            session, prior_application, "failed"
+                        self._lifecycle.fail(
+                            prior_application, str(error), now, session=session
                         )
-                        prior_application.status_reason = str(error)
-                        prior_application.updated_at = now
                         continue
                     prior_ordinal = prior_progress.workload_intent_ordinal
                     if prior_progress.admission_pending:
@@ -5656,14 +5703,13 @@ class FleetProfileService:
                         # parked; an older one is superseded by this acceptance.
                         if prior_order > intent_order:
                             continue
-                        self._set_application_state(
-                            session, prior_application, "cancelled"
-                        )
-                        prior_application.status_reason = (
+                        self._lifecycle.cancelled(
+                            prior_application,
                             "Profile order was replaced before admission by a later "
-                            "scoped intent"
+                            "scoped intent",
+                            now,
+                            session=session,
                         )
-                        prior_application.updated_at = now
                         continue
                     if (
                         prior_order > intent_order
@@ -5681,12 +5727,14 @@ class FleetProfileService:
                         or prior_ordinal >= workload_intent_ordinal
                     ):
                         continue
-                    self._set_application_state(session, prior_application, "cancelled")
-                    prior_application.status_reason = (
+                    self._lifecycle.cancelled(
+                        prior_application,
                         "Profile order was replaced by a later scoped intent; "
-                        "issued effects retain their own cancellation receipts"
+                        "issued effects retain their own cancellation receipts",
+                        now,
+                        effect=_LifecycleEffect.UNKNOWN,
+                        session=session,
                     )
-                    prior_application.updated_at = now
             progress = FleetProfileApplicationProgress(
                 operation_kind=operation_kind,
                 attempt=attempt,
@@ -5698,7 +5746,7 @@ class FleetProfileService:
             ).model_dump(mode="json")
             row = existing
             if row is None:
-                row = FleetProfileApplication(
+                row = FleetProfileAdapter.new_application(
                     id=application_id,
                     request_key=request_key,
                     profile_id=preview.profile_id,
@@ -5726,7 +5774,9 @@ class FleetProfileService:
                 row.profile_id = preview.profile_id
                 row.profile_digest = preview.profile_digest
                 row.plan_digest = preview.plan_digest
-                row.state = "succeeded" if not preview.steps else "queued"
+                self._lifecycle.reset(
+                    row, now, steps=bool(preview.steps), session=session
+                )
                 row.plan = preview.model_dump(mode="json")
                 row.current_step = 0
                 row.current_operation_id = None
@@ -5741,10 +5791,15 @@ class FleetProfileService:
             session.flush()
             if retry_of_application_id is not None and existing is None:
                 if retry_parent is not None and automatic_cache_recovery:
-                    retry_parent.state = "failed"
-                    retry_parent.status_reason = (
+                    # An ended parent absorbs the event; the reason is still the
+                    # record of why no attempt is scheduled for it.
+                    superseded_by = (
                         f"Automatically reconciled by profile retry {row.id}"
                     )[:512]
+                    self._lifecycle.fail(
+                        retry_parent, superseded_by, now, session=session
+                    )
+                    retry_parent.status_reason = superseded_by
                     # Superseded by its retry: no attempt is scheduled for it.
                     retry_parent.progress = _progress_with_blockers(
                         _canonical_progress(retry_parent.progress),
@@ -5891,11 +5946,14 @@ class FleetProfileService:
                 return None
             if child.state not in _CHILD_PENDING_STATES:
                 return None
-            self._set_application_state(session, row, "running")
+            self._lifecycle.reopen(
+                row,
+                now,
+                reason="Resumed advancing the live child operation",
+                session=session,
+            )
             # Failing released its unassigned claims; the resumed child needs them.
             restore_released_profile_claims(session, row)
-            row.status_reason = "Resumed advancing the live child operation"
-            row.updated_at = now
             session.flush()
             return self._application_view(row)
 
@@ -6157,7 +6215,7 @@ class FleetProfileService:
         """
 
         now = _aware(self._clock())
-        due = now + _cache_recovery_delay(progress.attempt)
+        due = FleetProfileAdapter.next_retry(row.id, progress.attempt, now)
         blockers = bound_blockers(blockers)
         row.progress = _progress_with_blockers(
             progress,
@@ -6744,24 +6802,15 @@ class FleetProfileService:
                 ):
                     raise FleetProfileConflict("Profile application is not cancellable")
                 ordinal = progress.workload_intent_ordinal
-                if ordinal is None and (
+                # A workload fence precedes every workload effect, so an issued
+                # child without one is evidence this cancel cannot fence: it is not
+                # refused for it (a cancel always completes).  It is driven like any
+                # other: the child is asked to stop and observed, and the cancel ends
+                # within its budget with that child's effect recorded.
+                has_child = (
                     progress.switch_adapter is not None
                     or row.current_operation_id is not None
-                ):
-                    # A workload fence precedes every workload effect, so an
-                    # issued child without one is evidence that cannot be
-                    # reconciled by cancelling: name it instead of guessing.
-                    child = (
-                        progress.switch_adapter.active_operation_id
-                        if progress.switch_adapter is not None
-                        else None
-                    ) or row.current_operation_id
-                    raise FleetProfileConflict(
-                        f"Profile cancellation cannot reconcile operation {child}: "
-                        "it issued workload effects without a recorded workload "
-                        "intent. Let that operation finish (or use its own cancel), "
-                        "then cancel this application again."
-                    )
+                )
                 cancel_ordinal: int | None = None
                 if ordinal is not None:
                     cancel_ordinal = ordinal + 1
@@ -6813,27 +6862,34 @@ class FleetProfileService:
                     strict=True,
                     from_json=True,
                 ).model_dump(mode="json")
-                if ordinal is None:
-                    # Nothing was fenced or issued: the application only waits
-                    # (for preparation, build capacity or its turn), so it
-                    # cancels at once and leaves the running workload alone.
-                    self._finish_profile_cancellation(
-                        session,
+                # Nothing fenced or issued: the application only waits (for
+                # preparation, build capacity or its turn), so the core cancels it
+                # at once and leaves the running workload alone.  Otherwise the
+                # cancel is driven by the worker (its stops are the core's, spaced
+                # and bounded), never run inside this admission transaction.
+                waiting_only = ordinal is None and not has_child
+                if retrying_failure:
+                    # An ended load the Controller would retry is shown as queued
+                    # and is cancellable like one: reopen it so the cancel (and any
+                    # child it still owns) is driven to its end like a live load's.
+                    self._lifecycle.reopen(
                         row,
-                        _persisted_profile_progress(row),
                         now,
-                        reason=(
-                            "Profile application cancelled before any workload "
-                            "effect was issued; the running workload was not touched."
-                        ),
+                        reason="Cancellation requested; reconciling issued profile effects.",
+                        session=session,
                     )
-                    waiting_only = True
-                else:
-                    row.state = "running"
-                    row.status_reason = (
-                        "Cancellation requested; reconciling issued profile effects."
-                    )
-                    row.updated_at = now
+                self._lifecycle.request_cancel(
+                    row,
+                    now,
+                    reason=(
+                        "Profile application cancelled before any workload "
+                        "effect was issued; the running workload was not touched."
+                        if waiting_only
+                        else "Cancellation requested; reconciling issued profile effects."
+                    ),
+                    session=session,
+                    run_commands=False,
+                )
 
         if waiting_only:
             self._cancel_owned_preparations(application_id, plan, actor=actor)
@@ -7050,7 +7106,7 @@ class FleetProfileService:
         if self._reconcile_selected_roster(now):
             return True
         pending_admission_observed = self._observe_pending_admissions(now)
-        parked_observed = self._observe_parked_applications(now)
+        parked_observed = self._heal_legacy_applications(now)
         recovery_deferred = False
         cancellation_observed = self._observe_pending_cancellation(now)
         recovery = self._automatic_profile_recovery(now)
@@ -7153,14 +7209,18 @@ class FleetProfileService:
                     isinstance(raw_cancellation, Mapping)
                     and raw_cancellation.get("state") == "cancelling"
                 ):
-                    row.status_reason = (
-                        "Cancellation is blocked because persisted effect evidence "
-                        "cannot be reconciled"
+                    # A cancel always completes: evidence that cannot be read is
+                    # an unknown effect, recorded as such, not a reason to park.
+                    self._lifecycle.cancelled(
+                        row,
+                        "Profile application cancelled; its persisted effect "
+                        "evidence could not be read, so its effect is unknown",
+                        now,
+                        effect=_LifecycleEffect.UNKNOWN,
+                        session=session,
                     )
                 else:
-                    self._set_application_state(session, row, "failed")
-                    row.status_reason = str(error)[:512]
-                row.updated_at = now
+                    self._lifecycle.fail(row, str(error), now, session=session)
                 return True
             if (
                 progress.cancellation is not None
@@ -7170,20 +7230,24 @@ class FleetProfileService:
                 # malformed query or dialect quirk monopolize ordinary work.
                 return cancellation_observed
             if not self._application_is_current_selection(session, row, progress):
-                self._set_application_state(session, row, "cancelled")
-                row.status_reason = (
+                self._lifecycle.cancelled(
+                    row,
                     "Profile order was replaced by a newer fleet profile load; "
-                    "issued effects retain their cancellation receipts"
+                    "issued effects retain their cancellation receipts",
+                    now,
+                    effect=_LifecycleEffect.UNKNOWN,
+                    session=session,
                 )
-                row.updated_at = now
                 return True
             if self._superseding_intent(session, row, progress):
-                self._set_application_state(session, row, "cancelled")
-                row.status_reason = (
+                self._lifecycle.cancelled(
+                    row,
                     "Profile order was replaced by a changed profile or later "
-                    "scoped intent; issued effects retain their own cancellation receipts"
+                    "scoped intent; issued effects retain their own cancellation receipts",
+                    now,
+                    effect=_LifecycleEffect.UNKNOWN,
+                    session=session,
                 )
-                row.updated_at = now
                 return True
             steps = [step.model_dump(mode="json") for step in plan.steps]
             if row.current_operation_id:
@@ -7192,11 +7256,15 @@ class FleetProfileService:
                         row.current_operation_id, session=session
                     )
                 except (KeyError, RuntimeError, ValueError) as error:
-                    self._set_application_state(session, row, "failed")
-                    row.status_reason = (
-                        str(error)[:512] or "Child operation is unavailable"
+                    # A damaged persisted document is retained as the evidence of
+                    # what was issued (a missing child record is reconciled before
+                    # this point, by issuing the step again).
+                    self._lifecycle.fail(
+                        row,
+                        str(error) or "Child operation is unavailable",
+                        now,
+                        session=session,
                     )
-                    row.updated_at = now
                     return True
                 # The adapter may have checkpointed its child in this same
                 # row/transaction. Read that receipt before mirroring progress.
@@ -7250,27 +7318,29 @@ class FleetProfileService:
                             or parked_observed
                             or recovery_deferred
                         )
-                    self._set_application_state(session, row, "running")
-                    row.updated_at = now
+                    self._lifecycle.project(
+                        row, now, state=_LifecycleState.RUNNING, session=session
+                    )
                     return True
                 if child.state in _CHILD_FAILED_STATES:
-                    self._set_application_state(
-                        session,
+                    # The load follows its child: a child that ended is not a wait
+                    # for a person (none exists), it is a definite end.
+                    self._lifecycle.fail(
                         row,
-                        "waiting-for-operator"
-                        if child.state == "waiting-for-operator"
-                        else "failed",
+                        child.status_reason
+                        or f"Profile step {row.current_step + 1} ended in {child.state}",
+                        now,
+                        session=session,
                     )
-                    child_reason = child.status_reason
-                    row.status_reason = child_reason or (
-                        f"Profile step {row.current_step + 1} ended in {child.state}"
-                    )
-                    row.updated_at = now
                     return True
                 if child.state != "succeeded":
-                    self._set_application_state(session, row, "failed")
-                    row.status_reason = f"Profile step {row.current_step + 1} returned unsupported state {child.state}"
-                    row.updated_at = now
+                    self._lifecycle.fail(
+                        row,
+                        f"Profile step {row.current_step + 1} returned unsupported "
+                        f"state {child.state}",
+                        now,
+                        session=session,
+                    )
                     return True
                 progress_data = progress.model_dump(mode="json")
                 results = dict(progress_data.get("step_results", {}))
@@ -7296,8 +7366,7 @@ class FleetProfileService:
                 row.current_operation_id = None
                 row.current_step += 1
             if row.current_step >= len(steps):
-                self._set_application_state(session, row, "succeeded")
-                row.status_reason = None
+                self._lifecycle.succeed(row, now, reason=None, session=session)
                 progress = read_stored_model(
                     FleetProfileApplicationProgress,
                     canonical_message(
@@ -7316,11 +7385,16 @@ class FleetProfileService:
                 return True
             raw_step = steps[row.current_step]
             if not isinstance(raw_step, Mapping):
-                self._set_application_state(session, row, "failed")
-                row.status_reason = "Persisted Fleet profile step is invalid"
-                row.updated_at = now
+                self._lifecycle.fail(
+                    row,
+                    "Persisted Fleet profile step is invalid",
+                    now,
+                    session=session,
+                )
                 return True
-            self._set_application_state(session, row, "running")
+            self._lifecycle.project(
+                row, now, state=_LifecycleState.RUNNING, session=session
+            )
             progress = read_stored_model(
                 FleetProfileApplicationProgress,
                 canonical_message(
@@ -7375,9 +7449,11 @@ class FleetProfileService:
                             + (str(error)[:360] or "child start was interrupted")
                         )[:512]
                     else:
-                        self._set_application_state(session, failed, "failed")
-                        failed.status_reason = (
-                            str(error)[:512] or "Profile operation could not be started"
+                        self._lifecycle.fail(
+                            failed,
+                            str(error) or "Profile operation could not be started",
+                            _aware(self._clock()),
+                            session=session,
                         )
                     failed.updated_at = _aware(self._clock())
             return True
@@ -7410,8 +7486,9 @@ class FleetProfileService:
                     from_json=True,
                 ).model_dump(mode="json")
             except FleetProfileConflict as error:
-                self._set_application_state(session, current, "failed")
-                current.status_reason = str(error)[:512]
+                self._lifecycle.fail(
+                    current, str(error), _aware(self._clock()), session=session
+                )
             current.updated_at = _aware(self._clock())
         return True
 
@@ -7627,9 +7704,9 @@ class FleetProfileService:
                 admission_attempt=0,
                 admission_retry_at=now.isoformat(),
             )
-            row.state = "queued"
-            row.status_reason = reason[:512]
-            row.updated_at = now
+            self._lifecycle.project(
+                row, now, state=_LifecycleState.QUEUED, reason=reason, session=session
+            )
         return True
 
     def _observe_pending_admissions(self, now: datetime) -> bool:
@@ -7785,31 +7862,25 @@ class FleetProfileService:
                 admission_pending=False,
                 admission_retry_at=None,
             )
-            row.state = state
-            row.status_reason = reason[:512]
-            row.updated_at = now
+            if state == "cancelled":
+                self._lifecycle.cancelled(row, reason, now, session=session)
+            else:
+                self._lifecycle.fail(row, reason, now, session=session)
 
-    def _observe_parked_applications(self, now: datetime) -> bool:
-        """Record the ending of a parked application whose child has ended.
+    def _heal_legacy_applications(self, now: datetime) -> bool:
+        """Re-evaluate a legacy ``waiting-for-operator`` load: it runs again.
 
-        A ``waiting-for-operator`` order owns no live execution step, so the
-        ordinary advancement path never revisits it and its receipt could stay
-        parked forever after the operation that parked it terminated.  This is
-        the same decision the live path makes, applied to the parked state: a
-        superseding intent cancels the order, a terminal child fails it with
-        that child's reason, and a child that resumed returns the order to
-        ``running`` so the normal advancement continues.  A child that is still
-        parked leaves the order exactly as it is.
+        An older Controller mirrored a child that waited for a person onto the load
+        and left it parked: the ordinary advancement never revisited it.  No profile
+        (or Run/Switch) action exists, so nothing can end that wait.  The load is
+        returned to the work queue (rules 1 and 3): the next ordinary tick observes
+        its exact child and records whatever that child concluded, exactly as for any
+        running load; one still being admitted retries its admission.  Nothing is
+        issued here and no child is touched, so running workloads are never
+        disturbed.  Bounded per tick, and idempotent after a restart.
         """
 
-        adapter = self._switch_adapter
-        if adapter is None:
-            return False
         with self._sessions.begin() as session:
-            admission_pending = func.coalesce(
-                FleetProfileApplication.progress["admission_pending"].as_boolean(),
-                False,
-            )
             rows = tuple(
                 session.scalars(
                     select(FleetProfileApplication)
@@ -7822,7 +7893,6 @@ class FleetProfileService:
                             "",
                         )
                         != "cancelling",
-                        admission_pending.is_(False),
                     )
                     .order_by(
                         FleetProfileApplication.created_at,
@@ -7833,61 +7903,8 @@ class FleetProfileService:
                 )
             )
             for row in rows:
-                try:
-                    progress = _persisted_profile_progress(row)
-                except FleetProfileConflict as error:
-                    row.state = "failed"
-                    row.status_reason = str(error)[:512]
-                    row.updated_at = now
-                    return True
-                if self._superseding_intent(session, row, progress):
-                    row.state = "cancelled"
-                    row.status_reason = (
-                        "Profile order was replaced by a changed profile or later "
-                        "scoped intent; issued effects retain their own cancellation receipts"
-                    )
-                    row.updated_at = now
-                    return True
-                if not row.current_operation_id:
-                    continue
-                try:
-                    child = adapter.get(row.current_operation_id, session=session)
-                except (KeyError, RuntimeError, ValueError) as error:
-                    row.state = "failed"
-                    row.status_reason = (
-                        str(error)[:512] or "Child operation is unavailable"
-                    )
-                    row.updated_at = now
-                    return True
-                if child.state == "waiting-for-operator":
-                    continue
-                if child.state in _CHILD_PENDING_STATES:
-                    # A resume or an authorised retry made the child live
-                    # again; hand the order back to the advancement path.
-                    row.state = "running"
-                    row.updated_at = now
-                    return True
-                if child.state in _CHILD_FAILED_STATES:
-                    row.state = "failed"
-                    row.status_reason = child.status_reason or (
-                        f"Profile step {row.current_step + 1} ended in {child.state}"
-                    )
-                    row.updated_at = now
-                    return True
-                if child.state != "succeeded":
-                    row.state = "failed"
-                    row.status_reason = (
-                        f"Profile step {row.current_step + 1} returned unsupported "
-                        f"state {child.state}"
-                    )
-                    row.updated_at = now
-                    return True
-                # The parked child concluded successfully; promote the order so
-                # the next tick records its receipt and starts the next step.
-                row.state = "running"
-                row.updated_at = now
-                return True
-        return False
+                self._lifecycle.heal(row, now, session=session)
+            return bool(rows)
 
     @staticmethod
     def _defer_cancellation_observation(
@@ -7923,11 +7940,49 @@ class FleetProfileService:
         progress: FleetProfileApplicationProgress,
         now: datetime,
     ) -> bool:
-        """Reconcile the exact current child, then finish the parent request."""
+        """Drive one pass of a cancel: the core stops and observes, and it completes.
 
-        intent = progress.cancellation
+        The children are stopped by :meth:`_stop_children` (the same reconcile the
+        worker always did, one pass per due observation); the core decides the rest:
+        when nothing is left the load is ``cancelled``, and when the budget is spent
+        it is ``cancelled`` anyway with the children's effect recorded unknown and
+        their operation ids kept.  A cancel never parks the load for a person.
+        """
+
+        del plan, progress
+        settled = self._lifecycle.tick_cancel(
+            row,
+            now,
+            terminal_reason=(
+                "Profile application cancelled after issued effects were reconciled"
+            ),
+            session=session,
+        )
+        return bool(settled.changed or settled.commands)
+
+    def _stop_children(self, session: Session, row: FleetProfileApplication) -> bool:
+        """One idempotent pass of the cancel's stop: ``True`` when nothing is left.
+
+        Reconciles the exact current child (a Run/Switch operation under the
+        profile's switch-adapter document), then the older agent effects fenced by
+        the cancel's workload intent.  Whatever cannot be confirmed yet is a wait the
+        core observes again (and bounds), recorded for the operator view; nothing
+        here is a refusal.
+        """
+
         adapter = self._switch_adapter
-        if intent is None or adapter is None:
+        now = _aware(self._clock())
+        try:
+            plan = _persisted_profile_plan(row)
+            progress = _persisted_profile_progress(row)
+        except FleetProfileConflict:
+            # Unreadable evidence is an unknown, not a verdict: it is observed
+            # again, and the cancel's budget ends it.
+            return False
+        intent = progress.cancellation
+        if intent is None:
+            return True
+        if adapter is None:
             return False
         if progress.switch_adapter is not None:
             try:
@@ -7939,7 +7994,7 @@ class FleetProfileService:
                     "reconciled by the Run/Switch owner"
                 )
                 row.updated_at = now
-                return True
+                return False
             progress = _persisted_profile_progress(row)
             progress_data = progress.model_dump(mode="json")
             if child.progress is not None:
@@ -7955,27 +8010,6 @@ class FleetProfileService:
                 progress.cancellation is not None
                 and progress.cancellation.state == "cancelled"
             ):
-                return self._finish_profile_cancellation(session, row, progress, now)
-            if (
-                child.state in _CHILD_PENDING_STATES
-                or child.state == "waiting-for-operator"
-            ):
-                self._defer_cancellation_observation(
-                    row,
-                    progress,
-                    now,
-                    due_at=(
-                        progress.switch_adapter.observation_due_at
-                        if progress.switch_adapter is not None
-                        else None
-                    ),
-                )
-                row.state = "running"
-                row.status_reason = (
-                    child.status_reason
-                    or "Cancellation is waiting for the active profile child"
-                )[:512]
-                row.updated_at = now
                 return True
             self._defer_cancellation_observation(
                 row,
@@ -7987,12 +8021,21 @@ class FleetProfileService:
                     else None
                 ),
             )
-            row.status_reason = (
-                f"Cancellation is waiting for the Run/Switch owner to reconcile "
-                f"child state {child.state}"
-            )[:512]
+            if (
+                child.state in _CHILD_PENDING_STATES
+                or child.state == "waiting-for-operator"
+            ):
+                row.status_reason = (
+                    child.status_reason
+                    or "Cancellation is waiting for the active profile child"
+                )[:512]
+            else:
+                row.status_reason = (
+                    f"Cancellation is waiting for the Run/Switch owner to reconcile "
+                    f"child state {child.state}"
+                )[:512]
             row.updated_at = now
-            return True
+            return False
 
         if row.current_operation_id is not None:
             self._defer_cancellation_observation(row, progress, now)
@@ -8001,7 +8044,7 @@ class FleetProfileService:
                 "to become available"
             )
             row.updated_at = now
-            return True
+            return False
 
         scope = tuple(
             sorted({node_id for step in plan.steps for node_id in step.node_ids})
@@ -8014,11 +8057,11 @@ class FleetProfileService:
             except (TypeError, ValueError) as error:
                 self._defer_cancellation_observation(row, progress, now)
                 row.status_reason = (
-                    "Cancellation is blocked by invalid issued-effect evidence: "
-                    f"{str(error)[:360]}"
-                )
+                    "Cancellation is waiting on issued-effect evidence it cannot "
+                    f"read yet: {str(error)[:360]}"
+                )[:512]
                 row.updated_at = now
-                return True
+                return False
             if effects:
                 deadline = min(effect.observation_deadline for effect in effects)
                 due = min(effect.observe_due_at for effect in effects)
@@ -8042,35 +8085,74 @@ class FleetProfileService:
                 owner = (
                     "waiting for issued agent cancellation receipts"
                     if now < deadline
-                    else "issued agent cancellation receipt deadline expired; operator action is required"
+                    else "issued agent cancellation receipts are overdue; its "
+                    "stop budget will end the cancel"
                 )
                 row.status_reason = f"Cancellation {owner}: " + ", ".join(operation_ids)
                 row.updated_at = now
-                return True
+                return False
 
-        # No workload intent and no child: no workload effect was ever issued.
-        return self._finish_profile_cancellation(session, row, progress, now)
+        # No workload intent left to settle and no child: nothing is left.
+        return True
 
-    def _finish_profile_cancellation(
-        self,
-        session: Session,
-        row: FleetProfileApplication,
-        progress: FleetProfileApplicationProgress,
-        now: datetime,
-        *,
-        reason: str = "Profile application cancelled after issued effects were reconciled",
-    ) -> bool:
+    def _observe_children(
+        self, session: Session, row: FleetProfileApplication
+    ) -> _LifecycleEffect:
+        """Read-only: whether anything of the cancelled load's children is left."""
+
+        try:
+            progress = _persisted_profile_progress(row)
+        except FleetProfileConflict:
+            return _LifecycleEffect.UNKNOWN
+        children = self._lifecycle.bound(session).children_of(session, row)
+        state = self._lifecycle.aggregate_state(children)
+        if state is not None and state in {
+            _LifecycleState.SUCCEEDED,
+            _LifecycleState.FAILED,
+            _LifecycleState.CANCELLED,
+        }:
+            return _LifecycleEffect.STOPPED
+        if progress.cancellation is None:
+            return _LifecycleEffect.NONE
+        return _LifecycleEffect.UNKNOWN
+
+    def _finish_cancel_records(
+        self, session: Session, row: FleetProfileApplication, residue: bool
+    ) -> None:
+        """Close the records of a cancel that ended: the cancellation, the child and
+        the result.  The state itself was written by the lifecycle adapter."""
+
+        del session
+        now = _aware(self._clock())
+        progress = _persisted_profile_progress(row)
         progress_data = progress.model_dump(mode="json")
         cancellation_data = dict(progress_data["cancellation"] or {})
         cancellation_data.update(
             {
-                "state": "cancelled",
-                "pending_operation_ids": [],
+                # The pending operation ids stay when the stop was never confirmed:
+                # they are the residue record.  A confirmed stop clears them.
                 "observation_due_at": None,
                 "observation_deadline_at": None,
             }
         )
+        if not residue:
+            cancellation_data["pending_operation_ids"] = []
         progress_data["cancellation"] = cancellation_data
+        cancellation_state(progress_data, "cancelled")
+        document = progress_data.get("switch_adapter")
+        if isinstance(document, dict) and document.get("state") not in {
+            "succeeded",
+            "failed",
+            "cancelled",
+        }:
+            document = dict(document)
+            doc_state(document, "cancelled")
+            if not residue:
+                # A stop that was never confirmed keeps its child's identity: it is
+                # the evidence of what may remain.
+                document["active_operation_id"] = None
+                document["active_kind"] = None
+            progress_data["switch_adapter"] = document
         row.progress = read_stored_model(
             FleetProfileApplicationProgress,
             canonical_message(progress_data),
@@ -8078,14 +8160,11 @@ class FleetProfileService:
             from_json=True,
         ).model_dump(mode="json")
         row.current_operation_id = None
-        self._set_application_state(session, row, "cancelled")
-        row.status_reason = reason
         row.result = {
             "changed": bool(progress.completed_steps or progress.step_results),
             "completed_steps": min(progress.completed_steps, row.current_step),
         }
         row.updated_at = now
-        return True
 
     def _recovery_wanted(
         self,
@@ -8140,8 +8219,12 @@ class FleetProfileService:
             if retrying:
                 # Automatic recovery always has a next attempt; name it even
                 # when the failure recorded no explicit due time.
-                return "queued", progress.retry_due_at or (
-                    _aware(row.updated_at) + _cache_recovery_delay(progress.attempt)
+                return (
+                    "queued",
+                    progress.retry_due_at
+                    or FleetProfileAdapter.next_retry(
+                        row.id, progress.attempt, _aware(row.updated_at)
+                    ),
                 )
             return state, None
         if state == "queued" and progress.admission_pending:
@@ -8206,8 +8289,8 @@ class FleetProfileService:
                     progress.retry_due_at
                 ) > _aware(now):
                     continue
-                if now < _aware(row.updated_at) + _cache_recovery_delay(
-                    progress.attempt
+                if now < FleetProfileAdapter.next_retry(
+                    row.id, progress.attempt, _aware(row.updated_at)
                 ):
                     continue
                 self._recovery_cursor = row.id

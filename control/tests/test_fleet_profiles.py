@@ -1156,7 +1156,8 @@ def test_parked_profile_load_rechecks_fencing_after_ordinal_is_bound(
     assert first.progress.workload_intent_ordinal == 1
     assert adapter.cancellations == [((_node_id(1),), 1)]
 
-    now[0] += timedelta(seconds=2)
+    # The second attempt is due on the lifecycle core's clock (3 to 5 seconds).
+    now[0] += timedelta(seconds=6)
     assert service.tick() is True
     assert adapter.cancellations == [((_node_id(1),), 1), ((_node_id(1),), 1)]
 

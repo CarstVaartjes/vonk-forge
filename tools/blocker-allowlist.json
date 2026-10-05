@@ -20,7 +20,7 @@
       "control/src/vonk_control/run_switch_operations.py"
     ]
   },
-  "max_debt": 16,
+  "max_debt": 13,
   "debt_ceiling": {
     "total": 408,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
@@ -53,48 +53,6 @@
       "irreversible_effect": "inherits",
       "verdict": "DERIVED",
       "reason": "Read-side projection of an existing Job state onto a typed owner view; it creates no wait.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "RunSwitchFleetProfileAdapter._advance_in_session",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "fleet-profile.apply"
-      ],
-      "trigger": "profile cancellation cannot reconcile a Run/Switch child state",
-      "advertised_action": "supported_actions=[retry] only if retry_available",
-      "irreversible_effect": "none (observation problem, not an effect)",
-      "verdict": "SELF-HEAL",
-      "reason": "Re-observe the child on the next tick instead of parking the application.",
-      "sites": 2
-    },
-    {
-      "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "RunSwitchFleetProfileAdapter._advance_in_session",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "fleet-profile.apply"
-      ],
-      "trigger": "mirrors a child job in waiting-for-operator onto the application",
-      "advertised_action": "inherits the child's action",
-      "irreversible_effect": "inherits",
-      "verdict": "DERIVED",
-      "reason": "Pure projection; allowed while the child transition is allowed.",
-      "sites": 2
-    },
-    {
-      "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "FleetProfileService.tick",
-      "kind": "control-state-argument",
-      "operation_kinds": [
-        "fleet-profile.apply"
-      ],
-      "trigger": "mirrors a Run/Switch child in waiting-for-operator onto the application",
-      "advertised_action": "inherits",
-      "irreversible_effect": "inherits",
-      "verdict": "DERIVED",
-      "reason": "Pure projection of the child state.",
       "sites": 1
     },
     {
@@ -610,7 +568,6 @@
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.cancel", "profile-application-is-not-cancellable", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.cancel", "profile-application-scope-changed-during-cancellation", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.cancel", "profile-cancellation-authority-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.cancel", "profile-cancellation-cannot-reconcile-operation", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.cancel", "profile-cancellation-request-key-is-invalid", 2],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.create", "a-fleet-profile-with-this-name-already-exists", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.endpoint_intent", "selected-profile-application-is-unavailable", 1],
