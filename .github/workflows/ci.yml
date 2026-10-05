@@ -59,11 +59,17 @@ jobs:
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # A merge-queue run has no pull request diff: compare the queued
+          # commit with the queue's base commit instead.
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == merge_group ]]; then
+            BASE_SHA="$MERGE_GROUP_BASE_SHA"
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == pull_request || "$GITHUB_EVENT_NAME" == merge_group ]]; then
             git diff --name-only --diff-filter=ACMRD "$BASE_SHA" "$GITHUB_SHA" |
-              scripts/select-ci-areas --event pull_request --github-output \
+              scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" --github-output \
                 >> "$GITHUB_OUTPUT"
           else
             scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" \

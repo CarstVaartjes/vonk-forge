@@ -20,6 +20,11 @@ AREAS = (
 )
 
 
+# Events whose changed paths are known: a pull request diff, or a merge-queue
+# commit compared with the queue's base commit. Anything else runs everything.
+DIFF_EVENTS = ("pull_request", "merge_group")
+
+
 def _matches(path: str, prefixes: tuple[str, ...], exact: tuple[str, ...] = ()) -> bool:
     return path in exact or path.startswith(prefixes)
 
@@ -60,7 +65,7 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
     changed = tuple(
         sorted({path.strip().removeprefix("./") for path in paths if path.strip()})
     )
-    if event != "pull_request" or not changed:
+    if event not in DIFF_EVENTS or not changed:
         return {area: True for area in AREAS}
 
     selected = {area: False for area in AREAS}
