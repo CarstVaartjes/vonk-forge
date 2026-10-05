@@ -392,7 +392,7 @@ class ImageAvailabilityAdapter:
     ) -> Lifecycle:
         return self._drive(
             job,
-            Reported(Outcome.OK, reason=None),
+            Reported(Outcome.DONE, reason=None),
             now,
             reason=None,
             payload=payload,
@@ -474,7 +474,7 @@ class ImageAvailabilityAdapter:
         row = self.lifecycle(job, now)
         return self._drive(
             job,
-            Reported(Outcome.UNCERTAIN, retry_after=retry_after),
+            Reported(Outcome.UNKNOWN, retry_after=retry_after),
             now,
             row=row,
             reason=KEEP,
@@ -551,7 +551,7 @@ class PrebuiltImageAdapter:
         row = self.adopt(job)
         decision = transition(
             row,
-            Reported(Outcome.OK if ok else Outcome.FAILED, retryable=False),
+            Reported(Outcome.DONE if ok else Outcome.FAILED, retryable=False),
             self,
             now,
         )

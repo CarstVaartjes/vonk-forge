@@ -133,10 +133,10 @@ def test_no_stored_state_and_event_leaves_a_row_waiting_for_a_person(kind: str) 
     events = [
         Tick(),
         CancelRequested("k", "stop"),
-        Reported(Outcome.UNCERTAIN),
+        Reported(Outcome.UNKNOWN),
         Reported(Outcome.FAILED, retryable=True),
         Reported(Outcome.FAILED, retryable=False),
-        Reported(Outcome.OK),
+        Reported(Outcome.DONE),
     ]
     for stored, event in product(STORED, events):
         row: Lifecycle = adapter.adopt(_job(kind, stored))
