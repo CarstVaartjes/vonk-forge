@@ -973,7 +973,17 @@ def initialize_database(
                     try:
                         with engine.begin() as schema_connection:
                             verify_schema_is_current(schema_connection)
-                            adopt_legacy_rows(schema_connection)
+                            # Adoption is derived bookkeeping, not schema authority.
+                            # A savepoint keeps a damaged historical row from undoing
+                            # current schema reconciliation; readers heal rows lazily.
+                            try:
+                                with schema_connection.begin_nested():
+                                    adopt_legacy_rows(schema_connection)
+                            except SQLAlchemyError:
+                                _LOGGER.exception(
+                                    "Lifecycle bookkeeping adoption deferred; "
+                                    "current schema remains available"
+                                )
                     except SQLAlchemyError as error:
                         raise RuntimeError(
                             "Controller startup schema reconciliation failed and the "

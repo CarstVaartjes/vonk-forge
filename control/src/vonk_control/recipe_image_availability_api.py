@@ -44,6 +44,7 @@ from .recipe_image_availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
 )
+from .recipe_image_removal_contract import RecipeRemovalUnavailableView
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import RecipeUpdateRequest, RecipeUpdateResponse
 from .stored_json import Residue
@@ -212,7 +213,10 @@ class RecipeOperatorResponse(StrictJSONModel):
 
 
 RecipeOperationResponse = (
-    RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse
+    RecipeImageAvailabilityResponse
+    | RecipeOperatorResponse
+    | RecipeUpdateResponse
+    | RecipeRemovalUnavailableView
 )
 
 
@@ -491,7 +495,9 @@ def install_recipe_operator_routes(
             operation = _service(service).get_operator_request(
                 request_key, actor=actor.subject
             )
-            if isinstance(operation, RecipeUpdateResponse):
+            if isinstance(
+                operation, (RecipeUpdateResponse, RecipeRemovalUnavailableView)
+            ):
                 return operation
             if isinstance(operation, RecipeImageAvailabilityView):
                 return _view_document(operation)
@@ -514,7 +520,9 @@ def install_recipe_operator_routes(
         del actor
         try:
             operation = _service(service).get_operator_operation(operation_id)
-            if isinstance(operation, RecipeUpdateResponse):
+            if isinstance(
+                operation, (RecipeUpdateResponse, RecipeRemovalUnavailableView)
+            ):
                 return operation
             if isinstance(operation, RecipeImageAvailabilityView):
                 return _view_document(operation)
@@ -542,7 +550,9 @@ def install_recipe_operator_routes(
                 request_id=body.request_key,
                 reason=body.reason,
             )
-            if isinstance(operation, RecipeUpdateResponse):
+            if isinstance(
+                operation, (RecipeUpdateResponse, RecipeRemovalUnavailableView)
+            ):
                 return operation
             return _view_document(operation)
         except (RecipeImageAvailabilityError, KeyError, ValueError) as error:

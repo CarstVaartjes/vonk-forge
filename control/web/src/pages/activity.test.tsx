@@ -580,3 +580,36 @@ test("server-side filters are sent to the operations API and kept in the URL", a
   await user.click(screen.getByRole("button", {name: "Clear filters"}));
   await waitFor(() => expect(location.search).toBe(""));
 });
+
+it("shows unknown job observations without invented progress counts and refreshes", async () => {
+  const user = userEvent.setup();
+  const loadJob = vi.fn().mockResolvedValueOnce({
+    id: "operation-1", kind: "recipe-install", state: "running", authority_revision: "a".repeat(64), targets: [TARGET_ID], target_total: 1, current_attempt: 1,
+    operations: null, operation_total: null, progress: null, projection_issue: "Operation observations are unavailable; progress and step membership are unknown.",
+  }).mockResolvedValue({
+    id: "operation-1", kind: "recipe-install", state: "running", authority_revision: "a".repeat(64), targets: [TARGET_ID], target_total: 1, current_attempt: 1,
+    operations: [], operation_total: 1, progress: {completed: 0, failed: 0, running: 1, total: 1}, projection_issue: null,
+  });
+  render(<ActivityPage api={api(loadJob)} now={NOW}/>);
+  await user.click(await screen.findByText("View operation progress"));
+  expect(await screen.findByText(/progress and step membership are unknown/)).toBeVisible();
+  expect(screen.queryByRole("region", {name: "Operation progress"})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Refresh details"}));
+  expect(await screen.findByRole("region", {name: "Operation progress"})).toHaveTextContent("Running1");
+});
+
+it("preserves visible activity when current operation membership is unknown", async () => {
+  const user = userEvent.setup();
+  const loadOperations = vi.fn()
+    .mockResolvedValueOnce({operations: recordedOperations(), total: 3, next_cursor: null})
+    .mockResolvedValueOnce({operations: null, total: null, projection_issue: "Stored observations are unreadable; membership is unknown."})
+    .mockResolvedValue({operations: recordedOperations(), total: 3, next_cursor: null});
+  render(<ActivityPage api={api(undefined, undefined, loadOperations)} now={NOW}/>);
+  await screen.findByRole("region", {name: "Activity history coverage"});
+  await user.click(screen.getByRole("button", {name: "Refresh activity"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("membership is unknown");
+  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Operations are unavailable");
+  await user.click(screen.getByRole("button", {name: "Refresh activity"}));
+  await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Loaded 3 of 3 operations");
+});

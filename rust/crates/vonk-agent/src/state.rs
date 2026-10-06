@@ -1,5 +1,6 @@
 use std::{
     fs::{self, OpenOptions},
+    io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     time::Duration,
@@ -169,6 +170,69 @@ impl StateStore {
             path: path.to_owned(),
             node_id: node_id.to_owned(),
         })
+    }
+
+    /// Restore a disposable local journal after proven stored-state damage.
+    /// The Controller remains the authority for claims and observes exact
+    /// effects before reissuing work. Keep the damaged journal for diagnostics.
+    pub fn open_recovered(path: &Path, node_id: &str) -> Result<Self, StateError> {
+        // A crash while moving WAL companions must never reopen the original
+        // main database without its committed pages. Finish the durable repair
+        // intent before opening either the old or the replacement journal.
+        finish_pending_state_repair(path)?;
+        prune_state_diagnostics(path);
+        let opened = Self::open(path, node_id).and_then(|mut state| {
+            state.recover_interrupted()?;
+            state.pending_results()?;
+            state.unreconciled_results()?;
+            Ok(state)
+        });
+        let error = match opened {
+            Ok(state) => return Ok(state),
+            Err(error) => error,
+        };
+        let repairable = match &error {
+            StateError::Identity | StateError::ResultState | StateError::Protocol(_) => true,
+            StateError::Database(rusqlite::Error::SqliteFailure(code, _)) => matches!(
+                code.code,
+                rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase
+            ),
+            _ => false,
+        };
+        if !repairable {
+            return Err(error);
+        }
+        let cause = match &error {
+            StateError::Identity => "stored-node-identity-mismatch",
+            StateError::ResultState => "stored-operation-unreadable",
+            StateError::Protocol(_) => "stored-receipt-invalid",
+            _ => "sqlite-file-corrupt",
+        };
+        // open() refuses links and non-files. Do not turn an unsafe path or
+        // an I/O failure into permission to replace somebody else's file.
+        let metadata = fs::symlink_metadata(path)?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(std::io::Error::other("state database path is unsafe").into());
+        }
+        let repair_id = uuid::Uuid::new_v4();
+        let marker = repair_marker(path);
+        let temporary = path.with_file_name(format!("state.sqlite.repair-{repair_id}.tmp"));
+        let mut intent = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        writeln!(intent, "{repair_id}")?;
+        intent.sync_all()?;
+        fs::rename(&temporary, &marker)?;
+        sync_state_directory(path)?;
+        finish_pending_state_repair(path)?;
+        prune_state_diagnostics(path);
+        eprintln!(
+            "vonk-agent: state-journal-recreated: cause={cause}; repair={repair_id}; diagnostic-budget-bytes={}",
+            crate::inventory::STATE_DATABASE_DISK_RESERVE_BYTES
+        );
+        Self::open(path, node_id)
     }
 
     pub fn reopen(&self) -> Result<Self, StateError> {
@@ -597,4 +661,102 @@ pub fn backoff_delay(attempt: u32, entropy: u64, minimum: u64, maximum: u64) -> 
     let lower = (base.saturating_mul(3) / 4).max(minimum);
     let upper = (base.saturating_mul(5) / 4).min(maximum).max(lower);
     Duration::from_secs(lower + entropy % (upper - lower + 1))
+}
+
+fn repair_marker(path: &Path) -> PathBuf {
+    path.with_file_name("state.sqlite.repair-pending")
+}
+
+fn sync_state_directory(path: &Path) -> Result<(), StateError> {
+    if let Some(parent) = path.parent() {
+        fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+fn finish_pending_state_repair(path: &Path) -> Result<(), StateError> {
+    let marker = repair_marker(path);
+    let metadata = match fs::symlink_metadata(&marker) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if !metadata.file_type().is_file() || metadata.len() > 64 {
+        return Err(std::io::Error::other("state repair intent is unsafe").into());
+    }
+    let raw = fs::read_to_string(&marker)?;
+    let id: uuid::Uuid = raw.trim().parse().map_err(|_| StateError::ResultState)?;
+    let quarantine = path.with_file_name(format!("state.sqlite.corrupt-{id}"));
+    for suffix in ["-wal", "-shm", ""] {
+        let source = PathBuf::from(format!("{}{suffix}", path.display()));
+        let destination = PathBuf::from(format!("{}{suffix}", quarantine.display()));
+        let metadata = match fs::symlink_metadata(&source) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.file_type().is_file() || destination.exists() {
+            return Err(std::io::Error::other("state quarantine path is unsafe").into());
+        }
+        fs::rename(source, destination)?;
+    }
+    sync_state_directory(path)?;
+    fs::remove_file(marker)?;
+    sync_state_directory(path)?;
+    Ok(())
+}
+
+/// Diagnostic journals share the existing state-database disk budget. Charge
+/// at least one allocation unit per entry so zero-length crash leftovers cannot
+/// grow without consuming the bound. Only our UUID-named inactive files qualify.
+fn prune_state_diagnostics(path: &Path) {
+    fn prune(path: &Path) -> std::io::Result<()> {
+        let Some(parent) = path.parent() else {
+            return Ok(());
+        };
+        let mut files = Vec::new();
+        let mut bytes = 0_u64;
+        for entry in fs::read_dir(parent)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let identity = if let Some(raw) = name.strip_prefix("state.sqlite.corrupt-") {
+                raw.strip_suffix("-wal")
+                    .or_else(|| raw.strip_suffix("-shm"))
+                    .unwrap_or(raw)
+            } else if let Some(raw) = name.strip_prefix("state.sqlite.repair-") {
+                let Some(raw) = raw.strip_suffix(".tmp") else {
+                    continue;
+                };
+                raw
+            } else {
+                continue;
+            };
+            if uuid::Uuid::parse_str(identity).is_err() {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(entry.path())?;
+            if !metadata.file_type().is_file() {
+                continue;
+            }
+            let cost = metadata.len().max(4096);
+            bytes = bytes.saturating_add(cost);
+            files.push((metadata.modified()?, entry.path(), cost));
+        }
+        files.sort();
+        for (_, file, cost) in files {
+            if bytes <= crate::inventory::STATE_DATABASE_DISK_RESERVE_BYTES {
+                break;
+            }
+            fs::remove_file(file)?;
+            bytes = bytes.saturating_sub(cost);
+        }
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    }
+    if let Err(error) = prune(path) {
+        eprintln!("vonk-agent: state-diagnostic-retention-deferred: {error}");
+    }
 }

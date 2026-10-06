@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import uuid
+from collections import Counter
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_control import terminal_history_collection
 from vonk_control.models import Base, Job, JobAttempt, RecipeRun, RunNode
 from vonk_control.recipe_execution_contract import StoredRunNodePlan, StoredRunPlan
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
@@ -136,17 +139,37 @@ def test_run_history_requires_complete_current_generation_absence() -> None:
 
 def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_references(
     history_sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = datetime.now(UTC)
     old = now - timedelta(days=2)
     removable = _job(old)
     referenced = _job(old)
+    # Equal timestamps use identity order; retain the first row before yielding.
+    referenced.id = str(uuid.UUID(int=1))
+    removable.id = str(uuid.UUID(int=2))
     recent = _job(now)
     live = _job(old, state="running", payload={"operation_id": referenced.id})
     with history_sessions.begin() as session:
         session.add_all((removable, referenced, recent, live))
     collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
-    counts = collector.collect()
+    counts: Counter[str] = Counter()
+    protected = {referenced.id, recent.id, live.id}
+    # Force the physical budget to expire between candidates, independently of
+    # database speed. The next pass must resume past the retained first row.
+    observed_times = iter((0.0, 0.0, 2.0, 3.0, 3.0))
+    monkeypatch.setattr(
+        terminal_history_collection,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(observed_times)),
+    )
+    for expected_removed in (0, 1):
+        counts.update(collector.collect())
+        assert counts["jobs"] == expected_removed
+        with history_sessions() as session:
+            remaining = set(session.scalars(select(Job.id)))
+            assert protected <= remaining
+            assert remaining <= protected | {removable.id}
     assert counts["jobs"] == 1
     with history_sessions() as session:
         assert session.get(Job, removable.id) is None

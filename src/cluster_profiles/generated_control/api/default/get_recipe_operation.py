@@ -11,6 +11,7 @@ from ... import errors
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.recipe_image_availability_response import RecipeImageAvailabilityResponse
 from ...models.recipe_operator_response import RecipeOperatorResponse
+from ...models.recipe_removal_unavailable_view import RecipeRemovalUnavailableView
 from ...models.recipe_update_response import RecipeUpdateResponse
 from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
@@ -37,9 +38,9 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem | None:
     if response.status_code == 200:
-        def _parse_response_200(data: object) -> RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse:
+        def _parse_response_200(data: object) -> RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
@@ -60,13 +61,23 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
                 return response_200_type_1
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                response_200_type_2 = RecipeUpdateResponse.from_dict(data)
+
+
+
+                return response_200_type_2
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
             if not isinstance(data, dict):
                 raise TypeError()
-            response_200_type_2 = RecipeUpdateResponse.from_dict(data)
+            response_200_type_3 = RecipeRemovalUnavailableView.from_dict(data)
 
 
 
-            return response_200_type_2
+            return response_200_type_3
 
         response_200 = _parse_response_200(response.json())
 
@@ -106,7 +117,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -120,7 +131,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]:
     """ Get Operation
 
      Observe a submitted recipe mutation; any authenticated actor may read it.
@@ -133,7 +144,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]
      """
 
 
@@ -153,7 +164,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem | None:
     """ Get Operation
 
      Observe a submitted recipe mutation; any authenticated actor may read it.
@@ -166,7 +177,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem
+        BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem
      """
 
 
@@ -181,7 +192,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]:
     """ Get Operation
 
      Observe a submitted recipe mutation; any authenticated actor may read it.
@@ -194,7 +205,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]
      """
 
 
@@ -214,7 +225,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem | None:
     """ Get Operation
 
      Observe a submitted recipe mutation; any authenticated actor may read it.
@@ -227,7 +238,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem
+        BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem
      """
 
 

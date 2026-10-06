@@ -7139,6 +7139,8 @@ pub enum ProfileReasonCode {
     ProfileApplicationIntentInvalid,
     #[serde(rename = "profile.choices_unreadable")]
     ProfileChoicesUnreadable,
+    #[serde(rename = "profile.definition_unavailable")]
+    ProfileDefinitionUnavailable,
     #[serde(rename = "profile.cleanup_delegated")]
     ProfileCleanupDelegated,
     #[serde(rename = "profile.distributed_cross_scope")]
@@ -7213,6 +7215,7 @@ impl ::std::fmt::Display for ProfileReasonCode {
                 f.write_str("profile.application_intent.invalid")
             }
             Self::ProfileChoicesUnreadable => f.write_str("profile.choices_unreadable"),
+            Self::ProfileDefinitionUnavailable => f.write_str("profile.definition_unavailable"),
             Self::ProfileCleanupDelegated => f.write_str("profile.cleanup_delegated"),
             Self::ProfileDistributedCrossScope => f.write_str("profile.distributed_cross_scope"),
             Self::ProfileFailureRepeated => f.write_str("profile.failure_repeated"),
@@ -7276,6 +7279,7 @@ impl ::std::str::FromStr for ProfileReasonCode {
             "profile.admission_effect_busy" => Ok(Self::ProfileAdmissionEffectBusy),
             "profile.application_intent.invalid" => Ok(Self::ProfileApplicationIntentInvalid),
             "profile.choices_unreadable" => Ok(Self::ProfileChoicesUnreadable),
+            "profile.definition_unavailable" => Ok(Self::ProfileDefinitionUnavailable),
             "profile.cleanup_delegated" => Ok(Self::ProfileCleanupDelegated),
             "profile.distributed_cross_scope" => Ok(Self::ProfileDistributedCrossScope),
             "profile.failure_repeated" => Ok(Self::ProfileFailureRepeated),
@@ -8122,6 +8126,8 @@ pub enum RecipeImageCode {
     RecipeImageNotRetryable,
     #[serde(rename = "recipe_image.operation_invalid")]
     RecipeImageOperationInvalid,
+    #[serde(rename = "recipe_image.removal_evidence_unavailable")]
+    RecipeImageRemovalEvidenceUnavailable,
     #[serde(rename = "recipe_image.operation_missing")]
     RecipeImageOperationMissing,
     #[serde(rename = "recipe_image.preparation_failed")]
@@ -8206,6 +8212,9 @@ impl ::std::fmt::Display for RecipeImageCode {
             Self::RecipeImageNotCancellable => f.write_str("recipe_image.not_cancellable"),
             Self::RecipeImageNotRetryable => f.write_str("recipe_image.not_retryable"),
             Self::RecipeImageOperationInvalid => f.write_str("recipe_image.operation_invalid"),
+            Self::RecipeImageRemovalEvidenceUnavailable => {
+                f.write_str("recipe_image.removal_evidence_unavailable")
+            }
             Self::RecipeImageOperationMissing => f.write_str("recipe_image.operation_missing"),
             Self::RecipeImagePreparationFailed => f.write_str("recipe_image.preparation_failed"),
             Self::RecipeImagePreparationExhausted => {
@@ -8274,6 +8283,9 @@ impl ::std::str::FromStr for RecipeImageCode {
             "recipe_image.not_cancellable" => Ok(Self::RecipeImageNotCancellable),
             "recipe_image.not_retryable" => Ok(Self::RecipeImageNotRetryable),
             "recipe_image.operation_invalid" => Ok(Self::RecipeImageOperationInvalid),
+            "recipe_image.removal_evidence_unavailable" => {
+                Ok(Self::RecipeImageRemovalEvidenceUnavailable)
+            }
             "recipe_image.operation_missing" => Ok(Self::RecipeImageOperationMissing),
             "recipe_image.preparation_failed" => Ok(Self::RecipeImagePreparationFailed),
             "recipe_image.preparation_exhausted" => Ok(Self::RecipeImagePreparationExhausted),
@@ -22508,6 +22520,7 @@ impl ProfileReasonCode {
             Self::ProfileAdmissionEffectBusy => "profile.admission_effect_busy",
             Self::ProfileApplicationIntentInvalid => "profile.application_intent.invalid",
             Self::ProfileChoicesUnreadable => "profile.choices_unreadable",
+            Self::ProfileDefinitionUnavailable => "profile.definition_unavailable",
             Self::ProfileCleanupDelegated => "profile.cleanup_delegated",
             Self::ProfileDistributedCrossScope => "profile.distributed_cross_scope",
             Self::ProfileFailureRepeated => "profile.failure_repeated",
@@ -22586,6 +22599,8 @@ impl<'de> ::serde::Deserialize<'de> for ProfileReasonCode {
             ProfileApplicationIntentInvalid,
             #[serde(rename = "profile.choices_unreadable")]
             ProfileChoicesUnreadable,
+            #[serde(rename = "profile.definition_unavailable")]
+            ProfileDefinitionUnavailable,
             #[serde(rename = "profile.cleanup_delegated")]
             ProfileCleanupDelegated,
             #[serde(rename = "profile.distributed_cross_scope")]
@@ -22658,6 +22673,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileReasonCode {
             Raw::ProfileAdmissionEffectBusy => Self::ProfileAdmissionEffectBusy,
             Raw::ProfileApplicationIntentInvalid => Self::ProfileApplicationIntentInvalid,
             Raw::ProfileChoicesUnreadable => Self::ProfileChoicesUnreadable,
+            Raw::ProfileDefinitionUnavailable => Self::ProfileDefinitionUnavailable,
             Raw::ProfileCleanupDelegated => Self::ProfileCleanupDelegated,
             Raw::ProfileDistributedCrossScope => Self::ProfileDistributedCrossScope,
             Raw::ProfileFailureRepeated => Self::ProfileFailureRepeated,
@@ -23648,6 +23664,9 @@ impl RecipeImageCode {
             Self::RecipeImageNotCancellable => "recipe_image.not_cancellable",
             Self::RecipeImageNotRetryable => "recipe_image.not_retryable",
             Self::RecipeImageOperationInvalid => "recipe_image.operation_invalid",
+            Self::RecipeImageRemovalEvidenceUnavailable => {
+                "recipe_image.removal_evidence_unavailable"
+            }
             Self::RecipeImageOperationMissing => "recipe_image.operation_missing",
             Self::RecipeImagePreparationFailed => "recipe_image.preparation_failed",
             Self::RecipeImagePreparationExhausted => "recipe_image.preparation_exhausted",
@@ -23767,6 +23786,8 @@ impl<'de> ::serde::Deserialize<'de> for RecipeImageCode {
             RecipeImageNotRetryable,
             #[serde(rename = "recipe_image.operation_invalid")]
             RecipeImageOperationInvalid,
+            #[serde(rename = "recipe_image.removal_evidence_unavailable")]
+            RecipeImageRemovalEvidenceUnavailable,
             #[serde(rename = "recipe_image.operation_missing")]
             RecipeImageOperationMissing,
             #[serde(rename = "recipe_image.preparation_failed")]
@@ -23841,6 +23862,9 @@ impl<'de> ::serde::Deserialize<'de> for RecipeImageCode {
             Raw::RecipeImageNotCancellable => Self::RecipeImageNotCancellable,
             Raw::RecipeImageNotRetryable => Self::RecipeImageNotRetryable,
             Raw::RecipeImageOperationInvalid => Self::RecipeImageOperationInvalid,
+            Raw::RecipeImageRemovalEvidenceUnavailable => {
+                Self::RecipeImageRemovalEvidenceUnavailable
+            }
             Raw::RecipeImageOperationMissing => Self::RecipeImageOperationMissing,
             Raw::RecipeImagePreparationFailed => Self::RecipeImagePreparationFailed,
             Raw::RecipeImagePreparationExhausted => Self::RecipeImagePreparationExhausted,

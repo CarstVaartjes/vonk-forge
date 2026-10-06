@@ -869,3 +869,24 @@ def test_fleet_locks_renders_holders_and_open_transactions(capsys):
     assert "Open transactions:" in output and "vonk-worker" in output
     render_payload({"held": [], "open_transactions": []}, "fleet", action="locks")
     assert "No admission locks are held." in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("action", ["progress", "activity"])
+def test_unreadable_operation_membership_is_rendered_as_unknown(action, capsys):
+    render_payload(
+        {
+            "id": "job-1",
+            "state": "running",
+            "targets": ["Atlas"],
+            "operations": None,
+            "total": None,
+            "progress": None,
+            "projection_issue": "Stored observations are unreadable; membership is unknown.",
+        },
+        "fleet",
+        action=action,
+    )
+    output = capsys.readouterr().out
+    assert "membership is unknown" in output
+    assert "0 of 0" not in output
+    assert "No activity" not in output

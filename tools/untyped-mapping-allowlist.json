@@ -156,6 +156,20 @@
       "reason": "The ASGI scope is Starlette's own mapping type; only a typed source value bound to the verified identity is read from it."
     },
     {
+      "path": "control/src/vonk_control/operation_contract.py",
+      "function": "sanitize_failure_evidence",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
+    },
+    {
+      "path": "control/src/vonk_control/operation_contract.py",
+      "function": "sanitize_failure_evidence.candidates",
+      "annotation": "dict[str, object]",
+      "count": 2,
+      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
+    },
+    {
       "path": "control/src/vonk_control/recipe_library_types.py",
       "function": "RecipeLibraryItem",
       "annotation": "dict[str, object]",
@@ -196,20 +210,6 @@
       "annotation": "dict[str, object]",
       "count": 1,
       "reason": "Generic canonical-JSON digest utility over a document the caller built from typed values."
-    },
-    {
-      "path": "control/src/vonk_control/operation_contract.py",
-      "function": "sanitize_failure_evidence",
-      "annotation": "dict[str, object]",
-      "count": 1,
-      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
-    },
-    {
-      "path": "control/src/vonk_control/operation_contract.py",
-      "function": "sanitize_failure_evidence.candidates",
-      "annotation": "dict[str, object]",
-      "count": 2,
-      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
     }
   ],
   "debt": [
@@ -319,7 +319,7 @@
     },
     {
       "path": "control/src/vonk_control/fleet_profiles.py",
-      "count": 26
+      "count": 25
     },
     {
       "path": "control/src/vonk_control/harnesses/canonical.py",

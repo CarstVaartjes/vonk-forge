@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import Engine, Table, create_engine, select, update
+from sqlalchemy import Engine, Table, create_engine, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DesiredAssignmentState,
@@ -1012,6 +1012,64 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
     assert unavailable.projection_issue.detail == (
         "stored document is invalid at profile_id (missing)"
     )
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize(
+    "damage", ["missing-application", "invalid-state", "saved-profile"]
+)
+def test_profile_observation_does_not_depend_on_damaged_bookkeeping(
+    damage: str,
+    tmp_path: Path,
+) -> None:
+    from vonk_control.auth import TokenCodec
+    from vonk_control.operation_api import durable_operation_services
+
+    sessions = _database()
+    _, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        switch_adapter=_SwitchAdapter(),
+        assessment_provider=lambda _session, _assignment, node_ids, **_kwargs: (
+            _assessment(_exact_preparation(node_ids))
+        ),
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    application = service.apply(profile.id, request_key=_uuid(441), actor="admin")
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        if damage == "missing-application":
+            session.delete(row)
+        elif damage == "invalid-state":
+            # Simulate a historical persisted row outside the current
+            # vocabulary; current writes must still enforce their constraint.
+            session.execute(text("PRAGMA ignore_check_constraints=ON"))
+            row.state = "damaged-state"
+        else:
+            session.execute(
+                update(FleetProfile)
+                .where(FleetProfile.id == profile.id)
+                .values(labels=["invalid-label"])
+            )
+    if damage == "saved-profile":
+        assert service.progress_number(profile.number).id == application.id
+        return
+    projections = durable_operation_services(
+        sessions,
+        tmp_path,
+        clock=lambda: NOW,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+        profile_endpoint_intent=service.endpoint_intent,
+    )
+    assert projections.profile_endpoint is not None
+    view = projections.profile_endpoint(profile.number, None, "https://example.test/v1")
+    assert view.application_id == application.id
+    assert view.application_state is None
+    assert view.assignments is None
+    assert view.projection_issue is not None
+    assert view.projection_issue.code == "profile.application_intent.invalid"
 
 
 def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progress() -> (
@@ -3472,8 +3530,18 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
             .where(FleetProfile.id == created.id)
             .values(assignments=assignments)
         )
-    # The damaged choice is retired (skipped), never a refusal to read the profile.
-    assert service.get(created.id).assignments == []
+    from vonk_control.fleet_profile_contract import UnavailableFleetProfileView
+
+    # Keep the exact saved identity observable. Dropping a malformed choice
+    # would let an ordinary edit silently delete accepted authoring intent.
+    observed = service.read_number(created.number)
+    assert isinstance(observed, UnavailableFleetProfileView)
+    assert observed.id == created.id and observed.revision == created.revision
+    assert observed.definition is None
+    assert observed.projection_issue.code == "profile.definition_unavailable"
+    with sessions() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None and row.assignments == assignments
 
 
 def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -> None:
