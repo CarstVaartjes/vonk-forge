@@ -57,7 +57,12 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LEGACY_WAIT_STATE, AgentOperation
+from vonk_agent_protocol import (
+    LEGACY_WAIT_STATE,
+    AgentOperation,
+    InvalidRequestReason,
+    WaitReason,
+)
 
 from .. import agent_operation_states as aos
 from ..agent_operation_facts import (
@@ -72,6 +77,7 @@ from ..agent_operation_facts import (
     operation_start_deadline,
     stalled_interruptions,
 )
+from ..categorized_errors import InvalidValue, UnsettledOutcome
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from .adapter import Dispatch
@@ -203,7 +209,10 @@ class AgentOperationAdapter:
         resume_candidates: ResumeCandidates | None = None,
     ) -> None:
         if (session is None) == (sessions is None):
-            raise ValueError("bind the adapter to a session or to a session factory")
+            raise InvalidValue(
+                "bind the adapter to a session or to a session factory",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         self._session = session
         self._sessions = sessions
         self._clock = clock or (lambda: datetime.now(UTC))
@@ -499,7 +508,10 @@ class AgentOperationAdapter:
                 return "failed", None
             case State.CANCELLED:
                 return "cancelled", None
-        raise ValueError(f"unmapped lifecycle state {after.state}")  # pragma: no cover
+        raise UnsettledOutcome(  # pragma: no cover
+            f"unmapped lifecycle state {after.state}",
+            reason=WaitReason.REPORT_UNCERTAIN,
+        )
 
     def _scheduled_reason(
         self, operation: StoredOperation, after: Lifecycle, event_reason: str | None

@@ -52,10 +52,11 @@ from typing import Any
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LEGACY_WAIT_STATE
+from vonk_agent_protocol import LEGACY_WAIT_STATE, InvalidRequestReason
 
 from .. import agent_operation_states as aos
 from ..agent_operation_facts import aware
+from ..categorized_errors import InvalidValue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, ArtifactJob, Job
 from .adapter import Dispatch
@@ -110,7 +111,10 @@ class ArtifactJobAdapter:
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if (session is None) == (sessions is None):
-            raise ValueError("bind the adapter to a session or to a session factory")
+            raise InvalidValue(
+                "bind the adapter to a session or to a session factory",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         self._session = session
         self._sessions = sessions
         self._clock = clock or (lambda: datetime.now(UTC))

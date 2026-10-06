@@ -88,3 +88,19 @@ def test_new_sites_become_one_family_per_module_and_category() -> None:
 def test_listed_sites_are_not_proposed_again() -> None:
     sites = scan_raises()
     assert propose_families(sites, load_allowlist()) == []
+
+
+@pytest.mark.parametrize(
+    ("cls", "category"),
+    [
+        ("InvalidValue", INPUT),
+        ("MissingRecord", INPUT),
+        ("SecurityRefused", SECURITY),
+        ("UnsettledOutcome", RETRIED),
+        ("AdmissionLockBusy", RETRIED),
+    ],
+)
+def test_a_class_of_a_category_type_names_its_family(cls: str, category: str) -> None:
+    """The error type decides, whatever the message says."""
+
+    assert classify(_site(cls, "stored plan is missing")).category == category

@@ -26,6 +26,7 @@ import sys
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import cache
 
 from vonk_agent_protocol import SECURITY_REFUSAL_SUFFIXES, BlockerCategory
 
@@ -188,6 +189,45 @@ _DEBT_TEXT = re.compile(
 )
 
 
+#: The contract's raisable base of each category, and the family category a raise
+#: of a class derived from it belongs to.  A class names its category by its type:
+#: an unknown outcome is observed and reconciled by the lifecycle core, so a raise
+#: of one is a handoff and never a dead end.
+_TYPED_BASES = {
+    "SecurityRefusalError": SECURITY,
+    "InvalidRequestError": INPUT,
+    "UnknownOutcomeError": RETRIED,
+}
+
+
+@cache
+def _typed_classes() -> dict[str, str]:
+    """Local classes that derive from one of the three category bases."""
+
+    bases: dict[str, set[str]] = defaultdict(set)
+    for tree in parsed_modules(CONTROL_SOURCE_ROOT).values():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                for base in node.bases:
+                    if isinstance(base, ast.Name):
+                        bases[node.name].add(base.id)
+                    elif isinstance(base, ast.Attribute):
+                        bases[node.name].add(base.attr)
+    typed = dict(_TYPED_BASES)
+    grew = True
+    while grew:
+        grew = False
+        for name, parents in sorted(bases.items()):
+            if name in typed:
+                continue
+            for parent in sorted(parents):
+                if parent in typed:
+                    typed[name] = typed[parent]
+                    grew = True
+                    break
+    return typed
+
+
 @dataclass(frozen=True)
 class Verdict:
     category: str
@@ -289,6 +329,11 @@ def classify(site: RaiseSite) -> Verdict:
 
     if site.exception_class in _CLASS_VERDICTS:
         return Verdict(*_CLASS_VERDICTS[site.exception_class])
+    typed = _typed_classes().get(site.exception_class)
+    if typed is not None:
+        return Verdict(
+            typed, f"class {site.exception_class} is of the {typed} error type"
+        )
     if (rule := _uncertain_class(site)) is not None:
         return Verdict(DEBT, rule)
     if (rule := _security_class(site)) is not None:

@@ -58,7 +58,7 @@
   },
   "categorized_raises": {
     "note": "Raises in a lifecycle or operation path that predate the rule that they use SecurityRefusalError, InvalidRequestError or UnknownOutcomeError. A module's count and the ceiling only fall: convert a raise to a categorized type, then lower the count.",
-    "ceiling": 1723,
+    "ceiling": 1720,
     "grandfathered": {
       "control/src/vonk_control/agent_jobs.py": 69,
       "control/src/vonk_control/agent_upgrades.py": 41,
@@ -73,8 +73,6 @@
       "control/src/vonk_control/host_runtime_plan_authority.py": 43,
       "control/src/vonk_control/install_admission.py": 30,
       "control/src/vonk_control/jobs.py": 16,
-      "control/src/vonk_control/lifecycle/agent_operation.py": 2,
-      "control/src/vonk_control/lifecycle/artifact_job.py": 1,
       "control/src/vonk_control/lifecycle/recipe_operation.py": 1,
       "control/src/vonk_control/model_cache.py": 239,
       "control/src/vonk_control/profile_stop_authority.py": 3,
@@ -3078,6 +3076,30 @@
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionStorageError", "FleetProfileService._admission_session", "profile-admission-database-constraint", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._queue_application", "message", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._reserve_preview_assets", "message", 1]
+      ]
+    },
+    {
+      "family": "agent_operation.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class UnsettledOutcome is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/lifecycle/agent_operation.py", "UnsettledOutcome", "AgentOperationAdapter._stored", "unmapped-lifecycle-state", 1]
+      ]
+    },
+    {
+      "family": "agent_operation.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InvalidValue is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/lifecycle/agent_operation.py", "InvalidValue", "AgentOperationAdapter.__init__", "bind-the-adapter-to-a-session-or-to-a-session-factory", 1]
+      ]
+    },
+    {
+      "family": "artifact_job.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InvalidValue is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/lifecycle/artifact_job.py", "InvalidValue", "ArtifactJobAdapter.__init__", "bind-the-adapter-to-a-session-or-to-a-session-factory", 1]
       ]
     }
   ]
