@@ -1752,6 +1752,21 @@ class SparkLifecycle:
             cwd=self.temporary_root,
             timeout=30,
         )
+        # Retire every pre-restart lease using Controller time. A buffered
+        # receipt from the stopped process must be stale even if the network
+        # delivers it after the relay is released. The Controller still owns
+        # every expiry/retry transition; this observer never writes SQL.
+        expiry_deadline = time.monotonic() + 120
+        while True:
+            leases = self._psql(
+                "SELECT count(*) FROM agent_operation_attempts "
+                f"WHERE operation_id='{operation_id}' AND lease_deadline>clock_timestamp()"
+            )
+            if leases == [["0"]]:
+                break
+            if time.monotonic() >= expiry_deadline:
+                raise LifecycleError("pre-restart Start leases did not expire")
+            time.sleep(1)
         self._run_command(
             ["sudo", "/usr/bin/systemctl", "start", "vonk-forge-agent.service"],
             cwd=self.temporary_root,
