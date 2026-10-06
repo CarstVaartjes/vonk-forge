@@ -158,9 +158,17 @@ class RecipeStartParent(_RecipeParent):
     recovery: DistributedRecoveryMarker | None = None
 
 
+class ProfilePartialStop(_Document):
+    """The reachable ranks a profile Stop reaches and the ranks it cannot."""
+
+    target_node_ids: list[NodeText] = Field(min_length=1, max_length=32)
+    missing_node_ids: list[NodeText] = Field(min_length=1, max_length=31)
+
+
 class RecipeStopParent(_RecipeParent):
     phases: list[list[StopPhaseOperation]] | None = None
     recovery: DistributedRecoveryMarker | None = None
+    profile_partial_stop: ProfilePartialStop | None = None
 
 
 class RecipeUninstallParent(_RecipeParent):
