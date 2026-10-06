@@ -1884,6 +1884,8 @@ class ModelCacheService:
         self._max_parallel_downloads = max_parallel_downloads
         self._streams = StreamGovernor(max_download_streams)
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._removal_gate_after: tuple[str, str] | None = None
+        self._removal_request_after: str | None = None
         self._http = http_client
         # Local file and caller-supplied HTTP sources are useful for isolated
         # fixture tests, but are never enabled by the production constructor.
@@ -4092,15 +4094,23 @@ class ModelCacheService:
             return 0  # a borrowed SQL transaction cannot precede a storage lock
         with self._session() as session:
             requests = []
+            observed_request = False
             for operation in session.scalars(
                 select(ModelCacheOperation)
                 .where(
                     ModelCacheOperation.kind.in_(("download", "repair")),
                     ModelCacheOperation.state.in_(model_cache_states.LIVE),
                 )
-                .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
+                .where(
+                    ModelCacheOperation.id > self._removal_request_after
+                    if self._removal_request_after is not None
+                    else True
+                )
+                .order_by(ModelCacheOperation.id)
                 .limit(limit)
             ):
+                observed_request = True
+                self._removal_request_after = operation.id
                 payload = self._payload_or_none(operation)
                 if payload is None or payload.get("cancellation") is not None:
                     continue
@@ -4141,8 +4151,13 @@ class ModelCacheService:
                             identity_map[(gate.artifact_kind, gate.artifact_sha256)],
                         )
                     )
+            if not observed_request:
+                self._removal_request_after = None
         changed = 0
+        deadline = time.monotonic() + 0.25
         for request_id, identity in requests[:limit]:
+            if time.monotonic() >= deadline:
+                break
 
             def validate(
                 requester: ModelCacheOperation | Job,
@@ -4226,10 +4241,19 @@ class ModelCacheService:
             return 0
         with self._session() as session:
             identities = dead_removal_identities(
-                session, owner_kind="model-cache-operation", limit=limit
+                session,
+                owner_kind="model-cache-operation",
+                limit=limit,
+                after=self._removal_gate_after,
             )
+        if not identities:
+            self._removal_gate_after = None
         released = 0
+        deadline = time.monotonic() + 0.25
         for identity in identities:
+            if time.monotonic() >= deadline:
+                break
+            self._removal_gate_after = (identity.kind, identity.sha256)
             try:
                 with (
                     self._model_storage_lock(

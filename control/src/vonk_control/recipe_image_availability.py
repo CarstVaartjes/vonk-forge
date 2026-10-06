@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
@@ -871,6 +872,8 @@ class RecipeImageAvailabilityService:
         self._transport = transport
         self._builder = builder
         self._clock = clock
+        self._removal_gate_after: tuple[str, str] | None = None
+        self._removal_request_after: str | None = None
         self._lifecycle = ImageAvailabilityAdapter(clock=clock)
         self._model_cache = model_cache
         self._max_parallel = max_parallel
@@ -2123,6 +2126,7 @@ class RecipeImageAvailabilityService:
         """Reconcile only the exact deletion dependencies bound at acceptance."""
         with self._sessions() as session:
             requests = []
+            observed_request = False
             for operation in session.scalars(
                 select(Job)
                 .where(
@@ -2131,9 +2135,16 @@ class RecipeImageAvailabilityService:
                         job_states.words(LifecycleState.QUEUED, LifecycleState.BACKOFF)
                     ),
                 )
-                .order_by(Job.updated_at, Job.id)
+                .where(
+                    Job.id > self._removal_request_after
+                    if self._removal_request_after is not None
+                    else True
+                )
+                .order_by(Job.id)
                 .limit(limit)
             ):
+                observed_request = True
+                self._removal_request_after = operation.id
                 try:
                     payload = read_stored_model(
                         AvailabilityJobPayload, operation.payload
@@ -2158,8 +2169,13 @@ class RecipeImageAvailabilityService:
                             ArtifactIdentity("runtime-image", gate.artifact_sha256),
                         )
                     )
+            if not observed_request:
+                self._removal_request_after = None
         changed = 0
+        deadline = time.monotonic() + 0.25
         for request_id, identity in requests[:limit]:
+            if time.monotonic() >= deadline:
+                break
 
             def validate(
                 requester: ModelCacheOperation | Job,
@@ -2219,10 +2235,19 @@ class RecipeImageAvailabilityService:
     def reconcile_removal_gates(self, *, limit: int = 64) -> int:
         with self._sessions() as session:
             identities = dead_removal_identities(
-                session, owner_kind="recipe-image-job", limit=limit
+                session,
+                owner_kind="recipe-image-job",
+                limit=limit,
+                after=self._removal_gate_after,
             )
+        if not identities:
+            self._removal_gate_after = None
         released = 0
+        deadline = time.monotonic() + 0.25
         for identity in identities:
+            if time.monotonic() >= deadline:
+                break
+            self._removal_gate_after = (identity.kind, identity.sha256)
             if identity.kind != "runtime-image":
                 continue
             try:
