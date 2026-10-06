@@ -549,13 +549,8 @@ class StaleAgentAttempt(RuntimeError):
     """
 
 
-class AgentRunAdmissionBusy(UnknownOutcomeError, RunAdmissionBusy):
+class AgentRunAdmissionBusy(RunAdmissionBusy):
     """The run capacity writer is busy: the enqueue is retried by its owner."""
-
-    def __init__(self, message: str = "", **kwargs: Any) -> None:
-        reason = kwargs.pop("reason", WaitReason.OBSERVATION_UNAVAILABLE)
-        super().__init__(message, **kwargs)
-        self.typed_reason = reason
 
 
 class StaleAgentFence(SecurityRefusalError, StaleAgentAttempt):

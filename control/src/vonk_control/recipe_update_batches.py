@@ -17,10 +17,12 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    InvalidRequestReason,
     LifecycleState,
     LifecycleSubject,
     OperationProgress,
     SecurityRefusalReason,
+    WaitReason,
 )
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -28,6 +30,7 @@ from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from . import job_states
 from .auth import MUTATION_ROLES
 from .catalog_queries import active_head_revision
+from .categorized_errors import InvalidValue, MissingRecord
 from .lifecycle import State
 from .lifecycle.recipe_update_batch import RecipeUpdateBatchAdapter
 from .logging import redact_text
@@ -39,6 +42,11 @@ from .operation_api import (
     _activity_keyset_filter,
 )
 from .recipe_availability_intent import RecipeRevisionIntent
+from .recipe_image_availability import (
+    RecipeImageAvailabilityInvalid,
+    RecipeImageAvailabilityRefused,
+    RecipeImageAvailabilityUnknown,
+)
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import (
     UPDATE_KIND,
@@ -94,13 +102,6 @@ def _now(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def _error(code: str, detail: str, *, retryable: bool = False):
-    # The helper belongs to this service; importing lazily avoids a module cycle.
-    from .recipe_image_availability import RecipeImageAvailabilityError
-
-    return RecipeImageAvailabilityError(code, detail, retryable=retryable)
-
-
 class RecipeUpdateBatches:
     def __init__(
         self, owner: RecipeImageAvailabilityService, sessions: sessionmaker[Session]
@@ -113,21 +114,25 @@ class RecipeUpdateBatches:
         try:
             document = read_update_document(job.payload)
         except (ValueError, TypeError) as error:
-            raise _error(
-                "recipe_update.operation_invalid", "stored update document is invalid"
+            raise RecipeImageAvailabilityInvalid(
+                "recipe_update.operation_invalid",
+                "stored update document is invalid",
+                retryable=False,
             ) from error
         if job.kind != UPDATE_KIND or _binding_digest(document) != job.payload_digest:
-            raise _error(
+            raise RecipeImageAvailabilityInvalid(
                 "recipe_update.operation_invalid",
                 "stored update scope does not match its accepted identity",
+                retryable=False,
             )
         if any(
             child.operation_id == job.id or child.request_key == job.request_id
             for child in document.children
         ):
-            raise _error(
+            raise RecipeImageAvailabilityInvalid(
                 "recipe_update.operation_invalid",
                 "update dependency graph contains a cycle",
+                retryable=False,
             )
         return document
 
@@ -140,24 +145,29 @@ class RecipeUpdateBatches:
             or user.disabled_at is not None
             or user.role not in MUTATION_ROLES[("POST", "/api/recipe/update")]
         ):
-            raise _error(
+            raise RecipeImageAvailabilityRefused(
                 SecurityRefusalReason.RECIPE_UPDATE_AUTHORITY_DENIED.value,
                 "recipe update authority is no longer available",
+                retryable=False,
             )
 
     def _matching(
         self, job: Job, actor: str, scope: RecipeUpdateScope
     ) -> RecipeUpdateResponse:
         if job.kind != UPDATE_KIND or job.actor != actor:
-            raise _error(
+            raise RecipeImageAvailabilityInvalid(
                 "recipe_update.request_key_reused",
                 "request key was already used for another operation",
+                reason=InvalidRequestReason.CONFLICT,
+                retryable=False,
             )
         document = self._document(job)
         if document.request != scope:
-            raise _error(
+            raise RecipeImageAvailabilityInvalid(
                 "recipe_update.request_key_reused",
                 "request key was already used for another scope",
+                reason=InvalidRequestReason.CONFLICT,
+                retryable=False,
             )
         return self._view(job, document)
 
@@ -231,9 +241,10 @@ class RecipeUpdateBatches:
                     or revision.state != "active"
                     or revision.execution_key is None
                 ):
-                    raise _error(
+                    raise RecipeImageAvailabilityInvalid(
                         "recipe_update.scope_invalid",
                         "selected recipe revision is no longer available",
+                        retryable=False,
                     )
                 children.append(
                     RecipeUpdateChild(
@@ -314,9 +325,10 @@ class RecipeUpdateBatches:
         )
         size = max(len(_encoded(worst)), len(_encoded(response)))
         if size > MAX_CONTROL_DOCUMENT_BYTES:
-            raise _error(
+            raise RecipeImageAvailabilityInvalid(
                 "recipe_update.scope_invalid",
                 f"complete update scope requires up to {size} bytes; document limit is {MAX_CONTROL_DOCUMENT_BYTES} bytes",
+                retryable=False,
             )
 
     def _view(self, job: Job, document: RecipeUpdateDocument) -> RecipeUpdateResponse:
@@ -362,7 +374,7 @@ class RecipeUpdateBatches:
         with self.sessions() as session:
             job = session.get(Job, operation_id)
             if job is None or job.kind != UPDATE_KIND:
-                raise KeyError(operation_id)
+                raise MissingRecord(operation_id)
             return self._view(job, self._document(job))
 
     def cancel(
@@ -378,7 +390,7 @@ class RecipeUpdateBatches:
                 .with_for_update(nowait=True)
             )
             if job is None:
-                raise KeyError(operation_id)
+                raise MissingRecord(operation_id)
             self.owner._request_cancellation(
                 session,
                 job,
@@ -398,7 +410,10 @@ class RecipeUpdateBatches:
         )
 
         if not 1 <= limit <= 100:
-            raise ValueError("update cancellation limit is invalid")
+            raise InvalidValue(
+                "update cancellation limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         with self.sessions() as session:
             operation_ids = tuple(
                 session.scalars(
@@ -672,12 +687,15 @@ class RecipeUpdateBatches:
         with self.sessions() as session:
             job = session.get(Job, operation_id)
             if job is None or job.kind != UPDATE_KIND:
-                raise KeyError(operation_id)
+                raise MissingRecord(operation_id)
             return self._activity_item(job)
 
     def _activity_list(self, query: OperationQuery) -> OperationListPage:
         if not 1 <= query.limit <= 101:
-            raise ValueError("operation provider page limit is invalid")
+            raise InvalidValue(
+                "operation provider page limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         if query.node_id is not None:
             return OperationListPage((), None, 0)
         filters = [Job.kind == UPDATE_KIND]
@@ -707,7 +725,7 @@ class RecipeUpdateBatches:
         from .recipe_image_availability import RecipeImageAvailabilityError
 
         if not owner or len(owner) > 95:
-            raise ValueError("update worker owner must contain 1 to 95 characters")
+            raise InvalidValue("update worker owner must contain 1 to 95 characters")
         now = _now(self.owner._clock())
         with self.sessions() as session:
             candidates = list(
@@ -769,8 +787,11 @@ class RecipeUpdateBatches:
             .with_for_update(nowait=True)
         )
         if job is None:
-            raise _error(
-                "recipe_update.claim_lost", "recipe update no longer owns its claim"
+            raise RecipeImageAvailabilityUnknown(
+                "recipe_update.claim_lost",
+                "recipe update no longer owns its claim",
+                reason=WaitReason.LEASE_LAPSED,
+                retryable=False,
             )
         document = self._document(job)
         if (
@@ -779,8 +800,11 @@ class RecipeUpdateBatches:
             or document.claim_until is None
             or document.claim_until <= _now(self.owner._clock())
         ):
-            raise _error(
-                "recipe_update.claim_lost", "recipe update no longer owns its claim"
+            raise RecipeImageAvailabilityUnknown(
+                "recipe_update.claim_lost",
+                "recipe update no longer owns its claim",
+                reason=WaitReason.LEASE_LAPSED,
+                retryable=False,
             )
         return job, document
 
@@ -800,9 +824,10 @@ class RecipeUpdateBatches:
             (item for item in document.children if item.request_key == request_id), None
         )
         if job.actor != actor or child is None or intent != self._intent(child):
-            raise _error(
+            raise RecipeImageAvailabilityInvalid(
                 "recipe_update.operation_invalid",
                 "child admission does not match the accepted update scope",
+                retryable=False,
             )
         revision = session.get(CatalogDocumentRevision, child.recipe_revision_id)
         if (
@@ -810,9 +835,10 @@ class RecipeUpdateBatches:
             or revision.content_digest != child.recipe_content_sha256
             or revision.execution_key != child.effective_execution_key
         ):
-            raise _error(
+            raise RecipeImageAvailabilityInvalid(
                 "recipe_update.operation_invalid",
                 "child recipe no longer matches the accepted update identity",
+                retryable=False,
             )
 
     @staticmethod
@@ -866,9 +892,10 @@ class RecipeUpdateBatches:
                         and child.operation_id != observed.id
                     )
                 ):
-                    raise _error(
+                    raise RecipeImageAvailabilityInvalid(
                         "recipe_update.operation_invalid",
                         "child receipt does not match its frozen recipe identity",
+                        retryable=False,
                     )
                 child.operation_id = observed.id
                 child.state = cast(UpdateState, observed.state)
