@@ -1711,19 +1711,22 @@ class SparkLifecycle:
         ):
             raise LifecycleError("lost Start receipt identity is invalid")
         rows = self._psql(
-            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,o.kind,o.node_id,a.state "
+            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,o.kind,o.node_id,a.state,COALESCE(o.payload->>'phase','single') "
             "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
             f"WHERE a.fence='{fence}'"
         )
-        if len(rows) != 1 or len(rows[0]) != 7:
+        if len(rows) != 1 or len(rows[0]) != 8:
             raise LifecycleError("lost Start receipt has no accepted Controller claim")
-        operation_id, payload_digest, run_id, attempt, kind, owner, state = rows[0]
+        operation_id, payload_digest, run_id, attempt, kind, owner, state, phase = rows[
+            0
+        ]
         if (
             UUID.fullmatch(operation_id) is None
             or SHA256.fullmatch(payload_digest) is None
             or UUID.fullmatch(run_id) is None
             or not attempt.isdigit()
             or kind != "recipe.start"
+            or phase != "single"
             or owner != node_id
             or state != "running"
         ):
