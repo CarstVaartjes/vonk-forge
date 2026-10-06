@@ -176,10 +176,7 @@ def repair_standard_runner(
         )
         or source_preinst.count(b'intent_text="schema_version=2\n') != 1
         or source_preinst.count(b'capsule_manifest_text="schema_version=2\n') != 1
-        or source_preinst.count(
-            b'[ "$(/usr/bin/wc -l < "$intent")" -eq 17 ]'
-        )
-        != 1
+        or source_preinst.count(b'[ "$(/usr/bin/wc -l < "$intent")" -eq 17 ]') != 1
     ):
         raise BuildError("repair source runner does not implement schema-2 recovery")
     source_recovery_capsule_unit = source_at_revision(
@@ -438,6 +435,7 @@ def read_repair_authority(
             subprocess.run(
                 ["/usr/bin/dpkg", "--compare-versions", older, "lt", newer],
                 check=False,
+                timeout=30,
             ).returncode
             != 0
         ):
@@ -971,7 +969,9 @@ def build(
             or source_revision_match is None
             or not binary_source_revision.startswith(source_revision_match.group(1))
         ):
-            raise BuildError("repair source revisions are invalid or version-mismatched")
+            raise BuildError(
+                "repair source revisions are invalid or version-mismatched"
+            )
         repair_evidence = {
             "authority_sha256": hashlib.sha256(repair_authority_raw).hexdigest(),
             "binary_source_revision": binary_source_revision,
@@ -1024,7 +1024,12 @@ def build(
                 0o555,
             )
         if RUNTIME_PROBE_BINARY in binaries:
-            install_file(stage, "usr/lib/vonk-forge/vonk-runtime-probe", binaries[RUNTIME_PROBE_BINARY], 0o555)
+            install_file(
+                stage,
+                "usr/lib/vonk-forge/vonk-runtime-probe",
+                binaries[RUNTIME_PROBE_BINARY],
+                0o555,
+            )
         install_file(stage, "usr/lib/vonk-forge/oras", binaries["oras"], 0o555)
         install_file(
             stage,
@@ -1224,9 +1229,7 @@ def build(
         install_file(
             stage,
             "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
-            (
-                standard_runner if repair_preinst is not None else preinst
-            ),
+            (standard_runner if repair_preinst is not None else preinst),
             0o555,
         )
         if repair_preinst is not None:
@@ -1271,9 +1274,7 @@ def build(
             "vonk-forge-package-upgrade-recover": preinst,
         }
         if repair_preinst is not None:
-            evidence_binaries["vonk-forge-package-upgrade-recover"] = (
-                standard_runner
-            )
+            evidence_binaries["vonk-forge-package-upgrade-recover"] = standard_runner
             evidence_binaries["vonk-forge-package-upgrade-recover.standard"] = (
                 standard_runner
             )

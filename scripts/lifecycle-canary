@@ -219,7 +219,17 @@ class Canary:
         application = self.start_load()
         if self.restart_command:
             self.say(f"restarting the Controller: {self.restart_command}")
-            done = subprocess.run(shlex.split(self.restart_command), check=False)
+            try:
+                done = subprocess.run(
+                    shlex.split(self.restart_command),
+                    check=False,
+                    timeout=self.minutes * 60,
+                )
+            except subprocess.TimeoutExpired as error:
+                raise CanaryFailure(
+                    f"Controller restart command exceeded {self.minutes * 60:g}s; "
+                    "restart outcome unconfirmed"
+                ) from error
             if done.returncode != 0:
                 raise CanaryFailure(f"restart command failed (exit {done.returncode})")
         else:

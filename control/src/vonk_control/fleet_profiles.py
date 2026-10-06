@@ -81,6 +81,7 @@ from .fleet_profile_contract import (
     FleetNodeView,
     FleetProfileAction,
     FleetProfileAdmissionDecision,
+    FleetProfileAdoptedApplicationEffect,
     FleetProfileApplicationCancellationIntent,
     FleetProfileApplicationCancellationView,
     FleetProfileApplicationEffect,
@@ -188,6 +189,7 @@ from .operation_item_contract import (
 from .operation_progress import project_progress
 from .preparation_contract import RolloutPreparation, RuntimeImageIdentity
 from .profile_capacity import (
+    release_replaced_profile_claims,
     release_unassigned_profile_claims,
     reserve_profile_disk,
     reserve_profile_memory,
@@ -547,7 +549,16 @@ def _persisted_profile_plan(
 def _profile_application_effect_nodes(plan: FleetProfilePreview) -> tuple[str, ...]:
     """Return the exact sorted node scope of reviewed profile effects."""
 
-    return tuple(sorted({node_id for step in plan.steps for node_id in step.node_ids}))
+    return tuple(
+        sorted(
+            {node_id for step in plan.steps for node_id in step.node_ids}
+            | {
+                node_id
+                for effect in plan.effects.adopted
+                for node_id in effect.node_ids
+            }
+        )
+    )
 
 
 def _application_effect_scope(row: FleetProfileApplication) -> tuple[str, ...]:
@@ -1817,11 +1828,17 @@ class RunSwitchFleetProfileAdapter:
         reviewed: FleetProfilePreview,
     ) -> None:
         live_scope = set(reviewed.scope.node_ids)
+        adopted_assignments = {
+            assignment_id
+            for effect in reviewed.effects.adopted
+            for assignment_id in effect.assignment_ids
+        }
         node_ids = tuple(
             sorted(
                 {
                     node.node_id
                     for assignment in assignments
+                    if assignment.id not in adopted_assignments
                     for node in assignment.nodes
                 }
                 & live_scope
@@ -1864,6 +1881,7 @@ class RunSwitchFleetProfileAdapter:
             item.assignment_id
             for item in reviewed.assignments
             if item.current_state != item.desired_state
+            and item.assignment_id not in adopted_assignments
         }
         for assignment in assignments:
             if (
@@ -1960,6 +1978,9 @@ class RunSwitchFleetProfileAdapter:
         if state is None:
             raise MissingRecord(application_id, reason=InvalidRequestReason.NOT_FOUND)
         cancelling = _persisted_profile_progress(application).cancellation is not None
+        adopted_scope = FleetProfileService._adopted_application_scope(
+            session, application
+        )
         active = state.get("active_operation_id")
         position = state.get("position")
         queue_state = sequence(state.get("queue")) or ()
@@ -2181,13 +2202,45 @@ class RunSwitchFleetProfileAdapter:
                 else next(
                     (
                         reason
-                        for reason in reviewed.reasons
+                        for reason in (
+                            reviewed.reasons
+                            if adopted_scope is None
+                            else [
+                                reason
+                                for assignment in reviewed.assignments
+                                if set(assignment.node_ids) <= set(adopted_scope)
+                                for reason in assignment.reasons
+                            ]
+                        )
                         if reason.code == ProfileReasonCode.INCOMPLETE_MULTI_SPARK_MODEL
                     ),
                     None,
                 )
             )
             failures = sequence(state.get("assignment_failures")) or ()
+            aggregate_children = sequence(state.get("children")) or ()
+            if adopted_scope is not None:
+                # Receipts retain the original application's complete history;
+                # unrelated ended lanes cannot poison an adopted lane's outcome.
+                def in_adopted_scope(item: object) -> bool:
+                    if not isinstance(item, Mapping):
+                        return False
+                    operation_id = item.get("operation_id")
+                    job = (
+                        session.get(Job, operation_id)
+                        if isinstance(operation_id, str)
+                        else None
+                    )
+                    return (
+                        job is not None
+                        and bool(job.targets)
+                        and set(job.targets) <= set(adopted_scope)
+                    )
+
+                aggregate_children = tuple(
+                    item for item in aggregate_children if in_adopted_scope(item)
+                )
+                failures = tuple(item for item in failures if in_adopted_scope(item))
             # The load's state is the aggregate of its children: a recorded failure
             # (or a model the reviewed plan could not complete) is a failed child;
             # otherwise every child ended well.
@@ -2196,9 +2249,7 @@ class RunSwitchFleetProfileAdapter:
                 "failed"
                 if incomplete_model is not None or failures
                 else _stored_state(
-                    FleetProfileAdapter.recorded_aggregate(
-                        sequence(state.get("children")) or ()
-                    )
+                    FleetProfileAdapter.recorded_aggregate(aggregate_children)
                 ),
             )
             first_failure = next(
@@ -2221,8 +2272,34 @@ class RunSwitchFleetProfileAdapter:
             )
             state["result"] = {
                 "children": list(sequence(state.get("children")) or ()),
-                "assignment_ids": list(sequence(state.get("assignment_ids")) or ()),
+                "assignment_ids": (
+                    [
+                        assignment.id
+                        for assignment in assignments
+                        if {node.node_id for node in assignment.nodes}
+                        <= set(adopted_scope)
+                    ]
+                    if adopted_scope is not None
+                    else list(sequence(state.get("assignment_ids")) or ())
+                ),
             }
+            if adopted_scope is not None and state["status_reason"] is None:
+                state["status_reason"] = (
+                    "Adopted assignments reconciled; other assignments were replaced "
+                    "by the selected profile"
+                )
+            self._write_state(session, application, state)
+            session.flush()
+            return self._view_from_state(application, state)
+        # Queue positions own deterministic child request identities. Skip old
+        # unissued effects without renumbering or dropping an in-flight child.
+        while adopted_scope is not None and (integer(position) or 0) < len(queue):
+            item = queue[integer(position) or 0]
+            if self._queue_item_in_scope(session, application, item, adopted_scope):
+                break
+            position = (integer(position) or 0) + 1
+            state["position"] = position
+        if (integer(position) or 0) >= len(queue):
             self._write_state(session, application, state)
             session.flush()
             return self._view_from_state(application, state)
@@ -2256,11 +2333,29 @@ class RunSwitchFleetProfileAdapter:
             self._write_state(session, application, state)
             session.flush()
             return self._view_from_state(application, state)
+        # Adoption-scope reads also query the session. Keep the entire read
+        # path from flushing a lost child's pending mirror before its owner
+        # starts a replacement in a separate transaction.
+        with session.no_autoflush:
+            pending_cancellation = (
+                None
+                if item.get("kind") == "stop"
+                else self._observe_superseded_agent_effects(
+                    session, application, state, before_dispatch=True
+                )
+            )
+        if pending_cancellation is not None:
+            # A newer selected effect may own the fence while an older executor
+            # still runs. Observe its exact cleanup before issuing replacement
+            # work; unrelated adopted scopes retain their execution path.
+            return pending_cancellation
         operation = self._start_child(
             application_id,
             item,
             assignments,
-            tuple(
+            adopted_scope
+            if adopted_scope is not None
+            else tuple(
                 str(node_id)
                 for node_id in (sequence(state.get("scope_node_ids")) or ())
             ),
@@ -2296,6 +2391,56 @@ class RunSwitchFleetProfileAdapter:
         session.flush()
         return self._view_from_child(application_id, state, operation)
 
+    @staticmethod
+    def _queue_item_in_scope(
+        session: Session,
+        application: FleetProfileApplication,
+        item: object,
+        scope: tuple[str, ...],
+    ) -> bool:
+        """Prove an unissued effect stays inside a complete adopted lane."""
+        if not isinstance(item, Mapping):
+            return False
+        reviewed = _persisted_profile_plan(application)
+        intended = FleetProfileService._intended_profile(application, session=session)
+        if isinstance(reviewed, Residue) or isinstance(intended, Residue):
+            return False
+        kind, identity = item.get("kind"), item.get("id")
+        nodes: set[str] | None = None
+        if kind in {"run", "install"}:
+            assignment = next(
+                (value for value in intended.assignments if value.id == identity), None
+            )
+            if assignment is not None:
+                nodes = {node.node_id for node in assignment.nodes}
+        elif kind == "stop":
+            effect = next(
+                (
+                    value
+                    for value in reviewed.effects.runs
+                    if value.run_id == identity and value.action == "stop"
+                ),
+                None,
+            )
+            if effect is not None:
+                nodes = set(
+                    effect.profile_stop_scope.target_node_ids
+                    if effect.profile_stop_scope is not None
+                    else effect.node_ids
+                )
+        elif kind == "cleanup":
+            removal = next(
+                (
+                    value
+                    for value in reviewed.effects.installations
+                    if value.installation_id == identity and value.action == "remove"
+                ),
+                None,
+            )
+            if removal is not None:
+                nodes = set(removal.node_ids)
+        return nodes is not None and bool(nodes) and nodes <= set(scope)
+
     def _observed_child(self, operation_id: str) -> RunSwitchOperation | None:
         """The Run/Switch child, or ``None`` when its record is gone (recorded)."""
 
@@ -2315,6 +2460,8 @@ class RunSwitchFleetProfileAdapter:
         session: Session,
         application: FleetProfileApplication,
         state: dict[str, object],
+        *,
+        before_dispatch: bool = False,
     ) -> FleetProfileChildOperation | None:
         """Wait for older issued cancellation receipts before a switch succeeds."""
 
@@ -2340,12 +2487,26 @@ class RunSwitchFleetProfileAdapter:
             state.get("scope_node_ids"),
             fallback=_persisted_profile_scope(application) or (),
         )
-        AgentJobService.abandon_superseded_idempotent_operations_in_session(
-            session, scope_node_ids, ordinal, now
+        adopted_scope = FleetProfileService._adopted_application_scope(
+            session, application
         )
-        effects = AgentJobService.assess_superseded_agent_effects_in_session(
-            session, scope_node_ids, ordinal, now
-        )
+        if cancellation is None and adopted_scope is not None:
+            scope_node_ids = list(adopted_scope)
+        if before_dispatch:
+            # A lost child has an unflushed mirror update. The new child's
+            # owner opens its own transaction, so this read must neither flush
+            # that update nor acquire mutation locks before dispatch.
+            with session.no_autoflush:
+                effects = AgentJobService.assess_superseded_agent_effects_in_session(
+                    session, scope_node_ids, ordinal, now
+                )
+        else:
+            AgentJobService.abandon_superseded_idempotent_operations_in_session(
+                session, scope_node_ids, ordinal, now
+            )
+            effects = AgentJobService.assess_superseded_agent_effects_in_session(
+                session, scope_node_ids, ordinal, now
+            )
         if not effects:
             state["observation_due_at"] = None
             state["observation_deadline_at"] = None
@@ -2469,7 +2630,9 @@ class RunSwitchFleetProfileAdapter:
                 RunSwitchCleanupPreviewRequest(installation_id=installation_id),
                 actor=actor,
             )
-            self._validate_child_effects(reviewed, cleanup_preview)
+            self._validate_child_effects(
+                reviewed, cleanup_preview, execution_scope=scope_node_ids
+            )
             return self._run_switch.apply_cleanup(
                 RunSwitchCleanupApplyRequest(
                     installation_id=installation_id,
@@ -2507,7 +2670,9 @@ class RunSwitchFleetProfileAdapter:
                     run_id, profile_stop_scope, actor=actor
                 )
             )
-            self._validate_child_effects(reviewed, preview)
+            self._validate_child_effects(
+                reviewed, preview, execution_scope=scope_node_ids
+            )
             if profile_stop_scope is not None:
                 return self._run_switch.apply_profile_stop(
                     run_id,
@@ -2579,7 +2744,7 @@ class RunSwitchFleetProfileAdapter:
                 "profile child plan blocked: "
                 + "; ".join(reason.code for reason in plan.blockers[:8])
             )
-        self._validate_child_effects(reviewed, plan)
+        self._validate_child_effects(reviewed, plan, execution_scope=scope_node_ids)
         return self._run_switch.apply(
             request.model_copy(update={"plan_digest": plan.plan_digest}),
             actor=actor,
@@ -2601,10 +2766,15 @@ class RunSwitchFleetProfileAdapter:
 
     @staticmethod
     def _validate_child_effects(
-        reviewed: FleetProfilePreview, child: RunSwitchPlan
+        reviewed: FleetProfilePreview,
+        child: RunSwitchPlan,
+        *,
+        execution_scope: tuple[str, ...] | None = None,
     ) -> None:
         """A fresh child plan cannot enlarge the accepted parent's consent."""
         execution_nodes = {node for step in reviewed.steps for node in step.node_ids}
+        if execution_scope is not None:
+            execution_nodes &= set(execution_scope)
         child_targets = (
             set(child.profile_stop_scope.target_node_ids)
             if child.profile_stop_scope is not None
@@ -2620,6 +2790,10 @@ class RunSwitchFleetProfileAdapter:
             if effect.action == "stop"
         }
         for stop in child.stops:
+            if not set(stop.node_ids) <= execution_nodes:
+                raise FleetProfileReviewStale(
+                    "Profile child Stop exceeds its current authorized scope"
+                )
             expected = stops.get(stop.run_id)
             if expected is None or expected.alias != stop.alias:
                 raise FleetProfileReviewStale(
@@ -2805,7 +2979,7 @@ class RunSwitchFleetProfileAdapter:
             reviewed = self._child_review(session, application_id)
             if isinstance(reviewed, Residue):
                 return reviewed
-            self._validate_child_effects(reviewed, plan)
+            self._validate_child_effects(reviewed, plan, execution_scope=scope_node_ids)
             operation_id = job.id
         return self._run_switch.get(operation_id)
 
@@ -2820,6 +2994,37 @@ class RunSwitchFleetProfileAdapter:
         reviewed_effects: FleetProfileEffects,
         expected_images: Mapping[str, RuntimeImageIdentity],
     ) -> list[dict[str, object]]:
+        adopted_assignment_ids = {
+            assignment_id
+            for effect in reviewed_effects.adopted
+            for assignment_id in effect.assignment_ids
+        }
+        adopted_nodes = {
+            node_id
+            for effect in reviewed_effects.adopted
+            for node_id in effect.node_ids
+        }
+        assignments = tuple(
+            item for item in assignments if item.id not in adopted_assignment_ids
+        )
+        scope_node_ids = tuple(
+            node for node in scope_node_ids if node not in adopted_nodes
+        )
+        application = session.get(FleetProfileApplication, application_id)
+        continuing_scope = (
+            None
+            if application is None
+            else FleetProfileService._adopted_application_scope(session, application)
+        )
+        if continuing_scope is not None:
+            scope_node_ids = tuple(
+                node for node in scope_node_ids if node in continuing_scope
+            )
+            assignments = tuple(
+                item
+                for item in assignments
+                if {node.node_id for node in item.nodes} <= set(continuing_scope)
+            )
         control = FleetProfileService._control_effects(
             session,
             assignments,
@@ -3712,6 +3917,8 @@ class FleetProfileService:
     ) -> bool:
         if progress is None:
             progress = _persisted_profile_progress(application)
+        if FleetProfileService._adopted_application_scope(session, application):
+            return True
         generation = application.selection_generation
         selection = session.get(FleetProfileSelection, 1)
         if selection is None:
@@ -4742,6 +4949,11 @@ class FleetProfileService:
             run_effects = control.effects.runs
             installation_effects = control.effects.installations
             reasons.extend(control.reasons)
+            adopted_by_assignment = {
+                identifier: session.get(FleetProfileApplication, effect.application_id)
+                for effect in control.effects.adopted
+                for identifier in effect.assignment_ids
+            }
             for assignment in resolved_assignments:
                 state = control.states[assignment.id]
                 preparation = None
@@ -4815,7 +5027,25 @@ class FleetProfileService:
                             severity="error",
                         )
                     )
-                if unavailable_nodes:
+                if assignment.id in adopted_by_assignment:
+                    owner = adopted_by_assignment[assignment.id]
+                    assert owner is not None
+                    owner_plan = _persisted_profile_plan(owner)
+                    assert not isinstance(owner_plan, Residue)
+                    assignment_assessments.extend(
+                        item
+                        for item in owner_plan.assessments
+                        if item.assignment_id == assignment.id
+                    )
+                    preparation = next(
+                        (
+                            item.preparation
+                            for item in owner_plan.preparations
+                            if item.assignment_id == assignment.id
+                        ),
+                        None,
+                    )
+                elif unavailable_nodes:
                     # A profile still covers the current fleet.  An assignment
                     # that refers to a removed Spark is deliberately not
                     # relaunched or allowed to block the other assignments.
@@ -4971,6 +5201,8 @@ class FleetProfileService:
                 actions: list[FleetProfileAction] = []
                 if unknown_nodes:
                     actions = []
+                elif assignment.id in adopted_by_assignment:
+                    actions.append("adopt")
                 elif state.current_state == assignment.desired_state:
                     actions.append("keep")
                 else:
@@ -5041,7 +5273,9 @@ class FleetProfileService:
                 builds=sum(step.kind == "build" for step in steps),
                 distributions=sum(step.kind == "distribute-image" for step in steps),
                 installs=sum(
-                    not state.installation_ready for state in control.states.values()
+                    not state.installation_ready
+                    for identifier, state in control.states.items()
+                    if identifier not in adopted_by_assignment
                 ),
                 starts=sum(
                     item.desired_state == DesiredAssignmentState.RUNNING
@@ -5155,6 +5389,17 @@ class FleetProfileService:
         excluded_application_id: str | None = None,
     ) -> _ProfileControlEffects:
         """Reconcile SQL-owned effects without cache, planner or external work."""
+        adopted = cls._continuing_effects(
+            session,
+            resolved_assignments,
+            target_nodes,
+            installation_policy,
+            excluded_application_id=excluded_application_id,
+        )
+        adopted_nodes = {node_id for effect in adopted for node_id in effect.node_ids}
+        adopted_assignments = {
+            identifier for effect in adopted for identifier in effect.assignment_ids
+        }
         states = {
             assignment.id: cls._assignment_state(
                 session,
@@ -5195,7 +5440,10 @@ class FleetProfileService:
                 and state.current_state == ObservedAssignmentState.RUNNING
             ):
                 desired_run_ids.add(state.run.id)
-            if state.current_state != assignment.desired_state:
+            if (
+                state.current_state != assignment.desired_state
+                and assignment.id not in adopted_assignments
+            ):
                 assignment_targets = {
                     node.node_id for node in assignment.nodes
                 } & target_nodes
@@ -5314,6 +5562,10 @@ class FleetProfileService:
             intersection = members & target_nodes
             if not intersection:
                 continue
+            if members <= adopted_nodes:
+                # The immutable borrowed plan owns transitional runs, including
+                # its exact stops. This decision neither repeats nor cancels them.
+                continue
             profile_stop_scope = None
             missing_members = members - target_nodes
             if missing_members:
@@ -5397,6 +5649,7 @@ class FleetProfileService:
                 node_ids = {node.node_id for node in nodes}
                 if (
                     not node_ids.intersection(target_nodes)
+                    or node_ids <= adopted_nodes
                     or installation.id in desired_installation_ids
                 ):
                     continue
@@ -5457,12 +5710,204 @@ class FleetProfileService:
                     changed_nodes,
                     excluded_application_id=excluded_application_id,
                 ),
+                adopted=adopted,
             ),
             changed_nodes=changed_nodes,
             unavailable_assignment_ids=unavailable_assignment_ids,
             switch_needed=adapter_switch_needed,
             reasons=reasons,
         )
+
+    @staticmethod
+    def _adopted_application_scope(
+        session: Session, application: FleetProfileApplication
+    ) -> tuple[str, ...] | None:
+        """Read continuing authority exclusively from the selected bound plan.
+
+        Keeping the original executor is an effect of a newer accepted decision,
+        never a second selected profile. Cancellation, altered identity and a
+        missing member invalidate that effect instead of guessing ownership.
+        """
+        selection = session.get(FleetProfileSelection, 1)
+        if selection is None or selection.application_id == application.id:
+            return None
+        selected = session.get(FleetProfileApplication, selection.application_id)
+        if selected is None or selected.selection_generation != selection.generation:
+            return None
+        selected_plan = _persisted_profile_plan(selected)
+        original_plan = _persisted_profile_plan(application)
+        original_progress = _persisted_profile_progress(application)
+        selected_progress = _persisted_profile_progress(selected)
+        if (
+            isinstance(selected_plan, Residue)
+            or isinstance(original_plan, Residue)
+            or original_progress.cancellation is not None
+            or selected_progress.cancellation is not None
+            or selected_progress.intended_profile is None
+            or original_progress.intended_profile is None
+            or selected_progress.intended_profile.installation_policy
+            != original_progress.intended_profile.installation_policy
+        ):
+            return None
+        links = [
+            item
+            for item in selected_plan.effects.adopted
+            if item.application_id == application.id
+        ]
+        if len(links) != 1:
+            return None
+        link = links[0]
+        if (
+            link.plan_digest != application.plan_digest
+            or link.workload_intent_ordinal != original_progress.workload_intent_ordinal
+        ):
+            return None
+        old = {item.id: item for item in original_progress.intended_profile.assignments}
+        desired = {
+            item.id: item for item in selected_progress.intended_profile.assignments
+        }
+        if any(
+            identifier not in old or old[identifier] != desired.get(identifier)
+            for identifier in link.assignment_ids
+        ):
+            return None
+        scope = {
+            node.node_id
+            for identifier in link.assignment_ids
+            for node in old[identifier].nodes
+        }
+        if scope != set(link.node_ids):
+            return None
+        original_preparations = {
+            item.assignment_id: item for item in original_plan.preparation_decisions
+        }
+        selected_preparations = {
+            item.assignment_id: item for item in selected_plan.preparation_decisions
+        }
+        if any(
+            original_preparations.get(identifier)
+            != selected_preparations.get(identifier)
+            for identifier in link.assignment_ids
+        ):
+            return None
+        nodes = tuple(
+            session.execute(
+                select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
+                .where(AgentNode.node_id.in_(scope), AgentNode.revoked_at.is_(None))
+                .order_by(AgentNode.node_id)
+            )
+        )
+        if nodes != tuple(
+            (node_id, link.workload_intent_ordinal) for node_id in link.node_ids
+        ):
+            return None
+        return tuple(link.node_ids)
+
+    @classmethod
+    def _continuing_effects(
+        cls,
+        session: Session,
+        assignments: tuple[FleetProfileAssignment, ...],
+        target_nodes: set[str],
+        installation_policy: str,
+        *,
+        excluded_application_id: str | None = None,
+    ) -> list[FleetProfileAdoptedApplicationEffect]:
+        """Bind complete equivalent assignment scopes to their original owners."""
+        desired = {item.id: item for item in assignments}
+        effects: list[FleetProfileAdoptedApplicationEffect] = []
+        owned_nodes: set[str] = set()
+        for application in session.scalars(
+            select(FleetProfileApplication)
+            .where(
+                FleetProfileApplication.state.in_(
+                    job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.NEEDS_OPERATOR,
+                    )
+                )
+            )
+            .order_by(FleetProfileApplication.created_at, FleetProfileApplication.id)
+        ):
+            if application.id == excluded_application_id:
+                continue
+            try:
+                plan = _persisted_profile_plan(application)
+                progress = _persisted_profile_progress(application)
+            except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+                continue
+            if (
+                isinstance(plan, Residue)
+                or progress.admission_pending
+                or progress.cancellation is not None
+                or progress.intended_profile is None
+                or progress.workload_intent_ordinal is None
+            ):
+                continue
+            if not cls._application_is_current_selection(
+                session, application, progress
+            ):
+                continue
+            if progress.intended_profile.installation_policy != installation_policy:
+                continue
+            if {
+                item.id: item for item in progress.intended_profile.assignments
+            } == desired:
+                # An explicit repeat of the entire same profile remains a new
+                # request. Continuity only preserves independent unchanged work
+                # while the newer decision changes another assignment.
+                continue
+            effect_nodes = {node_id for step in plan.steps for node_id in step.node_ids}
+            existing_adopted_scope = cls._adopted_application_scope(
+                session, application
+            )
+            if existing_adopted_scope:
+                effect_nodes &= set(existing_adopted_scope)
+            equivalent = [
+                item
+                for item in progress.intended_profile.assignments
+                if item == desired.get(item.id)
+                and {node.node_id for node in item.nodes} <= target_nodes
+                and {node.node_id for node in item.nodes} <= effect_nodes
+            ]
+            scope = {node.node_id for item in equivalent for node in item.nodes}
+            # Stop/removal effects remain topology-atomic too. A cross-boundary
+            # effect cannot be borrowed merely because one rank is unchanged.
+            for effect in (*plan.effects.runs, *plan.effects.installations):
+                members = set(effect.node_ids)
+                if members & scope and not members <= scope:
+                    scope -= members
+            equivalent = [
+                item
+                for item in equivalent
+                if {node.node_id for node in item.nodes} <= scope
+            ]
+            scope = {node.node_id for item in equivalent for node in item.nodes}
+            if not scope or scope & owned_nodes:
+                continue
+            nodes = tuple(
+                session.execute(
+                    select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
+                    .where(AgentNode.node_id.in_(scope), AgentNode.revoked_at.is_(None))
+                    .order_by(AgentNode.node_id)
+                )
+            )
+            if nodes != tuple(
+                (node_id, progress.workload_intent_ordinal) for node_id in sorted(scope)
+            ):
+                continue
+            effects.append(
+                FleetProfileAdoptedApplicationEffect(
+                    application_id=application.id,
+                    plan_digest=application.plan_digest,
+                    workload_intent_ordinal=progress.workload_intent_ordinal,
+                    node_ids=sorted(scope),
+                    assignment_ids=sorted(item.id for item in equivalent),
+                )
+            )
+            owned_nodes.update(scope)
+        return sorted(effects, key=lambda item: item.application_id)
 
     @staticmethod
     def _pending_effects(
@@ -6481,6 +6926,15 @@ class FleetProfileService:
                 and (execution_nodes or prior_profile_work is not None)
                 else execution_nodes
             )
+            adopted_nodes = {
+                node_id
+                for effect in preview.effects.adopted
+                for node_id in effect.node_ids
+            }
+            adopted_application_ids = {
+                effect.application_id for effect in preview.effects.adopted
+            }
+            fenced_nodes -= adopted_nodes
             attempt = 1
             recovery_ordinal: int | None = None
             accepted_images: dict[str, RuntimeImageIdentity] = {}
@@ -6715,6 +7169,23 @@ class FleetProfileService:
                     .order_by(FleetProfileApplication.id)
                     .with_for_update(nowait=True)
                 ):
+                    if prior_application.id in adopted_application_ids:
+                        # Unconsumed profile promises on changed siblings lose
+                        # their fence in this same transaction. Materialized
+                        # installation/run claims already changed owner under
+                        # the consumer's atomic handoff and remain until exact
+                        # effect reconciliation. Continuing promises stay owned
+                        # by the original application and are never duplicated.
+                        release_replaced_profile_claims(
+                            session,
+                            prior_application,
+                            node_ids=tuple(sorted(fenced_nodes)),
+                            now=now,
+                        )
+                        # Flush replaced promises before a successor inserts the
+                        # same unique promised port; this is not capacity freed.
+                        session.flush()
+                        continue
                     prior_plan = _persisted_profile_plan(prior_application)
                     if isinstance(prior_plan, Residue):
                         # Its plan cannot be read, so what it owns is unknown: it is
@@ -6807,7 +7278,9 @@ class FleetProfileService:
                     profile_id=preview.profile_id,
                     profile_digest=preview.profile_digest,
                     plan_digest=preview.plan_digest,
-                    state="succeeded" if not preview.steps else "queued",
+                    state="succeeded"
+                    if not preview.steps and not preview.effects.adopted
+                    else "queued",
                     plan=preview.model_dump(mode="json"),
                     current_step=0,
                     current_operation_id=None,
@@ -6819,7 +7292,7 @@ class FleetProfileService:
                         FleetProfileApplicationResult(
                             changed=False, completed_steps=0
                         ).model_dump(mode="json")
-                        if not preview.steps
+                        if not preview.steps and not preview.effects.adopted
                         else None
                     ),
                     actor=actor,
@@ -6832,7 +7305,10 @@ class FleetProfileService:
                 row.profile_digest = preview.profile_digest
                 row.plan_digest = preview.plan_digest
                 self._lifecycle.reset(
-                    row, now, steps=bool(preview.steps), session=session
+                    row,
+                    now,
+                    steps=bool(preview.steps or preview.effects.adopted),
+                    session=session,
                 )
                 row.plan = preview.model_dump(mode="json")
                 row.current_step = 0
@@ -6842,7 +7318,7 @@ class FleetProfileService:
                     FleetProfileApplicationResult(
                         changed=False, completed_steps=0
                     ).model_dump(mode="json")
-                    if not preview.steps
+                    if not preview.steps and not preview.effects.adopted
                     else None
                 )
                 row.status_reason = None
@@ -6901,6 +7377,12 @@ class FleetProfileService:
                     item.id
                     for item in frozen_assignments
                     if not control.states[item.id].installation_ready
+                    and item.id
+                    not in {
+                        identifier
+                        for effect in preview.effects.adopted
+                        for identifier in effect.assignment_ids
+                    }
                 },
                 now=now,
             )
@@ -6908,6 +7390,12 @@ class FleetProfileService:
                 item.id
                 for item in frozen_assignments
                 if item.desired_state == DesiredAssignmentState.RUNNING
+                and item.id
+                not in {
+                    identifier
+                    for effect in preview.effects.adopted
+                    for identifier in effect.assignment_ids
+                }
                 and control.states[item.id].current_state
                 != ObservedAssignmentState.RUNNING
             }
@@ -7011,6 +7499,12 @@ class FleetProfileService:
                 or self._switch_adapter is None
             ):
                 return None
+            progress = _persisted_profile_progress(row)
+            if (
+                progress.cancellation is not None
+                or not self._application_is_current_selection(session, row, progress)
+            ):
+                return None
             try:
                 child = self._switch_adapter.get(
                     row.current_operation_id, session=session
@@ -7026,7 +7520,11 @@ class FleetProfileService:
                 session=session,
             )
             # Failing released its unassigned claims; the resumed child needs them.
-            restore_released_profile_claims(session, row)
+            restore_released_profile_claims(
+                session,
+                row,
+                node_ids=self._adopted_application_scope(session, row),
+            )
             session.flush()
             return self._application_view(row)
 
@@ -7978,6 +8476,15 @@ class FleetProfileService:
                     )
                 cancellation = previous
             else:
+                if self._adopted_application_scope(session, row) is not None:
+                    selected = session.get(FleetProfileSelection, 1)
+                    assert selected is not None
+                    raise FleetProfileInvalid(
+                        "This application's continuing effects now belong to selected "
+                        f"profile application {selected.application_id}; cancel that "
+                        "application to cancel the currently authorized work",
+                        reason=InvalidRequestReason.SUPERSEDED,
+                    )
                 # A failed application the Controller will retry by itself is
                 # shown as queued, so it must be cancellable like any queued
                 # one: cancelling stops that retry, and a child it still owns is
@@ -8010,8 +8517,17 @@ class FleetProfileService:
                     or row.current_operation_id is not None
                 )
                 cancel_ordinal: int | None = None
-                if ordinal is not None:
-                    cancel_ordinal = ordinal + 1
+                adopted_ordinals = (
+                    {
+                        node_id: effect.workload_intent_ordinal
+                        for effect in plan.effects.adopted
+                        for node_id in effect.node_ids
+                    }
+                    if not isinstance(plan, Residue)
+                    else {}
+                )
+                if ordinal is not None or adopted_ordinals:
+                    cancel_ordinal = max([ordinal or 0, *adopted_ordinals.values()]) + 1
                     nodes = (
                         tuple(
                             session.scalars(
@@ -8030,10 +8546,13 @@ class FleetProfileService:
                     cancellable_nodes = tuple(
                         node.node_id
                         for node in nodes
-                        if node.workload_intent_ordinal == ordinal
+                        if node.workload_intent_ordinal
+                        == adopted_ordinals.get(node.node_id, ordinal)
                     )
                     for node in nodes:
-                        if node.workload_intent_ordinal == ordinal:
+                        if node.workload_intent_ordinal == adopted_ordinals.get(
+                            node.node_id, ordinal
+                        ):
                             node.workload_intent_ordinal = cancel_ordinal
                     if cancellable_nodes:
                         adapter = self._switch_adapter
@@ -8065,7 +8584,9 @@ class FleetProfileService:
                 # at once and leaves the running workload alone.  Otherwise the
                 # cancel is driven by the worker (its stops are the core's, spaced
                 # and bounded), never run inside this admission transaction.
-                waiting_only = ordinal is None and not has_child
+                waiting_only = (
+                    ordinal is None and not adopted_ordinals and not has_child
+                )
                 if retrying_failure:
                     # An ended load the Controller would retry is shown as queued
                     # and is cancellable like one: reopen it so the cancel (and any
@@ -8596,6 +9117,65 @@ class FleetProfileService:
                 row.current_operation_id = None
                 row.current_step += 1
             if row.current_step >= len(steps):
+                waiting_for_adopted = False
+                for effect in plan.effects.adopted:
+                    owner = session.get(FleetProfileApplication, effect.application_id)
+                    if owner is None or owner.plan_digest != effect.plan_digest:
+                        self._lifecycle.fail(
+                            row,
+                            "Continuing assignment evidence is unavailable; exact effects will be reconciled",
+                            now,
+                            session=session,
+                        )
+                        return True
+                    owner_plan = _persisted_profile_plan(owner)
+                    if isinstance(owner_plan, Residue):
+                        self._lifecycle.fail(
+                            row,
+                            "Continuing assignment evidence is unreadable; exact effects will be reconciled",
+                            now,
+                            session=session,
+                        )
+                        return True
+                    if owner.state in job_states.words(
+                        LifecycleState.FAILED,
+                        LifecycleState.CANCELLED,
+                        LifecycleState.SUPERSEDED,
+                    ):
+                        self._lifecycle.fail(
+                            row,
+                            owner.status_reason
+                            or "A continuing assignment ended before the selected profile converged",
+                            now,
+                            session=session,
+                        )
+                        return True
+                    expected_images = {
+                        item.assignment_id: item.runtime_image
+                        for item in owner_plan.preparation_decisions
+                    }
+                    assignments = [
+                        item
+                        for item in plan.resolved_assignments
+                        if item.id in effect.assignment_ids
+                    ]
+                    waiting_for_adopted |= (
+                        owner.state != LifecycleState.SUCCEEDED
+                        or any(
+                            self._assignment_state(
+                                session,
+                                item,
+                                expected_image=expected_images.get(item.id),
+                            ).current_state
+                            != item.desired_state
+                            for item in assignments
+                        )
+                    )
+                if waiting_for_adopted:
+                    row.status_reason = "Waiting for exact continuing assignments to finish under the selected profile"
+                    row.updated_at = now
+                    return True
+                continuing_scope = self._adopted_application_scope(session, row)
                 self._lifecycle.succeed(row, now, reason=None, session=session)
                 progress = read_stored_model(
                     FleetProfileApplicationProgress,
@@ -8604,6 +9184,11 @@ class FleetProfileService:
                             **progress.model_dump(mode="json"),
                             "completed_steps": len(steps),
                             "total_steps": len(steps),
+                            "current_label": (
+                                "Continuing assignments completed; changed sibling assignments were superseded"
+                                if continuing_scope is not None
+                                else progress.current_label
+                            ),
                         }
                     ),
                     strict=True,
@@ -9333,6 +9918,50 @@ class FleetProfileService:
             return True
         if adapter is None:
             return False
+        plan = _persisted_profile_plan(row)
+        if not isinstance(plan, Residue) and plan.effects.adopted:
+            borrowed_scope = tuple(
+                sorted(
+                    {
+                        node_id
+                        for effect in plan.effects.adopted
+                        for node_id in effect.node_ids
+                    }
+                )
+            )
+            if intent.workload_intent_ordinal is None:
+                return False
+            effects = AgentJobService.assess_superseded_agent_effects_in_session(
+                session, borrowed_scope, intent.workload_intent_ordinal, now
+            )
+            if effects:
+                operation_ids = sorted(effect.operation_id for effect in effects)
+                progress_data = progress.model_dump(mode="json")
+                cancellation_data = dict(progress_data["cancellation"])
+                cancellation_data.update(
+                    {
+                        "pending_operation_ids": operation_ids,
+                        "observation_due_at": min(
+                            effect.observe_due_at for effect in effects
+                        ).isoformat(),
+                        "observation_deadline_at": min(
+                            effect.observation_deadline for effect in effects
+                        ).isoformat(),
+                    }
+                )
+                progress_data["cancellation"] = cancellation_data
+                row.progress = read_stored_model(
+                    FleetProfileApplicationProgress,
+                    canonical_message(progress_data),
+                    strict=True,
+                    from_json=True,
+                ).model_dump(mode="json")
+                row.status_reason = (
+                    "Cancellation is waiting for adopted assignment effects: "
+                    + ", ".join(operation_ids)
+                )[:512]
+                row.updated_at = now
+                return False
         if progress.switch_adapter is not None:
             try:
                 child = adapter.advance(row.id, session=session)
@@ -9451,6 +10080,28 @@ class FleetProfileService:
             progress = _persisted_profile_progress(row)
         except FleetProfileConflict:
             return _LifecycleEffect.UNKNOWN
+        plan = _persisted_profile_plan(row)
+        if (
+            not isinstance(plan, Residue)
+            and plan.effects.adopted
+            and progress.cancellation is not None
+        ):
+            ordinal = progress.cancellation.workload_intent_ordinal
+            if ordinal is None:
+                return _LifecycleEffect.UNKNOWN
+            scope = tuple(
+                sorted(
+                    {
+                        node_id
+                        for effect in plan.effects.adopted
+                        for node_id in effect.node_ids
+                    }
+                )
+            )
+            if AgentJobService.assess_superseded_agent_effects_in_session(
+                session, scope, ordinal, _aware(self._clock())
+            ):
+                return _LifecycleEffect.UNKNOWN
         children = self._lifecycle.bound(session).children_of(session, row)
         state = self._lifecycle.aggregate_state(children)
         if state is not None and state in {
@@ -9795,7 +10446,12 @@ class FleetProfileService:
             # it is retired as superseded (its issued effects keep their own
             # cancellation receipts).
             return True
-        scope = {node_id for step in plan.steps for node_id in step.node_ids}
+        adopted_scope = FleetProfileService._adopted_application_scope(session, row)
+        scope = (
+            set(adopted_scope)
+            if adopted_scope is not None
+            else {node_id for step in plan.steps for node_id in step.node_ids}
+        )
         if not scope:
             return False
         ordinal = progress.workload_intent_ordinal

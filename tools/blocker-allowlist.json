@@ -1047,7 +1047,6 @@
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.create_draft", "catalog.document_exists", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.resolve", "catalog.not_candidate", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.resolve", "catalog.stale_revision", 1],
-        ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.revise", "catalog.candidate_exists", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.revise", "catalog.stale_revision", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogRevisionContractError", "_rederive_projection", "catalog-revision", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService._bind_recipe_models", "catalog.model_reference_invalid", 2],
@@ -1246,7 +1245,11 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
       "sites": [
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._authorize_uncached", "distribution.revoked", 1]
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "DistributionService._authorize_uncached", "distribution.revoked", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "forbidden", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "permission-denied", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "nas-cache-object-access-was-refused", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "permission-denied", 1]
       ]
     },
     {
@@ -1897,7 +1900,8 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
       "sites": [
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "profile-stop-target-is-not-authorized", 1]
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "profile-stop-target-is-not-authorized", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-exceeds-its-adopted-assignment-scope", 1]
       ]
     },
     {
@@ -2378,9 +2382,9 @@
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.not_found", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_generated_bundle", "bundle.read_failed", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.read_failed", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_read_archive", "bundle.empty", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_read_archive", "bundle.read_failed", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "generate_source_bundle", "bundle.empty", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.get", "bundle.storage_unavailable", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.put", "bundle.storage_unavailable", 1]
       ]
     },
     {
@@ -2388,7 +2392,9 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
       "sites": [
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_safe_path", "bundle.path_too_long", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_safe_path", "bundle.path_too_long", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleInvalid", "_read_archive", "bundle.empty", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleInvalid", "generate_source_bundle", "bundle.empty", 1]
       ]
     },
     {
@@ -2399,10 +2405,10 @@
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.manifest_invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.storage_collision", 2],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.put", "bundle.digest_mismatch", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore._put", "bundle.digest_invalid", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore._put", "bundle.digest_mismatch", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.digest_invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.storage_collision", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.put", "bundle.digest_invalid", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.put", "bundle.digest_mismatch", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.duplicate_path", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.entry_forbidden", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.expanded_too_large", 1],
@@ -2414,7 +2420,9 @@
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_safe_path", "bundle.path_forbidden", 2],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_validate_digest", "source-bundle-digest-is-invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "generate_source_bundle", "bundle.file_invalid", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "parse_source_bundle_manifest", "bundle.manifest_invalid", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "parse_source_bundle_manifest", "bundle.manifest_invalid", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleRefused", "SourceBundleStore.get", "source-bundle-storage-access-was-denied", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleRefused", "SourceBundleStore.put", "source-bundle-storage-access-was-denied", 1]
       ]
     },
     {
@@ -3637,6 +3645,25 @@
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_profile_build_dependencies", "build.consumer_invalid", 1]
+      ]
+    },
+    {
+      "family": "fleet_profiles.adoption-authority",
+      "category": "security-edge",
+      "reason": "Preserves the current selected whole-fleet authority: stale executor cancellation cannot revoke newer adopted intent, and a reviewed stop child cannot broaden beyond its complete currently authorized assignment scope. These are authorization boundaries before effects, not recoverable observation failures.",
+      "sites": [
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "this-application-s-continuing-effects-now-belong-to-selected", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-stop-exceeds-its-current-authorized-scope", 1]
+      ]
+    },
+    {
+      "family": "recipe_builds.security-edge",
+      "category": "security-edge",
+      "reason": "Explicit source storage permission denial is propagated as a typed build refusal, never a source miss, regeneration request, or automatic repair.",
+      "sites": [
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._heal_source_bundle", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._verified_bundle.read", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "rederive_source_bundle_from_closure", "permission-denied", 1]
       ]
     }
   ]

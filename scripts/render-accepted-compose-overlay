@@ -87,6 +87,7 @@ def main() -> int:
             ],
             capture_output=True,
             check=False,
+            timeout=30,
         )
     if result.returncode != 0:
         raise SystemExit("accepted release signature is invalid")
