@@ -420,7 +420,12 @@ contract.
 
 The Rust agent has
 the equivalent check in `rust/crates/vonk-agent/tests/protocol_literals.rs`: no
-vocabulary word in a string literal and no `json!` result body outside tests.
+vocabulary word (the lifecycle enums and every enum `ReasonCodeVocabulary` publishes,
+including `RuntimePreflightFindingCode` and `HelperErrorCode`) in a string literal of
+the agent, helper or protocol crates, no `json!` result body outside tests, and one
+struct literal of the runtime preflight finding (the constructor that takes a
+`RuntimePreflightFindingCode` member), so a new free-string finding code fails.
+Its two residues (`VOCABULARY_RESIDUE`, `TOOL_OUTPUT_WORDS`) only fall.
 
 The lifecycle also has a hardware canary that nothing in CI runs:
 `scripts/lifecycle-canary` drives one load, one cancel during start and one

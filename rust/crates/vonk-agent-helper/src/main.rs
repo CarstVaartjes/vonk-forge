@@ -20,7 +20,9 @@ use vonk_agent_helper::protocol::{
     GrantVerifier, HelperError, HostOperation, PeerIdentity, parse_inspection_request,
     parse_request, read_frame, write_frame,
 };
-use vonk_agent_protocol::generated::{HostHelperProcessLogs, HostHelperResponse as HelperResponse};
+use vonk_agent_protocol::generated::{
+    HelperErrorCode, HostHelperProcessLogs, HostHelperResponse as HelperResponse,
+};
 
 const GRANT_KEY: &str = "/etc/vonk-forge-agent/host-helper-authority.pub";
 const RELEASE_KEY: &str = "/usr/share/keyrings/vonk-forge-release.pub";
@@ -52,7 +54,7 @@ fn acquire_worker(counter: &Arc<AtomicUsize>) -> Option<WorkerPermit> {
 
 struct HelperRejection {
     request_id: Option<String>,
-    error_code: &'static str,
+    error_code: HelperErrorCode,
     exit_code: Option<i32>,
     detail: String,
     diagnostic: Option<String>,
@@ -60,7 +62,7 @@ struct HelperRejection {
 }
 
 impl HelperRejection {
-    fn new(error_code: &'static str, detail: impl Into<String>) -> Self {
+    fn new(error_code: HelperErrorCode, detail: impl Into<String>) -> Self {
         Self {
             request_id: None,
             error_code,
@@ -73,7 +75,7 @@ impl HelperRejection {
 
     fn for_request(
         request_id: impl Into<String>,
-        error_code: &'static str,
+        error_code: HelperErrorCode,
         detail: impl Into<String>,
     ) -> Self {
         Self {
@@ -121,47 +123,60 @@ impl HelperRejection {
         };
         let (error_code, exit_code) = match error {
             OperationError::InvalidArtifact if package_install => {
-                ("package_verification_failed", None)
+                (HelperErrorCode::PackageVerificationFailed, None)
             }
             OperationError::PackagePreflightFailed if package_install => {
-                ("package_preflight_failed", None)
+                (HelperErrorCode::PackagePreflightFailed, None)
             }
             OperationError::PackageMetadataInvalid if package_install => {
-                ("package_metadata_failed", None)
+                (HelperErrorCode::PackageMetadataFailed, None)
             }
             OperationError::PackageInstallFailed { exit_code, .. } if package_install => (
-                "package_install_failed",
+                HelperErrorCode::PackageInstallFailed,
                 exit_code.filter(|code| (0..=255).contains(code)),
             ),
             OperationError::UnsafePath | OperationError::Io(_) if package_install => {
-                ("package_custody_failed", None)
+                (HelperErrorCode::PackageCustodyFailed, None)
             }
-            OperationError::RuntimeImageLoadFailed => ("runtime_image_load_failed", None),
-            OperationError::RuntimeImageInspectFailed => ("runtime_image_inspect_failed", None),
-            OperationError::RuntimeImageIdentityInvalid => ("runtime_image_identity_invalid", None),
-            OperationError::RuntimeImageReceiptFailed => ("runtime_image_receipt_failed", None),
-            OperationError::RuntimeProcessExited { .. } => ("runtime_process_exited", None),
-            OperationError::RuntimeRunMissing => ("runtime_run_missing", None),
-            OperationError::RuntimeFabricUnavailable => ("runtime_fabric_unavailable", None),
+            OperationError::RuntimeImageLoadFailed => {
+                (HelperErrorCode::RuntimeImageLoadFailed, None)
+            }
+            OperationError::RuntimeImageInspectFailed => {
+                (HelperErrorCode::RuntimeImageInspectFailed, None)
+            }
+            OperationError::RuntimeImageIdentityInvalid => {
+                (HelperErrorCode::RuntimeImageIdentityInvalid, None)
+            }
+            OperationError::RuntimeImageReceiptFailed => {
+                (HelperErrorCode::RuntimeImageReceiptFailed, None)
+            }
+            OperationError::RuntimeProcessExited { .. } => {
+                (HelperErrorCode::RuntimeProcessExited, None)
+            }
+            OperationError::RuntimeRunMissing => (HelperErrorCode::RuntimeRunMissing, None),
+            OperationError::RuntimeFabricUnavailable => {
+                (HelperErrorCode::RuntimeFabricUnavailable, None)
+            }
             OperationError::RuntimeFabricFirewallRejected { .. } => {
-                ("runtime_fabric_firewall_rejected", None)
+                (HelperErrorCode::RuntimeFabricFirewallRejected, None)
             }
             OperationError::RuntimeEndpointFirewallRejected { .. } => {
-                ("runtime_endpoint_firewall_rejected", None)
+                (HelperErrorCode::RuntimeEndpointFirewallRejected, None)
             }
             OperationError::InstallationReconciliationBusy => {
-                ("installation_reconciliation_busy", None)
+                (HelperErrorCode::InstallationReconciliationBusy, None)
             }
-            OperationError::InstallationReconciliationStorageUnavailable => {
-                ("installation_reconciliation_storage_unavailable", None)
-            }
-            OperationError::InvalidOperation => ("operation_invalid", None),
-            OperationError::UnsafePath => ("operation_unsafe_path", None),
-            OperationError::InvalidArtifact => ("operation_invalid_artifact", None),
-            OperationError::CommandFailed => ("operation_command_failed", None),
-            OperationError::StopUncertain => ("operation_stop_uncertain", None),
-            OperationError::Io(_) => ("operation_io", None),
-            _ => ("operation_failed", None),
+            OperationError::InstallationReconciliationStorageUnavailable => (
+                HelperErrorCode::InstallationReconciliationStorageUnavailable,
+                None,
+            ),
+            OperationError::InvalidOperation => (HelperErrorCode::OperationInvalid, None),
+            OperationError::UnsafePath => (HelperErrorCode::OperationUnsafePath, None),
+            OperationError::InvalidArtifact => (HelperErrorCode::OperationInvalidArtifact, None),
+            OperationError::CommandFailed => (HelperErrorCode::OperationCommandFailed, None),
+            OperationError::StopUncertain => (HelperErrorCode::OperationStopUncertain, None),
+            OperationError::Io(_) => (HelperErrorCode::OperationIo, None),
+            _ => (HelperErrorCode::OperationFailed, None),
         };
         Self {
             request_id: Some(request_id.into()),
@@ -235,7 +250,7 @@ fn run() -> Result<(), String> {
                     reject(
                         &mut stream,
                         &HelperRejection::new(
-                            "concurrency_limit",
+                            HelperErrorCode::ConcurrencyLimit,
                             "concurrent request limit reached",
                         ),
                     );
@@ -276,7 +291,8 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
             .diagnostic
             .as_deref()
             .or_else(|| {
-                (error.error_code == "package_install_failed").then_some(error.detail.as_str())
+                (error.error_code == HelperErrorCode::PackageInstallFailed)
+                    .then_some(error.detail.as_str())
             })
             // A diagnostic is a tail: the newest text is the text that explains
             // the failure, so the bound keeps the end rather than the head.
@@ -290,7 +306,7 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         request_id,
         status: "rejected".parse().expect("declared helper response status"),
         exit_code,
-        error_code: Some(error.error_code.to_owned()),
+        error_code: Some(error.error_code.to_string()),
         process_running: None,
     };
     if let Ok(body) = vonk_agent_protocol::canonical_generated_json(&response) {
@@ -308,21 +324,28 @@ fn handle(
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .map_err(|_| {
-            HelperRejection::new("request_invalid", "helper socket configuration failed")
+            HelperRejection::new(
+                HelperErrorCode::RequestInvalid,
+                "helper socket configuration failed",
+            )
         })?;
     stream
         .set_write_timeout(Some(Duration::from_secs(10)))
         .map_err(|_| {
-            HelperRejection::new("request_invalid", "helper socket configuration failed")
+            HelperRejection::new(
+                HelperErrorCode::RequestInvalid,
+                "helper socket configuration failed",
+            )
         })?;
     let peer = peer_identity(stream)
-        .map_err(|error| HelperRejection::new("peer_identity_invalid", error))?;
-    let raw = read_frame(stream)
-        .map_err(|error| HelperRejection::new("request_invalid", error.safe_detail()))?;
+        .map_err(|error| HelperRejection::new(HelperErrorCode::PeerIdentityInvalid, error))?;
+    let raw = read_frame(stream).map_err(|error| {
+        HelperRejection::new(HelperErrorCode::RequestInvalid, error.safe_detail())
+    })?;
     if let Ok(inspection) = parse_inspection_request(&raw) {
-        verifier
-            .authorize_peer(&peer)
-            .map_err(|error| HelperRejection::new("peer_identity_invalid", error.safe_detail()))?;
+        verifier.authorize_peer(&peer).map_err(|error| {
+            HelperRejection::new(HelperErrorCode::PeerIdentityInvalid, error.safe_detail())
+        })?;
         let request_id = inspection.request_id.to_string();
         let running = executor
             .inspect_recipe_run(&inspection.request_sha256)
@@ -344,22 +367,25 @@ fn handle(
             },
         );
     }
-    let request = parse_request(&raw)
-        .map_err(|error| HelperRejection::new("grant_invalid", error.safe_detail()))?;
+    let request = parse_request(&raw).map_err(|error| {
+        HelperRejection::new(HelperErrorCode::GrantInvalid, error.safe_detail())
+    })?;
     let request_id = request.claims.request_id.to_string();
     if request.claims.node_id != node_id {
         return Err(HelperRejection::new(
-            "grant_node_mismatch",
+            HelperErrorCode::GrantNodeMismatch,
             "grant is for a different node",
         ));
     }
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|_| HelperRejection::new("grant_invalid", "system clock is unavailable"))?
+        .map_err(|_| {
+            HelperRejection::new(HelperErrorCode::GrantInvalid, "system clock is unavailable")
+        })?
         .as_secs() as i64;
-    verifier
-        .authorize(&request, &peer, now)
-        .map_err(|error| HelperRejection::new("grant_unauthorized", error.safe_detail()))?;
+    verifier.authorize(&request, &peer, now).map_err(|error| {
+        HelperRejection::new(HelperErrorCode::GrantUnauthorized, error.safe_detail())
+    })?;
     claim_once(&request_id).map_err(|failure| {
         HelperRejection::for_request(&request_id, failure.error_code(), failure.detail())
     })?;
@@ -376,7 +402,7 @@ fn handle(
         status: outcome.status.parse().map_err(|_| {
             HelperRejection::for_request(
                 &request_id,
-                "operation_failed",
+                HelperErrorCode::OperationFailed,
                 "invalid operation response status",
             )
         })?,
@@ -387,7 +413,7 @@ fn handle(
             .map_err(|_| {
                 HelperRejection::for_request(
                     &request_id,
-                    "operation_failed",
+                    HelperErrorCode::OperationFailed,
                     "invalid operation exit code",
                 )
             })?,
@@ -405,12 +431,16 @@ fn respond(
     let body = vonk_agent_protocol::canonical_generated_json(&response).map_err(|_error| {
         HelperRejection::for_request(
             request_id,
-            "operation_failed",
+            HelperErrorCode::OperationFailed,
             "helper response encoding failed",
         )
     })?;
     write_frame(stream, &body).map_err(|error| {
-        HelperRejection::for_request(request_id, "operation_failed", error.safe_detail())
+        HelperRejection::for_request(
+            request_id,
+            HelperErrorCode::OperationFailed,
+            error.safe_detail(),
+        )
     })
 }
 
@@ -435,10 +465,10 @@ impl ClaimFailure {
         }
     }
 
-    fn error_code(&self) -> &'static str {
+    fn error_code(&self) -> HelperErrorCode {
         match self {
-            Self::Consumed => "request_replayed",
-            Self::Ledger => "request_ledger_failed",
+            Self::Consumed => HelperErrorCode::RequestReplayed,
+            Self::Ledger => HelperErrorCode::RequestLedgerFailed,
         }
     }
 
@@ -616,7 +646,9 @@ fn _classify_protocol_error(error: HelperError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{HelperRejection, HelperResponse, MAX_CONCURRENT_REQUESTS, acquire_worker};
+    use super::{
+        HelperErrorCode, HelperRejection, HelperResponse, MAX_CONCURRENT_REQUESTS, acquire_worker,
+    };
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -644,7 +676,7 @@ mod tests {
         let (mut client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
         super::reject(
             &mut server,
-            &HelperRejection::new("request_invalid", "private diagnostic"),
+            &HelperRejection::new(HelperErrorCode::RequestInvalid, "private diagnostic"),
         );
         let bytes = vonk_agent_helper::protocol::read_frame(&mut client).unwrap();
         let response: HelperResponse = vonk_agent_protocol::parse_strict(&bytes).unwrap();
@@ -744,11 +776,14 @@ mod tests {
     #[test]
     fn request_id_is_only_attached_after_authorization() {
         let before_authorization =
-            HelperRejection::new("grant_unauthorized", "signature was invalid");
+            HelperRejection::new(HelperErrorCode::GrantUnauthorized, "signature was invalid");
         assert!(before_authorization.request_id.is_none());
 
-        let after_authorization =
-            HelperRejection::for_request("request-1", "operation_failed", "dpkg failed");
+        let after_authorization = HelperRejection::for_request(
+            "request-1",
+            HelperErrorCode::OperationFailed,
+            "dpkg failed",
+        );
         assert_eq!(after_authorization.request_id.as_deref(), Some("request-1"));
     }
 

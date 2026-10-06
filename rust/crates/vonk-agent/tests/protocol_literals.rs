@@ -11,8 +11,16 @@
 //!   vocabulary (a state, a wait reason, a failure code, a security-refusal
 //!   code...): use the generated enum.
 //!
+//! * no hand-built runtime preflight finding: a finding is built in one place,
+//!   from a member of the contract's closed `RuntimePreflightFindingCode`, so a
+//!   new free-string finding code does not compile and a second struct literal
+//!   of the finding fails the ceiling below;
+//! * the helper and protocol crates spell no vocabulary word either (their code
+//!   builds from the same generated enums).
+//!
 //! The vocabulary is read from the exported wire schema, so a word added to the
-//! contract is guarded without editing this test.
+//! contract is guarded without editing this test: besides the lifecycle enums
+//! named below it includes every enum `ReasonCodeVocabulary` publishes.
 
 use std::{
     collections::BTreeSet,
@@ -39,13 +47,32 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// The enums the lifecycle contract names, and every enum the reason-code
+/// carrier publishes (the carrier is the contract's list of closed code sets).
+fn vocabulary_enums(schema: &serde_json::Value) -> BTreeSet<String> {
+    let mut names: BTreeSet<String> = VOCABULARY_ENUMS
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+    let carrier = schema["$defs"]["ReasonCodeVocabulary"]["properties"]
+        .as_object()
+        .expect("ReasonCodeVocabulary publishes the reason-code enums");
+    for property in carrier.values() {
+        let reference = property["$ref"].as_str().expect("an enum reference");
+        names.insert(reference.rsplit('/').next().unwrap().to_owned());
+    }
+    assert!(names.contains("RuntimePreflightFindingCode") && names.contains("HelperErrorCode"));
+    names
+}
+
 fn vocabulary() -> BTreeSet<String> {
     let schema: serde_json::Value = serde_json::from_slice(
         &fs::read(root().join("../vonk-agent-protocol/schema/wire.json")).unwrap(),
     )
     .unwrap();
     let mut words = BTreeSet::new();
-    for name in VOCABULARY_ENUMS {
+    for name in vocabulary_enums(&schema) {
+        let name = name.as_str();
         let members = schema["$defs"][name]["enum"]
             .as_array()
             .unwrap_or_else(|| panic!("{name} is not a contract enum"));
@@ -228,20 +255,119 @@ fn the_protocol_crates_build_no_message_from_loose_json_beyond_the_listed_residu
     );
 }
 
+/// Vocabulary-equal literals that remain in the agent, per file, with a ceiling
+/// that only falls. The source-policy recheck keeps its own finding codes: its
+/// report never reaches a protocol message (a rejected build reports a reason,
+/// not the findings), and some of its words differ from the contract's
+/// `SourcePolicyCode`, so it is a separate drift to close, not a message to guard.
+const VOCABULARY_RESIDUE: [(&str, usize); 1] = [("src/source_policy.rs", 21)];
+
+fn offenders_by_file(
+    files: Vec<(String, String)>,
+    vocabulary: &BTreeSet<String>,
+) -> std::collections::BTreeMap<String, usize> {
+    let mut observed = std::collections::BTreeMap::new();
+    for (name, code) in files {
+        let words = vocabulary_literals(&code, vocabulary).len();
+        if words > 0 {
+            observed.insert(name, words);
+        }
+    }
+    observed
+}
+
 #[test]
 fn the_agent_spells_no_vocabulary_word_by_hand() {
     let vocabulary = vocabulary();
-    let offenders: Vec<_> = sources()
-        .into_iter()
-        .flat_map(|(name, code)| {
-            vocabulary_literals(&code, &vocabulary)
-                .into_iter()
-                .map(move |word| format!("{name}: {word:?}"))
-        })
+    let ceiling: std::collections::BTreeMap<String, usize> = VOCABULARY_RESIDUE
+        .iter()
+        .map(|(name, count)| ((*name).to_owned(), *count))
         .collect();
+    assert_eq!(
+        offenders_by_file(sources(), &vocabulary),
+        ceiling,
+        "use the generated contract enum instead of the string; VOCABULARY_RESIDUE only falls"
+    );
+}
+
+/// The protocol crates' hand-written code: the generated declarations and the
+/// schema document spell every member by construction.
+fn handwritten_protocol_sources() -> Vec<(String, String)> {
+    protocol_crate_sources()
+        .into_iter()
+        .filter(|(name, _)| !name.ends_with("/generated.rs") && !name.ends_with("/wire_schema.rs"))
+        .collect()
+}
+
+/// A tool's own output that happens to equal a word of the vocabulary:
+/// systemd's `LoadState` is `not-found` for a unit that is not installed.
+const TOOL_OUTPUT_WORDS: [(&str, &str); 1] =
+    [("vonk-agent-helper/src/package_rollback.rs", "not-found")];
+
+#[test]
+fn the_protocol_crates_spell_no_vocabulary_word_by_hand() {
+    let vocabulary = vocabulary();
+    let mut offenders = Vec::new();
+    for (name, code) in handwritten_protocol_sources() {
+        for word in vocabulary_literals(&code, &vocabulary) {
+            if !TOOL_OUTPUT_WORDS.contains(&(name.as_str(), word.as_str())) {
+                offenders.push(format!("{name}: {word:?}"));
+            }
+        }
+    }
     assert!(
         offenders.is_empty(),
         "use the generated contract enum instead of the string: {offenders:?}"
+    );
+}
+
+/// Struct literals of the runtime preflight finding, with a ceiling that only
+/// falls: the one constructor, which takes a member of the closed finding-code
+/// enum. A second literal is a finding whose code could be any string.
+const FINDING_LITERALS: [(&str, usize); 1] = [("src/runtime_preflight.rs", 1)];
+
+fn finding_literal_sites(code: &str) -> usize {
+    const NAMES: [&str; 2] = ["RuntimePreflightFinding", "Finding"];
+    let mut sites = 0;
+    let mut from = 0;
+    while let Some(found) = code[from..].find("Finding {") {
+        let end = from + found + "Finding".len();
+        let start = code[..end]
+            .rfind(|character: char| !(character.is_alphanumeric() || character == '_'))
+            .map_or(0, |index| index + 1);
+        let name = &code[start..end];
+        // A declaration, an `impl` header or a function body that returns the
+        // type is not a struct literal.
+        let before = code[..start].trim_end();
+        let declaration =
+            before.ends_with("struct") || before.ends_with("impl") || before.ends_with("->");
+        if NAMES.contains(&name) && !declaration {
+            sites += 1;
+        }
+        from = end;
+    }
+    sites
+}
+
+#[test]
+fn a_runtime_preflight_finding_is_built_in_one_place_from_the_contract_enum() {
+    let mut observed = std::collections::BTreeMap::new();
+    let agent = sources();
+    let others = handwritten_protocol_sources();
+    for (name, code) in agent.iter().chain(others.iter()) {
+        let count = finding_literal_sites(code);
+        if count > 0 {
+            observed.insert(name.clone(), count);
+        }
+    }
+    let ceiling: std::collections::BTreeMap<String, usize> = FINDING_LITERALS
+        .iter()
+        .map(|(name, count)| ((*name).to_owned(), *count))
+        .collect();
+    assert_eq!(
+        observed, ceiling,
+        "a finding is built by `finding` / `finding_with` in runtime_preflight.rs from a \
+         RuntimePreflightFindingCode member; a new struct literal is a free-string code"
     );
 }
 
@@ -254,7 +380,13 @@ fn wait() {
     let body = serde_json::json!({"reason": state});
     let code = "operation_cancelled";
     let plain = "failed";
+    let hand_built = Finding { capability: "x".into(), status: Status::Failed, code: "available".into() };
+    let also = vonk_agent_protocol::runtime_preflight::RuntimePreflightFinding { code: "x".into() };
+    let other = SourceFinding { code: "x" };
+    fn made() -> Finding { build() }
 }
+pub struct Finding {}
+impl Finding {}
 #[cfg(test)]
 mod tests {
     fn fixture() { let _ = "waiting-for-operator"; let _ = serde_json::json!({}); }
@@ -263,8 +395,16 @@ mod tests {
     let code = production_code(seeded);
 
     assert_eq!(json_macro_sites(&code), 1);
+    assert_eq!(finding_literal_sites(&code), 2);
     assert_eq!(
         vocabulary_literals(&code, &vocabulary),
         ["waiting-for-operator", "operation_cancelled"]
+    );
+    // The finding code enum and the helper's codes are guarded like the rest.
+    let seeded =
+        r#"let a = "preflight_finding.available"; let b = "operation_io"; let c = "available";"#;
+    assert_eq!(
+        vocabulary_literals(seeded, &vocabulary),
+        ["preflight_finding.available", "operation_io"]
     );
 }

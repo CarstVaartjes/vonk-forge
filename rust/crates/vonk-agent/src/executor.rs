@@ -32,9 +32,9 @@ use crate::{
     },
 };
 use vonk_agent_protocol::generated::{
-    AgentFailureKind, AgentInstallResult, AgentOperation, ArtifactDistributionResult, FailureCode,
-    RecipeReconcileResult, RecipeStartResult, RecipeStopResult, RecipeUninstallResult,
-    SecurityRefusalReason, WaitReason,
+    AgentFailureKind, AgentInstallResult, AgentOperation, ArtifactDistributionResult,
+    DistributionCode, FailureCode, HelperErrorCode, RecipeReconcileResult, RecipeStartResult,
+    RecipeStopResult, RecipeUninstallResult, RuntimePreflightFindingCode, WaitReason,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, OperationProgress,
@@ -727,7 +727,7 @@ impl<R> RecipeExecutor<'_, R> {
                 identity_refused: matches!(
                     &error,
                     crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }
-                        if vocabulary::is(code, SecurityRefusalReason::OperationInvalidArtifact)
+                        if *code == HelperErrorCode::OperationInvalidArtifact
                 ),
                 result: unconfirmed(
                     WaitReason::StopUnconfirmed,
@@ -1188,30 +1188,37 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         vec![],
                     )
                     .await;
+                use RuntimePreflightFindingCode as Finding;
                 let (passed, code) = match outcome {
-                    Ok(outcome) => {
-                        let (passed, code) = match outcome.exit_code {
-                            Some(0) => (true, "available"),
-                            Some(21) => (false, "helper_proc_unavailable"),
-                            Some(22) => (false, "helper_capabilities_not_zero"),
-                            Some(23) => (false, "helper_no_new_privileges_unavailable"),
-                            Some(24) => (false, "helper_mount_namespace_unavailable"),
-                            Some(25) => (false, "helper_temporary_directory_unavailable"),
-                            Some(30) => (false, "helper_image_import_failed"),
-                            Some(31) => (false, "helper_sandbox_run_failed"),
-                            Some(32) => (false, "helper_probe_cleanup_failed"),
-                            _ => (false, "helper_probe_invalid_result"),
-                        };
-                        (passed, code.to_owned())
-                    }
-                    Err(error) => (false, error.preflight_code()),
+                    Ok(outcome) => match outcome.exit_code {
+                        Some(0) => (true, Finding::PreflightFindingAvailable),
+                        Some(21) => (false, Finding::PreflightFindingHelperProcUnavailable),
+                        Some(22) => (false, Finding::PreflightFindingHelperCapabilitiesNotZero),
+                        Some(23) => (
+                            false,
+                            Finding::PreflightFindingHelperNoNewPrivilegesUnavailable,
+                        ),
+                        Some(24) => (
+                            false,
+                            Finding::PreflightFindingHelperMountNamespaceUnavailable,
+                        ),
+                        Some(25) => (
+                            false,
+                            Finding::PreflightFindingHelperTemporaryDirectoryUnavailable,
+                        ),
+                        Some(30) => (false, Finding::PreflightFindingHelperImageImportFailed),
+                        Some(31) => (false, Finding::PreflightFindingHelperSandboxRunFailed),
+                        Some(32) => (false, Finding::PreflightFindingHelperProbeCleanupFailed),
+                        _ => (false, Finding::PreflightFindingHelperProbeInvalidResult),
+                    },
+                    Err(error) => (false, error.finding_code()),
                 };
                 result
                     .findings
                     .retain(|value| value.capability != "signed_helper_run");
                 result
                     .findings
-                    .push(finding("signed_helper_run", passed, &code));
+                    .push(finding("signed_helper_run", passed, code));
                 if started.elapsed() >= Duration::from_secs(60) || result.validate().is_err() {
                     return failed("runtime preflight exceeded the bounded deadline");
                 }
@@ -1817,7 +1824,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     if matches!(
                         error,
                         crate::host_runtime::HostRuntimeError::HelperRejected { ref code, .. }
-                            if vocabulary::is(code, FailureCode::InstallationReconciliationBusy)
+                            if *code == HelperErrorCode::InstallationReconciliationBusy
                     ) {
                         return temporary_reconciliation_failure(
                             "helper-runtime-reconciliation-lock",
@@ -2085,7 +2092,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     && matches!(
                         &runtime_result,
                         Some(Err(crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }))
-                            if code == "runtime_run_missing"
+                            if *code == HelperErrorCode::RuntimeRunMissing
                     )
                 {
                     // The retained plan and an independent Docker listing prove
@@ -2176,10 +2183,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             if matches!(
                                 &error,
                                 crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }
-                                    if vocabulary::is(
-                                        code,
-                                        SecurityRefusalReason::OperationInvalidArtifact
-                                    )
+                                    if *code == HelperErrorCode::OperationInvalidArtifact
                             ) {
                                 return match self
                                     .heal_retained_run(
@@ -2647,7 +2651,7 @@ fn host_runtime_evidence(
     let evidence = UnknownEvidence::at(stage).because(error.preflight_code());
     match error {
         crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
-            evidence.helper(code.clone())
+            evidence.helper(*code)
         }
         _ => evidence,
     }
@@ -2666,8 +2670,9 @@ fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) ->
         HostRuntimeError::Controller(_) => true,
         HostRuntimeError::HelperRejected { code, .. } => {
             matches!(
-                code.as_str(),
-                "operation_io" | "installation_reconciliation_storage_unavailable"
+                code,
+                HelperErrorCode::OperationIo
+                    | HelperErrorCode::InstallationReconciliationStorageUnavailable
             )
         }
         HostRuntimeError::HelperProtocol(_) => false,
@@ -2699,7 +2704,7 @@ fn runtime_observation_failure(error: &crate::host_runtime::HostRuntimeError) ->
     let exited = matches!(
         error,
         crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }
-            if code == "runtime_process_exited"
+            if *code == HelperErrorCode::RuntimeProcessExited
     );
     let lead = if exited {
         "the workload process exited"
@@ -2715,7 +2720,7 @@ fn runtime_observation_failure(error: &crate::host_runtime::HostRuntimeError) ->
         error.diagnostic(),
     ));
     if let crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } = error {
-        failure = failure.helper(code.clone(), None);
+        failure = failure.helper(*code, None);
     }
     ExecutionResult::Failed(failure)
 }
@@ -2779,7 +2784,9 @@ fn distribution_failure_result(error: &ClientError) -> ExecutionResult {
     let failure_kind = if error.retryable()
         // A grant that merely ran out of time is renewed by the next
         // attempt's claim; it is a wait, not a denial of authority.
-        || error.code() == Some("distribution.expired")
+        || error
+            .code()
+            .is_some_and(|code| vocabulary::is(code, DistributionCode::DistributionExpired))
     {
         AgentFailureKind::TemporaryDependency
     } else if matches!(error.status(), Some(401 | 403)) {
@@ -3398,22 +3405,18 @@ fn record_result_rejection(
     Ok(())
 }
 
-/// The bounded helper error code a runtime image pull failure reports. This is
-/// the producer for `stable_runtime_helper_error_code`, which decides whether
-/// the code survives into the Controller's normalized failure body.
-fn runtime_helper_code(error: &crate::host_runtime::HostRuntimeError) -> String {
+/// The bounded helper error code a runtime image pull failure reports. It is
+/// the producer for the codes `helper_codes::is_distribution_evidence` lets
+/// survive into the Controller's normalized failure body.
+fn runtime_helper_code(error: &crate::host_runtime::HostRuntimeError) -> HelperErrorCode {
     use crate::host_runtime::HostRuntimeError;
     match error {
-        HostRuntimeError::HelperRejected { code, .. } => code.clone(),
-        HostRuntimeError::Io(_) => "runtime_helper_unavailable".to_owned(),
-        HostRuntimeError::Controller(_) => "runtime_authority_unavailable".to_owned(),
-        HostRuntimeError::HelperProtocol(cause) => {
-            format!("runtime_helper_{}", cause.code())
-        }
-        HostRuntimeError::HelperProtocolBound { cause, .. } => {
-            format!("runtime_helper_{}", cause.code())
-        }
-        HostRuntimeError::StopUncertain => "runtime_helper_stop_uncertain".to_owned(),
+        HostRuntimeError::HelperRejected { code, .. } => *code,
+        HostRuntimeError::Io(_) => HelperErrorCode::RuntimeHelperUnavailable,
+        HostRuntimeError::Controller(_) => HelperErrorCode::RuntimeAuthorityUnavailable,
+        HostRuntimeError::HelperProtocol(cause)
+        | HostRuntimeError::HelperProtocolBound { cause, .. } => cause.runtime_helper_code(),
+        HostRuntimeError::StopUncertain => HelperErrorCode::RuntimeHelperStopUncertain,
     }
 }
 
@@ -3631,9 +3634,9 @@ fn remaining_lease(deadline: DateTime<FixedOffset>) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, HeartbeatFailure, InterruptibleJob,
-        LoopClient, ReadinessOutcome, RecipeExecutor, RecipeObservationError, RejectingExecutor,
-        RunOncePolicy, classify_heartbeat_failure, controller_denial_diagnostic,
+        ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, HeartbeatFailure, HelperErrorCode,
+        InterruptibleJob, LoopClient, ReadinessOutcome, RecipeExecutor, RecipeObservationError,
+        RejectingExecutor, RunOncePolicy, classify_heartbeat_failure, controller_denial_diagnostic,
         distribution_failure_result, distribution_success, exact_stop_plan_from_claim,
         first_report_of_run, output_media_type, parse_compiled_execution_plan, readiness_identity,
         recipe_build_client_failure_result, recipe_install_success,
@@ -4743,7 +4746,7 @@ mod tests {
         // inspection gate admits that text precisely because the inspection
         // already proved the container's identity and sanitized it.
         let error = crate::host_runtime::HostRuntimeError::HelperRejected {
-            code: "runtime_process_exited".to_owned(),
+            code: HelperErrorCode::RuntimeProcessExited,
             diagnostic: None,
             process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
                 stdout: crate::failure_evidence::log_tail(b"rank 0 listening on 8888\n"),
@@ -5172,7 +5175,7 @@ mod tests {
         let mut start_claim = claim();
         start_claim.operation = "recipe.start".parse().unwrap();
         let error = crate::host_runtime::HostRuntimeError::HelperRejected {
-            code: "runtime_process_exited".into(),
+            code: HelperErrorCode::RuntimeProcessExited,
             diagnostic: None,
             process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
                 stdout: crate::failure_evidence::log_tail(b"starting the engine core\n"),
@@ -5248,7 +5251,7 @@ mod tests {
         // Wrong implementation: the stop error was discarded, so the wait said
         // "remains unconfirmed" and nothing more.
         let error = crate::host_runtime::HostRuntimeError::HelperRejected {
-            code: "operation_io".to_owned(),
+            code: HelperErrorCode::OperationIo,
             diagnostic: None,
             process_logs: None,
         };
@@ -5328,7 +5331,7 @@ mod tests {
         let mut start_claim = claim();
         start_claim.operation = "recipe.start".parse().unwrap();
         let error = crate::host_runtime::HostRuntimeError::HelperRejected {
-            code: "runtime_fabric_firewall_rejected".to_owned(),
+            code: HelperErrorCode::RuntimeFabricFirewallRejected,
             diagnostic: Some(
                 "check-fabric-run endpoint=8000: vonk-forge-docker-firewall: host endpoint \
                  port 8000 is not authorized (authorized host endpoint ports: 8888)"
@@ -5430,7 +5433,7 @@ mod tests {
             let result = failed_outcome(
                 &pull_claim,
                 ExecutionResult::Failed(
-                    Failure::new("runtime image pull failed").helper(code.clone(), None),
+                    Failure::new("runtime image pull failed").helper(code, None),
                 ),
             );
             assert_eq!(
@@ -6451,7 +6454,7 @@ mod tests {
             &upgrade_claim,
             ExecutionResult::Failed(
                 Failure::new("agent upgrade helper rejected the request: package_install_failed")
-                    .helper("package_install_failed", Some(75)),
+                    .helper(HelperErrorCode::PackageInstallFailed, Some(75)),
             ),
         );
 
@@ -6471,7 +6474,8 @@ mod tests {
         let rejected = failed_outcome(
             &upgrade_claim,
             ExecutionResult::Failed(
-                Failure::new("agent upgrade failed").helper("arbitrary_host_detail", Some(512)),
+                Failure::new("agent upgrade failed")
+                    .helper(HelperErrorCode::ConcurrencyLimit, Some(512)),
             ),
         );
         assert!(evidence_of(&rejected).helper_error_code.is_none());
@@ -6479,7 +6483,8 @@ mod tests {
         let out_of_range = failed_outcome(
             &upgrade_claim,
             ExecutionResult::Failed(
-                Failure::new("agent upgrade failed").helper("package_install_failed", Some(512)),
+                Failure::new("agent upgrade failed")
+                    .helper(HelperErrorCode::PackageInstallFailed, Some(512)),
             ),
         );
         assert!(evidence_of(&out_of_range).helper_exit_code.is_none());
@@ -6490,11 +6495,11 @@ mod tests {
         let mut pull_claim = claim();
         pull_claim.operation = "artifact.distribution.v1".parse().unwrap();
         for code in [
-            "runtime_helper_unavailable",
-            "runtime_authority_unavailable",
-            "runtime_helper_protocol_invalid",
-            "grant_unauthorized",
-            "request_replayed",
+            HelperErrorCode::RuntimeHelperUnavailable,
+            HelperErrorCode::RuntimeAuthorityUnavailable,
+            HelperErrorCode::RuntimeHelperProtocolInvalid,
+            HelperErrorCode::GrantUnauthorized,
+            HelperErrorCode::RequestReplayed,
         ] {
             let result = failed_outcome(
                 &pull_claim,
@@ -6504,15 +6509,16 @@ mod tests {
             );
 
             assert_eq!(
-                evidence_of(&result).helper_error_code.as_deref(),
-                Some(code)
+                evidence_of(&result).helper_error_code,
+                Some(code.to_string())
             );
         }
 
         let rejected = failed_outcome(
             &pull_claim,
             ExecutionResult::Failed(
-                Failure::new("runtime image pull failed").helper("arbitrary_host_detail", None),
+                Failure::new("runtime image pull failed")
+                    .helper(HelperErrorCode::PackageInstallFailed, None),
             ),
         );
         assert!(evidence_of(&rejected).helper_error_code.is_none());

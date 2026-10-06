@@ -9,6 +9,7 @@ pub mod config;
 pub mod executor;
 pub mod failure_evidence;
 pub mod health;
+pub mod helper_codes;
 pub mod host_runtime;
 pub mod identity;
 pub mod image_store;

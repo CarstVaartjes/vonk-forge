@@ -1928,7 +1928,7 @@ export interface components {
          * @description Generic Controller request and fleet-operation problem codes.
          * @enum {string}
          */
-        ControllerErrorCode: "controller.conflict" | "controller.fleet.revocation_uncertain" | "controller.fleet.upgrade_conflict" | "controller.http_" | "controller.internal_error" | "controller.invalid_request" | "controller.not_found" | "controller.request_too_large" | "controller.unavailable";
+        ControllerErrorCode: "controller.conflict" | "controller.fleet.revocation_uncertain" | "controller.fleet.upgrade_conflict" | "controller.http_" | "controller.internal_error" | "controller.invalid_request" | "controller.not_found" | "controller.rate_limited" | "controller.request_too_large" | "controller.timeout" | "controller.unavailable";
         /**
          * DesiredAssignmentState
          * @description What a fleet-profile assignment is asked to become on its Sparks.
@@ -3630,6 +3630,17 @@ export interface components {
             /** Repository */
             repository: string;
         };
+        /**
+         * HelperErrorCode
+         * @description Every code the privileged helper, or the agent speaking about it, names as an error.
+         *
+         *     The helper builds its rejection from a member; the agent reads a reply code
+         *     through the enum, so a word outside it is a malformed rejection, never a code
+         *     the agent invents or forwards.  ``runtime_helper_*`` is the spelling of an
+         *     agent-side cause in failure evidence.
+         * @enum {string}
+         */
+        HelperErrorCode: "call_join_failed" | "concurrency_limit" | "grant_invalid" | "grant_node_mismatch" | "grant_unauthorized" | "inspection_outcome_invalid" | "installation_reconciliation_busy" | "installation_reconciliation_storage_unavailable" | "message_framing_invalid" | "operation_command_failed" | "operation_failed" | "operation_invalid" | "operation_invalid_artifact" | "operation_io" | "operation_stop_uncertain" | "operation_unsafe_path" | "outcome_malformed" | "package_custody_failed" | "package_install_failed" | "package_metadata_failed" | "package_preflight_failed" | "package_verification_failed" | "peer_identity_invalid" | "rejection_malformed" | "request_arguments_presence_invalid" | "request_argument_nul_byte" | "request_attempt_invalid" | "request_bytes_invalid" | "request_document_invalid" | "request_encoding_invalid" | "request_installation_identity_invalid" | "request_invalid" | "request_ledger_failed" | "request_plan_binding_invalid" | "request_plan_bytes_invalid" | "request_replayed" | "request_schema_version_invalid" | "request_storage_invalid" | "response_unbound" | "runtime_authority_unavailable" | "runtime_endpoint_firewall_rejected" | "runtime_fabric_firewall_rejected" | "runtime_fabric_unavailable" | "runtime_helper_call_join_failed" | "runtime_helper_inspection_outcome_invalid" | "runtime_helper_message_framing_invalid" | "runtime_helper_outcome_malformed" | "runtime_helper_protocol_invalid" | "runtime_helper_rejection_malformed" | "runtime_helper_request_arguments_presence_invalid" | "runtime_helper_request_argument_nul_byte" | "runtime_helper_request_attempt_invalid" | "runtime_helper_request_bytes_invalid" | "runtime_helper_request_document_invalid" | "runtime_helper_request_encoding_invalid" | "runtime_helper_request_installation_identity_invalid" | "runtime_helper_request_plan_binding_invalid" | "runtime_helper_request_plan_bytes_invalid" | "runtime_helper_request_schema_version_invalid" | "runtime_helper_request_storage_invalid" | "runtime_helper_response_unbound" | "runtime_helper_stop_uncertain" | "runtime_helper_system_clock_invalid" | "runtime_helper_unavailable" | "runtime_image_identity_invalid" | "runtime_image_inspect_failed" | "runtime_image_load_failed" | "runtime_image_receipt_failed" | "runtime_process_exited" | "runtime_run_missing" | "system_clock_invalid";
         /**
          * ImageStoreCode
          * @description Refusals and damage found by the Controller OCI image store.
@@ -5369,6 +5380,7 @@ export interface components {
             cluster_mapping_code: components["schemas"]["ClusterMappingCode"];
             controller_error_code: components["schemas"]["ControllerErrorCode"];
             distribution_code: components["schemas"]["DistributionCode"];
+            helper_error_code: components["schemas"]["HelperErrorCode"];
             image_store_code: components["schemas"]["ImageStoreCode"];
             install_admission_code: components["schemas"]["InstallAdmissionCode"];
             install_degraded_reason: components["schemas"]["InstallDegradedReason"];
@@ -5394,6 +5406,7 @@ export interface components {
             run_switch_code: components["schemas"]["RunSwitchCode"];
             runtime_image_code: components["schemas"]["RuntimeImageCode"];
             runtime_preflight_code: components["schemas"]["RuntimePreflightCode"];
+            runtime_preflight_finding_code: components["schemas"]["RuntimePreflightFindingCode"];
             source_bundle_code: components["schemas"]["SourceBundleCode"];
             source_policy_code: components["schemas"]["SourcePolicyCode"];
             stop_plan_code: components["schemas"]["StopPlanCode"];
@@ -8045,7 +8058,15 @@ export interface components {
          * @enum {string}
          */
         RuntimePreflightCode: "runtime_preflight.child_missing" | "runtime_preflight.execution_failed" | "runtime_preflight.host_changed" | "runtime_preflight.node_revoked" | "runtime_preflight.operation_missing" | "runtime_preflight.receipt_invalid" | "runtime_preflight.receipt_missing" | "runtime_preflight.required" | "runtime_preflight.requirement_unknown" | "runtime_preflight.requirements_changed" | "runtime_preflight.stale" | "runtime_preflight.node_missing" | "runtime_preflight.capability_failed";
-        /** RuntimePreflightFinding */
+        /**
+         * RuntimePreflightFinding
+         * @description One capability's verdict.
+         *
+         *     ``code`` travels as the word of a :class:`RuntimePreflightFindingCode` member.
+         *     It stays a pattern-bound string on the wire so an older agent's free-text
+         *     code (``available``, ``proc-mount-denied``) and a newer agent's word still
+         *     read; :attr:`finding_code` is the typed reading of either.
+         */
         RuntimePreflightFinding: {
             /** Capability */
             capability: string;
@@ -8057,6 +8078,15 @@ export interface components {
              */
             status: "passed" | "failed" | "unknown";
         };
+        /**
+         * RuntimePreflightFindingCode
+         * @description Why one runtime preflight capability passed, failed or stayed unknown, as the agent reports it.
+         *
+         *     The agent builds every finding from a member; the Controller reads a code an
+         *     older agent sent as free text through :func:`adopt_preflight_finding_code`.
+         * @enum {string}
+         */
+        RuntimePreflightFindingCode: "preflight_finding.architecture_mismatch" | "preflight_finding.available" | "preflight_finding.build_step_failed" | "preflight_finding.capabilities_not_zero" | "preflight_finding.controller_unreachable" | "preflight_finding.deadline_exceeded" | "preflight_finding.diagnostic_limit_exceeded" | "preflight_finding.directory_not_writable" | "preflight_finding.disk_reserve_insufficient" | "preflight_finding.fabric_requirement_unverified" | "preflight_finding.helper_call_join_failed" | "preflight_finding.helper_capabilities_not_zero" | "preflight_finding.helper_grant_invalid" | "preflight_finding.helper_grant_node_mismatch" | "preflight_finding.helper_grant_unauthorized" | "preflight_finding.helper_grant_unavailable" | "preflight_finding.helper_image_import_failed" | "preflight_finding.helper_inspection_outcome_invalid" | "preflight_finding.helper_installation_reconciliation_busy" | "preflight_finding.helper_installation_reconciliation_storage_unavailable" | "preflight_finding.helper_io_failed" | "preflight_finding.helper_message_framing_invalid" | "preflight_finding.helper_mount_namespace_unavailable" | "preflight_finding.helper_no_new_privileges_unavailable" | "preflight_finding.helper_operation_command_failed" | "preflight_finding.helper_operation_failed" | "preflight_finding.helper_operation_invalid" | "preflight_finding.helper_operation_invalid_artifact" | "preflight_finding.helper_operation_io" | "preflight_finding.helper_operation_stop_uncertain" | "preflight_finding.helper_operation_unsafe_path" | "preflight_finding.helper_outcome_malformed" | "preflight_finding.helper_peer_identity_invalid" | "preflight_finding.helper_probe_cleanup_failed" | "preflight_finding.helper_probe_invalid_result" | "preflight_finding.helper_proc_unavailable" | "preflight_finding.helper_protocol_invalid" | "preflight_finding.helper_rejection_malformed" | "preflight_finding.helper_request_arguments_presence_invalid" | "preflight_finding.helper_request_argument_nul_byte" | "preflight_finding.helper_request_attempt_invalid" | "preflight_finding.helper_request_bytes_invalid" | "preflight_finding.helper_request_document_invalid" | "preflight_finding.helper_request_encoding_invalid" | "preflight_finding.helper_request_installation_identity_invalid" | "preflight_finding.helper_request_invalid" | "preflight_finding.helper_request_ledger_failed" | "preflight_finding.helper_request_plan_binding_invalid" | "preflight_finding.helper_request_plan_bytes_invalid" | "preflight_finding.helper_request_replayed" | "preflight_finding.helper_request_schema_version_invalid" | "preflight_finding.helper_request_storage_invalid" | "preflight_finding.helper_response_unbound" | "preflight_finding.helper_runtime_endpoint_firewall_rejected" | "preflight_finding.helper_runtime_fabric_firewall_rejected" | "preflight_finding.helper_runtime_fabric_unavailable" | "preflight_finding.helper_runtime_image_identity_invalid" | "preflight_finding.helper_runtime_image_inspect_failed" | "preflight_finding.helper_runtime_image_load_failed" | "preflight_finding.helper_runtime_image_receipt_failed" | "preflight_finding.helper_runtime_process_exited" | "preflight_finding.helper_runtime_run_missing" | "preflight_finding.helper_sandbox_run_failed" | "preflight_finding.helper_stop_uncertain" | "preflight_finding.helper_system_clock_invalid" | "preflight_finding.helper_temporary_directory_unavailable" | "preflight_finding.memory_limit_exceeded" | "preflight_finding.mount_namespace_unavailable" | "preflight_finding.nonzero_without_output" | "preflight_finding.no_new_privileges_unavailable" | "preflight_finding.oci_runtime_unavailable" | "preflight_finding.patch_rejected" | "preflight_finding.permission_denied" | "preflight_finding.proc_mount_denied" | "preflight_finding.proc_unavailable" | "preflight_finding.runroot_exceeds_50_bytes" | "preflight_finding.signed_helper_probe_required" | "preflight_finding.storage_driver_failure" | "preflight_finding.subordinate_id_mapping_unavailable" | "preflight_finding.subprocess_unavailable" | "preflight_finding.systemd_scope_failure" | "preflight_finding.temporary_directory_unavailable" | "preflight_finding.temporary_storage_exhausted" | "preflight_finding.unclassified" | "preflight_finding.unclassified_podman_build_failure" | "preflight_finding.user_namespace_denied" | "preflight_finding.user_service_manager_unavailable";
         /** RuntimePreflightResult */
         RuntimePreflightResult: {
             /** Findings */

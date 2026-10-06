@@ -13,9 +13,10 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::generated::{
-    ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, HostHelperGrantResponse,
-    HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, IssuedCertificateResponse,
-    PackageActivationGrantRequest, RenewRequest, SecurityRefusalReason, TelemetryRequest,
+    ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, ControllerErrorCode,
+    HostHelperGrantResponse, HostRuntimeGrantRequest, HostRuntimeGrantRequestAction,
+    IssuedCertificateResponse, PackageActivationGrantRequest, RenewRequest, SecurityRefusalReason,
+    TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
@@ -2072,10 +2073,10 @@ fn controller_error(
     let code = supplied_code.unwrap_or_else(|| match status_code {
         401 => SecurityRefusalReason::ControllerAuthenticationRequired.to_string(),
         403 => SecurityRefusalReason::ControllerRequestRejected.to_string(),
-        408 => "controller.timeout".to_owned(),
-        429 => "controller.rate_limited".to_owned(),
-        500..=599 => "controller.unavailable".to_owned(),
-        _ => format!("controller.http_{status_code}"),
+        408 => ControllerErrorCode::ControllerTimeout.to_string(),
+        429 => ControllerErrorCode::ControllerRateLimited.to_string(),
+        500..=599 => ControllerErrorCode::ControllerUnavailable.to_string(),
+        _ => format!("{}{status_code}", ControllerErrorCode::ControllerHttp),
     });
     let decision = match status_code {
         408 | 429 | 500..=599 => "retry",

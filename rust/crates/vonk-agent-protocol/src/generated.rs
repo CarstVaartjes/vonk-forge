@@ -1763,8 +1763,12 @@ pub enum ControllerErrorCode {
     ControllerInvalidRequest,
     #[serde(rename = "controller.not_found")]
     ControllerNotFound,
+    #[serde(rename = "controller.rate_limited")]
+    ControllerRateLimited,
     #[serde(rename = "controller.request_too_large")]
     ControllerRequestTooLarge,
+    #[serde(rename = "controller.timeout")]
+    ControllerTimeout,
     #[serde(rename = "controller.unavailable")]
     ControllerUnavailable,
 }
@@ -1782,7 +1786,9 @@ impl ::std::fmt::Display for ControllerErrorCode {
             Self::ControllerInternalError => f.write_str("controller.internal_error"),
             Self::ControllerInvalidRequest => f.write_str("controller.invalid_request"),
             Self::ControllerNotFound => f.write_str("controller.not_found"),
+            Self::ControllerRateLimited => f.write_str("controller.rate_limited"),
             Self::ControllerRequestTooLarge => f.write_str("controller.request_too_large"),
+            Self::ControllerTimeout => f.write_str("controller.timeout"),
             Self::ControllerUnavailable => f.write_str("controller.unavailable"),
         }
     }
@@ -1798,7 +1804,9 @@ impl ::std::str::FromStr for ControllerErrorCode {
             "controller.internal_error" => Ok(Self::ControllerInternalError),
             "controller.invalid_request" => Ok(Self::ControllerInvalidRequest),
             "controller.not_found" => Ok(Self::ControllerNotFound),
+            "controller.rate_limited" => Ok(Self::ControllerRateLimited),
             "controller.request_too_large" => Ok(Self::ControllerRequestTooLarge),
+            "controller.timeout" => Ok(Self::ControllerTimeout),
             "controller.unavailable" => Ok(Self::ControllerUnavailable),
             _ => Err("invalid value".into()),
         }
@@ -2659,6 +2667,385 @@ impl ::std::convert::TryFrom<&str> for GatewayRouteState {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for GatewayRouteState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum HelperErrorCode {
+    #[serde(rename = "call_join_failed")]
+    CallJoinFailed,
+    #[serde(rename = "concurrency_limit")]
+    ConcurrencyLimit,
+    #[serde(rename = "grant_invalid")]
+    GrantInvalid,
+    #[serde(rename = "grant_node_mismatch")]
+    GrantNodeMismatch,
+    #[serde(rename = "grant_unauthorized")]
+    GrantUnauthorized,
+    #[serde(rename = "inspection_outcome_invalid")]
+    InspectionOutcomeInvalid,
+    #[serde(rename = "installation_reconciliation_busy")]
+    InstallationReconciliationBusy,
+    #[serde(rename = "installation_reconciliation_storage_unavailable")]
+    InstallationReconciliationStorageUnavailable,
+    #[serde(rename = "message_framing_invalid")]
+    MessageFramingInvalid,
+    #[serde(rename = "operation_command_failed")]
+    OperationCommandFailed,
+    #[serde(rename = "operation_failed")]
+    OperationFailed,
+    #[serde(rename = "operation_invalid")]
+    OperationInvalid,
+    #[serde(rename = "operation_invalid_artifact")]
+    OperationInvalidArtifact,
+    #[serde(rename = "operation_io")]
+    OperationIo,
+    #[serde(rename = "operation_stop_uncertain")]
+    OperationStopUncertain,
+    #[serde(rename = "operation_unsafe_path")]
+    OperationUnsafePath,
+    #[serde(rename = "outcome_malformed")]
+    OutcomeMalformed,
+    #[serde(rename = "package_custody_failed")]
+    PackageCustodyFailed,
+    #[serde(rename = "package_install_failed")]
+    PackageInstallFailed,
+    #[serde(rename = "package_metadata_failed")]
+    PackageMetadataFailed,
+    #[serde(rename = "package_preflight_failed")]
+    PackagePreflightFailed,
+    #[serde(rename = "package_verification_failed")]
+    PackageVerificationFailed,
+    #[serde(rename = "peer_identity_invalid")]
+    PeerIdentityInvalid,
+    #[serde(rename = "rejection_malformed")]
+    RejectionMalformed,
+    #[serde(rename = "request_arguments_presence_invalid")]
+    RequestArgumentsPresenceInvalid,
+    #[serde(rename = "request_argument_nul_byte")]
+    RequestArgumentNulByte,
+    #[serde(rename = "request_attempt_invalid")]
+    RequestAttemptInvalid,
+    #[serde(rename = "request_bytes_invalid")]
+    RequestBytesInvalid,
+    #[serde(rename = "request_document_invalid")]
+    RequestDocumentInvalid,
+    #[serde(rename = "request_encoding_invalid")]
+    RequestEncodingInvalid,
+    #[serde(rename = "request_installation_identity_invalid")]
+    RequestInstallationIdentityInvalid,
+    #[serde(rename = "request_invalid")]
+    RequestInvalid,
+    #[serde(rename = "request_ledger_failed")]
+    RequestLedgerFailed,
+    #[serde(rename = "request_plan_binding_invalid")]
+    RequestPlanBindingInvalid,
+    #[serde(rename = "request_plan_bytes_invalid")]
+    RequestPlanBytesInvalid,
+    #[serde(rename = "request_replayed")]
+    RequestReplayed,
+    #[serde(rename = "request_schema_version_invalid")]
+    RequestSchemaVersionInvalid,
+    #[serde(rename = "request_storage_invalid")]
+    RequestStorageInvalid,
+    #[serde(rename = "response_unbound")]
+    ResponseUnbound,
+    #[serde(rename = "runtime_authority_unavailable")]
+    RuntimeAuthorityUnavailable,
+    #[serde(rename = "runtime_endpoint_firewall_rejected")]
+    RuntimeEndpointFirewallRejected,
+    #[serde(rename = "runtime_fabric_firewall_rejected")]
+    RuntimeFabricFirewallRejected,
+    #[serde(rename = "runtime_fabric_unavailable")]
+    RuntimeFabricUnavailable,
+    #[serde(rename = "runtime_helper_call_join_failed")]
+    RuntimeHelperCallJoinFailed,
+    #[serde(rename = "runtime_helper_inspection_outcome_invalid")]
+    RuntimeHelperInspectionOutcomeInvalid,
+    #[serde(rename = "runtime_helper_message_framing_invalid")]
+    RuntimeHelperMessageFramingInvalid,
+    #[serde(rename = "runtime_helper_outcome_malformed")]
+    RuntimeHelperOutcomeMalformed,
+    #[serde(rename = "runtime_helper_protocol_invalid")]
+    RuntimeHelperProtocolInvalid,
+    #[serde(rename = "runtime_helper_rejection_malformed")]
+    RuntimeHelperRejectionMalformed,
+    #[serde(rename = "runtime_helper_request_arguments_presence_invalid")]
+    RuntimeHelperRequestArgumentsPresenceInvalid,
+    #[serde(rename = "runtime_helper_request_argument_nul_byte")]
+    RuntimeHelperRequestArgumentNulByte,
+    #[serde(rename = "runtime_helper_request_attempt_invalid")]
+    RuntimeHelperRequestAttemptInvalid,
+    #[serde(rename = "runtime_helper_request_bytes_invalid")]
+    RuntimeHelperRequestBytesInvalid,
+    #[serde(rename = "runtime_helper_request_document_invalid")]
+    RuntimeHelperRequestDocumentInvalid,
+    #[serde(rename = "runtime_helper_request_encoding_invalid")]
+    RuntimeHelperRequestEncodingInvalid,
+    #[serde(rename = "runtime_helper_request_installation_identity_invalid")]
+    RuntimeHelperRequestInstallationIdentityInvalid,
+    #[serde(rename = "runtime_helper_request_plan_binding_invalid")]
+    RuntimeHelperRequestPlanBindingInvalid,
+    #[serde(rename = "runtime_helper_request_plan_bytes_invalid")]
+    RuntimeHelperRequestPlanBytesInvalid,
+    #[serde(rename = "runtime_helper_request_schema_version_invalid")]
+    RuntimeHelperRequestSchemaVersionInvalid,
+    #[serde(rename = "runtime_helper_request_storage_invalid")]
+    RuntimeHelperRequestStorageInvalid,
+    #[serde(rename = "runtime_helper_response_unbound")]
+    RuntimeHelperResponseUnbound,
+    #[serde(rename = "runtime_helper_stop_uncertain")]
+    RuntimeHelperStopUncertain,
+    #[serde(rename = "runtime_helper_system_clock_invalid")]
+    RuntimeHelperSystemClockInvalid,
+    #[serde(rename = "runtime_helper_unavailable")]
+    RuntimeHelperUnavailable,
+    #[serde(rename = "runtime_image_identity_invalid")]
+    RuntimeImageIdentityInvalid,
+    #[serde(rename = "runtime_image_inspect_failed")]
+    RuntimeImageInspectFailed,
+    #[serde(rename = "runtime_image_load_failed")]
+    RuntimeImageLoadFailed,
+    #[serde(rename = "runtime_image_receipt_failed")]
+    RuntimeImageReceiptFailed,
+    #[serde(rename = "runtime_process_exited")]
+    RuntimeProcessExited,
+    #[serde(rename = "runtime_run_missing")]
+    RuntimeRunMissing,
+    #[serde(rename = "system_clock_invalid")]
+    SystemClockInvalid,
+}
+impl ::std::fmt::Display for HelperErrorCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::CallJoinFailed => f.write_str("call_join_failed"),
+            Self::ConcurrencyLimit => f.write_str("concurrency_limit"),
+            Self::GrantInvalid => f.write_str("grant_invalid"),
+            Self::GrantNodeMismatch => f.write_str("grant_node_mismatch"),
+            Self::GrantUnauthorized => f.write_str("grant_unauthorized"),
+            Self::InspectionOutcomeInvalid => f.write_str("inspection_outcome_invalid"),
+            Self::InstallationReconciliationBusy => f.write_str("installation_reconciliation_busy"),
+            Self::InstallationReconciliationStorageUnavailable => {
+                f.write_str("installation_reconciliation_storage_unavailable")
+            }
+            Self::MessageFramingInvalid => f.write_str("message_framing_invalid"),
+            Self::OperationCommandFailed => f.write_str("operation_command_failed"),
+            Self::OperationFailed => f.write_str("operation_failed"),
+            Self::OperationInvalid => f.write_str("operation_invalid"),
+            Self::OperationInvalidArtifact => f.write_str("operation_invalid_artifact"),
+            Self::OperationIo => f.write_str("operation_io"),
+            Self::OperationStopUncertain => f.write_str("operation_stop_uncertain"),
+            Self::OperationUnsafePath => f.write_str("operation_unsafe_path"),
+            Self::OutcomeMalformed => f.write_str("outcome_malformed"),
+            Self::PackageCustodyFailed => f.write_str("package_custody_failed"),
+            Self::PackageInstallFailed => f.write_str("package_install_failed"),
+            Self::PackageMetadataFailed => f.write_str("package_metadata_failed"),
+            Self::PackagePreflightFailed => f.write_str("package_preflight_failed"),
+            Self::PackageVerificationFailed => f.write_str("package_verification_failed"),
+            Self::PeerIdentityInvalid => f.write_str("peer_identity_invalid"),
+            Self::RejectionMalformed => f.write_str("rejection_malformed"),
+            Self::RequestArgumentsPresenceInvalid => {
+                f.write_str("request_arguments_presence_invalid")
+            }
+            Self::RequestArgumentNulByte => f.write_str("request_argument_nul_byte"),
+            Self::RequestAttemptInvalid => f.write_str("request_attempt_invalid"),
+            Self::RequestBytesInvalid => f.write_str("request_bytes_invalid"),
+            Self::RequestDocumentInvalid => f.write_str("request_document_invalid"),
+            Self::RequestEncodingInvalid => f.write_str("request_encoding_invalid"),
+            Self::RequestInstallationIdentityInvalid => {
+                f.write_str("request_installation_identity_invalid")
+            }
+            Self::RequestInvalid => f.write_str("request_invalid"),
+            Self::RequestLedgerFailed => f.write_str("request_ledger_failed"),
+            Self::RequestPlanBindingInvalid => f.write_str("request_plan_binding_invalid"),
+            Self::RequestPlanBytesInvalid => f.write_str("request_plan_bytes_invalid"),
+            Self::RequestReplayed => f.write_str("request_replayed"),
+            Self::RequestSchemaVersionInvalid => f.write_str("request_schema_version_invalid"),
+            Self::RequestStorageInvalid => f.write_str("request_storage_invalid"),
+            Self::ResponseUnbound => f.write_str("response_unbound"),
+            Self::RuntimeAuthorityUnavailable => f.write_str("runtime_authority_unavailable"),
+            Self::RuntimeEndpointFirewallRejected => {
+                f.write_str("runtime_endpoint_firewall_rejected")
+            }
+            Self::RuntimeFabricFirewallRejected => f.write_str("runtime_fabric_firewall_rejected"),
+            Self::RuntimeFabricUnavailable => f.write_str("runtime_fabric_unavailable"),
+            Self::RuntimeHelperCallJoinFailed => f.write_str("runtime_helper_call_join_failed"),
+            Self::RuntimeHelperInspectionOutcomeInvalid => {
+                f.write_str("runtime_helper_inspection_outcome_invalid")
+            }
+            Self::RuntimeHelperMessageFramingInvalid => {
+                f.write_str("runtime_helper_message_framing_invalid")
+            }
+            Self::RuntimeHelperOutcomeMalformed => f.write_str("runtime_helper_outcome_malformed"),
+            Self::RuntimeHelperProtocolInvalid => f.write_str("runtime_helper_protocol_invalid"),
+            Self::RuntimeHelperRejectionMalformed => {
+                f.write_str("runtime_helper_rejection_malformed")
+            }
+            Self::RuntimeHelperRequestArgumentsPresenceInvalid => {
+                f.write_str("runtime_helper_request_arguments_presence_invalid")
+            }
+            Self::RuntimeHelperRequestArgumentNulByte => {
+                f.write_str("runtime_helper_request_argument_nul_byte")
+            }
+            Self::RuntimeHelperRequestAttemptInvalid => {
+                f.write_str("runtime_helper_request_attempt_invalid")
+            }
+            Self::RuntimeHelperRequestBytesInvalid => {
+                f.write_str("runtime_helper_request_bytes_invalid")
+            }
+            Self::RuntimeHelperRequestDocumentInvalid => {
+                f.write_str("runtime_helper_request_document_invalid")
+            }
+            Self::RuntimeHelperRequestEncodingInvalid => {
+                f.write_str("runtime_helper_request_encoding_invalid")
+            }
+            Self::RuntimeHelperRequestInstallationIdentityInvalid => {
+                f.write_str("runtime_helper_request_installation_identity_invalid")
+            }
+            Self::RuntimeHelperRequestPlanBindingInvalid => {
+                f.write_str("runtime_helper_request_plan_binding_invalid")
+            }
+            Self::RuntimeHelperRequestPlanBytesInvalid => {
+                f.write_str("runtime_helper_request_plan_bytes_invalid")
+            }
+            Self::RuntimeHelperRequestSchemaVersionInvalid => {
+                f.write_str("runtime_helper_request_schema_version_invalid")
+            }
+            Self::RuntimeHelperRequestStorageInvalid => {
+                f.write_str("runtime_helper_request_storage_invalid")
+            }
+            Self::RuntimeHelperResponseUnbound => f.write_str("runtime_helper_response_unbound"),
+            Self::RuntimeHelperStopUncertain => f.write_str("runtime_helper_stop_uncertain"),
+            Self::RuntimeHelperSystemClockInvalid => {
+                f.write_str("runtime_helper_system_clock_invalid")
+            }
+            Self::RuntimeHelperUnavailable => f.write_str("runtime_helper_unavailable"),
+            Self::RuntimeImageIdentityInvalid => f.write_str("runtime_image_identity_invalid"),
+            Self::RuntimeImageInspectFailed => f.write_str("runtime_image_inspect_failed"),
+            Self::RuntimeImageLoadFailed => f.write_str("runtime_image_load_failed"),
+            Self::RuntimeImageReceiptFailed => f.write_str("runtime_image_receipt_failed"),
+            Self::RuntimeProcessExited => f.write_str("runtime_process_exited"),
+            Self::RuntimeRunMissing => f.write_str("runtime_run_missing"),
+            Self::SystemClockInvalid => f.write_str("system_clock_invalid"),
+        }
+    }
+}
+impl ::std::str::FromStr for HelperErrorCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "call_join_failed" => Ok(Self::CallJoinFailed),
+            "concurrency_limit" => Ok(Self::ConcurrencyLimit),
+            "grant_invalid" => Ok(Self::GrantInvalid),
+            "grant_node_mismatch" => Ok(Self::GrantNodeMismatch),
+            "grant_unauthorized" => Ok(Self::GrantUnauthorized),
+            "inspection_outcome_invalid" => Ok(Self::InspectionOutcomeInvalid),
+            "installation_reconciliation_busy" => Ok(Self::InstallationReconciliationBusy),
+            "installation_reconciliation_storage_unavailable" => {
+                Ok(Self::InstallationReconciliationStorageUnavailable)
+            }
+            "message_framing_invalid" => Ok(Self::MessageFramingInvalid),
+            "operation_command_failed" => Ok(Self::OperationCommandFailed),
+            "operation_failed" => Ok(Self::OperationFailed),
+            "operation_invalid" => Ok(Self::OperationInvalid),
+            "operation_invalid_artifact" => Ok(Self::OperationInvalidArtifact),
+            "operation_io" => Ok(Self::OperationIo),
+            "operation_stop_uncertain" => Ok(Self::OperationStopUncertain),
+            "operation_unsafe_path" => Ok(Self::OperationUnsafePath),
+            "outcome_malformed" => Ok(Self::OutcomeMalformed),
+            "package_custody_failed" => Ok(Self::PackageCustodyFailed),
+            "package_install_failed" => Ok(Self::PackageInstallFailed),
+            "package_metadata_failed" => Ok(Self::PackageMetadataFailed),
+            "package_preflight_failed" => Ok(Self::PackagePreflightFailed),
+            "package_verification_failed" => Ok(Self::PackageVerificationFailed),
+            "peer_identity_invalid" => Ok(Self::PeerIdentityInvalid),
+            "rejection_malformed" => Ok(Self::RejectionMalformed),
+            "request_arguments_presence_invalid" => Ok(Self::RequestArgumentsPresenceInvalid),
+            "request_argument_nul_byte" => Ok(Self::RequestArgumentNulByte),
+            "request_attempt_invalid" => Ok(Self::RequestAttemptInvalid),
+            "request_bytes_invalid" => Ok(Self::RequestBytesInvalid),
+            "request_document_invalid" => Ok(Self::RequestDocumentInvalid),
+            "request_encoding_invalid" => Ok(Self::RequestEncodingInvalid),
+            "request_installation_identity_invalid" => Ok(Self::RequestInstallationIdentityInvalid),
+            "request_invalid" => Ok(Self::RequestInvalid),
+            "request_ledger_failed" => Ok(Self::RequestLedgerFailed),
+            "request_plan_binding_invalid" => Ok(Self::RequestPlanBindingInvalid),
+            "request_plan_bytes_invalid" => Ok(Self::RequestPlanBytesInvalid),
+            "request_replayed" => Ok(Self::RequestReplayed),
+            "request_schema_version_invalid" => Ok(Self::RequestSchemaVersionInvalid),
+            "request_storage_invalid" => Ok(Self::RequestStorageInvalid),
+            "response_unbound" => Ok(Self::ResponseUnbound),
+            "runtime_authority_unavailable" => Ok(Self::RuntimeAuthorityUnavailable),
+            "runtime_endpoint_firewall_rejected" => Ok(Self::RuntimeEndpointFirewallRejected),
+            "runtime_fabric_firewall_rejected" => Ok(Self::RuntimeFabricFirewallRejected),
+            "runtime_fabric_unavailable" => Ok(Self::RuntimeFabricUnavailable),
+            "runtime_helper_call_join_failed" => Ok(Self::RuntimeHelperCallJoinFailed),
+            "runtime_helper_inspection_outcome_invalid" => {
+                Ok(Self::RuntimeHelperInspectionOutcomeInvalid)
+            }
+            "runtime_helper_message_framing_invalid" => {
+                Ok(Self::RuntimeHelperMessageFramingInvalid)
+            }
+            "runtime_helper_outcome_malformed" => Ok(Self::RuntimeHelperOutcomeMalformed),
+            "runtime_helper_protocol_invalid" => Ok(Self::RuntimeHelperProtocolInvalid),
+            "runtime_helper_rejection_malformed" => Ok(Self::RuntimeHelperRejectionMalformed),
+            "runtime_helper_request_arguments_presence_invalid" => {
+                Ok(Self::RuntimeHelperRequestArgumentsPresenceInvalid)
+            }
+            "runtime_helper_request_argument_nul_byte" => {
+                Ok(Self::RuntimeHelperRequestArgumentNulByte)
+            }
+            "runtime_helper_request_attempt_invalid" => {
+                Ok(Self::RuntimeHelperRequestAttemptInvalid)
+            }
+            "runtime_helper_request_bytes_invalid" => Ok(Self::RuntimeHelperRequestBytesInvalid),
+            "runtime_helper_request_document_invalid" => {
+                Ok(Self::RuntimeHelperRequestDocumentInvalid)
+            }
+            "runtime_helper_request_encoding_invalid" => {
+                Ok(Self::RuntimeHelperRequestEncodingInvalid)
+            }
+            "runtime_helper_request_installation_identity_invalid" => {
+                Ok(Self::RuntimeHelperRequestInstallationIdentityInvalid)
+            }
+            "runtime_helper_request_plan_binding_invalid" => {
+                Ok(Self::RuntimeHelperRequestPlanBindingInvalid)
+            }
+            "runtime_helper_request_plan_bytes_invalid" => {
+                Ok(Self::RuntimeHelperRequestPlanBytesInvalid)
+            }
+            "runtime_helper_request_schema_version_invalid" => {
+                Ok(Self::RuntimeHelperRequestSchemaVersionInvalid)
+            }
+            "runtime_helper_request_storage_invalid" => {
+                Ok(Self::RuntimeHelperRequestStorageInvalid)
+            }
+            "runtime_helper_response_unbound" => Ok(Self::RuntimeHelperResponseUnbound),
+            "runtime_helper_stop_uncertain" => Ok(Self::RuntimeHelperStopUncertain),
+            "runtime_helper_system_clock_invalid" => Ok(Self::RuntimeHelperSystemClockInvalid),
+            "runtime_helper_unavailable" => Ok(Self::RuntimeHelperUnavailable),
+            "runtime_image_identity_invalid" => Ok(Self::RuntimeImageIdentityInvalid),
+            "runtime_image_inspect_failed" => Ok(Self::RuntimeImageInspectFailed),
+            "runtime_image_load_failed" => Ok(Self::RuntimeImageLoadFailed),
+            "runtime_image_receipt_failed" => Ok(Self::RuntimeImageReceiptFailed),
+            "runtime_process_exited" => Ok(Self::RuntimeProcessExited),
+            "runtime_run_missing" => Ok(Self::RuntimeRunMissing),
+            "system_clock_invalid" => Ok(Self::SystemClockInvalid),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for HelperErrorCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for HelperErrorCode {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -6310,6 +6697,7 @@ pub struct ReasonCodeVocabulary {
     pub cluster_mapping_code: ClusterMappingCode,
     pub controller_error_code: ControllerErrorCode,
     pub distribution_code: DistributionCode,
+    pub helper_error_code: HelperErrorCode,
     pub image_store_code: ImageStoreCode,
     pub install_admission_code: InstallAdmissionCode,
     pub install_degraded_reason: InstallDegradedReason,
@@ -6335,6 +6723,7 @@ pub struct ReasonCodeVocabulary {
     pub run_switch_code: RunSwitchCode,
     pub runtime_image_code: RuntimeImageCode,
     pub runtime_preflight_code: RuntimePreflightCode,
+    pub runtime_preflight_finding_code: RuntimePreflightFindingCode,
     pub source_bundle_code: SourceBundleCode,
     pub source_policy_code: SourcePolicyCode,
     pub stop_plan_code: StopPlanCode,
@@ -9941,6 +10330,709 @@ pub struct RuntimePreflightFinding {
     pub capability: ::std::string::String,
     pub code: ::std::string::String,
     pub status: RuntimePreflightFindingStatus,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum RuntimePreflightFindingCode {
+    #[serde(rename = "preflight_finding.architecture_mismatch")]
+    PreflightFindingArchitectureMismatch,
+    #[serde(rename = "preflight_finding.available")]
+    PreflightFindingAvailable,
+    #[serde(rename = "preflight_finding.build_step_failed")]
+    PreflightFindingBuildStepFailed,
+    #[serde(rename = "preflight_finding.capabilities_not_zero")]
+    PreflightFindingCapabilitiesNotZero,
+    #[serde(rename = "preflight_finding.controller_unreachable")]
+    PreflightFindingControllerUnreachable,
+    #[serde(rename = "preflight_finding.deadline_exceeded")]
+    PreflightFindingDeadlineExceeded,
+    #[serde(rename = "preflight_finding.diagnostic_limit_exceeded")]
+    PreflightFindingDiagnosticLimitExceeded,
+    #[serde(rename = "preflight_finding.directory_not_writable")]
+    PreflightFindingDirectoryNotWritable,
+    #[serde(rename = "preflight_finding.disk_reserve_insufficient")]
+    PreflightFindingDiskReserveInsufficient,
+    #[serde(rename = "preflight_finding.fabric_requirement_unverified")]
+    PreflightFindingFabricRequirementUnverified,
+    #[serde(rename = "preflight_finding.helper_call_join_failed")]
+    PreflightFindingHelperCallJoinFailed,
+    #[serde(rename = "preflight_finding.helper_capabilities_not_zero")]
+    PreflightFindingHelperCapabilitiesNotZero,
+    #[serde(rename = "preflight_finding.helper_grant_invalid")]
+    PreflightFindingHelperGrantInvalid,
+    #[serde(rename = "preflight_finding.helper_grant_node_mismatch")]
+    PreflightFindingHelperGrantNodeMismatch,
+    #[serde(rename = "preflight_finding.helper_grant_unauthorized")]
+    PreflightFindingHelperGrantUnauthorized,
+    #[serde(rename = "preflight_finding.helper_grant_unavailable")]
+    PreflightFindingHelperGrantUnavailable,
+    #[serde(rename = "preflight_finding.helper_image_import_failed")]
+    PreflightFindingHelperImageImportFailed,
+    #[serde(rename = "preflight_finding.helper_inspection_outcome_invalid")]
+    PreflightFindingHelperInspectionOutcomeInvalid,
+    #[serde(rename = "preflight_finding.helper_installation_reconciliation_busy")]
+    PreflightFindingHelperInstallationReconciliationBusy,
+    #[serde(rename = "preflight_finding.helper_installation_reconciliation_storage_unavailable")]
+    PreflightFindingHelperInstallationReconciliationStorageUnavailable,
+    #[serde(rename = "preflight_finding.helper_io_failed")]
+    PreflightFindingHelperIoFailed,
+    #[serde(rename = "preflight_finding.helper_message_framing_invalid")]
+    PreflightFindingHelperMessageFramingInvalid,
+    #[serde(rename = "preflight_finding.helper_mount_namespace_unavailable")]
+    PreflightFindingHelperMountNamespaceUnavailable,
+    #[serde(rename = "preflight_finding.helper_no_new_privileges_unavailable")]
+    PreflightFindingHelperNoNewPrivilegesUnavailable,
+    #[serde(rename = "preflight_finding.helper_operation_command_failed")]
+    PreflightFindingHelperOperationCommandFailed,
+    #[serde(rename = "preflight_finding.helper_operation_failed")]
+    PreflightFindingHelperOperationFailed,
+    #[serde(rename = "preflight_finding.helper_operation_invalid")]
+    PreflightFindingHelperOperationInvalid,
+    #[serde(rename = "preflight_finding.helper_operation_invalid_artifact")]
+    PreflightFindingHelperOperationInvalidArtifact,
+    #[serde(rename = "preflight_finding.helper_operation_io")]
+    PreflightFindingHelperOperationIo,
+    #[serde(rename = "preflight_finding.helper_operation_stop_uncertain")]
+    PreflightFindingHelperOperationStopUncertain,
+    #[serde(rename = "preflight_finding.helper_operation_unsafe_path")]
+    PreflightFindingHelperOperationUnsafePath,
+    #[serde(rename = "preflight_finding.helper_outcome_malformed")]
+    PreflightFindingHelperOutcomeMalformed,
+    #[serde(rename = "preflight_finding.helper_peer_identity_invalid")]
+    PreflightFindingHelperPeerIdentityInvalid,
+    #[serde(rename = "preflight_finding.helper_probe_cleanup_failed")]
+    PreflightFindingHelperProbeCleanupFailed,
+    #[serde(rename = "preflight_finding.helper_probe_invalid_result")]
+    PreflightFindingHelperProbeInvalidResult,
+    #[serde(rename = "preflight_finding.helper_proc_unavailable")]
+    PreflightFindingHelperProcUnavailable,
+    #[serde(rename = "preflight_finding.helper_protocol_invalid")]
+    PreflightFindingHelperProtocolInvalid,
+    #[serde(rename = "preflight_finding.helper_rejection_malformed")]
+    PreflightFindingHelperRejectionMalformed,
+    #[serde(rename = "preflight_finding.helper_request_arguments_presence_invalid")]
+    PreflightFindingHelperRequestArgumentsPresenceInvalid,
+    #[serde(rename = "preflight_finding.helper_request_argument_nul_byte")]
+    PreflightFindingHelperRequestArgumentNulByte,
+    #[serde(rename = "preflight_finding.helper_request_attempt_invalid")]
+    PreflightFindingHelperRequestAttemptInvalid,
+    #[serde(rename = "preflight_finding.helper_request_bytes_invalid")]
+    PreflightFindingHelperRequestBytesInvalid,
+    #[serde(rename = "preflight_finding.helper_request_document_invalid")]
+    PreflightFindingHelperRequestDocumentInvalid,
+    #[serde(rename = "preflight_finding.helper_request_encoding_invalid")]
+    PreflightFindingHelperRequestEncodingInvalid,
+    #[serde(rename = "preflight_finding.helper_request_installation_identity_invalid")]
+    PreflightFindingHelperRequestInstallationIdentityInvalid,
+    #[serde(rename = "preflight_finding.helper_request_invalid")]
+    PreflightFindingHelperRequestInvalid,
+    #[serde(rename = "preflight_finding.helper_request_ledger_failed")]
+    PreflightFindingHelperRequestLedgerFailed,
+    #[serde(rename = "preflight_finding.helper_request_plan_binding_invalid")]
+    PreflightFindingHelperRequestPlanBindingInvalid,
+    #[serde(rename = "preflight_finding.helper_request_plan_bytes_invalid")]
+    PreflightFindingHelperRequestPlanBytesInvalid,
+    #[serde(rename = "preflight_finding.helper_request_replayed")]
+    PreflightFindingHelperRequestReplayed,
+    #[serde(rename = "preflight_finding.helper_request_schema_version_invalid")]
+    PreflightFindingHelperRequestSchemaVersionInvalid,
+    #[serde(rename = "preflight_finding.helper_request_storage_invalid")]
+    PreflightFindingHelperRequestStorageInvalid,
+    #[serde(rename = "preflight_finding.helper_response_unbound")]
+    PreflightFindingHelperResponseUnbound,
+    #[serde(rename = "preflight_finding.helper_runtime_endpoint_firewall_rejected")]
+    PreflightFindingHelperRuntimeEndpointFirewallRejected,
+    #[serde(rename = "preflight_finding.helper_runtime_fabric_firewall_rejected")]
+    PreflightFindingHelperRuntimeFabricFirewallRejected,
+    #[serde(rename = "preflight_finding.helper_runtime_fabric_unavailable")]
+    PreflightFindingHelperRuntimeFabricUnavailable,
+    #[serde(rename = "preflight_finding.helper_runtime_image_identity_invalid")]
+    PreflightFindingHelperRuntimeImageIdentityInvalid,
+    #[serde(rename = "preflight_finding.helper_runtime_image_inspect_failed")]
+    PreflightFindingHelperRuntimeImageInspectFailed,
+    #[serde(rename = "preflight_finding.helper_runtime_image_load_failed")]
+    PreflightFindingHelperRuntimeImageLoadFailed,
+    #[serde(rename = "preflight_finding.helper_runtime_image_receipt_failed")]
+    PreflightFindingHelperRuntimeImageReceiptFailed,
+    #[serde(rename = "preflight_finding.helper_runtime_process_exited")]
+    PreflightFindingHelperRuntimeProcessExited,
+    #[serde(rename = "preflight_finding.helper_runtime_run_missing")]
+    PreflightFindingHelperRuntimeRunMissing,
+    #[serde(rename = "preflight_finding.helper_sandbox_run_failed")]
+    PreflightFindingHelperSandboxRunFailed,
+    #[serde(rename = "preflight_finding.helper_stop_uncertain")]
+    PreflightFindingHelperStopUncertain,
+    #[serde(rename = "preflight_finding.helper_system_clock_invalid")]
+    PreflightFindingHelperSystemClockInvalid,
+    #[serde(rename = "preflight_finding.helper_temporary_directory_unavailable")]
+    PreflightFindingHelperTemporaryDirectoryUnavailable,
+    #[serde(rename = "preflight_finding.memory_limit_exceeded")]
+    PreflightFindingMemoryLimitExceeded,
+    #[serde(rename = "preflight_finding.mount_namespace_unavailable")]
+    PreflightFindingMountNamespaceUnavailable,
+    #[serde(rename = "preflight_finding.nonzero_without_output")]
+    PreflightFindingNonzeroWithoutOutput,
+    #[serde(rename = "preflight_finding.no_new_privileges_unavailable")]
+    PreflightFindingNoNewPrivilegesUnavailable,
+    #[serde(rename = "preflight_finding.oci_runtime_unavailable")]
+    PreflightFindingOciRuntimeUnavailable,
+    #[serde(rename = "preflight_finding.patch_rejected")]
+    PreflightFindingPatchRejected,
+    #[serde(rename = "preflight_finding.permission_denied")]
+    PreflightFindingPermissionDenied,
+    #[serde(rename = "preflight_finding.proc_mount_denied")]
+    PreflightFindingProcMountDenied,
+    #[serde(rename = "preflight_finding.proc_unavailable")]
+    PreflightFindingProcUnavailable,
+    #[serde(rename = "preflight_finding.runroot_exceeds_50_bytes")]
+    PreflightFindingRunrootExceeds50Bytes,
+    #[serde(rename = "preflight_finding.signed_helper_probe_required")]
+    PreflightFindingSignedHelperProbeRequired,
+    #[serde(rename = "preflight_finding.storage_driver_failure")]
+    PreflightFindingStorageDriverFailure,
+    #[serde(rename = "preflight_finding.subordinate_id_mapping_unavailable")]
+    PreflightFindingSubordinateIdMappingUnavailable,
+    #[serde(rename = "preflight_finding.subprocess_unavailable")]
+    PreflightFindingSubprocessUnavailable,
+    #[serde(rename = "preflight_finding.systemd_scope_failure")]
+    PreflightFindingSystemdScopeFailure,
+    #[serde(rename = "preflight_finding.temporary_directory_unavailable")]
+    PreflightFindingTemporaryDirectoryUnavailable,
+    #[serde(rename = "preflight_finding.temporary_storage_exhausted")]
+    PreflightFindingTemporaryStorageExhausted,
+    #[serde(rename = "preflight_finding.unclassified")]
+    PreflightFindingUnclassified,
+    #[serde(rename = "preflight_finding.unclassified_podman_build_failure")]
+    PreflightFindingUnclassifiedPodmanBuildFailure,
+    #[serde(rename = "preflight_finding.user_namespace_denied")]
+    PreflightFindingUserNamespaceDenied,
+    #[serde(rename = "preflight_finding.user_service_manager_unavailable")]
+    PreflightFindingUserServiceManagerUnavailable,
+}
+impl ::std::fmt::Display for RuntimePreflightFindingCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::PreflightFindingArchitectureMismatch => {
+                f.write_str("preflight_finding.architecture_mismatch")
+            }
+            Self::PreflightFindingAvailable => f.write_str("preflight_finding.available"),
+            Self::PreflightFindingBuildStepFailed => {
+                f.write_str("preflight_finding.build_step_failed")
+            }
+            Self::PreflightFindingCapabilitiesNotZero => {
+                f.write_str("preflight_finding.capabilities_not_zero")
+            }
+            Self::PreflightFindingControllerUnreachable => {
+                f.write_str("preflight_finding.controller_unreachable")
+            }
+            Self::PreflightFindingDeadlineExceeded => {
+                f.write_str("preflight_finding.deadline_exceeded")
+            }
+            Self::PreflightFindingDiagnosticLimitExceeded => {
+                f.write_str("preflight_finding.diagnostic_limit_exceeded")
+            }
+            Self::PreflightFindingDirectoryNotWritable => {
+                f.write_str("preflight_finding.directory_not_writable")
+            }
+            Self::PreflightFindingDiskReserveInsufficient => {
+                f.write_str("preflight_finding.disk_reserve_insufficient")
+            }
+            Self::PreflightFindingFabricRequirementUnverified => {
+                f.write_str("preflight_finding.fabric_requirement_unverified")
+            }
+            Self::PreflightFindingHelperCallJoinFailed => {
+                f.write_str("preflight_finding.helper_call_join_failed")
+            }
+            Self::PreflightFindingHelperCapabilitiesNotZero => {
+                f.write_str("preflight_finding.helper_capabilities_not_zero")
+            }
+            Self::PreflightFindingHelperGrantInvalid => {
+                f.write_str("preflight_finding.helper_grant_invalid")
+            }
+            Self::PreflightFindingHelperGrantNodeMismatch => {
+                f.write_str("preflight_finding.helper_grant_node_mismatch")
+            }
+            Self::PreflightFindingHelperGrantUnauthorized => {
+                f.write_str("preflight_finding.helper_grant_unauthorized")
+            }
+            Self::PreflightFindingHelperGrantUnavailable => {
+                f.write_str("preflight_finding.helper_grant_unavailable")
+            }
+            Self::PreflightFindingHelperImageImportFailed => {
+                f.write_str("preflight_finding.helper_image_import_failed")
+            }
+            Self::PreflightFindingHelperInspectionOutcomeInvalid => {
+                f.write_str("preflight_finding.helper_inspection_outcome_invalid")
+            }
+            Self::PreflightFindingHelperInstallationReconciliationBusy => {
+                f.write_str("preflight_finding.helper_installation_reconciliation_busy")
+            }
+            Self::PreflightFindingHelperInstallationReconciliationStorageUnavailable => f
+                .write_str(
+                    "preflight_finding.helper_installation_reconciliation_storage_unavailable",
+                ),
+            Self::PreflightFindingHelperIoFailed => {
+                f.write_str("preflight_finding.helper_io_failed")
+            }
+            Self::PreflightFindingHelperMessageFramingInvalid => {
+                f.write_str("preflight_finding.helper_message_framing_invalid")
+            }
+            Self::PreflightFindingHelperMountNamespaceUnavailable => {
+                f.write_str("preflight_finding.helper_mount_namespace_unavailable")
+            }
+            Self::PreflightFindingHelperNoNewPrivilegesUnavailable => {
+                f.write_str("preflight_finding.helper_no_new_privileges_unavailable")
+            }
+            Self::PreflightFindingHelperOperationCommandFailed => {
+                f.write_str("preflight_finding.helper_operation_command_failed")
+            }
+            Self::PreflightFindingHelperOperationFailed => {
+                f.write_str("preflight_finding.helper_operation_failed")
+            }
+            Self::PreflightFindingHelperOperationInvalid => {
+                f.write_str("preflight_finding.helper_operation_invalid")
+            }
+            Self::PreflightFindingHelperOperationInvalidArtifact => {
+                f.write_str("preflight_finding.helper_operation_invalid_artifact")
+            }
+            Self::PreflightFindingHelperOperationIo => {
+                f.write_str("preflight_finding.helper_operation_io")
+            }
+            Self::PreflightFindingHelperOperationStopUncertain => {
+                f.write_str("preflight_finding.helper_operation_stop_uncertain")
+            }
+            Self::PreflightFindingHelperOperationUnsafePath => {
+                f.write_str("preflight_finding.helper_operation_unsafe_path")
+            }
+            Self::PreflightFindingHelperOutcomeMalformed => {
+                f.write_str("preflight_finding.helper_outcome_malformed")
+            }
+            Self::PreflightFindingHelperPeerIdentityInvalid => {
+                f.write_str("preflight_finding.helper_peer_identity_invalid")
+            }
+            Self::PreflightFindingHelperProbeCleanupFailed => {
+                f.write_str("preflight_finding.helper_probe_cleanup_failed")
+            }
+            Self::PreflightFindingHelperProbeInvalidResult => {
+                f.write_str("preflight_finding.helper_probe_invalid_result")
+            }
+            Self::PreflightFindingHelperProcUnavailable => {
+                f.write_str("preflight_finding.helper_proc_unavailable")
+            }
+            Self::PreflightFindingHelperProtocolInvalid => {
+                f.write_str("preflight_finding.helper_protocol_invalid")
+            }
+            Self::PreflightFindingHelperRejectionMalformed => {
+                f.write_str("preflight_finding.helper_rejection_malformed")
+            }
+            Self::PreflightFindingHelperRequestArgumentsPresenceInvalid => {
+                f.write_str("preflight_finding.helper_request_arguments_presence_invalid")
+            }
+            Self::PreflightFindingHelperRequestArgumentNulByte => {
+                f.write_str("preflight_finding.helper_request_argument_nul_byte")
+            }
+            Self::PreflightFindingHelperRequestAttemptInvalid => {
+                f.write_str("preflight_finding.helper_request_attempt_invalid")
+            }
+            Self::PreflightFindingHelperRequestBytesInvalid => {
+                f.write_str("preflight_finding.helper_request_bytes_invalid")
+            }
+            Self::PreflightFindingHelperRequestDocumentInvalid => {
+                f.write_str("preflight_finding.helper_request_document_invalid")
+            }
+            Self::PreflightFindingHelperRequestEncodingInvalid => {
+                f.write_str("preflight_finding.helper_request_encoding_invalid")
+            }
+            Self::PreflightFindingHelperRequestInstallationIdentityInvalid => {
+                f.write_str("preflight_finding.helper_request_installation_identity_invalid")
+            }
+            Self::PreflightFindingHelperRequestInvalid => {
+                f.write_str("preflight_finding.helper_request_invalid")
+            }
+            Self::PreflightFindingHelperRequestLedgerFailed => {
+                f.write_str("preflight_finding.helper_request_ledger_failed")
+            }
+            Self::PreflightFindingHelperRequestPlanBindingInvalid => {
+                f.write_str("preflight_finding.helper_request_plan_binding_invalid")
+            }
+            Self::PreflightFindingHelperRequestPlanBytesInvalid => {
+                f.write_str("preflight_finding.helper_request_plan_bytes_invalid")
+            }
+            Self::PreflightFindingHelperRequestReplayed => {
+                f.write_str("preflight_finding.helper_request_replayed")
+            }
+            Self::PreflightFindingHelperRequestSchemaVersionInvalid => {
+                f.write_str("preflight_finding.helper_request_schema_version_invalid")
+            }
+            Self::PreflightFindingHelperRequestStorageInvalid => {
+                f.write_str("preflight_finding.helper_request_storage_invalid")
+            }
+            Self::PreflightFindingHelperResponseUnbound => {
+                f.write_str("preflight_finding.helper_response_unbound")
+            }
+            Self::PreflightFindingHelperRuntimeEndpointFirewallRejected => {
+                f.write_str("preflight_finding.helper_runtime_endpoint_firewall_rejected")
+            }
+            Self::PreflightFindingHelperRuntimeFabricFirewallRejected => {
+                f.write_str("preflight_finding.helper_runtime_fabric_firewall_rejected")
+            }
+            Self::PreflightFindingHelperRuntimeFabricUnavailable => {
+                f.write_str("preflight_finding.helper_runtime_fabric_unavailable")
+            }
+            Self::PreflightFindingHelperRuntimeImageIdentityInvalid => {
+                f.write_str("preflight_finding.helper_runtime_image_identity_invalid")
+            }
+            Self::PreflightFindingHelperRuntimeImageInspectFailed => {
+                f.write_str("preflight_finding.helper_runtime_image_inspect_failed")
+            }
+            Self::PreflightFindingHelperRuntimeImageLoadFailed => {
+                f.write_str("preflight_finding.helper_runtime_image_load_failed")
+            }
+            Self::PreflightFindingHelperRuntimeImageReceiptFailed => {
+                f.write_str("preflight_finding.helper_runtime_image_receipt_failed")
+            }
+            Self::PreflightFindingHelperRuntimeProcessExited => {
+                f.write_str("preflight_finding.helper_runtime_process_exited")
+            }
+            Self::PreflightFindingHelperRuntimeRunMissing => {
+                f.write_str("preflight_finding.helper_runtime_run_missing")
+            }
+            Self::PreflightFindingHelperSandboxRunFailed => {
+                f.write_str("preflight_finding.helper_sandbox_run_failed")
+            }
+            Self::PreflightFindingHelperStopUncertain => {
+                f.write_str("preflight_finding.helper_stop_uncertain")
+            }
+            Self::PreflightFindingHelperSystemClockInvalid => {
+                f.write_str("preflight_finding.helper_system_clock_invalid")
+            }
+            Self::PreflightFindingHelperTemporaryDirectoryUnavailable => {
+                f.write_str("preflight_finding.helper_temporary_directory_unavailable")
+            }
+            Self::PreflightFindingMemoryLimitExceeded => {
+                f.write_str("preflight_finding.memory_limit_exceeded")
+            }
+            Self::PreflightFindingMountNamespaceUnavailable => {
+                f.write_str("preflight_finding.mount_namespace_unavailable")
+            }
+            Self::PreflightFindingNonzeroWithoutOutput => {
+                f.write_str("preflight_finding.nonzero_without_output")
+            }
+            Self::PreflightFindingNoNewPrivilegesUnavailable => {
+                f.write_str("preflight_finding.no_new_privileges_unavailable")
+            }
+            Self::PreflightFindingOciRuntimeUnavailable => {
+                f.write_str("preflight_finding.oci_runtime_unavailable")
+            }
+            Self::PreflightFindingPatchRejected => f.write_str("preflight_finding.patch_rejected"),
+            Self::PreflightFindingPermissionDenied => {
+                f.write_str("preflight_finding.permission_denied")
+            }
+            Self::PreflightFindingProcMountDenied => {
+                f.write_str("preflight_finding.proc_mount_denied")
+            }
+            Self::PreflightFindingProcUnavailable => {
+                f.write_str("preflight_finding.proc_unavailable")
+            }
+            Self::PreflightFindingRunrootExceeds50Bytes => {
+                f.write_str("preflight_finding.runroot_exceeds_50_bytes")
+            }
+            Self::PreflightFindingSignedHelperProbeRequired => {
+                f.write_str("preflight_finding.signed_helper_probe_required")
+            }
+            Self::PreflightFindingStorageDriverFailure => {
+                f.write_str("preflight_finding.storage_driver_failure")
+            }
+            Self::PreflightFindingSubordinateIdMappingUnavailable => {
+                f.write_str("preflight_finding.subordinate_id_mapping_unavailable")
+            }
+            Self::PreflightFindingSubprocessUnavailable => {
+                f.write_str("preflight_finding.subprocess_unavailable")
+            }
+            Self::PreflightFindingSystemdScopeFailure => {
+                f.write_str("preflight_finding.systemd_scope_failure")
+            }
+            Self::PreflightFindingTemporaryDirectoryUnavailable => {
+                f.write_str("preflight_finding.temporary_directory_unavailable")
+            }
+            Self::PreflightFindingTemporaryStorageExhausted => {
+                f.write_str("preflight_finding.temporary_storage_exhausted")
+            }
+            Self::PreflightFindingUnclassified => f.write_str("preflight_finding.unclassified"),
+            Self::PreflightFindingUnclassifiedPodmanBuildFailure => {
+                f.write_str("preflight_finding.unclassified_podman_build_failure")
+            }
+            Self::PreflightFindingUserNamespaceDenied => {
+                f.write_str("preflight_finding.user_namespace_denied")
+            }
+            Self::PreflightFindingUserServiceManagerUnavailable => {
+                f.write_str("preflight_finding.user_service_manager_unavailable")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for RuntimePreflightFindingCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "preflight_finding.architecture_mismatch" => {
+                Ok(Self::PreflightFindingArchitectureMismatch)
+            }
+            "preflight_finding.available" => Ok(Self::PreflightFindingAvailable),
+            "preflight_finding.build_step_failed" => Ok(Self::PreflightFindingBuildStepFailed),
+            "preflight_finding.capabilities_not_zero" => {
+                Ok(Self::PreflightFindingCapabilitiesNotZero)
+            }
+            "preflight_finding.controller_unreachable" => {
+                Ok(Self::PreflightFindingControllerUnreachable)
+            }
+            "preflight_finding.deadline_exceeded" => Ok(Self::PreflightFindingDeadlineExceeded),
+            "preflight_finding.diagnostic_limit_exceeded" => {
+                Ok(Self::PreflightFindingDiagnosticLimitExceeded)
+            }
+            "preflight_finding.directory_not_writable" => {
+                Ok(Self::PreflightFindingDirectoryNotWritable)
+            }
+            "preflight_finding.disk_reserve_insufficient" => {
+                Ok(Self::PreflightFindingDiskReserveInsufficient)
+            }
+            "preflight_finding.fabric_requirement_unverified" => {
+                Ok(Self::PreflightFindingFabricRequirementUnverified)
+            }
+            "preflight_finding.helper_call_join_failed" => {
+                Ok(Self::PreflightFindingHelperCallJoinFailed)
+            }
+            "preflight_finding.helper_capabilities_not_zero" => {
+                Ok(Self::PreflightFindingHelperCapabilitiesNotZero)
+            }
+            "preflight_finding.helper_grant_invalid" => {
+                Ok(Self::PreflightFindingHelperGrantInvalid)
+            }
+            "preflight_finding.helper_grant_node_mismatch" => {
+                Ok(Self::PreflightFindingHelperGrantNodeMismatch)
+            }
+            "preflight_finding.helper_grant_unauthorized" => {
+                Ok(Self::PreflightFindingHelperGrantUnauthorized)
+            }
+            "preflight_finding.helper_grant_unavailable" => {
+                Ok(Self::PreflightFindingHelperGrantUnavailable)
+            }
+            "preflight_finding.helper_image_import_failed" => {
+                Ok(Self::PreflightFindingHelperImageImportFailed)
+            }
+            "preflight_finding.helper_inspection_outcome_invalid" => {
+                Ok(Self::PreflightFindingHelperInspectionOutcomeInvalid)
+            }
+            "preflight_finding.helper_installation_reconciliation_busy" => {
+                Ok(Self::PreflightFindingHelperInstallationReconciliationBusy)
+            }
+            "preflight_finding.helper_installation_reconciliation_storage_unavailable" => {
+                Ok(Self::PreflightFindingHelperInstallationReconciliationStorageUnavailable)
+            }
+            "preflight_finding.helper_io_failed" => Ok(Self::PreflightFindingHelperIoFailed),
+            "preflight_finding.helper_message_framing_invalid" => {
+                Ok(Self::PreflightFindingHelperMessageFramingInvalid)
+            }
+            "preflight_finding.helper_mount_namespace_unavailable" => {
+                Ok(Self::PreflightFindingHelperMountNamespaceUnavailable)
+            }
+            "preflight_finding.helper_no_new_privileges_unavailable" => {
+                Ok(Self::PreflightFindingHelperNoNewPrivilegesUnavailable)
+            }
+            "preflight_finding.helper_operation_command_failed" => {
+                Ok(Self::PreflightFindingHelperOperationCommandFailed)
+            }
+            "preflight_finding.helper_operation_failed" => {
+                Ok(Self::PreflightFindingHelperOperationFailed)
+            }
+            "preflight_finding.helper_operation_invalid" => {
+                Ok(Self::PreflightFindingHelperOperationInvalid)
+            }
+            "preflight_finding.helper_operation_invalid_artifact" => {
+                Ok(Self::PreflightFindingHelperOperationInvalidArtifact)
+            }
+            "preflight_finding.helper_operation_io" => Ok(Self::PreflightFindingHelperOperationIo),
+            "preflight_finding.helper_operation_stop_uncertain" => {
+                Ok(Self::PreflightFindingHelperOperationStopUncertain)
+            }
+            "preflight_finding.helper_operation_unsafe_path" => {
+                Ok(Self::PreflightFindingHelperOperationUnsafePath)
+            }
+            "preflight_finding.helper_outcome_malformed" => {
+                Ok(Self::PreflightFindingHelperOutcomeMalformed)
+            }
+            "preflight_finding.helper_peer_identity_invalid" => {
+                Ok(Self::PreflightFindingHelperPeerIdentityInvalid)
+            }
+            "preflight_finding.helper_probe_cleanup_failed" => {
+                Ok(Self::PreflightFindingHelperProbeCleanupFailed)
+            }
+            "preflight_finding.helper_probe_invalid_result" => {
+                Ok(Self::PreflightFindingHelperProbeInvalidResult)
+            }
+            "preflight_finding.helper_proc_unavailable" => {
+                Ok(Self::PreflightFindingHelperProcUnavailable)
+            }
+            "preflight_finding.helper_protocol_invalid" => {
+                Ok(Self::PreflightFindingHelperProtocolInvalid)
+            }
+            "preflight_finding.helper_rejection_malformed" => {
+                Ok(Self::PreflightFindingHelperRejectionMalformed)
+            }
+            "preflight_finding.helper_request_arguments_presence_invalid" => {
+                Ok(Self::PreflightFindingHelperRequestArgumentsPresenceInvalid)
+            }
+            "preflight_finding.helper_request_argument_nul_byte" => {
+                Ok(Self::PreflightFindingHelperRequestArgumentNulByte)
+            }
+            "preflight_finding.helper_request_attempt_invalid" => {
+                Ok(Self::PreflightFindingHelperRequestAttemptInvalid)
+            }
+            "preflight_finding.helper_request_bytes_invalid" => {
+                Ok(Self::PreflightFindingHelperRequestBytesInvalid)
+            }
+            "preflight_finding.helper_request_document_invalid" => {
+                Ok(Self::PreflightFindingHelperRequestDocumentInvalid)
+            }
+            "preflight_finding.helper_request_encoding_invalid" => {
+                Ok(Self::PreflightFindingHelperRequestEncodingInvalid)
+            }
+            "preflight_finding.helper_request_installation_identity_invalid" => {
+                Ok(Self::PreflightFindingHelperRequestInstallationIdentityInvalid)
+            }
+            "preflight_finding.helper_request_invalid" => {
+                Ok(Self::PreflightFindingHelperRequestInvalid)
+            }
+            "preflight_finding.helper_request_ledger_failed" => {
+                Ok(Self::PreflightFindingHelperRequestLedgerFailed)
+            }
+            "preflight_finding.helper_request_plan_binding_invalid" => {
+                Ok(Self::PreflightFindingHelperRequestPlanBindingInvalid)
+            }
+            "preflight_finding.helper_request_plan_bytes_invalid" => {
+                Ok(Self::PreflightFindingHelperRequestPlanBytesInvalid)
+            }
+            "preflight_finding.helper_request_replayed" => {
+                Ok(Self::PreflightFindingHelperRequestReplayed)
+            }
+            "preflight_finding.helper_request_schema_version_invalid" => {
+                Ok(Self::PreflightFindingHelperRequestSchemaVersionInvalid)
+            }
+            "preflight_finding.helper_request_storage_invalid" => {
+                Ok(Self::PreflightFindingHelperRequestStorageInvalid)
+            }
+            "preflight_finding.helper_response_unbound" => {
+                Ok(Self::PreflightFindingHelperResponseUnbound)
+            }
+            "preflight_finding.helper_runtime_endpoint_firewall_rejected" => {
+                Ok(Self::PreflightFindingHelperRuntimeEndpointFirewallRejected)
+            }
+            "preflight_finding.helper_runtime_fabric_firewall_rejected" => {
+                Ok(Self::PreflightFindingHelperRuntimeFabricFirewallRejected)
+            }
+            "preflight_finding.helper_runtime_fabric_unavailable" => {
+                Ok(Self::PreflightFindingHelperRuntimeFabricUnavailable)
+            }
+            "preflight_finding.helper_runtime_image_identity_invalid" => {
+                Ok(Self::PreflightFindingHelperRuntimeImageIdentityInvalid)
+            }
+            "preflight_finding.helper_runtime_image_inspect_failed" => {
+                Ok(Self::PreflightFindingHelperRuntimeImageInspectFailed)
+            }
+            "preflight_finding.helper_runtime_image_load_failed" => {
+                Ok(Self::PreflightFindingHelperRuntimeImageLoadFailed)
+            }
+            "preflight_finding.helper_runtime_image_receipt_failed" => {
+                Ok(Self::PreflightFindingHelperRuntimeImageReceiptFailed)
+            }
+            "preflight_finding.helper_runtime_process_exited" => {
+                Ok(Self::PreflightFindingHelperRuntimeProcessExited)
+            }
+            "preflight_finding.helper_runtime_run_missing" => {
+                Ok(Self::PreflightFindingHelperRuntimeRunMissing)
+            }
+            "preflight_finding.helper_sandbox_run_failed" => {
+                Ok(Self::PreflightFindingHelperSandboxRunFailed)
+            }
+            "preflight_finding.helper_stop_uncertain" => {
+                Ok(Self::PreflightFindingHelperStopUncertain)
+            }
+            "preflight_finding.helper_system_clock_invalid" => {
+                Ok(Self::PreflightFindingHelperSystemClockInvalid)
+            }
+            "preflight_finding.helper_temporary_directory_unavailable" => {
+                Ok(Self::PreflightFindingHelperTemporaryDirectoryUnavailable)
+            }
+            "preflight_finding.memory_limit_exceeded" => {
+                Ok(Self::PreflightFindingMemoryLimitExceeded)
+            }
+            "preflight_finding.mount_namespace_unavailable" => {
+                Ok(Self::PreflightFindingMountNamespaceUnavailable)
+            }
+            "preflight_finding.nonzero_without_output" => {
+                Ok(Self::PreflightFindingNonzeroWithoutOutput)
+            }
+            "preflight_finding.no_new_privileges_unavailable" => {
+                Ok(Self::PreflightFindingNoNewPrivilegesUnavailable)
+            }
+            "preflight_finding.oci_runtime_unavailable" => {
+                Ok(Self::PreflightFindingOciRuntimeUnavailable)
+            }
+            "preflight_finding.patch_rejected" => Ok(Self::PreflightFindingPatchRejected),
+            "preflight_finding.permission_denied" => Ok(Self::PreflightFindingPermissionDenied),
+            "preflight_finding.proc_mount_denied" => Ok(Self::PreflightFindingProcMountDenied),
+            "preflight_finding.proc_unavailable" => Ok(Self::PreflightFindingProcUnavailable),
+            "preflight_finding.runroot_exceeds_50_bytes" => {
+                Ok(Self::PreflightFindingRunrootExceeds50Bytes)
+            }
+            "preflight_finding.signed_helper_probe_required" => {
+                Ok(Self::PreflightFindingSignedHelperProbeRequired)
+            }
+            "preflight_finding.storage_driver_failure" => {
+                Ok(Self::PreflightFindingStorageDriverFailure)
+            }
+            "preflight_finding.subordinate_id_mapping_unavailable" => {
+                Ok(Self::PreflightFindingSubordinateIdMappingUnavailable)
+            }
+            "preflight_finding.subprocess_unavailable" => {
+                Ok(Self::PreflightFindingSubprocessUnavailable)
+            }
+            "preflight_finding.systemd_scope_failure" => {
+                Ok(Self::PreflightFindingSystemdScopeFailure)
+            }
+            "preflight_finding.temporary_directory_unavailable" => {
+                Ok(Self::PreflightFindingTemporaryDirectoryUnavailable)
+            }
+            "preflight_finding.temporary_storage_exhausted" => {
+                Ok(Self::PreflightFindingTemporaryStorageExhausted)
+            }
+            "preflight_finding.unclassified" => Ok(Self::PreflightFindingUnclassified),
+            "preflight_finding.unclassified_podman_build_failure" => {
+                Ok(Self::PreflightFindingUnclassifiedPodmanBuildFailure)
+            }
+            "preflight_finding.user_namespace_denied" => {
+                Ok(Self::PreflightFindingUserNamespaceDenied)
+            }
+            "preflight_finding.user_service_manager_unavailable" => {
+                Ok(Self::PreflightFindingUserServiceManagerUnavailable)
+            }
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RuntimePreflightFindingCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RuntimePreflightFindingCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(
     ::serde::Deserialize,
@@ -13637,7 +14729,9 @@ impl ControllerErrorCode {
             Self::ControllerInternalError => "controller.internal_error",
             Self::ControllerInvalidRequest => "controller.invalid_request",
             Self::ControllerNotFound => "controller.not_found",
+            Self::ControllerRateLimited => "controller.rate_limited",
             Self::ControllerRequestTooLarge => "controller.request_too_large",
+            Self::ControllerTimeout => "controller.timeout",
             Self::ControllerUnavailable => "controller.unavailable",
         }
     }
@@ -13691,8 +14785,12 @@ impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
             ControllerInvalidRequest,
             #[serde(rename = "controller.not_found")]
             ControllerNotFound,
+            #[serde(rename = "controller.rate_limited")]
+            ControllerRateLimited,
             #[serde(rename = "controller.request_too_large")]
             ControllerRequestTooLarge,
+            #[serde(rename = "controller.timeout")]
+            ControllerTimeout,
             #[serde(rename = "controller.unavailable")]
             ControllerUnavailable,
         }
@@ -13706,7 +14804,9 @@ impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
             Raw::ControllerInternalError => Self::ControllerInternalError,
             Raw::ControllerInvalidRequest => Self::ControllerInvalidRequest,
             Raw::ControllerNotFound => Self::ControllerNotFound,
+            Raw::ControllerRateLimited => Self::ControllerRateLimited,
             Raw::ControllerRequestTooLarge => Self::ControllerRequestTooLarge,
+            Raw::ControllerTimeout => Self::ControllerTimeout,
             Raw::ControllerUnavailable => Self::ControllerUnavailable,
         })
     }
@@ -14693,6 +15793,363 @@ impl<'de> ::serde::Deserialize<'de> for GatewayRouteState {
             Raw::Published => Self::Published,
             Raw::Maintenance => Self::Maintenance,
             Raw::Unavailable => Self::Unavailable,
+        })
+    }
+}
+impl HelperErrorCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CallJoinFailed => "call_join_failed",
+            Self::ConcurrencyLimit => "concurrency_limit",
+            Self::GrantInvalid => "grant_invalid",
+            Self::GrantNodeMismatch => "grant_node_mismatch",
+            Self::GrantUnauthorized => "grant_unauthorized",
+            Self::InspectionOutcomeInvalid => "inspection_outcome_invalid",
+            Self::InstallationReconciliationBusy => "installation_reconciliation_busy",
+            Self::InstallationReconciliationStorageUnavailable => {
+                "installation_reconciliation_storage_unavailable"
+            }
+            Self::MessageFramingInvalid => "message_framing_invalid",
+            Self::OperationCommandFailed => "operation_command_failed",
+            Self::OperationFailed => "operation_failed",
+            Self::OperationInvalid => "operation_invalid",
+            Self::OperationInvalidArtifact => "operation_invalid_artifact",
+            Self::OperationIo => "operation_io",
+            Self::OperationStopUncertain => "operation_stop_uncertain",
+            Self::OperationUnsafePath => "operation_unsafe_path",
+            Self::OutcomeMalformed => "outcome_malformed",
+            Self::PackageCustodyFailed => "package_custody_failed",
+            Self::PackageInstallFailed => "package_install_failed",
+            Self::PackageMetadataFailed => "package_metadata_failed",
+            Self::PackagePreflightFailed => "package_preflight_failed",
+            Self::PackageVerificationFailed => "package_verification_failed",
+            Self::PeerIdentityInvalid => "peer_identity_invalid",
+            Self::RejectionMalformed => "rejection_malformed",
+            Self::RequestArgumentsPresenceInvalid => "request_arguments_presence_invalid",
+            Self::RequestArgumentNulByte => "request_argument_nul_byte",
+            Self::RequestAttemptInvalid => "request_attempt_invalid",
+            Self::RequestBytesInvalid => "request_bytes_invalid",
+            Self::RequestDocumentInvalid => "request_document_invalid",
+            Self::RequestEncodingInvalid => "request_encoding_invalid",
+            Self::RequestInstallationIdentityInvalid => "request_installation_identity_invalid",
+            Self::RequestInvalid => "request_invalid",
+            Self::RequestLedgerFailed => "request_ledger_failed",
+            Self::RequestPlanBindingInvalid => "request_plan_binding_invalid",
+            Self::RequestPlanBytesInvalid => "request_plan_bytes_invalid",
+            Self::RequestReplayed => "request_replayed",
+            Self::RequestSchemaVersionInvalid => "request_schema_version_invalid",
+            Self::RequestStorageInvalid => "request_storage_invalid",
+            Self::ResponseUnbound => "response_unbound",
+            Self::RuntimeAuthorityUnavailable => "runtime_authority_unavailable",
+            Self::RuntimeEndpointFirewallRejected => "runtime_endpoint_firewall_rejected",
+            Self::RuntimeFabricFirewallRejected => "runtime_fabric_firewall_rejected",
+            Self::RuntimeFabricUnavailable => "runtime_fabric_unavailable",
+            Self::RuntimeHelperCallJoinFailed => "runtime_helper_call_join_failed",
+            Self::RuntimeHelperInspectionOutcomeInvalid => {
+                "runtime_helper_inspection_outcome_invalid"
+            }
+            Self::RuntimeHelperMessageFramingInvalid => "runtime_helper_message_framing_invalid",
+            Self::RuntimeHelperOutcomeMalformed => "runtime_helper_outcome_malformed",
+            Self::RuntimeHelperProtocolInvalid => "runtime_helper_protocol_invalid",
+            Self::RuntimeHelperRejectionMalformed => "runtime_helper_rejection_malformed",
+            Self::RuntimeHelperRequestArgumentsPresenceInvalid => {
+                "runtime_helper_request_arguments_presence_invalid"
+            }
+            Self::RuntimeHelperRequestArgumentNulByte => "runtime_helper_request_argument_nul_byte",
+            Self::RuntimeHelperRequestAttemptInvalid => "runtime_helper_request_attempt_invalid",
+            Self::RuntimeHelperRequestBytesInvalid => "runtime_helper_request_bytes_invalid",
+            Self::RuntimeHelperRequestDocumentInvalid => "runtime_helper_request_document_invalid",
+            Self::RuntimeHelperRequestEncodingInvalid => "runtime_helper_request_encoding_invalid",
+            Self::RuntimeHelperRequestInstallationIdentityInvalid => {
+                "runtime_helper_request_installation_identity_invalid"
+            }
+            Self::RuntimeHelperRequestPlanBindingInvalid => {
+                "runtime_helper_request_plan_binding_invalid"
+            }
+            Self::RuntimeHelperRequestPlanBytesInvalid => {
+                "runtime_helper_request_plan_bytes_invalid"
+            }
+            Self::RuntimeHelperRequestSchemaVersionInvalid => {
+                "runtime_helper_request_schema_version_invalid"
+            }
+            Self::RuntimeHelperRequestStorageInvalid => "runtime_helper_request_storage_invalid",
+            Self::RuntimeHelperResponseUnbound => "runtime_helper_response_unbound",
+            Self::RuntimeHelperStopUncertain => "runtime_helper_stop_uncertain",
+            Self::RuntimeHelperSystemClockInvalid => "runtime_helper_system_clock_invalid",
+            Self::RuntimeHelperUnavailable => "runtime_helper_unavailable",
+            Self::RuntimeImageIdentityInvalid => "runtime_image_identity_invalid",
+            Self::RuntimeImageInspectFailed => "runtime_image_inspect_failed",
+            Self::RuntimeImageLoadFailed => "runtime_image_load_failed",
+            Self::RuntimeImageReceiptFailed => "runtime_image_receipt_failed",
+            Self::RuntimeProcessExited => "runtime_process_exited",
+            Self::RuntimeRunMissing => "runtime_run_missing",
+            Self::SystemClockInvalid => "system_clock_invalid",
+        }
+    }
+}
+impl ::std::ops::Deref for HelperErrorCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for HelperErrorCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for HelperErrorCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for HelperErrorCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("HelperErrorCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "call_join_failed")]
+            CallJoinFailed,
+            #[serde(rename = "concurrency_limit")]
+            ConcurrencyLimit,
+            #[serde(rename = "grant_invalid")]
+            GrantInvalid,
+            #[serde(rename = "grant_node_mismatch")]
+            GrantNodeMismatch,
+            #[serde(rename = "grant_unauthorized")]
+            GrantUnauthorized,
+            #[serde(rename = "inspection_outcome_invalid")]
+            InspectionOutcomeInvalid,
+            #[serde(rename = "installation_reconciliation_busy")]
+            InstallationReconciliationBusy,
+            #[serde(rename = "installation_reconciliation_storage_unavailable")]
+            InstallationReconciliationStorageUnavailable,
+            #[serde(rename = "message_framing_invalid")]
+            MessageFramingInvalid,
+            #[serde(rename = "operation_command_failed")]
+            OperationCommandFailed,
+            #[serde(rename = "operation_failed")]
+            OperationFailed,
+            #[serde(rename = "operation_invalid")]
+            OperationInvalid,
+            #[serde(rename = "operation_invalid_artifact")]
+            OperationInvalidArtifact,
+            #[serde(rename = "operation_io")]
+            OperationIo,
+            #[serde(rename = "operation_stop_uncertain")]
+            OperationStopUncertain,
+            #[serde(rename = "operation_unsafe_path")]
+            OperationUnsafePath,
+            #[serde(rename = "outcome_malformed")]
+            OutcomeMalformed,
+            #[serde(rename = "package_custody_failed")]
+            PackageCustodyFailed,
+            #[serde(rename = "package_install_failed")]
+            PackageInstallFailed,
+            #[serde(rename = "package_metadata_failed")]
+            PackageMetadataFailed,
+            #[serde(rename = "package_preflight_failed")]
+            PackagePreflightFailed,
+            #[serde(rename = "package_verification_failed")]
+            PackageVerificationFailed,
+            #[serde(rename = "peer_identity_invalid")]
+            PeerIdentityInvalid,
+            #[serde(rename = "rejection_malformed")]
+            RejectionMalformed,
+            #[serde(rename = "request_arguments_presence_invalid")]
+            RequestArgumentsPresenceInvalid,
+            #[serde(rename = "request_argument_nul_byte")]
+            RequestArgumentNulByte,
+            #[serde(rename = "request_attempt_invalid")]
+            RequestAttemptInvalid,
+            #[serde(rename = "request_bytes_invalid")]
+            RequestBytesInvalid,
+            #[serde(rename = "request_document_invalid")]
+            RequestDocumentInvalid,
+            #[serde(rename = "request_encoding_invalid")]
+            RequestEncodingInvalid,
+            #[serde(rename = "request_installation_identity_invalid")]
+            RequestInstallationIdentityInvalid,
+            #[serde(rename = "request_invalid")]
+            RequestInvalid,
+            #[serde(rename = "request_ledger_failed")]
+            RequestLedgerFailed,
+            #[serde(rename = "request_plan_binding_invalid")]
+            RequestPlanBindingInvalid,
+            #[serde(rename = "request_plan_bytes_invalid")]
+            RequestPlanBytesInvalid,
+            #[serde(rename = "request_replayed")]
+            RequestReplayed,
+            #[serde(rename = "request_schema_version_invalid")]
+            RequestSchemaVersionInvalid,
+            #[serde(rename = "request_storage_invalid")]
+            RequestStorageInvalid,
+            #[serde(rename = "response_unbound")]
+            ResponseUnbound,
+            #[serde(rename = "runtime_authority_unavailable")]
+            RuntimeAuthorityUnavailable,
+            #[serde(rename = "runtime_endpoint_firewall_rejected")]
+            RuntimeEndpointFirewallRejected,
+            #[serde(rename = "runtime_fabric_firewall_rejected")]
+            RuntimeFabricFirewallRejected,
+            #[serde(rename = "runtime_fabric_unavailable")]
+            RuntimeFabricUnavailable,
+            #[serde(rename = "runtime_helper_call_join_failed")]
+            RuntimeHelperCallJoinFailed,
+            #[serde(rename = "runtime_helper_inspection_outcome_invalid")]
+            RuntimeHelperInspectionOutcomeInvalid,
+            #[serde(rename = "runtime_helper_message_framing_invalid")]
+            RuntimeHelperMessageFramingInvalid,
+            #[serde(rename = "runtime_helper_outcome_malformed")]
+            RuntimeHelperOutcomeMalformed,
+            #[serde(rename = "runtime_helper_protocol_invalid")]
+            RuntimeHelperProtocolInvalid,
+            #[serde(rename = "runtime_helper_rejection_malformed")]
+            RuntimeHelperRejectionMalformed,
+            #[serde(rename = "runtime_helper_request_arguments_presence_invalid")]
+            RuntimeHelperRequestArgumentsPresenceInvalid,
+            #[serde(rename = "runtime_helper_request_argument_nul_byte")]
+            RuntimeHelperRequestArgumentNulByte,
+            #[serde(rename = "runtime_helper_request_attempt_invalid")]
+            RuntimeHelperRequestAttemptInvalid,
+            #[serde(rename = "runtime_helper_request_bytes_invalid")]
+            RuntimeHelperRequestBytesInvalid,
+            #[serde(rename = "runtime_helper_request_document_invalid")]
+            RuntimeHelperRequestDocumentInvalid,
+            #[serde(rename = "runtime_helper_request_encoding_invalid")]
+            RuntimeHelperRequestEncodingInvalid,
+            #[serde(rename = "runtime_helper_request_installation_identity_invalid")]
+            RuntimeHelperRequestInstallationIdentityInvalid,
+            #[serde(rename = "runtime_helper_request_plan_binding_invalid")]
+            RuntimeHelperRequestPlanBindingInvalid,
+            #[serde(rename = "runtime_helper_request_plan_bytes_invalid")]
+            RuntimeHelperRequestPlanBytesInvalid,
+            #[serde(rename = "runtime_helper_request_schema_version_invalid")]
+            RuntimeHelperRequestSchemaVersionInvalid,
+            #[serde(rename = "runtime_helper_request_storage_invalid")]
+            RuntimeHelperRequestStorageInvalid,
+            #[serde(rename = "runtime_helper_response_unbound")]
+            RuntimeHelperResponseUnbound,
+            #[serde(rename = "runtime_helper_stop_uncertain")]
+            RuntimeHelperStopUncertain,
+            #[serde(rename = "runtime_helper_system_clock_invalid")]
+            RuntimeHelperSystemClockInvalid,
+            #[serde(rename = "runtime_helper_unavailable")]
+            RuntimeHelperUnavailable,
+            #[serde(rename = "runtime_image_identity_invalid")]
+            RuntimeImageIdentityInvalid,
+            #[serde(rename = "runtime_image_inspect_failed")]
+            RuntimeImageInspectFailed,
+            #[serde(rename = "runtime_image_load_failed")]
+            RuntimeImageLoadFailed,
+            #[serde(rename = "runtime_image_receipt_failed")]
+            RuntimeImageReceiptFailed,
+            #[serde(rename = "runtime_process_exited")]
+            RuntimeProcessExited,
+            #[serde(rename = "runtime_run_missing")]
+            RuntimeRunMissing,
+            #[serde(rename = "system_clock_invalid")]
+            SystemClockInvalid,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CallJoinFailed => Self::CallJoinFailed,
+            Raw::ConcurrencyLimit => Self::ConcurrencyLimit,
+            Raw::GrantInvalid => Self::GrantInvalid,
+            Raw::GrantNodeMismatch => Self::GrantNodeMismatch,
+            Raw::GrantUnauthorized => Self::GrantUnauthorized,
+            Raw::InspectionOutcomeInvalid => Self::InspectionOutcomeInvalid,
+            Raw::InstallationReconciliationBusy => Self::InstallationReconciliationBusy,
+            Raw::InstallationReconciliationStorageUnavailable => {
+                Self::InstallationReconciliationStorageUnavailable
+            }
+            Raw::MessageFramingInvalid => Self::MessageFramingInvalid,
+            Raw::OperationCommandFailed => Self::OperationCommandFailed,
+            Raw::OperationFailed => Self::OperationFailed,
+            Raw::OperationInvalid => Self::OperationInvalid,
+            Raw::OperationInvalidArtifact => Self::OperationInvalidArtifact,
+            Raw::OperationIo => Self::OperationIo,
+            Raw::OperationStopUncertain => Self::OperationStopUncertain,
+            Raw::OperationUnsafePath => Self::OperationUnsafePath,
+            Raw::OutcomeMalformed => Self::OutcomeMalformed,
+            Raw::PackageCustodyFailed => Self::PackageCustodyFailed,
+            Raw::PackageInstallFailed => Self::PackageInstallFailed,
+            Raw::PackageMetadataFailed => Self::PackageMetadataFailed,
+            Raw::PackagePreflightFailed => Self::PackagePreflightFailed,
+            Raw::PackageVerificationFailed => Self::PackageVerificationFailed,
+            Raw::PeerIdentityInvalid => Self::PeerIdentityInvalid,
+            Raw::RejectionMalformed => Self::RejectionMalformed,
+            Raw::RequestArgumentsPresenceInvalid => Self::RequestArgumentsPresenceInvalid,
+            Raw::RequestArgumentNulByte => Self::RequestArgumentNulByte,
+            Raw::RequestAttemptInvalid => Self::RequestAttemptInvalid,
+            Raw::RequestBytesInvalid => Self::RequestBytesInvalid,
+            Raw::RequestDocumentInvalid => Self::RequestDocumentInvalid,
+            Raw::RequestEncodingInvalid => Self::RequestEncodingInvalid,
+            Raw::RequestInstallationIdentityInvalid => Self::RequestInstallationIdentityInvalid,
+            Raw::RequestInvalid => Self::RequestInvalid,
+            Raw::RequestLedgerFailed => Self::RequestLedgerFailed,
+            Raw::RequestPlanBindingInvalid => Self::RequestPlanBindingInvalid,
+            Raw::RequestPlanBytesInvalid => Self::RequestPlanBytesInvalid,
+            Raw::RequestReplayed => Self::RequestReplayed,
+            Raw::RequestSchemaVersionInvalid => Self::RequestSchemaVersionInvalid,
+            Raw::RequestStorageInvalid => Self::RequestStorageInvalid,
+            Raw::ResponseUnbound => Self::ResponseUnbound,
+            Raw::RuntimeAuthorityUnavailable => Self::RuntimeAuthorityUnavailable,
+            Raw::RuntimeEndpointFirewallRejected => Self::RuntimeEndpointFirewallRejected,
+            Raw::RuntimeFabricFirewallRejected => Self::RuntimeFabricFirewallRejected,
+            Raw::RuntimeFabricUnavailable => Self::RuntimeFabricUnavailable,
+            Raw::RuntimeHelperCallJoinFailed => Self::RuntimeHelperCallJoinFailed,
+            Raw::RuntimeHelperInspectionOutcomeInvalid => {
+                Self::RuntimeHelperInspectionOutcomeInvalid
+            }
+            Raw::RuntimeHelperMessageFramingInvalid => Self::RuntimeHelperMessageFramingInvalid,
+            Raw::RuntimeHelperOutcomeMalformed => Self::RuntimeHelperOutcomeMalformed,
+            Raw::RuntimeHelperProtocolInvalid => Self::RuntimeHelperProtocolInvalid,
+            Raw::RuntimeHelperRejectionMalformed => Self::RuntimeHelperRejectionMalformed,
+            Raw::RuntimeHelperRequestArgumentsPresenceInvalid => {
+                Self::RuntimeHelperRequestArgumentsPresenceInvalid
+            }
+            Raw::RuntimeHelperRequestArgumentNulByte => Self::RuntimeHelperRequestArgumentNulByte,
+            Raw::RuntimeHelperRequestAttemptInvalid => Self::RuntimeHelperRequestAttemptInvalid,
+            Raw::RuntimeHelperRequestBytesInvalid => Self::RuntimeHelperRequestBytesInvalid,
+            Raw::RuntimeHelperRequestDocumentInvalid => Self::RuntimeHelperRequestDocumentInvalid,
+            Raw::RuntimeHelperRequestEncodingInvalid => Self::RuntimeHelperRequestEncodingInvalid,
+            Raw::RuntimeHelperRequestInstallationIdentityInvalid => {
+                Self::RuntimeHelperRequestInstallationIdentityInvalid
+            }
+            Raw::RuntimeHelperRequestPlanBindingInvalid => {
+                Self::RuntimeHelperRequestPlanBindingInvalid
+            }
+            Raw::RuntimeHelperRequestPlanBytesInvalid => Self::RuntimeHelperRequestPlanBytesInvalid,
+            Raw::RuntimeHelperRequestSchemaVersionInvalid => {
+                Self::RuntimeHelperRequestSchemaVersionInvalid
+            }
+            Raw::RuntimeHelperRequestStorageInvalid => Self::RuntimeHelperRequestStorageInvalid,
+            Raw::RuntimeHelperResponseUnbound => Self::RuntimeHelperResponseUnbound,
+            Raw::RuntimeHelperStopUncertain => Self::RuntimeHelperStopUncertain,
+            Raw::RuntimeHelperSystemClockInvalid => Self::RuntimeHelperSystemClockInvalid,
+            Raw::RuntimeHelperUnavailable => Self::RuntimeHelperUnavailable,
+            Raw::RuntimeImageIdentityInvalid => Self::RuntimeImageIdentityInvalid,
+            Raw::RuntimeImageInspectFailed => Self::RuntimeImageInspectFailed,
+            Raw::RuntimeImageLoadFailed => Self::RuntimeImageLoadFailed,
+            Raw::RuntimeImageReceiptFailed => Self::RuntimeImageReceiptFailed,
+            Raw::RuntimeProcessExited => Self::RuntimeProcessExited,
+            Raw::RuntimeRunMissing => Self::RuntimeRunMissing,
+            Raw::SystemClockInvalid => Self::SystemClockInvalid,
         })
     }
 }
@@ -18831,6 +20288,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
             pub cluster_mapping_code: ClusterMappingCode,
             pub controller_error_code: ControllerErrorCode,
             pub distribution_code: DistributionCode,
+            pub helper_error_code: HelperErrorCode,
             pub image_store_code: ImageStoreCode,
             pub install_admission_code: InstallAdmissionCode,
             pub install_degraded_reason: InstallDegradedReason,
@@ -18856,6 +20314,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
             pub run_switch_code: RunSwitchCode,
             pub runtime_image_code: RuntimeImageCode,
             pub runtime_preflight_code: RuntimePreflightCode,
+            pub runtime_preflight_finding_code: RuntimePreflightFindingCode,
             pub source_bundle_code: SourceBundleCode,
             pub source_policy_code: SourcePolicyCode,
             pub stop_plan_code: StopPlanCode,
@@ -18875,6 +20334,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
             cluster_mapping_code: raw.cluster_mapping_code,
             controller_error_code: raw.controller_error_code,
             distribution_code: raw.distribution_code,
+            helper_error_code: raw.helper_error_code,
             image_store_code: raw.image_store_code,
             install_admission_code: raw.install_admission_code,
             install_degraded_reason: raw.install_degraded_reason,
@@ -18900,6 +20360,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
             run_switch_code: raw.run_switch_code,
             runtime_image_code: raw.runtime_image_code,
             runtime_preflight_code: raw.runtime_preflight_code,
+            runtime_preflight_finding_code: raw.runtime_preflight_finding_code,
             source_bundle_code: raw.source_bundle_code,
             source_policy_code: raw.source_policy_code,
             stop_plan_code: raw.stop_plan_code,
@@ -22975,6 +24436,674 @@ impl<'de> ::serde::Deserialize<'de> for RuntimePreflightFinding {
             capability: raw.capability,
             code: raw.code,
             status: raw.status,
+        })
+    }
+}
+impl RuntimePreflightFindingCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::PreflightFindingArchitectureMismatch => "preflight_finding.architecture_mismatch",
+            Self::PreflightFindingAvailable => "preflight_finding.available",
+            Self::PreflightFindingBuildStepFailed => "preflight_finding.build_step_failed",
+            Self::PreflightFindingCapabilitiesNotZero => "preflight_finding.capabilities_not_zero",
+            Self::PreflightFindingControllerUnreachable => {
+                "preflight_finding.controller_unreachable"
+            }
+            Self::PreflightFindingDeadlineExceeded => "preflight_finding.deadline_exceeded",
+            Self::PreflightFindingDiagnosticLimitExceeded => {
+                "preflight_finding.diagnostic_limit_exceeded"
+            }
+            Self::PreflightFindingDirectoryNotWritable => {
+                "preflight_finding.directory_not_writable"
+            }
+            Self::PreflightFindingDiskReserveInsufficient => {
+                "preflight_finding.disk_reserve_insufficient"
+            }
+            Self::PreflightFindingFabricRequirementUnverified => {
+                "preflight_finding.fabric_requirement_unverified"
+            }
+            Self::PreflightFindingHelperCallJoinFailed => {
+                "preflight_finding.helper_call_join_failed"
+            }
+            Self::PreflightFindingHelperCapabilitiesNotZero => {
+                "preflight_finding.helper_capabilities_not_zero"
+            }
+            Self::PreflightFindingHelperGrantInvalid => "preflight_finding.helper_grant_invalid",
+            Self::PreflightFindingHelperGrantNodeMismatch => {
+                "preflight_finding.helper_grant_node_mismatch"
+            }
+            Self::PreflightFindingHelperGrantUnauthorized => {
+                "preflight_finding.helper_grant_unauthorized"
+            }
+            Self::PreflightFindingHelperGrantUnavailable => {
+                "preflight_finding.helper_grant_unavailable"
+            }
+            Self::PreflightFindingHelperImageImportFailed => {
+                "preflight_finding.helper_image_import_failed"
+            }
+            Self::PreflightFindingHelperInspectionOutcomeInvalid => {
+                "preflight_finding.helper_inspection_outcome_invalid"
+            }
+            Self::PreflightFindingHelperInstallationReconciliationBusy => {
+                "preflight_finding.helper_installation_reconciliation_busy"
+            }
+            Self::PreflightFindingHelperInstallationReconciliationStorageUnavailable => {
+                "preflight_finding.helper_installation_reconciliation_storage_unavailable"
+            }
+            Self::PreflightFindingHelperIoFailed => "preflight_finding.helper_io_failed",
+            Self::PreflightFindingHelperMessageFramingInvalid => {
+                "preflight_finding.helper_message_framing_invalid"
+            }
+            Self::PreflightFindingHelperMountNamespaceUnavailable => {
+                "preflight_finding.helper_mount_namespace_unavailable"
+            }
+            Self::PreflightFindingHelperNoNewPrivilegesUnavailable => {
+                "preflight_finding.helper_no_new_privileges_unavailable"
+            }
+            Self::PreflightFindingHelperOperationCommandFailed => {
+                "preflight_finding.helper_operation_command_failed"
+            }
+            Self::PreflightFindingHelperOperationFailed => {
+                "preflight_finding.helper_operation_failed"
+            }
+            Self::PreflightFindingHelperOperationInvalid => {
+                "preflight_finding.helper_operation_invalid"
+            }
+            Self::PreflightFindingHelperOperationInvalidArtifact => {
+                "preflight_finding.helper_operation_invalid_artifact"
+            }
+            Self::PreflightFindingHelperOperationIo => "preflight_finding.helper_operation_io",
+            Self::PreflightFindingHelperOperationStopUncertain => {
+                "preflight_finding.helper_operation_stop_uncertain"
+            }
+            Self::PreflightFindingHelperOperationUnsafePath => {
+                "preflight_finding.helper_operation_unsafe_path"
+            }
+            Self::PreflightFindingHelperOutcomeMalformed => {
+                "preflight_finding.helper_outcome_malformed"
+            }
+            Self::PreflightFindingHelperPeerIdentityInvalid => {
+                "preflight_finding.helper_peer_identity_invalid"
+            }
+            Self::PreflightFindingHelperProbeCleanupFailed => {
+                "preflight_finding.helper_probe_cleanup_failed"
+            }
+            Self::PreflightFindingHelperProbeInvalidResult => {
+                "preflight_finding.helper_probe_invalid_result"
+            }
+            Self::PreflightFindingHelperProcUnavailable => {
+                "preflight_finding.helper_proc_unavailable"
+            }
+            Self::PreflightFindingHelperProtocolInvalid => {
+                "preflight_finding.helper_protocol_invalid"
+            }
+            Self::PreflightFindingHelperRejectionMalformed => {
+                "preflight_finding.helper_rejection_malformed"
+            }
+            Self::PreflightFindingHelperRequestArgumentsPresenceInvalid => {
+                "preflight_finding.helper_request_arguments_presence_invalid"
+            }
+            Self::PreflightFindingHelperRequestArgumentNulByte => {
+                "preflight_finding.helper_request_argument_nul_byte"
+            }
+            Self::PreflightFindingHelperRequestAttemptInvalid => {
+                "preflight_finding.helper_request_attempt_invalid"
+            }
+            Self::PreflightFindingHelperRequestBytesInvalid => {
+                "preflight_finding.helper_request_bytes_invalid"
+            }
+            Self::PreflightFindingHelperRequestDocumentInvalid => {
+                "preflight_finding.helper_request_document_invalid"
+            }
+            Self::PreflightFindingHelperRequestEncodingInvalid => {
+                "preflight_finding.helper_request_encoding_invalid"
+            }
+            Self::PreflightFindingHelperRequestInstallationIdentityInvalid => {
+                "preflight_finding.helper_request_installation_identity_invalid"
+            }
+            Self::PreflightFindingHelperRequestInvalid => {
+                "preflight_finding.helper_request_invalid"
+            }
+            Self::PreflightFindingHelperRequestLedgerFailed => {
+                "preflight_finding.helper_request_ledger_failed"
+            }
+            Self::PreflightFindingHelperRequestPlanBindingInvalid => {
+                "preflight_finding.helper_request_plan_binding_invalid"
+            }
+            Self::PreflightFindingHelperRequestPlanBytesInvalid => {
+                "preflight_finding.helper_request_plan_bytes_invalid"
+            }
+            Self::PreflightFindingHelperRequestReplayed => {
+                "preflight_finding.helper_request_replayed"
+            }
+            Self::PreflightFindingHelperRequestSchemaVersionInvalid => {
+                "preflight_finding.helper_request_schema_version_invalid"
+            }
+            Self::PreflightFindingHelperRequestStorageInvalid => {
+                "preflight_finding.helper_request_storage_invalid"
+            }
+            Self::PreflightFindingHelperResponseUnbound => {
+                "preflight_finding.helper_response_unbound"
+            }
+            Self::PreflightFindingHelperRuntimeEndpointFirewallRejected => {
+                "preflight_finding.helper_runtime_endpoint_firewall_rejected"
+            }
+            Self::PreflightFindingHelperRuntimeFabricFirewallRejected => {
+                "preflight_finding.helper_runtime_fabric_firewall_rejected"
+            }
+            Self::PreflightFindingHelperRuntimeFabricUnavailable => {
+                "preflight_finding.helper_runtime_fabric_unavailable"
+            }
+            Self::PreflightFindingHelperRuntimeImageIdentityInvalid => {
+                "preflight_finding.helper_runtime_image_identity_invalid"
+            }
+            Self::PreflightFindingHelperRuntimeImageInspectFailed => {
+                "preflight_finding.helper_runtime_image_inspect_failed"
+            }
+            Self::PreflightFindingHelperRuntimeImageLoadFailed => {
+                "preflight_finding.helper_runtime_image_load_failed"
+            }
+            Self::PreflightFindingHelperRuntimeImageReceiptFailed => {
+                "preflight_finding.helper_runtime_image_receipt_failed"
+            }
+            Self::PreflightFindingHelperRuntimeProcessExited => {
+                "preflight_finding.helper_runtime_process_exited"
+            }
+            Self::PreflightFindingHelperRuntimeRunMissing => {
+                "preflight_finding.helper_runtime_run_missing"
+            }
+            Self::PreflightFindingHelperSandboxRunFailed => {
+                "preflight_finding.helper_sandbox_run_failed"
+            }
+            Self::PreflightFindingHelperStopUncertain => "preflight_finding.helper_stop_uncertain",
+            Self::PreflightFindingHelperSystemClockInvalid => {
+                "preflight_finding.helper_system_clock_invalid"
+            }
+            Self::PreflightFindingHelperTemporaryDirectoryUnavailable => {
+                "preflight_finding.helper_temporary_directory_unavailable"
+            }
+            Self::PreflightFindingMemoryLimitExceeded => "preflight_finding.memory_limit_exceeded",
+            Self::PreflightFindingMountNamespaceUnavailable => {
+                "preflight_finding.mount_namespace_unavailable"
+            }
+            Self::PreflightFindingNonzeroWithoutOutput => {
+                "preflight_finding.nonzero_without_output"
+            }
+            Self::PreflightFindingNoNewPrivilegesUnavailable => {
+                "preflight_finding.no_new_privileges_unavailable"
+            }
+            Self::PreflightFindingOciRuntimeUnavailable => {
+                "preflight_finding.oci_runtime_unavailable"
+            }
+            Self::PreflightFindingPatchRejected => "preflight_finding.patch_rejected",
+            Self::PreflightFindingPermissionDenied => "preflight_finding.permission_denied",
+            Self::PreflightFindingProcMountDenied => "preflight_finding.proc_mount_denied",
+            Self::PreflightFindingProcUnavailable => "preflight_finding.proc_unavailable",
+            Self::PreflightFindingRunrootExceeds50Bytes => {
+                "preflight_finding.runroot_exceeds_50_bytes"
+            }
+            Self::PreflightFindingSignedHelperProbeRequired => {
+                "preflight_finding.signed_helper_probe_required"
+            }
+            Self::PreflightFindingStorageDriverFailure => {
+                "preflight_finding.storage_driver_failure"
+            }
+            Self::PreflightFindingSubordinateIdMappingUnavailable => {
+                "preflight_finding.subordinate_id_mapping_unavailable"
+            }
+            Self::PreflightFindingSubprocessUnavailable => {
+                "preflight_finding.subprocess_unavailable"
+            }
+            Self::PreflightFindingSystemdScopeFailure => "preflight_finding.systemd_scope_failure",
+            Self::PreflightFindingTemporaryDirectoryUnavailable => {
+                "preflight_finding.temporary_directory_unavailable"
+            }
+            Self::PreflightFindingTemporaryStorageExhausted => {
+                "preflight_finding.temporary_storage_exhausted"
+            }
+            Self::PreflightFindingUnclassified => "preflight_finding.unclassified",
+            Self::PreflightFindingUnclassifiedPodmanBuildFailure => {
+                "preflight_finding.unclassified_podman_build_failure"
+            }
+            Self::PreflightFindingUserNamespaceDenied => "preflight_finding.user_namespace_denied",
+            Self::PreflightFindingUserServiceManagerUnavailable => {
+                "preflight_finding.user_service_manager_unavailable"
+            }
+        }
+    }
+}
+impl ::std::ops::Deref for RuntimePreflightFindingCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RuntimePreflightFindingCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RuntimePreflightFindingCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RuntimePreflightFindingCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RuntimePreflightFindingCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "preflight_finding.architecture_mismatch")]
+            PreflightFindingArchitectureMismatch,
+            #[serde(rename = "preflight_finding.available")]
+            PreflightFindingAvailable,
+            #[serde(rename = "preflight_finding.build_step_failed")]
+            PreflightFindingBuildStepFailed,
+            #[serde(rename = "preflight_finding.capabilities_not_zero")]
+            PreflightFindingCapabilitiesNotZero,
+            #[serde(rename = "preflight_finding.controller_unreachable")]
+            PreflightFindingControllerUnreachable,
+            #[serde(rename = "preflight_finding.deadline_exceeded")]
+            PreflightFindingDeadlineExceeded,
+            #[serde(rename = "preflight_finding.diagnostic_limit_exceeded")]
+            PreflightFindingDiagnosticLimitExceeded,
+            #[serde(rename = "preflight_finding.directory_not_writable")]
+            PreflightFindingDirectoryNotWritable,
+            #[serde(rename = "preflight_finding.disk_reserve_insufficient")]
+            PreflightFindingDiskReserveInsufficient,
+            #[serde(rename = "preflight_finding.fabric_requirement_unverified")]
+            PreflightFindingFabricRequirementUnverified,
+            #[serde(rename = "preflight_finding.helper_call_join_failed")]
+            PreflightFindingHelperCallJoinFailed,
+            #[serde(rename = "preflight_finding.helper_capabilities_not_zero")]
+            PreflightFindingHelperCapabilitiesNotZero,
+            #[serde(rename = "preflight_finding.helper_grant_invalid")]
+            PreflightFindingHelperGrantInvalid,
+            #[serde(rename = "preflight_finding.helper_grant_node_mismatch")]
+            PreflightFindingHelperGrantNodeMismatch,
+            #[serde(rename = "preflight_finding.helper_grant_unauthorized")]
+            PreflightFindingHelperGrantUnauthorized,
+            #[serde(rename = "preflight_finding.helper_grant_unavailable")]
+            PreflightFindingHelperGrantUnavailable,
+            #[serde(rename = "preflight_finding.helper_image_import_failed")]
+            PreflightFindingHelperImageImportFailed,
+            #[serde(rename = "preflight_finding.helper_inspection_outcome_invalid")]
+            PreflightFindingHelperInspectionOutcomeInvalid,
+            #[serde(rename = "preflight_finding.helper_installation_reconciliation_busy")]
+            PreflightFindingHelperInstallationReconciliationBusy,
+            #[serde(
+                rename = "preflight_finding.helper_installation_reconciliation_storage_unavailable"
+            )]
+            PreflightFindingHelperInstallationReconciliationStorageUnavailable,
+            #[serde(rename = "preflight_finding.helper_io_failed")]
+            PreflightFindingHelperIoFailed,
+            #[serde(rename = "preflight_finding.helper_message_framing_invalid")]
+            PreflightFindingHelperMessageFramingInvalid,
+            #[serde(rename = "preflight_finding.helper_mount_namespace_unavailable")]
+            PreflightFindingHelperMountNamespaceUnavailable,
+            #[serde(rename = "preflight_finding.helper_no_new_privileges_unavailable")]
+            PreflightFindingHelperNoNewPrivilegesUnavailable,
+            #[serde(rename = "preflight_finding.helper_operation_command_failed")]
+            PreflightFindingHelperOperationCommandFailed,
+            #[serde(rename = "preflight_finding.helper_operation_failed")]
+            PreflightFindingHelperOperationFailed,
+            #[serde(rename = "preflight_finding.helper_operation_invalid")]
+            PreflightFindingHelperOperationInvalid,
+            #[serde(rename = "preflight_finding.helper_operation_invalid_artifact")]
+            PreflightFindingHelperOperationInvalidArtifact,
+            #[serde(rename = "preflight_finding.helper_operation_io")]
+            PreflightFindingHelperOperationIo,
+            #[serde(rename = "preflight_finding.helper_operation_stop_uncertain")]
+            PreflightFindingHelperOperationStopUncertain,
+            #[serde(rename = "preflight_finding.helper_operation_unsafe_path")]
+            PreflightFindingHelperOperationUnsafePath,
+            #[serde(rename = "preflight_finding.helper_outcome_malformed")]
+            PreflightFindingHelperOutcomeMalformed,
+            #[serde(rename = "preflight_finding.helper_peer_identity_invalid")]
+            PreflightFindingHelperPeerIdentityInvalid,
+            #[serde(rename = "preflight_finding.helper_probe_cleanup_failed")]
+            PreflightFindingHelperProbeCleanupFailed,
+            #[serde(rename = "preflight_finding.helper_probe_invalid_result")]
+            PreflightFindingHelperProbeInvalidResult,
+            #[serde(rename = "preflight_finding.helper_proc_unavailable")]
+            PreflightFindingHelperProcUnavailable,
+            #[serde(rename = "preflight_finding.helper_protocol_invalid")]
+            PreflightFindingHelperProtocolInvalid,
+            #[serde(rename = "preflight_finding.helper_rejection_malformed")]
+            PreflightFindingHelperRejectionMalformed,
+            #[serde(rename = "preflight_finding.helper_request_arguments_presence_invalid")]
+            PreflightFindingHelperRequestArgumentsPresenceInvalid,
+            #[serde(rename = "preflight_finding.helper_request_argument_nul_byte")]
+            PreflightFindingHelperRequestArgumentNulByte,
+            #[serde(rename = "preflight_finding.helper_request_attempt_invalid")]
+            PreflightFindingHelperRequestAttemptInvalid,
+            #[serde(rename = "preflight_finding.helper_request_bytes_invalid")]
+            PreflightFindingHelperRequestBytesInvalid,
+            #[serde(rename = "preflight_finding.helper_request_document_invalid")]
+            PreflightFindingHelperRequestDocumentInvalid,
+            #[serde(rename = "preflight_finding.helper_request_encoding_invalid")]
+            PreflightFindingHelperRequestEncodingInvalid,
+            #[serde(rename = "preflight_finding.helper_request_installation_identity_invalid")]
+            PreflightFindingHelperRequestInstallationIdentityInvalid,
+            #[serde(rename = "preflight_finding.helper_request_invalid")]
+            PreflightFindingHelperRequestInvalid,
+            #[serde(rename = "preflight_finding.helper_request_ledger_failed")]
+            PreflightFindingHelperRequestLedgerFailed,
+            #[serde(rename = "preflight_finding.helper_request_plan_binding_invalid")]
+            PreflightFindingHelperRequestPlanBindingInvalid,
+            #[serde(rename = "preflight_finding.helper_request_plan_bytes_invalid")]
+            PreflightFindingHelperRequestPlanBytesInvalid,
+            #[serde(rename = "preflight_finding.helper_request_replayed")]
+            PreflightFindingHelperRequestReplayed,
+            #[serde(rename = "preflight_finding.helper_request_schema_version_invalid")]
+            PreflightFindingHelperRequestSchemaVersionInvalid,
+            #[serde(rename = "preflight_finding.helper_request_storage_invalid")]
+            PreflightFindingHelperRequestStorageInvalid,
+            #[serde(rename = "preflight_finding.helper_response_unbound")]
+            PreflightFindingHelperResponseUnbound,
+            #[serde(rename = "preflight_finding.helper_runtime_endpoint_firewall_rejected")]
+            PreflightFindingHelperRuntimeEndpointFirewallRejected,
+            #[serde(rename = "preflight_finding.helper_runtime_fabric_firewall_rejected")]
+            PreflightFindingHelperRuntimeFabricFirewallRejected,
+            #[serde(rename = "preflight_finding.helper_runtime_fabric_unavailable")]
+            PreflightFindingHelperRuntimeFabricUnavailable,
+            #[serde(rename = "preflight_finding.helper_runtime_image_identity_invalid")]
+            PreflightFindingHelperRuntimeImageIdentityInvalid,
+            #[serde(rename = "preflight_finding.helper_runtime_image_inspect_failed")]
+            PreflightFindingHelperRuntimeImageInspectFailed,
+            #[serde(rename = "preflight_finding.helper_runtime_image_load_failed")]
+            PreflightFindingHelperRuntimeImageLoadFailed,
+            #[serde(rename = "preflight_finding.helper_runtime_image_receipt_failed")]
+            PreflightFindingHelperRuntimeImageReceiptFailed,
+            #[serde(rename = "preflight_finding.helper_runtime_process_exited")]
+            PreflightFindingHelperRuntimeProcessExited,
+            #[serde(rename = "preflight_finding.helper_runtime_run_missing")]
+            PreflightFindingHelperRuntimeRunMissing,
+            #[serde(rename = "preflight_finding.helper_sandbox_run_failed")]
+            PreflightFindingHelperSandboxRunFailed,
+            #[serde(rename = "preflight_finding.helper_stop_uncertain")]
+            PreflightFindingHelperStopUncertain,
+            #[serde(rename = "preflight_finding.helper_system_clock_invalid")]
+            PreflightFindingHelperSystemClockInvalid,
+            #[serde(rename = "preflight_finding.helper_temporary_directory_unavailable")]
+            PreflightFindingHelperTemporaryDirectoryUnavailable,
+            #[serde(rename = "preflight_finding.memory_limit_exceeded")]
+            PreflightFindingMemoryLimitExceeded,
+            #[serde(rename = "preflight_finding.mount_namespace_unavailable")]
+            PreflightFindingMountNamespaceUnavailable,
+            #[serde(rename = "preflight_finding.nonzero_without_output")]
+            PreflightFindingNonzeroWithoutOutput,
+            #[serde(rename = "preflight_finding.no_new_privileges_unavailable")]
+            PreflightFindingNoNewPrivilegesUnavailable,
+            #[serde(rename = "preflight_finding.oci_runtime_unavailable")]
+            PreflightFindingOciRuntimeUnavailable,
+            #[serde(rename = "preflight_finding.patch_rejected")]
+            PreflightFindingPatchRejected,
+            #[serde(rename = "preflight_finding.permission_denied")]
+            PreflightFindingPermissionDenied,
+            #[serde(rename = "preflight_finding.proc_mount_denied")]
+            PreflightFindingProcMountDenied,
+            #[serde(rename = "preflight_finding.proc_unavailable")]
+            PreflightFindingProcUnavailable,
+            #[serde(rename = "preflight_finding.runroot_exceeds_50_bytes")]
+            PreflightFindingRunrootExceeds50Bytes,
+            #[serde(rename = "preflight_finding.signed_helper_probe_required")]
+            PreflightFindingSignedHelperProbeRequired,
+            #[serde(rename = "preflight_finding.storage_driver_failure")]
+            PreflightFindingStorageDriverFailure,
+            #[serde(rename = "preflight_finding.subordinate_id_mapping_unavailable")]
+            PreflightFindingSubordinateIdMappingUnavailable,
+            #[serde(rename = "preflight_finding.subprocess_unavailable")]
+            PreflightFindingSubprocessUnavailable,
+            #[serde(rename = "preflight_finding.systemd_scope_failure")]
+            PreflightFindingSystemdScopeFailure,
+            #[serde(rename = "preflight_finding.temporary_directory_unavailable")]
+            PreflightFindingTemporaryDirectoryUnavailable,
+            #[serde(rename = "preflight_finding.temporary_storage_exhausted")]
+            PreflightFindingTemporaryStorageExhausted,
+            #[serde(rename = "preflight_finding.unclassified")]
+            PreflightFindingUnclassified,
+            #[serde(rename = "preflight_finding.unclassified_podman_build_failure")]
+            PreflightFindingUnclassifiedPodmanBuildFailure,
+            #[serde(rename = "preflight_finding.user_namespace_denied")]
+            PreflightFindingUserNamespaceDenied,
+            #[serde(rename = "preflight_finding.user_service_manager_unavailable")]
+            PreflightFindingUserServiceManagerUnavailable,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::PreflightFindingArchitectureMismatch => Self::PreflightFindingArchitectureMismatch,
+            Raw::PreflightFindingAvailable => Self::PreflightFindingAvailable,
+            Raw::PreflightFindingBuildStepFailed => Self::PreflightFindingBuildStepFailed,
+            Raw::PreflightFindingCapabilitiesNotZero => Self::PreflightFindingCapabilitiesNotZero,
+            Raw::PreflightFindingControllerUnreachable => {
+                Self::PreflightFindingControllerUnreachable
+            }
+            Raw::PreflightFindingDeadlineExceeded => Self::PreflightFindingDeadlineExceeded,
+            Raw::PreflightFindingDiagnosticLimitExceeded => {
+                Self::PreflightFindingDiagnosticLimitExceeded
+            }
+            Raw::PreflightFindingDirectoryNotWritable => Self::PreflightFindingDirectoryNotWritable,
+            Raw::PreflightFindingDiskReserveInsufficient => {
+                Self::PreflightFindingDiskReserveInsufficient
+            }
+            Raw::PreflightFindingFabricRequirementUnverified => {
+                Self::PreflightFindingFabricRequirementUnverified
+            }
+            Raw::PreflightFindingHelperCallJoinFailed => Self::PreflightFindingHelperCallJoinFailed,
+            Raw::PreflightFindingHelperCapabilitiesNotZero => {
+                Self::PreflightFindingHelperCapabilitiesNotZero
+            }
+            Raw::PreflightFindingHelperGrantInvalid => Self::PreflightFindingHelperGrantInvalid,
+            Raw::PreflightFindingHelperGrantNodeMismatch => {
+                Self::PreflightFindingHelperGrantNodeMismatch
+            }
+            Raw::PreflightFindingHelperGrantUnauthorized => {
+                Self::PreflightFindingHelperGrantUnauthorized
+            }
+            Raw::PreflightFindingHelperGrantUnavailable => {
+                Self::PreflightFindingHelperGrantUnavailable
+            }
+            Raw::PreflightFindingHelperImageImportFailed => {
+                Self::PreflightFindingHelperImageImportFailed
+            }
+            Raw::PreflightFindingHelperInspectionOutcomeInvalid => {
+                Self::PreflightFindingHelperInspectionOutcomeInvalid
+            }
+            Raw::PreflightFindingHelperInstallationReconciliationBusy => {
+                Self::PreflightFindingHelperInstallationReconciliationBusy
+            }
+            Raw::PreflightFindingHelperInstallationReconciliationStorageUnavailable => {
+                Self::PreflightFindingHelperInstallationReconciliationStorageUnavailable
+            }
+            Raw::PreflightFindingHelperIoFailed => Self::PreflightFindingHelperIoFailed,
+            Raw::PreflightFindingHelperMessageFramingInvalid => {
+                Self::PreflightFindingHelperMessageFramingInvalid
+            }
+            Raw::PreflightFindingHelperMountNamespaceUnavailable => {
+                Self::PreflightFindingHelperMountNamespaceUnavailable
+            }
+            Raw::PreflightFindingHelperNoNewPrivilegesUnavailable => {
+                Self::PreflightFindingHelperNoNewPrivilegesUnavailable
+            }
+            Raw::PreflightFindingHelperOperationCommandFailed => {
+                Self::PreflightFindingHelperOperationCommandFailed
+            }
+            Raw::PreflightFindingHelperOperationFailed => {
+                Self::PreflightFindingHelperOperationFailed
+            }
+            Raw::PreflightFindingHelperOperationInvalid => {
+                Self::PreflightFindingHelperOperationInvalid
+            }
+            Raw::PreflightFindingHelperOperationInvalidArtifact => {
+                Self::PreflightFindingHelperOperationInvalidArtifact
+            }
+            Raw::PreflightFindingHelperOperationIo => Self::PreflightFindingHelperOperationIo,
+            Raw::PreflightFindingHelperOperationStopUncertain => {
+                Self::PreflightFindingHelperOperationStopUncertain
+            }
+            Raw::PreflightFindingHelperOperationUnsafePath => {
+                Self::PreflightFindingHelperOperationUnsafePath
+            }
+            Raw::PreflightFindingHelperOutcomeMalformed => {
+                Self::PreflightFindingHelperOutcomeMalformed
+            }
+            Raw::PreflightFindingHelperPeerIdentityInvalid => {
+                Self::PreflightFindingHelperPeerIdentityInvalid
+            }
+            Raw::PreflightFindingHelperProbeCleanupFailed => {
+                Self::PreflightFindingHelperProbeCleanupFailed
+            }
+            Raw::PreflightFindingHelperProbeInvalidResult => {
+                Self::PreflightFindingHelperProbeInvalidResult
+            }
+            Raw::PreflightFindingHelperProcUnavailable => {
+                Self::PreflightFindingHelperProcUnavailable
+            }
+            Raw::PreflightFindingHelperProtocolInvalid => {
+                Self::PreflightFindingHelperProtocolInvalid
+            }
+            Raw::PreflightFindingHelperRejectionMalformed => {
+                Self::PreflightFindingHelperRejectionMalformed
+            }
+            Raw::PreflightFindingHelperRequestArgumentsPresenceInvalid => {
+                Self::PreflightFindingHelperRequestArgumentsPresenceInvalid
+            }
+            Raw::PreflightFindingHelperRequestArgumentNulByte => {
+                Self::PreflightFindingHelperRequestArgumentNulByte
+            }
+            Raw::PreflightFindingHelperRequestAttemptInvalid => {
+                Self::PreflightFindingHelperRequestAttemptInvalid
+            }
+            Raw::PreflightFindingHelperRequestBytesInvalid => {
+                Self::PreflightFindingHelperRequestBytesInvalid
+            }
+            Raw::PreflightFindingHelperRequestDocumentInvalid => {
+                Self::PreflightFindingHelperRequestDocumentInvalid
+            }
+            Raw::PreflightFindingHelperRequestEncodingInvalid => {
+                Self::PreflightFindingHelperRequestEncodingInvalid
+            }
+            Raw::PreflightFindingHelperRequestInstallationIdentityInvalid => {
+                Self::PreflightFindingHelperRequestInstallationIdentityInvalid
+            }
+            Raw::PreflightFindingHelperRequestInvalid => Self::PreflightFindingHelperRequestInvalid,
+            Raw::PreflightFindingHelperRequestLedgerFailed => {
+                Self::PreflightFindingHelperRequestLedgerFailed
+            }
+            Raw::PreflightFindingHelperRequestPlanBindingInvalid => {
+                Self::PreflightFindingHelperRequestPlanBindingInvalid
+            }
+            Raw::PreflightFindingHelperRequestPlanBytesInvalid => {
+                Self::PreflightFindingHelperRequestPlanBytesInvalid
+            }
+            Raw::PreflightFindingHelperRequestReplayed => {
+                Self::PreflightFindingHelperRequestReplayed
+            }
+            Raw::PreflightFindingHelperRequestSchemaVersionInvalid => {
+                Self::PreflightFindingHelperRequestSchemaVersionInvalid
+            }
+            Raw::PreflightFindingHelperRequestStorageInvalid => {
+                Self::PreflightFindingHelperRequestStorageInvalid
+            }
+            Raw::PreflightFindingHelperResponseUnbound => {
+                Self::PreflightFindingHelperResponseUnbound
+            }
+            Raw::PreflightFindingHelperRuntimeEndpointFirewallRejected => {
+                Self::PreflightFindingHelperRuntimeEndpointFirewallRejected
+            }
+            Raw::PreflightFindingHelperRuntimeFabricFirewallRejected => {
+                Self::PreflightFindingHelperRuntimeFabricFirewallRejected
+            }
+            Raw::PreflightFindingHelperRuntimeFabricUnavailable => {
+                Self::PreflightFindingHelperRuntimeFabricUnavailable
+            }
+            Raw::PreflightFindingHelperRuntimeImageIdentityInvalid => {
+                Self::PreflightFindingHelperRuntimeImageIdentityInvalid
+            }
+            Raw::PreflightFindingHelperRuntimeImageInspectFailed => {
+                Self::PreflightFindingHelperRuntimeImageInspectFailed
+            }
+            Raw::PreflightFindingHelperRuntimeImageLoadFailed => {
+                Self::PreflightFindingHelperRuntimeImageLoadFailed
+            }
+            Raw::PreflightFindingHelperRuntimeImageReceiptFailed => {
+                Self::PreflightFindingHelperRuntimeImageReceiptFailed
+            }
+            Raw::PreflightFindingHelperRuntimeProcessExited => {
+                Self::PreflightFindingHelperRuntimeProcessExited
+            }
+            Raw::PreflightFindingHelperRuntimeRunMissing => {
+                Self::PreflightFindingHelperRuntimeRunMissing
+            }
+            Raw::PreflightFindingHelperSandboxRunFailed => {
+                Self::PreflightFindingHelperSandboxRunFailed
+            }
+            Raw::PreflightFindingHelperStopUncertain => Self::PreflightFindingHelperStopUncertain,
+            Raw::PreflightFindingHelperSystemClockInvalid => {
+                Self::PreflightFindingHelperSystemClockInvalid
+            }
+            Raw::PreflightFindingHelperTemporaryDirectoryUnavailable => {
+                Self::PreflightFindingHelperTemporaryDirectoryUnavailable
+            }
+            Raw::PreflightFindingMemoryLimitExceeded => Self::PreflightFindingMemoryLimitExceeded,
+            Raw::PreflightFindingMountNamespaceUnavailable => {
+                Self::PreflightFindingMountNamespaceUnavailable
+            }
+            Raw::PreflightFindingNonzeroWithoutOutput => Self::PreflightFindingNonzeroWithoutOutput,
+            Raw::PreflightFindingNoNewPrivilegesUnavailable => {
+                Self::PreflightFindingNoNewPrivilegesUnavailable
+            }
+            Raw::PreflightFindingOciRuntimeUnavailable => {
+                Self::PreflightFindingOciRuntimeUnavailable
+            }
+            Raw::PreflightFindingPatchRejected => Self::PreflightFindingPatchRejected,
+            Raw::PreflightFindingPermissionDenied => Self::PreflightFindingPermissionDenied,
+            Raw::PreflightFindingProcMountDenied => Self::PreflightFindingProcMountDenied,
+            Raw::PreflightFindingProcUnavailable => Self::PreflightFindingProcUnavailable,
+            Raw::PreflightFindingRunrootExceeds50Bytes => {
+                Self::PreflightFindingRunrootExceeds50Bytes
+            }
+            Raw::PreflightFindingSignedHelperProbeRequired => {
+                Self::PreflightFindingSignedHelperProbeRequired
+            }
+            Raw::PreflightFindingStorageDriverFailure => Self::PreflightFindingStorageDriverFailure,
+            Raw::PreflightFindingSubordinateIdMappingUnavailable => {
+                Self::PreflightFindingSubordinateIdMappingUnavailable
+            }
+            Raw::PreflightFindingSubprocessUnavailable => {
+                Self::PreflightFindingSubprocessUnavailable
+            }
+            Raw::PreflightFindingSystemdScopeFailure => Self::PreflightFindingSystemdScopeFailure,
+            Raw::PreflightFindingTemporaryDirectoryUnavailable => {
+                Self::PreflightFindingTemporaryDirectoryUnavailable
+            }
+            Raw::PreflightFindingTemporaryStorageExhausted => {
+                Self::PreflightFindingTemporaryStorageExhausted
+            }
+            Raw::PreflightFindingUnclassified => Self::PreflightFindingUnclassified,
+            Raw::PreflightFindingUnclassifiedPodmanBuildFailure => {
+                Self::PreflightFindingUnclassifiedPodmanBuildFailure
+            }
+            Raw::PreflightFindingUserNamespaceDenied => Self::PreflightFindingUserNamespaceDenied,
+            Raw::PreflightFindingUserServiceManagerUnavailable => {
+                Self::PreflightFindingUserServiceManagerUnavailable
+            }
         })
     }
 }

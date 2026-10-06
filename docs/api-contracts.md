@@ -322,9 +322,23 @@ does not know is read and shown as it is, and a respelled code is adopted throug
 `RETIRED_CODE_SPELLINGS` (`adopt_reason_code`). A code that wraps another domain's
 (`run-switch.` plus a resource, reconcile, stop or uninstall code) is looked up with
 `run_switch_code`, and a code built from a closed pair (`resource.context_unknown`)
-with `resource_term_code`; both are total over their members. Agent-originated
-free text (the runtime preflight finding code) is shown in the detail, not as a
-Controller code.
+with `resource_term_code`; both are total over their members.
+
+The agent's own words are closed the same way. A runtime preflight finding's `code`
+is a `RuntimePreflightFindingCode` member (`preflight_finding.available`,
+`preflight_finding.proc_mount_denied`, `preflight_finding.helper_operation_io`, ...),
+and the code the privileged helper names in an error reply and in failure evidence
+(`helper_error_code`) is a `HelperErrorCode` member. The Rust agent and helper build
+both only from the generated enums, and `rust/crates/vonk-agent/tests/protocol_literals.rs`
+fails a string spelled by hand, a second struct literal of the finding, and a word
+that only the helper or protocol crates spell. The finding `code` stays a
+pattern-bound string on the wire so that an older agent's free text still reads: the
+Controller adopts it through the one adapter, `adopt_preflight_finding_code`
+(`RuntimePreflightFinding.finding_code`; `RETIRED_FINDING_CODE_SPELLINGS` holds the
+bare and kebab-case spellings agents wrote before the enum). A word no member spells
+reads as `preflight_finding.unclassified` and is shown as reported; the finding is
+never refused. It is scoped to the finding (not folded into `RETIRED_CODE_SPELLINGS`)
+because the old bare word `helper_grant_invalid` is also a member of another domain.
 
 The vocabulary ratchet keeps this flat at zero: a literal equal to a member, and
 any string constant in a code position (see [testing and CI](testing-and-ci.md)),

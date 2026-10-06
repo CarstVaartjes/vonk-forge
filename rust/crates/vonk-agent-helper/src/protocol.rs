@@ -36,19 +36,6 @@ pub enum HelperError {
 }
 
 impl HelperError {
-    /// Stable, bounded diagnostics for the response and service log.
-    /// Underlying I/O text can contain paths or other host details.
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::InvalidMessage => "helper.message_invalid",
-            Self::InvalidOperation => "helper.operation_invalid",
-            Self::InvalidAuthorization => "helper.authorization_invalid",
-            Self::InvalidPeer => "helper.peer_invalid",
-            Self::InvalidFrame => "helper.frame_invalid",
-            Self::Io(_) => "helper.io_failed",
-        }
-    }
-
     pub fn safe_detail(&self) -> &'static str {
         match self {
             Self::InvalidMessage => "helper message is invalid",

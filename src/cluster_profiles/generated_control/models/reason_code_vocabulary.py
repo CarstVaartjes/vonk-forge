@@ -24,6 +24,8 @@ from ..models.controller_error_code import check_controller_error_code
 from ..models.controller_error_code import ControllerErrorCode
 from ..models.distribution_code import check_distribution_code
 from ..models.distribution_code import DistributionCode
+from ..models.helper_error_code import check_helper_error_code
+from ..models.helper_error_code import HelperErrorCode
 from ..models.image_store_code import check_image_store_code
 from ..models.image_store_code import ImageStoreCode
 from ..models.install_admission_code import check_install_admission_code
@@ -74,6 +76,8 @@ from ..models.runtime_image_code import check_runtime_image_code
 from ..models.runtime_image_code import RuntimeImageCode
 from ..models.runtime_preflight_code import check_runtime_preflight_code
 from ..models.runtime_preflight_code import RuntimePreflightCode
+from ..models.runtime_preflight_finding_code import check_runtime_preflight_finding_code
+from ..models.runtime_preflight_finding_code import RuntimePreflightFindingCode
 from ..models.source_bundle_code import check_source_bundle_code
 from ..models.source_bundle_code import SourceBundleCode
 from ..models.source_policy_code import check_source_policy_code
@@ -117,6 +121,13 @@ class ReasonCodeVocabulary:
             cluster_mapping_code (ClusterMappingCode): Refusals of a cluster mapping (recipe-to-Spark assignment) request.
             controller_error_code (ControllerErrorCode): Generic Controller request and fleet-operation problem codes.
             distribution_code (DistributionCode): Why a distribution assignment object cannot be served to a Spark.
+            helper_error_code (HelperErrorCode): Every code the privileged helper, or the agent speaking about it, names as
+                an error.
+
+                The helper builds its rejection from a member; the agent reads a reply code
+                through the enum, so a word outside it is a malformed rejection, never a code
+                the agent invents or forwards.  ``runtime_helper_*`` is the spelling of an
+                agent-side cause in failure evidence.
             image_store_code (ImageStoreCode): Refusals and damage found by the Controller OCI image store.
             install_admission_code (InstallAdmissionCode): Why an installation is not admitted (or is waiting) on a Spark.
             install_degraded_reason (InstallDegradedReason): Why an installation is shown partial in the fleet projection.
@@ -144,6 +155,11 @@ class ReasonCodeVocabulary:
             run_switch_code (RunSwitchCode): Run/Switch phase blockers, waits and failure codes.
             runtime_image_code (RuntimeImageCode): Runtime image preparation, receipt and registry problems.
             runtime_preflight_code (RuntimePreflightCode): Runtime preflight blockers.
+            runtime_preflight_finding_code (RuntimePreflightFindingCode): Why one runtime preflight capability passed,
+                failed or stayed unknown, as the agent reports it.
+
+                The agent builds every finding from a member; the Controller reads a code an
+                older agent sent as free text through :func:`adopt_preflight_finding_code`.
             source_bundle_code (SourceBundleCode): Recipe source bundle validation problems.
             source_policy_code (SourcePolicyCode): Findings of the build source policy (Dockerfile and Compose rules).
             stop_plan_code (StopPlanCode): Why a stop plan is stale or cannot be taken.
@@ -161,6 +177,7 @@ class ReasonCodeVocabulary:
     cluster_mapping_code: ClusterMappingCode
     controller_error_code: ControllerErrorCode
     distribution_code: DistributionCode
+    helper_error_code: HelperErrorCode
     image_store_code: ImageStoreCode
     install_admission_code: InstallAdmissionCode
     install_degraded_reason: InstallDegradedReason
@@ -186,6 +203,7 @@ class ReasonCodeVocabulary:
     run_switch_code: RunSwitchCode
     runtime_image_code: RuntimeImageCode
     runtime_preflight_code: RuntimePreflightCode
+    runtime_preflight_finding_code: RuntimePreflightFindingCode
     source_bundle_code: SourceBundleCode
     source_policy_code: SourcePolicyCode
     stop_plan_code: StopPlanCode
@@ -214,6 +232,8 @@ class ReasonCodeVocabulary:
         controller_error_code: str = self.controller_error_code
 
         distribution_code: str = self.distribution_code
+
+        helper_error_code: str = self.helper_error_code
 
         image_store_code: str = self.image_store_code
 
@@ -265,6 +285,8 @@ class ReasonCodeVocabulary:
 
         runtime_preflight_code: str = self.runtime_preflight_code
 
+        runtime_preflight_finding_code: str = self.runtime_preflight_finding_code
+
         source_bundle_code: str = self.source_bundle_code
 
         source_policy_code: str = self.source_policy_code
@@ -291,6 +313,7 @@ class ReasonCodeVocabulary:
             "cluster_mapping_code": cluster_mapping_code,
             "controller_error_code": controller_error_code,
             "distribution_code": distribution_code,
+            "helper_error_code": helper_error_code,
             "image_store_code": image_store_code,
             "install_admission_code": install_admission_code,
             "install_degraded_reason": install_degraded_reason,
@@ -316,6 +339,7 @@ class ReasonCodeVocabulary:
             "run_switch_code": run_switch_code,
             "runtime_image_code": runtime_image_code,
             "runtime_preflight_code": runtime_preflight_code,
+            "runtime_preflight_finding_code": runtime_preflight_finding_code,
             "source_bundle_code": source_bundle_code,
             "source_policy_code": source_policy_code,
             "stop_plan_code": stop_plan_code,
@@ -368,6 +392,11 @@ class ReasonCodeVocabulary:
 
 
         distribution_code = check_distribution_code(d.pop("distribution_code"))
+
+
+
+
+        helper_error_code = check_helper_error_code(d.pop("helper_error_code"))
 
 
 
@@ -497,6 +526,11 @@ class ReasonCodeVocabulary:
 
 
 
+        runtime_preflight_finding_code = check_runtime_preflight_finding_code(d.pop("runtime_preflight_finding_code"))
+
+
+
+
         source_bundle_code = check_source_bundle_code(d.pop("source_bundle_code"))
 
 
@@ -541,6 +575,7 @@ class ReasonCodeVocabulary:
             cluster_mapping_code=cluster_mapping_code,
             controller_error_code=controller_error_code,
             distribution_code=distribution_code,
+            helper_error_code=helper_error_code,
             image_store_code=image_store_code,
             install_admission_code=install_admission_code,
             install_degraded_reason=install_degraded_reason,
@@ -566,6 +601,7 @@ class ReasonCodeVocabulary:
             run_switch_code=run_switch_code,
             runtime_image_code=runtime_image_code,
             runtime_preflight_code=runtime_preflight_code,
+            runtime_preflight_finding_code=runtime_preflight_finding_code,
             source_bundle_code=source_bundle_code,
             source_policy_code=source_policy_code,
             stop_plan_code=stop_plan_code,
