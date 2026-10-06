@@ -67,6 +67,19 @@ class Residue:
         return unknown(self.reason, f"{self.kind}:{self.subject}")
 
 
+@dataclass(frozen=True, slots=True)
+class Damaged:
+    """What a ``read`` callable *returns* when the stored value does not hold.
+
+    The read of a stored document answers with the value or with ``Damaged``;
+    :func:`read_or_rebuild` then rebuilds it from evidence or retires it as
+    unknown.  Returning it, not raising, keeps a damaged document out of the
+    exception path of every caller (core rule 5).
+    """
+
+    note: str
+
+
 def unknown(reason: BookkeepingReason, detail: str = "") -> Observed:
     """The adapter ``observe`` answer for bookkeeping the core must reconcile."""
 
@@ -105,21 +118,26 @@ def read_or_rebuild[T](
     *,
     kind: str,
     subject: str,
-    read: Callable[[], T],
+    read: Callable[[], T | Damaged],
     rebuild: Callable[[], T | None] | None = None,
     reason: BookkeepingReason = BookkeepingReason.PERSISTED_STATE_DAMAGED,
 ) -> T | Residue:
     """Read persisted state; rebuild it from evidence; else retire it as unknown.
 
-    ``read`` may raise ``TypeError`` or ``ValueError`` (a damaged document) or
-    ``KeyError``; anything else is a defect and propagates.  ``rebuild`` returns
-    the re-derived value or ``None`` when the evidence does not exist.
+    ``read`` returns :class:`Damaged` for a document that does not hold; a
+    parser it calls may still raise ``TypeError``, ``ValueError`` or ``KeyError``
+    (a damaged document); anything else is a defect and propagates.  ``rebuild``
+    returns the re-derived value or ``None`` when the evidence does not exist.
     """
 
     try:
-        return read()
+        value = read()
     except (TypeError, ValueError, KeyError) as error:
         note = f"{type(error).__name__}: {error}"
+    else:
+        if not isinstance(value, Damaged):
+            return value
+        note = value.note
     if rebuild is not None:
         try:
             rebuilt = rebuild()

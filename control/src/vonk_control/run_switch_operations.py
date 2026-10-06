@@ -68,10 +68,8 @@ from .artifact_reference_scan import (
 from .attempt_residues import unowned_never_installed
 from .bounded_json import require_integer, require_sequence
 from .categorized_errors import (
-    BookkeepingUnknown,
     InvalidValue,
     MissingRecord,
-    UnsettledOutcome,
 )
 from .categorized_faults import security_reason
 from .cluster_mappings import (
@@ -923,6 +921,31 @@ def _latest_inventory(
     )
 
 
+def _inspection_unavailable(detail: str) -> ArtifactInspection:
+    """What a coverage inspection that could not be made says: coverage unknown,
+    with a blocker the plan observes again (never a refusal of the request)."""
+
+    return ArtifactInspection(
+        required_bytes=None,
+        reused_bytes=0,
+        copied_bytes=0,
+        missing_nas_bytes=None,
+        missing_spark_bytes=None,
+        reclaimable_bytes=0,
+        nas_coverage="unknown",
+        spark_coverage="unknown",
+        artifact_digests=(),
+        reclaimable_digests=(),
+        blockers=(
+            _as_reason(
+                RunSwitchCode.ARTIFACT_INSPECTION_UNAVAILABLE,
+                f"Artifact coverage could not be inspected: {detail}",
+                scope="artifact",
+            ),
+        ),
+    )
+
+
 class DatabaseRunSwitchArtifactInspector:
     """Conservative Spark-side coverage inspector.
 
@@ -951,9 +974,8 @@ class DatabaseRunSwitchArtifactInspector:
         now: datetime,
     ) -> ArtifactInspection:
         if self._model_cache is None:
-            raise UnsettledOutcome(
-                "model-cache manifest provider is unavailable",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            return _inspection_unavailable(
+                "model-cache manifest provider is unavailable"
             )
         return self._inspect_model_cache(
             session,
@@ -999,21 +1021,18 @@ class DatabaseRunSwitchArtifactInspector:
                     if not key.startswith("_")
                 }
             )
-        except Exception as error:
-            raise UnsettledOutcome(
-                f"model-cache exact manifest is unavailable: {error}",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from error
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
+            return _inspection_unavailable(
+                f"model-cache exact manifest is unavailable: {error}"
+            )
         artifact_set_sha256 = manifest.digest
         if preview.artifact_set_sha256 != artifact_set_sha256:
-            raise UnsettledOutcome(
-                "model-cache download preview does not match its manifest",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            return _inspection_unavailable(
+                "model-cache download preview does not match its manifest"
             )
         if manifest.model_content_sha256 != model_content_sha256:
-            raise UnsettledOutcome(
-                "model-cache manifest model identity does not match the request",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            return _inspection_unavailable(
+                "model-cache manifest model identity does not match the request"
             )
         # The cache authority validates the manifest.  Consume its exact typed
         # fields, including empty support files and shared physical objects.
@@ -3827,7 +3846,14 @@ class RunSwitchOperationService:
             try:
                 advanced = self._advance(str(job_id)) or advanced
                 self._record_wait(str(job_id))
-            except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
+            except (
+                RunSwitchOperationConflict,
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                KeyError,
+            ) as error:
                 # One persisted operation must never deny unrelated operations
                 # their turn.  A malformed contract is rejected and retained by
                 # ``_advance`` itself; this contains an unexpected per-job
@@ -6098,9 +6124,18 @@ class RunSwitchOperationService:
                                     if not _is_memory_reservation_kind(
                                         residual.reservation_kind
                                     ):
-                                        raise BookkeepingUnknown(
-                                            "active run memory claim has an invalid kind"
+                                        # A claim of a kind this contract cannot
+                                        # name is left out of the typed range and
+                                        # recorded; the fit above already counted
+                                        # it, so the plan stays conservative.
+                                        retire_as_unknown(
+                                            "run-switch.memory-claim",
+                                            residual.run_id,
+                                            BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                                            "an active run memory claim has an "
+                                            "invalid kind",
                                         )
+                                        continue
                                     residual_ranges.append(
                                         RunMemoryResidualRange(
                                             run_id=residual.run_id,
@@ -6135,6 +6170,7 @@ class RunSwitchOperationService:
                                 node_warnings.append(projected)
                             else:
                                 node_blockers.append(projected)
+                disk_need = None
                 try:
                     image_size = (
                         image_bytes if image_bytes is not None else disk.image_bytes
@@ -6144,25 +6180,27 @@ class RunSwitchOperationService:
                         if artifact_bytes is not None
                         else disk.artifact_bytes
                     )
-                    if image_size is None or artifact_size is None:
-                        raise BookkeepingUnknown("payload size is unavailable")
-                    if recipe_models and recipe_models <= models_stored_on_node(
-                        session, item.node_id
-                    ):
-                        # The Spark's shared store already holds every model of
-                        # the recipe (an installation of it exists there), so
-                        # the install links those files and writes none.
-                        artifact_size = 0
-                    disk_need = installation_disk_requirement(
-                        disk,
-                        required_download_bytes=image_size + artifact_size,
-                        minimum_floor_bytes=(
-                            self._lifecycle._install_admission._disk_floor
-                            if self._lifecycle is not None
-                            else 0
-                        ),
-                    )
+                    # An unstated payload size leaves the envelope incomplete.
+                    if image_size is not None and artifact_size is not None:
+                        if recipe_models and recipe_models <= models_stored_on_node(
+                            session, item.node_id
+                        ):
+                            # The Spark's shared store already holds every model of
+                            # the recipe (an installation of it exists there), so
+                            # the install links those files and writes none.
+                            artifact_size = 0
+                        disk_need = installation_disk_requirement(
+                            disk,
+                            required_download_bytes=image_size + artifact_size,
+                            minimum_floor_bytes=(
+                                self._lifecycle._install_admission._disk_floor
+                                if self._lifecycle is not None
+                                else 0
+                            ),
+                        )
                 except (TypeError, ValueError):
+                    disk_need = None
+                if disk_need is None:
                     node_blockers.append(
                         _as_reason(
                             RunSwitchCode.DISK_ENVELOPE_INVALID,
@@ -6358,25 +6396,7 @@ class RunSwitchOperationService:
                 now=now,
             )
         except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
-            return ArtifactInspection(
-                required_bytes=None,
-                reused_bytes=0,
-                copied_bytes=0,
-                missing_nas_bytes=None,
-                missing_spark_bytes=None,
-                reclaimable_bytes=0,
-                nas_coverage="unknown",
-                spark_coverage="unknown",
-                artifact_digests=(),
-                reclaimable_digests=(),
-                blockers=(
-                    _as_reason(
-                        RunSwitchCode.ARTIFACT_INSPECTION_UNAVAILABLE,
-                        f"Artifact coverage could not be inspected: {error}",
-                        scope="artifact",
-                    ),
-                ),
-            )
+            return _inspection_unavailable(str(error))
         if (
             inspection.missing_spark_bytes not in (None, 0)
             and inspection.nas_coverage == "unknown"
@@ -7022,10 +7042,9 @@ class RunSwitchOperationService:
                     ),
                 )
             else:
-                raise RunSwitchRetryLater(
-                    "run-switch intent is invalid",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
+                # An intent this plan cannot be refreshed from is read as no
+                # refreshed plan; the waiting operation backs off below.
+                refreshed = None
         except (KeyError, TypeError, ValueError, RuntimeError) as error:
             if is_security_failure(error_code(error)):
                 with self._sessions.begin() as session:
@@ -8964,27 +8983,32 @@ class RunSwitchOperationProvider:
 
     def _item(self, job: Job) -> Mapping[str, object]:
         node_ids: list[str] = []
-        try:
-            if (
-                not isinstance(job.targets, list)
-                or not job.targets
-                or any(
-                    not isinstance(node_id, str)
-                    or re.fullmatch(r"spk_[0-9a-f]{32}", node_id) is None
-                    for node_id in job.targets
-                )
-            ):
-                raise BookkeepingUnknown("stored Run/Switch targets are malformed")
+        # Malformed stored targets read as an unreadable row (shown below), the
+        # same as a plan that does not parse.
+        readable = not (
+            not isinstance(job.targets, list)
+            or not job.targets
+            or any(
+                not isinstance(node_id, str)
+                or re.fullmatch(r"spk_[0-9a-f]{32}", node_id) is None
+                for node_id in job.targets
+            )
+        )
+        operation: RunSwitchOperation | None = None
+        if readable:
             node_ids = list(job.targets)
-            operation = self._service._operation_view(job)
-        except (
-            AttributeError,
-            KeyError,
-            RunSwitchOperationConflict,
-            TypeError,
-            ValueError,
-            ValidationError,
-        ):
+            try:
+                operation = self._service._operation_view(job)
+            except (
+                AttributeError,
+                KeyError,
+                RunSwitchOperationConflict,
+                TypeError,
+                ValueError,
+                ValidationError,
+            ):
+                operation = None
+        if operation is None:
             warn_unreadable_once("run-switch job", job.id)
             return {
                 "id": job.id,
@@ -9527,19 +9551,21 @@ def _phase_result(
 ) -> dict[str, object]:
     """Validate one phase receipt before it enters durable progress."""
 
+    result: RunSwitchPhaseResult | None = None
+    failure: Exception | None = None
     try:
         normalized = dict(value)
+        belongs = True
         if phase is not None:
-            if "phase" in normalized and normalized["phase"] != phase.kind:
-                raise BookkeepingUnknown("phase receipt belongs to a different phase")
+            belongs = "phase" not in normalized or normalized["phase"] == phase.kind
             normalized.setdefault("phase", phase.kind)
             subphase = getattr(phase, "subphase", None)
             if subphase is None and phase.kind in {"transfer", "verify"}:
                 subphase = "target-copy"
-            if "subphase" in normalized and normalized["subphase"] != subphase:
-                raise BookkeepingUnknown(
-                    "phase receipt belongs to a different subphase"
-                )
+            # A receipt of another phase or subphase is not this phase's.
+            belongs = belongs and (
+                "subphase" not in normalized or normalized["subphase"] == subphase
+            )
             normalized.setdefault("subphase", subphase)
         assignments = normalized.get("assignments")
         if isinstance(assignments, Mapping):
@@ -9549,12 +9575,15 @@ def _phase_result(
                 else raw
                 for node_id, raw in assignments.items()
             }
-        result = _PHASE_RESULT_ADAPTER.validate_python(normalized, strict=True)
+        if belongs:
+            result = _PHASE_RESULT_ADAPTER.validate_python(normalized, strict=True)
     except (TypeError, ValueError) as error:
+        failure = error
+    if result is None:
         raise RunSwitchRetryLater(
             "run-switch phase receipt is invalid",
             reason=WaitReason.RECEIPT_MISSING,
-        ) from error
+        ) from failure
     return result.model_dump(mode="json", exclude_unset=True)
 
 

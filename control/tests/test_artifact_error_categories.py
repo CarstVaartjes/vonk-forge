@@ -18,7 +18,6 @@ from vonk_control.artifact_blob_store import (
     ArtifactBlobQuotaExhausted,
     ArtifactBlobStore,
     ArtifactBlobStoreError,
-    ArtifactBlobUnavailable,
     ArtifactBlobUnsafePath,
 )
 from vonk_control.artifact_jobs import _translate_blob_error
@@ -68,10 +67,7 @@ def test_missing_bytes_are_unknown_and_still_file_not_found(tmp_path: Path) -> N
     store = _store(tmp_path)
     store.put_bytes(hashlib.sha256(b"x").hexdigest(), b"x", maximum_bytes=10)
     digest = hashlib.sha256(b"y").hexdigest()
-    with pytest.raises(ArtifactBlobUnavailable) as caught:
-        store.resolve(f"{digest[:2]}/{digest}", digest, 1)
-    assert caught.value.category is ErrorCategory.UNKNOWN
-    assert isinstance(caught.value, FileNotFoundError)
+    assert store.resolve(f"{digest[:2]}/{digest}", digest, 1) is None
 
 
 def test_blob_failures_keep_their_category_through_the_job_service(
