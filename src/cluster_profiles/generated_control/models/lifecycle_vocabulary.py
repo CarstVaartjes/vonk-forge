@@ -10,6 +10,8 @@ from ..types import UNSET, Unset
 
 from ..models.agent_result_state import AgentResultState
 from ..models.agent_result_state import check_agent_result_state
+from ..models.artifact_preparation import ArtifactPreparation
+from ..models.artifact_preparation import check_artifact_preparation
 from ..models.blocker_category import BlockerCategory
 from ..models.blocker_category import check_blocker_category
 from ..models.error_category import check_error_category
@@ -75,6 +77,12 @@ class LifecycleVocabulary:
                 confirmed cancellation is ``cancelled``, any other definite failure is
                 ``failed`` and ``unknown`` is the legacy ``waiting-for-operator``); the
                 Controller maps them onto its stored state values unchanged.
+            artifact_preparation (ArtifactPreparation): The stages of an artifact job before it is submitted.
+
+                These are preparation, not execution: a job is ``draft`` while its inputs are
+                uploaded and ``ready`` once they are complete.  Its lifecycle ``state`` begins
+                at ``queued`` on submit and is absent until then.  The old spelling kept both
+                in the one ``state`` word, which is why :func:`legacy_preparation` exists.
             blocker_category (BlockerCategory): The categories of the blocker allowlist (fail-closed raises).
             effect (LifecycleEffect): What is known about the real-world effect of the work.
             error_category (ErrorCategory): The only three things a lifecycle adapter may raise or report.
@@ -138,6 +146,7 @@ class LifecycleVocabulary:
      """
 
     agent_result_state: AgentResultState
+    artifact_preparation: ArtifactPreparation
     blocker_category: BlockerCategory
     effect: LifecycleEffect
     error_category: ErrorCategory
@@ -164,6 +173,8 @@ class LifecycleVocabulary:
 
     def to_dict(self) -> dict[str, Any]:
         agent_result_state: str = self.agent_result_state
+
+        artifact_preparation: str = self.artifact_preparation
 
         blocker_category: str = self.blocker_category
 
@@ -208,6 +219,7 @@ class LifecycleVocabulary:
 
         field_dict.update({
             "agent_result_state": agent_result_state,
+            "artifact_preparation": artifact_preparation,
             "blocker_category": blocker_category,
             "effect": effect,
             "error_category": error_category,
@@ -237,6 +249,11 @@ class LifecycleVocabulary:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
         agent_result_state = check_agent_result_state(d.pop("agent_result_state"))
+
+
+
+
+        artifact_preparation = check_artifact_preparation(d.pop("artifact_preparation"))
 
 
 
@@ -338,6 +355,7 @@ class LifecycleVocabulary:
 
         lifecycle_vocabulary = cls(
             agent_result_state=agent_result_state,
+            artifact_preparation=artifact_preparation,
             blocker_category=blocker_category,
             effect=effect,
             error_category=error_category,

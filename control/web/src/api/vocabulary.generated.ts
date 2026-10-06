@@ -117,6 +117,12 @@ export const ObservationCause = {
 } as const;
 export type ObservationCause = (typeof ObservationCause)[keyof typeof ObservationCause];
 
+export const ArtifactPreparation = {
+  DRAFT: "draft",
+  READY: "ready",
+} as const;
+export type ArtifactPreparation = (typeof ArtifactPreparation)[keyof typeof ArtifactPreparation];
+
 export const StateWriteKind = {
   ATTRIBUTE: "attribute",
   DICT_ITEM: "dict-item",

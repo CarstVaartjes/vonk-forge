@@ -48,6 +48,8 @@ from .distribution import (
 )
 from .failure_evidence import FailureDiagnostics
 from .lifecycle_vocabulary import (
+    ArtifactPreparation,
+    legacy_preparation,
     ATTEMPT_ALIAS_CAUSE,
     ObservationCause,
     legacy_observation_cause,
@@ -218,6 +220,7 @@ __all__ = [
     "AgentUpgradeResult",
     "ArtifactDistributionPayload",
     "ArtifactDistributionResult",
+    "ArtifactPreparation",
     "BlockerCategory",
     "CategorizedError",
     "CompiledExecutionPlan",
@@ -322,6 +325,7 @@ __all__ = [
     "is_live",
     "is_state",
     "legacy_observation_cause",
+    "legacy_preparation",
     "live_words",
     "normalize_operation_progress",
     "outcome_body",

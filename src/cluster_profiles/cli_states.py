@@ -12,3 +12,56 @@ NEEDS_OPERATOR = "needs-operator"
 LEGACY_NEEDS_OPERATOR = "waiting-for-operator"
 #: A wait for a person, under either spelling.
 OPERATOR_WAIT_STATES = frozenset({NEEDS_OPERATOR, LEGACY_NEEDS_OPERATOR})
+
+# -- artifact jobs ---------------------------------------------------------------
+
+#: The preparation stages of an artifact job that has not been submitted.
+DRAFT = "draft"
+READY = "ready"
+#: The old spelling of "a cancel is under way" (now ``cancel_requested_at``).
+LEGACY_CANCELLING = "cancelling"
+ENDED_STATES = frozenset({"succeeded", "failed", "cancelled"})
+#: Every lifecycle state an artifact job may report, and the old ones.
+ARTIFACT_JOB_STATES = frozenset(
+    {
+        "queued",
+        "running",
+        "backoff",
+        "observing",
+        NEEDS_OPERATOR,
+        LEGACY_NEEDS_OPERATOR,
+        LEGACY_CANCELLING,
+        *ENDED_STATES,
+    }
+)
+
+
+def preparation(job: dict[str, object]) -> str | None:
+    """``draft`` or ``ready`` while a job is prepared: its field, or an old state word."""
+
+    stage = job.get("preparation")
+    if isinstance(stage, str):
+        return stage
+    state = job.get("state")
+    return state if isinstance(state, str) and state in {DRAFT, READY} else None
+
+
+def cancel_pending(job: dict[str, object]) -> bool:
+    """A cancel was requested and the job has not ended (either spelling)."""
+
+    state = job.get("state")
+    if state == LEGACY_CANCELLING:
+        return True
+    return job.get("cancel_requested_at") is not None and state not in ENDED_STATES
+
+
+def lifecycle_state(job: dict[str, object]) -> object:
+    """The job's state for messages: its stage while preparing, else its state."""
+
+    return preparation(job) or job.get("state")
+
+
+#: Artifact-job states a CLI user reconnects to (the job is still in flight).
+ARTIFACT_JOB_IN_FLIGHT = frozenset(
+    {"queued", "running", "backoff", "observing", LEGACY_CANCELLING}
+)

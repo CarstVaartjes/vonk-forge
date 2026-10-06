@@ -1238,6 +1238,8 @@ export interface components {
         };
         /** ArtifactJobResponse */
         ArtifactJobResponse: {
+            /** Cancel Requested At */
+            cancel_requested_at?: string | null;
             compiled_contract: components["schemas"]["CompiledArtifactContract"];
             /** Contract Sha256 */
             contract_sha256: string;
@@ -1268,14 +1270,13 @@ export interface components {
             output_limits: components["schemas"]["OutputLimits"];
             /** Output Manifest Sha256 */
             output_manifest_sha256?: string | null;
+            /** Preparation */
+            preparation?: ("draft" | "ready") | null;
             result_evidence?: components["schemas"]["ArtifactJobResultEvidence"] | null;
             /** Run Id */
             run_id: string;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "draft" | "ready" | "queued" | "running" | "succeeded" | "failed" | "cancelling" | "cancelled" | "waiting-for-operator";
+            /** State */
+            state: ("queued" | "running" | "backoff" | "observing" | "needs-operator" | "succeeded" | "failed" | "cancelled") | null;
             /** Status Reason */
             status_reason?: string | null;
             /** Submit Request Id */
@@ -1371,6 +1372,17 @@ export interface components {
             /** Max Total Bytes */
             max_total_bytes: number;
         };
+        /**
+         * ArtifactPreparation
+         * @description The stages of an artifact job before it is submitted.
+         *
+         *     These are preparation, not execution: a job is ``draft`` while its inputs are
+         *     uploaded and ``ready`` once they are complete.  Its lifecycle ``state`` begins
+         *     at ``queued`` on submit and is absent until then.  The old spelling kept both
+         *     in the one ``state`` word, which is why :func:`legacy_preparation` exists.
+         * @enum {string}
+         */
+        ArtifactPreparation: "draft" | "ready";
         /** ArtifactSlotContract */
         ArtifactSlotContract: {
             /** Description */
@@ -4178,6 +4190,7 @@ export interface components {
          */
         LifecycleVocabulary: {
             agent_result_state: components["schemas"]["AgentResultState"];
+            artifact_preparation: components["schemas"]["ArtifactPreparation"];
             blocker_category: components["schemas"]["BlockerCategory"];
             effect: components["schemas"]["LifecycleEffect"];
             error_category: components["schemas"]["ErrorCategory"];

@@ -192,6 +192,28 @@ class ObservationCause(WireEnum):
     LEASE_LAPSED = "lease-lapsed"
 
 
+class ArtifactPreparation(WireEnum):
+    """The stages of an artifact job before it is submitted.
+
+    These are preparation, not execution: a job is ``draft`` while its inputs are
+    uploaded and ``ready`` once they are complete.  Its lifecycle ``state`` begins
+    at ``queued`` on submit and is absent until then.  The old spelling kept both
+    in the one ``state`` word, which is why :func:`legacy_preparation` exists.
+    """
+
+    DRAFT = "draft"
+    READY = "ready"
+
+
+def legacy_preparation(stored: str | None) -> ArtifactPreparation | None:
+    """The preparation stage an old artifact-job ``state`` word meant, else ``None``."""
+
+    try:
+        return ArtifactPreparation(stored) if stored is not None else None
+    except ValueError:
+        return None
+
+
 class AdoptedState(NamedTuple):
     """What a stored word means in the core vocabulary.
 
@@ -629,6 +651,7 @@ class LifecycleVocabulary(WireModel):
     lifecycle_subject: LifecycleSubject
     state_alias: StateAlias
     observation_cause: ObservationCause
+    artifact_preparation: ArtifactPreparation
     state_write_kind: StateWriteKind
     migration_step: MigrationStep
     error_category: ErrorCategory
@@ -648,6 +671,7 @@ __all__ = [
     "TERMINAL_LIFECYCLE_STATES",
     "AdoptedState",
     "AgentResultState",
+    "ArtifactPreparation",
     "BlockerCategory",
     "ErrorCategory",
     "FailureCode",
@@ -675,6 +699,7 @@ __all__ = [
     "is_live",
     "is_state",
     "legacy_observation_cause",
+    "legacy_preparation",
     "live_words",
     "state_adopter",
     "stored_words",

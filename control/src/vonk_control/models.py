@@ -39,7 +39,12 @@ from sqlalchemy import (
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql.functions import FunctionElement
-from vonk_agent_protocol import LifecycleState, LifecycleSubject, check_words
+from vonk_agent_protocol import (
+    ArtifactPreparation,
+    LifecycleState,
+    LifecycleSubject,
+    check_words,
+)
 from vonk_agent_protocol.inventory import MemoryPool
 
 
@@ -64,16 +69,24 @@ def _compile_utf8_byte_length(element, compiler, **kwargs) -> str:
     return f"octet_length(CAST({value} AS TEXT))"
 
 
-def _state_in(subject: LifecycleSubject, *states: LifecycleState) -> str:
+def _state_in(
+    subject: LifecycleSubject,
+    *states: LifecycleState,
+    extra: tuple[str, ...] = (),
+    nullable: bool = False,
+) -> str:
     """The CHECK of a lifecycle subject's ``state``: its words, and the old spellings.
 
     Generated from the contract, so the words the column admits cannot drift from
     the ones the rest of the Controller speaks.  An old spelling stays admitted for
-    one release so a row written before the rename is still valid.
+    one release so a row written before the rename is still valid; ``extra`` names
+    words the kind itself still carries (an artifact job's old ``draft`` and
+    ``ready``) and ``nullable`` admits a row that has no lifecycle state yet.
     """
 
-    words = ",".join(f"'{word}'" for word in check_words(subject, states))
-    return f"state IN ({words})"
+    words = ",".join(f"'{word}'" for word in (*check_words(subject, states), *extra))
+    check = f"state IN ({words})"
+    return f"state IS NULL OR {check}" if nullable else check
 
 
 def _lower_hex(column: str, length: int) -> str:
@@ -2070,8 +2083,21 @@ class ArtifactJob(Base):
             name="ck_artifact_jobs_interface",
         ),
         CheckConstraint(
-            "state IN ('draft','ready','queued','running','cancelling','waiting-for-operator','succeeded','failed','cancelled')",
+            _state_in(
+                LifecycleSubject.ARTIFACT_JOB,
+                *(
+                    state
+                    for state in LifecycleState
+                    if state is not LifecycleState.BACKOFF
+                ),
+                extra=tuple(stage.value for stage in ArtifactPreparation),
+                nullable=True,
+            ),
             name="ck_artifact_jobs_state",
+        ),
+        CheckConstraint(
+            "preparation IS NULL OR preparation IN ('draft','ready')",
+            name="ck_artifact_jobs_preparation",
         ),
         CheckConstraint(
             "input_total_bytes >= 0 AND timeout_seconds BETWEEN 1 AND 3600",
@@ -2105,7 +2131,14 @@ class ArtifactJob(Base):
     output_limits: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     compiled_contract: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     contract_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    #: The lifecycle state; ``NULL`` until the job is submitted (it is preparing).
+    state: Mapped[str | None] = mapped_column(String(24), index=True)
+    #: ``draft`` while inputs upload, ``ready`` once complete; ``NULL`` after submit.
+    preparation: Mapped[str | None] = mapped_column(String(8))
+    #: When a cancel was requested (monotonic); the job's state stays the core's.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     input_manifest: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     input_manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     input_total_bytes: Mapped[int] = mapped_column(

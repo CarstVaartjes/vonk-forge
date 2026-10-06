@@ -17,17 +17,21 @@ owns the *projection* and the only writer of an artifact job's ``state``:
   result, a cancel of work that never ran) through the core's ``transition`` and
   writes what it decides.
 
-Stored vocabulary is unchanged (the API, the CLI and the generated clients pin
-it): ``draft``/``ready`` before submission, then ``queued``, ``running``,
-``cancelling``, ``waiting-for-operator`` and the three terminal states.
+An artifact job has a *preparation* stage before it is submitted (``draft`` while
+its inputs upload, ``ready`` once complete; the lifecycle ``state`` is ``NULL``) and,
+from submit, a lifecycle ``state`` of the core vocabulary stored as itself.  A cancel
+is the monotonic ``cancel_requested_at``; it never changes the state.  Rows written
+before the rename kept this in one word (``draft``, ``ready``, ``cancelling``,
+``waiting-for-operator``); ``artifact_job_states`` reads either shape and the startup
+adoption rewrites them.
 
 ========================  ==========================================
-core state of the order   stored artifact job
+core state of the order   stored artifact job ``state``
 ========================  ==========================================
-``queued``                ``queued`` (``draft``/``ready`` before submit)
+``queued``                ``queued`` (``NULL`` before submit)
 ``running``               ``running``
-``backoff``/``observing`` ``running`` (``cancelling`` once a cancel is requested)
-``needs-operator``        ``waiting-for-operator`` (``cancelling`` once requested)
+``backoff``/``observing`` ``backoff``/``observing``
+``needs-operator``        ``needs-operator``
 ``succeeded``             ``succeeded``
 ``failed``                ``failed``
 ``cancelled``             ``cancelled``
@@ -52,9 +56,10 @@ from typing import Any
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LEGACY_WAIT_STATE
+from vonk_agent_protocol import LifecycleState, legacy_preparation
 
 from .. import agent_operation_states as aos
+from .. import artifact_job_states as ajs
 from ..agent_operation_facts import aware
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, ArtifactJob, Job
@@ -80,10 +85,10 @@ from .types import (
 )
 
 KIND = "artifact-job"
-WAITING = LEGACY_WAIT_STATE
-TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
+WAITING = ajs.NEEDS_OPERATOR
+TERMINAL_STATES = frozenset(ajs.ENDED)
 #: Stored states of a submitted job that still depends on its order.
-LIVE_STATES = frozenset({"queued", "running", "cancelling", WAITING})
+LIVE_STATES = frozenset(ajs.LIVE)
 _MAX_REASON = 512
 _RECEIPT_STATES = {"cancelled": Effect.STOPPED, "succeeded": Effect.ESTABLISHED}
 _CANCELLING_REASON = "waiting for exact artifact cancellation receipt"
@@ -162,15 +167,15 @@ class ArtifactJobAdapter:
 
     @staticmethod
     def new_job(**fields: Any) -> ArtifactJob:
-        """Create a job: it is born ``draft``, with no order."""
+        """Create a job: it is born preparing (``draft``), with no state and no order."""
 
-        return ArtifactJob(state="draft", **fields)
+        return ArtifactJob(preparation=ajs.DRAFT, state=None, **fields)
 
     @staticmethod
     def mark_ready(job: ArtifactJob, now: datetime) -> None:
         """Its inputs are complete: ``draft`` becomes ``ready``."""
 
-        job.state = "ready"
+        job.preparation = ajs.READY
         job.finalized_at = aware(now)
         job.updated_at = aware(now)
 
@@ -179,7 +184,8 @@ class ArtifactJobAdapter:
         """Its order was queued: the job is ``queued`` and bound to the order."""
 
         job.operation_id = operation_id
-        job.state = "queued"
+        job.preparation = None
+        job.state = ajs.QUEUED
         job.submitted_at = aware(now)
         job.updated_at = aware(now)
 
@@ -212,11 +218,14 @@ class ArtifactJobAdapter:
             if operation is None
             else self._orders.lifecycle(operation, attempt, parent, now)
         )
-        stored = job.state
-        if stored == "running":
+        stored = ajs.state_of(job)
+        cancelled_at = ajs.cancel_requested_at(job)
+        if stored == ajs.RUNNING:
             state = State.RUNNING
-        elif stored == "cancelling":
+        elif stored == ajs.OBSERVING:
             state = State.OBSERVING
+        elif stored == LifecycleState.BACKOFF.value:
+            state = State.BACKOFF
         elif stored == WAITING:
             state = State.NEEDS_OPERATOR
         elif stored == "succeeded":
@@ -240,7 +249,10 @@ class ArtifactJobAdapter:
             next_action_at=None if order is None else order.next_action_at,
             observe_count=0 if order is None else order.observe_count,
             intent_ordinal=None if order is None else order.intent_ordinal,
-            cancel_requested_at=None if order is None else order.cancel_requested_at,
+            cancel_requested_at=(
+                order.cancel_requested_at if order is not None else None
+            )
+            or (None if cancelled_at is None else aware(cancelled_at)),
             cancel_request_key=None if order is None else order.cancel_request_key,
             effect=Effect.NONE,
             reason=job.status_reason,
@@ -336,8 +348,10 @@ class ArtifactJobAdapter:
     def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
-    def view(self, job: ArtifactJob) -> tuple[str, tuple[str, ...]]:
-        """The state and operator actions an API reader sees for a stored job.
+    def view(
+        self, job: ArtifactJob
+    ) -> tuple[str | None, tuple[str, ...], datetime | None]:
+        """The state, operator actions and cancel request an API reader sees for a job.
 
         The state is the stored one, read through the order: a claimed ``queued``
         job is ``running`` (the Spark claims its own order), and a legacy
@@ -349,12 +363,13 @@ class ArtifactJobAdapter:
         with self._read() as session:
             parent, operation, attempt = self.order_of(session, job)
             row = self.lifecycle(job, parent, operation, attempt, self.now())
-        state = job.state
-        if state == "queued" and row.state is State.RUNNING:
-            state = "running"
+        state = ajs.state_of(job)
+        if state == ajs.QUEUED and row.state is State.RUNNING:
+            state = ajs.RUNNING
         elif state == WAITING and row.cancel_requested:
-            state = "cancelling"
-        return state, self.actions(row)
+            # It completes by itself; nobody has to act, so it is not a wait.
+            state = ajs.OBSERVING
+        return state, self.actions(row), row.cancel_requested_at
 
     def supported_actions(self, job: ArtifactJob) -> tuple[str, ...]:
         """The operator actions of a stored job (what the API advertises)."""
@@ -381,10 +396,12 @@ class ArtifactJobAdapter:
         """
 
         now = aware(now)
-        if job.state in TERMINAL_STATES:
+        if ajs.is_ended(job):
             return False
+        if job.preparation is None and (stage := legacy_preparation(job.state)):
+            job.preparation = stage.value  # a row written before the rename
         target = self._stored_state(job, after)
-        changed_state = job.state != target
+        changed_state = ajs.state_of(job) != target or job.state != target
         text = reason
         if text is None and changed_state:
             text = self._default_reason(after, target)
@@ -395,6 +412,11 @@ class ArtifactJobAdapter:
         changed = False
         if changed_state:
             job.state = target
+            if target is not None:
+                job.preparation = None
+            changed = True
+        if after.cancel_requested and job.cancel_requested_at is None:
+            job.cancel_requested_at = after.cancel_requested_at
             changed = True
         if text is not None:
             text = text[:_MAX_REASON]
@@ -421,31 +443,36 @@ class ArtifactJobAdapter:
         return changed
 
     @staticmethod
-    def _stored_state(job: ArtifactJob, after: Lifecycle) -> str:
+    def _stored_state(job: ArtifactJob, after: Lifecycle) -> str | None:
+        """The core state, stored as itself; ``None`` while the job is preparing."""
+
         match after.state:
             case State.SUCCEEDED:
-                return "succeeded"
+                return ajs.SUCCEEDED
             case State.FAILED:
-                return "failed"
+                return ajs.FAILED
             case State.CANCELLED:
-                return "cancelled"
+                return ajs.CANCELLED
             case State.QUEUED if job.operation_id is None:
-                return job.state if job.state in {"draft", "ready"} else "queued"
+                return None
             case State.QUEUED:
-                return "cancelling" if after.cancel_requested else "queued"
+                return ajs.QUEUED
             case State.NEEDS_OPERATOR:
                 if after.cancel_requested:
-                    return "cancelling"
+                    return ajs.OBSERVING
                 # Work that never ran has nothing to stop: it is queued again.
-                return WAITING if after.attempt > 0 else "queued"
-        # running, observing, backoff
-        return "cancelling" if after.cancel_requested else "running"
+                return WAITING if after.attempt > 0 else ajs.QUEUED
+            case State.OBSERVING:
+                return ajs.OBSERVING
+            case State.BACKOFF:
+                return LifecycleState.BACKOFF.value
+        return ajs.RUNNING
 
     @staticmethod
-    def _default_reason(after: Lifecycle, target: str) -> str | None:
-        if target == "cancelling":
+    def _default_reason(after: Lifecycle, target: str | None) -> str | None:
+        if after.cancel_requested and not after.terminal:
             return _CANCELLING_REASON
-        if target == "running" and after.state in {State.OBSERVING, State.BACKOFF}:
+        if after.state in {State.OBSERVING, State.BACKOFF}:
             return _OBSERVING_REASON
         if target == WAITING:
             return _WAITING_REASON
@@ -461,7 +488,7 @@ class ArtifactJobAdapter:
     def _evidence(
         job: ArtifactJob,
         after: Lifecycle,
-        target: str,
+        target: str | None,
         given: Mapping[str, object] | None,
     ) -> dict[str, object] | None:
         """The result evidence after this change: the old, the report's, the residue.
@@ -480,10 +507,11 @@ class ArtifactJobAdapter:
         doubtful = (
             after.attempt > 0
             and after.effect is Effect.UNKNOWN
-            and target in {"cancelled", "cancelling", "running", WAITING}
+            and target is not None
+            and target not in {ajs.SUCCEEDED, ajs.FAILED, ajs.QUEUED}
         )
         if doubtful:
-            cancel = after.cancel_requested or target in {"cancelled", "cancelling"}
+            cancel = after.cancel_requested or target == ajs.CANCELLED
             merged.setdefault(
                 "failure_kind",
                 "cancellation-stop-uncertain" if cancel else "agent-lease-expired",
@@ -548,7 +576,7 @@ class ArtifactJobAdapter:
         """
 
         now = aware(now)
-        if job.state not in TERMINAL_STATES:
+        if not ajs.is_ended(job):
             self.settle(
                 job,
                 Reported(Outcome.CANCELLED, effect=Effect.STOPPED, reason=reason),
@@ -562,7 +590,7 @@ class ArtifactJobAdapter:
             and evidence.get("active_scope_may_remain") is True
         ):
             return False
-        job.state = "cancelled"
+        job.state = ajs.CANCELLED
         job.status_reason = reason[:_MAX_REASON]
         job.result_evidence = {
             **evidence,
@@ -591,7 +619,7 @@ class ArtifactJobAdapter:
         now = aware(now)
         session = self._session
         assert session is not None
-        if job.state in TERMINAL_STATES or job.operation_id is None:
+        if ajs.is_ended(job) or job.operation_id is None:
             return False
         parent, operation, attempt = self.order_of(session, job)
         if operation is None:
@@ -687,7 +715,7 @@ class ArtifactJobAdapter:
                             StoredOperation.state.in_(
                                 {*aos.PARKED, "cancelled", "failed"}
                             ),
-                            (ArtifactJob.state == "queued")
+                            (ArtifactJob.state == ajs.QUEUED)
                             & (StoredOperation.state == "running"),
                         ),
                     )

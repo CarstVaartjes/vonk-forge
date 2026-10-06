@@ -35,7 +35,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import read_model, read_recipe
 
-from . import agent_operation_states
+from . import agent_operation_states, artifact_job_states
 from .admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -6039,7 +6039,7 @@ class RecipeOperationService:
             .with_for_update(of=ArtifactJob)
         ):
             if artifact.operation_id is None:
-                if artifact.state not in {"draft", "ready"}:
+                if artifact_job_states.preparation_of(artifact) is None:
                     raise RecipeOperationConflict(
                         "submitted artifact job has no exact JobRun identity"
                     )
@@ -6256,16 +6256,7 @@ class RecipeOperationService:
                 select(ArtifactJob)
                 .where(
                     ArtifactJob.run_id == run_id,
-                    ArtifactJob.state.in_(
-                        {
-                            "draft",
-                            "ready",
-                            "queued",
-                            "running",
-                            "cancelling",
-                            "waiting-for-operator",
-                        }
-                    ),
+                    artifact_job_states.sql_preparing_or_live(ArtifactJob),
                 )
                 .order_by(ArtifactJob.created_at, ArtifactJob.id)
                 .with_for_update(of=ArtifactJob)
@@ -6281,7 +6272,7 @@ class RecipeOperationService:
             ):
                 continue
             if artifact.operation_id is None:
-                if artifact.state not in {"draft", "ready"}:
+                if artifact_job_states.preparation_of(artifact) is None:
                     raise RecipeOperationConflict(
                         "artifact job operation identity is missing"
                     )

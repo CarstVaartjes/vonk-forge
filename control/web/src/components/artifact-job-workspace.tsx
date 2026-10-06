@@ -10,6 +10,7 @@ import type {
   LibraryViewRecipeDetail,
   RecipeDefinition,
 } from "../api/types";
+import {LifecycleState} from "../api/vocabulary.generated";
 import {formatBytes} from "../lib/fleet";
 import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 import {StatusPill} from "./status-pill";
@@ -19,7 +20,21 @@ import "./artifact-job-workspace.css";
 
 const CONTROLLER_FILE_LIMIT = 512 * 1024 * 1024;
 const CONTROLLER_TOTAL_LIMIT = 1024 * 1024 * 1024;
-const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
+const TERMINAL_STATES = new Set<string>(["succeeded", "failed", "cancelled"]);
+
+/** The name a job is shown under: its lifecycle state, or its preparation stage before it is submitted. */
+function phaseOf(job: ArtifactJob): string {
+  return job.state ?? job.preparation ?? "draft";
+}
+
+function isTerminal(job: ArtifactJob): boolean {
+  return job.state != null && TERMINAL_STATES.has(job.state);
+}
+
+/** A cancel was accepted and the job has not settled: it completes by itself, so nobody has to act. */
+function isCancelling(job: ArtifactJob): boolean {
+  return job.cancel_requested_at != null && !isTerminal(job);
+}
 
 type JobRecipeDocument = RecipeDefinition;
 type JobRecipeInterface = Extract<JobRecipeDocument["interfaces"][number], {adapter: ArtifactJobInterface}>;
@@ -77,7 +92,7 @@ function cancelReceipt(job: ArtifactJob): {requestId: string; reason: string} | 
 function isCancelReceipt(job: ArtifactJob, requestId: string, reason: string): boolean {
   const receipt = cancelReceipt(job);
   return receipt?.requestId === requestId && receipt.reason === reason
-    && (job.state === "cancelling" || job.state === "cancelled");
+    && (isCancelling(job) || job.state === "cancelled");
 }
 
 function recoveredInputIndexes(job: ArtifactJob, prepared: InputPayload[]): Set<number> {
@@ -108,10 +123,10 @@ const outputMedia: Record<ArtifactJobInterface, string[]> = {
   "artifact-job": ["application/json", "text/plain", "application/octet-stream", "application/pdf", "image/png", "image/jpeg", "image/webp"],
 };
 
-function jobTone(state: ArtifactJob["state"]): "healthy" | "warning" | "danger" | "info" {
+function jobTone(state: string): "healthy" | "warning" | "danger" | "info" {
   if (state === "succeeded") return "healthy";
   if (state === "failed" || state === "cancelled") return "danger";
-  if (state === "running" || state === "queued") return "info";
+  if (state === "running" || state === "queued" || state === LifecycleState.BACKOFF || state === LifecycleState.OBSERVING) return "info";
   return "warning";
 }
 
@@ -193,9 +208,9 @@ function JobHistory({api, busyJobId, cancelCandidate, job, onCancel, onConfirmCa
   onConfirmCancel(job: ArtifactJob): void;
   onPrepareRetry(job: ArtifactJob): void;
 }) {
-  const active = !TERMINAL_STATES.has(job.state);
-  return <article className="artifact-job-history-row" aria-label={`Artifact job ${job.id}, ${job.state}`}>
-    <header><div><StatusPill tone={jobTone(job.state)}>{humanizeIdentifier(job.state)}</StatusPill><strong>{humanizeIdentifier(job.interface)}</strong><span><Time value={job.created_at}/></span></div><span>{formatBytes(job.input_total_bytes)} input</span></header>
+  const active = !isTerminal(job);
+  return <article className="artifact-job-history-row" aria-label={`Artifact job ${job.id}, ${phaseOf(job)}`}>
+    <header><div><StatusPill tone={jobTone(phaseOf(job))}>{humanizeIdentifier(phaseOf(job))}</StatusPill><strong>{humanizeIdentifier(job.interface)}</strong><span><Time value={job.created_at}/></span></div><span>{formatBytes(job.input_total_bytes)} input</span></header>
     {active && <div className="artifact-job-progress" role="status" aria-live="polite"><span className="artifact-job-progress-track"><span/></span><p>{job.state === "running" ? "The Spark is producing artifacts." : job.state === "queued" ? "Waiting for the assigned Spark." : "Preparing the immutable job request."}</p></div>}
     {job.status_reason && <p className="artifact-job-reason" role={job.state === "failed" ? "alert" : undefined}>{job.status_reason}</p>}
     {job.result_evidence && <dl className="artifact-job-evidence">
@@ -204,10 +219,10 @@ function JobHistory({api, busyJobId, cancelCandidate, job, onCancel, onConfirmCa
     </dl>}
     {job.state === "succeeded" && job.output_files.length === 0 && <p className="artifact-job-reason">This job succeeded without downloadable outputs.</p>}
     {job.state === "succeeded" && job.output_files.length > 0 && <ul className="artifact-output-list" aria-label={`${job.output_files.length} generated outputs`}>{job.output_files.map(file => <OutputPreview api={api} file={file} job={job} key={`${file.name}:${file.sha256}`}/>)}</ul>}
-    {job.state === "cancelling" && <p className="artifact-job-notice" role="status">Cancellation was accepted and is waiting for the Controller to report a settled result.</p>}
+    {isCancelling(job) && <p className="artifact-job-notice" role="status">Cancellation was accepted and is waiting for the Controller to report a settled result.</p>}
     <div className="artifact-job-row-actions">
-      {active && job.state !== "cancelling" && cancelCandidate !== job.id && <button type="button" className="button secondary" disabled={busyJobId === job.id} onClick={() => onCancel(job.id)}>Cancel job</button>}
-      {active && job.state !== "cancelling" && cancelCandidate === job.id && <><p>Cancel this job and keep its audit history?</p><button type="button" className="danger" disabled={busyJobId === job.id} onClick={() => onConfirmCancel(job)}>{busyJobId === job.id ? "Cancelling…" : "Confirm cancel"}</button><button type="button" className="button secondary" onClick={() => onCancel(undefined)}>Keep running</button></>}
+      {active && !isCancelling(job) && cancelCandidate !== job.id && <button type="button" className="button secondary" disabled={busyJobId === job.id} onClick={() => onCancel(job.id)}>Cancel job</button>}
+      {active && !isCancelling(job) && cancelCandidate === job.id && <><p>Cancel this job and keep its audit history?</p><button type="button" className="danger" disabled={busyJobId === job.id} onClick={() => onConfirmCancel(job)}>{busyJobId === job.id ? "Cancelling…" : "Confirm cancel"}</button><button type="button" className="button secondary" onClick={() => onCancel(undefined)}>Keep running</button></>}
       {(job.state === "failed" || job.state === "cancelled") && <button type="button" className="button secondary" onClick={() => onPrepareRetry(job)}>Prepare retry</button>}
     </div>
     <TechnicalDetails compact items={[
@@ -329,7 +344,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
   }, [activeRun, jobInterface, loadJobs]);
 
   useEffect(() => {
-    if (!activeRun || !jobs.some(job => !TERMINAL_STATES.has(job.state))) return;
+    if (!activeRun || !jobs.some(job => !isTerminal(job))) return;
     const controller = new AbortController();
     const timer = window.setInterval(() => void loadJobs(controller.signal), 2000);
     return () => { controller.abort(); window.clearInterval(timer); };
@@ -385,7 +400,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
     max_total_bytes: Math.min(output?.max_total_bytes ?? 1, capabilities?.transport.max_output_total_bytes ?? 2 * 1024 ** 3),
     allowed_media_types: exactOutputMedia.length > 0 ? exactOutputMedia : outputMedia[adapter],
   };
-  const featuredTerminalId = jobs.find(job => TERMINAL_STATES.has(job.state))?.id;
+  const featuredTerminalId = jobs.find(job => isTerminal(job))?.id;
 
   async function payloads(signal: AbortSignal): Promise<InputPayload[]> {
     const sources: Array<{slot: string; name: string; media_type: string; blob: Blob}> = selectedFiles.map(({slot, file}) => ({slot: slot.id, name: filename(file.name), media_type: fileMediaType(slot, file), blob: file}));
@@ -509,7 +524,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
         if (observed.submit_request_id === requestId) return observed;
         throw new Error(`Job ${job.id} was submitted under a different request identity`);
       }
-      if (observed.state !== "ready") throw error;
+      if (observed.preparation !== "ready") throw error;
       if (signal.aborted || isAbort(error)) throw abortError();
       try {
         const replayed = await api.submitArtifactJob(job.id, requestId, signal);
@@ -546,8 +561,8 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
       if (!mayHaveBeenAccepted(error)) throw error;
       const observed = await readJobForRecovery(jobId, expectedRunId, "Cancellation");
       if (isCancelReceipt(observed, requestId, reason)) return observed;
-      if (observed.state === "cancelling" || TERMINAL_STATES.has(observed.state)) {
-        throw new Error(`Controller reports job ${jobId} as ${observed.state}, without this cancellation receipt`);
+      if (isCancelling(observed) || isTerminal(observed)) {
+        throw new Error(`Controller reports job ${jobId} as ${phaseOf(observed)}, without this cancellation receipt`);
       }
       try {
         const replayed = await api.cancelArtifactJob(jobId, reason, requestId);
@@ -582,7 +597,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
       if (source === "upload") {
         createIntent.current = undefined;
         setSubmitError("");
-        setCancellationNotice(updated.state === "cancelling"
+        setCancellationNotice(isCancelling(updated)
           ? `Local upload stopped. Cancellation is pending for draft ${updated.id}.`
           : `Local upload stopped. Controller cancelled draft ${updated.id}.`);
       }
@@ -633,8 +648,8 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
         if (!submitIntent || job.submit_request_id !== submitIntent) {
           throw new Error(`Job ${job.id} is already submitted under a request identity this page cannot verify`);
         }
-      } else if (job.state !== "draft" && job.state !== "ready") {
-        throw new Error(`Job ${job.id} is ${job.state}; its inputs cannot be resumed safely`);
+      } else if (job.preparation == null) {
+        throw new Error(`Job ${job.id} is ${phaseOf(job)}; its inputs cannot be resumed safely`);
       }
       setJobs(current => [job, ...current.filter(item => item.id !== job.id)]);
       const uploadTotal = prepared.reduce((total, current) => total + current.blob.size, 0);
@@ -642,8 +657,8 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
       setTransfer({loaded: completed, total: uploadTotal});
       for (const [index, item] of prepared.entries()) {
         if (uploadedIndexes.has(index)) continue;
-        if (job.state !== "draft") {
-          throw new Error(`Job ${job.id} is ${job.state} but is missing a declared input; it cannot be resumed safely`);
+        if (job.preparation !== "draft") {
+          throw new Error(`Job ${job.id} is ${phaseOf(job)} but is missing a declared input; it cannot be resumed safely`);
         }
         setPhase(`Uploading input ${index + 1} of ${prepared.length}…`);
         const alreadyUploaded = completed;
@@ -660,14 +675,14 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
         setTransfer({loaded: completed, total: uploadTotal});
         setJobs(current => current.map(existing => existing.id === job.id ? job : existing));
       }
-      if (job.state === "draft") {
+      if (job.preparation === "draft") {
         setPhase("Finalizing immutable inputs…");
         const finalizeJobId = job.id;
         const finalizedJob = await api.finalizeArtifactJob(finalizeJobId, controller.signal);
         assertJobIdentity(finalizedJob, finalizeJobId, activeRun.run_id, "Finalize response");
         job = finalizedJob;
         if (controller.signal.aborted) throw abortError();
-        if (job.state !== "ready") throw new Error(`Controller did not confirm that job ${job.id} is ready for submission`);
+        if (job.preparation !== "ready") throw new Error(`Controller did not confirm that job ${job.id} is ready for submission`);
       }
       setPhase("Submitting to the Spark…");
       const submitKey = submitRequestId(job);
@@ -790,7 +805,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
         {!jobsLoading && !jobsError && jobs.length === 0 && <div className="artifact-job-history-empty"><strong>No artifact jobs yet</strong><p>Your first submitted job will stay here across refreshes, including its progress and outputs.</p></div>}
         {jobs.map(job => {
           const history = <JobHistory api={api} busyJobId={busyJobId} cancelCandidate={cancelCandidate} job={job} onCancel={setCancelCandidate} onConfirmCancel={value => void confirmCancel(value)} onPrepareRetry={prepareRetry}/>;
-          if (!TERMINAL_STATES.has(job.state) || job.id === featuredTerminalId) return <div className="artifact-job-featured" key={job.id}>{history}</div>;
+          if (!isTerminal(job) || job.id === featuredTerminalId) return <div className="artifact-job-featured" key={job.id}>{history}</div>;
           const archiveOpen = !compactMobile || expandedArchiveIds.has(job.id);
           return <details className="artifact-job-archive" key={job.id} open={archiveOpen} onToggle={event => {
             const open = event.currentTarget.open;
@@ -800,7 +815,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
               open ? next.add(job.id) : next.delete(job.id);
               return next;
             });
-          }}><summary><span><StatusPill tone={jobTone(job.state)}>{humanizeIdentifier(job.state)}</StatusPill><strong>{humanizeIdentifier(job.interface)}</strong></span><span><Time value={job.created_at}/><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round"/></svg></span></summary>{history}</details>;
+          }}><summary><span><StatusPill tone={jobTone(phaseOf(job))}>{humanizeIdentifier(phaseOf(job))}</StatusPill><strong>{humanizeIdentifier(job.interface)}</strong></span><span><Time value={job.created_at}/><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round"/></svg></span></summary>{history}</details>;
         })}
       </section>
     </div>

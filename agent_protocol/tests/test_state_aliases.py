@@ -156,3 +156,12 @@ def test_an_old_attempt_word_also_yields_why_it_is_observed() -> None:
     )
     assert legacy_observation_cause("expired") is ObservationCause.LEASE_LAPSED
     assert legacy_observation_cause("failed") is None
+
+
+def test_draft_and_ready_are_preparation_not_lifecycle_state() -> None:
+    from vonk_agent_protocol import ArtifactPreparation, legacy_preparation
+
+    assert legacy_preparation("draft") is ArtifactPreparation.DRAFT
+    assert legacy_preparation("ready") is ArtifactPreparation.READY
+    assert legacy_preparation("queued") is None and legacy_preparation(None) is None
+    assert adopt_state(LifecycleSubject.ARTIFACT_JOB, "draft") is None

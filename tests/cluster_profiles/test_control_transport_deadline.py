@@ -299,7 +299,7 @@ def test_transport_preserves_streamed_artifact_upload_and_verified_download(
         expected_sha256=digest,
         expected_size=len(content),
     )
-    assert result["state"] == "draft"
+    assert result["preparation"] == "draft"
     assert state["calls"][0][2] == content
     state.update(body=content, media_type="image/png")
     destination = tmp_path / "result.png"

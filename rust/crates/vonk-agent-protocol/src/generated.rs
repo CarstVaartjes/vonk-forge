@@ -622,6 +622,45 @@ pub struct ArtifactDistributionResult {
     pub downloaded_bytes: u64,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ArtifactPreparation {
+    #[serde(rename = "draft")]
+    Draft,
+    #[serde(rename = "ready")]
+    Ready,
+}
+impl ::std::fmt::Display for ArtifactPreparation {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Draft => f.write_str("draft"),
+            Self::Ready => f.write_str("ready"),
+        }
+    }
+}
+impl ::std::str::FromStr for ArtifactPreparation {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "draft" => Ok(Self::Draft),
+            "ready" => Ok(Self::Ready),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ArtifactPreparation {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ArtifactPreparation {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum BlockerCategory {
     #[serde(rename = "security-edge")]
     SecurityEdge,
@@ -2671,6 +2710,7 @@ impl ::std::convert::TryFrom<::std::string::String> for LifecycleSubject {
 #[derive(Eq)]
 pub struct LifecycleVocabulary {
     pub agent_result_state: AgentResultState,
+    pub artifact_preparation: ArtifactPreparation,
     pub blocker_category: BlockerCategory,
     pub effect: LifecycleEffect,
     pub error_category: ErrorCategory,
@@ -5856,6 +5896,61 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionResult {
         })
     }
 }
+impl ArtifactPreparation {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Ready => "ready",
+        }
+    }
+}
+impl ::std::ops::Deref for ArtifactPreparation {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ArtifactPreparation {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ArtifactPreparation {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ArtifactPreparation {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ArtifactPreparation", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "draft")]
+            Draft,
+            #[serde(rename = "ready")]
+            Ready,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Draft => Self::Draft,
+            Raw::Ready => Self::Ready,
+        })
+    }
+}
 impl BlockerCategory {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -8380,6 +8475,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
         #[derive(Eq)]
         struct Raw {
             pub agent_result_state: AgentResultState,
+            pub artifact_preparation: ArtifactPreparation,
             pub blocker_category: BlockerCategory,
             pub effect: LifecycleEffect,
             pub error_category: ErrorCategory,
@@ -8404,6 +8500,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             agent_result_state: raw.agent_result_state,
+            artifact_preparation: raw.artifact_preparation,
             blocker_category: raw.blocker_category,
             effect: raw.effect,
             error_category: raw.error_category,

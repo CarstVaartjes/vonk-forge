@@ -11,15 +11,25 @@ from collections.abc import AsyncIterable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, TypeAdapter, ValidationError, model_validator
+from pydantic import (
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentProtocolError,
+    ArtifactPreparation,
     InvalidRequestError,
+    LifecycleState,
+    LifecycleSubject,
     RecipeJobFile,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
@@ -28,10 +38,13 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
     recipe_job_manifest_sha256,
+    state_adopter,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
+from . import agent_operation_states
+from . import artifact_job_states as ajs
 from .artifact_blob_store import (
     ArtifactBlobStore,
     ArtifactBlobStoreError,
@@ -80,6 +93,24 @@ MAX_INPUT_FILES = 32
 MAX_INPUT_FILE_BYTES = 512 * 1024**2
 MAX_INPUT_TOTAL_BYTES = 1024**3
 _UUID_ID_ADAPTER = TypeAdapter(UuidId)
+
+
+#: The lifecycle states of a submitted artifact job (an old spelling is adopted).
+ArtifactJobState = Annotated[
+    Literal[
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.BACKOFF,
+        LifecycleState.OBSERVING,
+        LifecycleState.NEEDS_OPERATOR,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+    ],
+    BeforeValidator(state_adopter(LifecycleSubject.ARTIFACT_JOB)),
+]
+#: The preparation stages of a job that has not been submitted.
+ArtifactPreparationStage = Literal[ArtifactPreparation.DRAFT, ArtifactPreparation.READY]
 
 
 class ArtifactJobError(ValueError):
@@ -215,17 +246,12 @@ class ArtifactJobResponse(ArtifactJobContractModel):
     interface: Literal[
         "audio-job", "video-job", "image-job", "mesh-job", "artifact-job"
     ]
-    state: Literal[
-        "draft",
-        "ready",
-        "queued",
-        "running",
-        "succeeded",
-        "failed",
-        "cancelling",
-        "cancelled",
-        "waiting-for-operator",
-    ]
+    #: The lifecycle state; absent (``None``) while the job is being prepared.
+    state: ArtifactJobState | None
+    #: ``draft`` while inputs upload, ``ready`` once complete; absent after submit.
+    preparation: ArtifactPreparationStage | None = None
+    #: When a cancel was requested; the state stays the core's (it completes by itself).
+    cancel_requested_at: datetime | None = None
     contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     compiled_contract: CompiledArtifactContract
     input_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -244,9 +270,12 @@ class ArtifactJobResponse(ArtifactJobContractModel):
 
     @model_validator(mode="after")
     def response_is_consistent(self) -> ArtifactJobResponse:
-        if (self.operation_id is None) != (self.submit_request_id is None):
+        if (self.operation_id is None) != (self.submit_request_id is None) or (
+            self.state is None
+        ) != (self.preparation is not None):
             raise ValueError(
-                "artifact submission operation and request identity must be paired"
+                "artifact submission operation and request identity must be paired, "
+                "and a job is either being prepared or has a lifecycle state"
             )
         if self.state == "succeeded":
             if self.output_manifest_sha256 is None or self.result_evidence is None:
@@ -271,12 +300,12 @@ class ArtifactJobResponse(ArtifactJobContractModel):
             except ArtifactJobError as error:
                 raise ValueError(str(error)) from error
         if (
-            self.state in {"failed", "waiting-for-operator"}
+            self.state in {LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR}
             and not (self.status_reason or "").strip()
         ):
             raise ValueError("failed or waiting artifact job requires a status reason")
         if (
-            self.state == "waiting-for-operator"
+            self.state == LifecycleState.NEEDS_OPERATOR
             and "stop" not in self.supported_actions
         ):
             # Rule 3 of the lifecycle core, as a contract: a job never waits for
@@ -322,7 +351,9 @@ class ArtifactJobView:
     operation_id: str | None
     submit_request_id: str | None
     interface: str
-    state: str
+    state: str | None
+    preparation: str | None
+    cancel_requested_at: datetime | None
     contract_sha256: str
     compiled_contract: CompiledArtifactContract
     input_manifest_sha256: str
@@ -748,7 +779,7 @@ class ArtifactJobService:
                 session.scalars(
                     select(ArtifactJob)
                     .where(
-                        ArtifactJob.state.in_({"succeeded", "failed", "cancelled"}),
+                        ArtifactJob.state.in_(ajs.ENDED),
                         ArtifactJob.completed_at.is_not(None),
                         ArtifactJob.completed_at < cutoff,
                     )
@@ -1070,7 +1101,7 @@ class ArtifactJobService:
             job = session.get(ArtifactJob, job_id)
             if job is None:
                 raise KeyError(job_id)
-            if job.state != "draft":
+            if ajs.preparation_of(job) != ajs.DRAFT:
                 raise ArtifactJobError("artifact job inputs are immutable")
             declaration = self._input_declaration(job, name)
             size_bytes = None if declaration is None else declaration.get("size_bytes")
@@ -1096,7 +1127,7 @@ class ArtifactJobService:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
             if job is None:
                 raise KeyError(job_id)
-            if job.state != "draft":
+            if ajs.preparation_of(job) != ajs.DRAFT:
                 raise ArtifactJobError("artifact job inputs are immutable")
             declaration = self._input_declaration(job, name)
             if (
@@ -1134,9 +1165,9 @@ class ArtifactJobService:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
             if job is None:
                 raise KeyError(job_id)
-            if job.state == "ready":
+            if ajs.preparation_of(job) == ajs.READY:
                 return self._view_in_session(session, job)
-            if job.state != "draft":
+            if ajs.preparation_of(job) != ajs.DRAFT:
                 raise ArtifactJobError("artifact job cannot be finalized")
             expected = _input_manifest(job).model_dump(mode="json")["files"]
             uploaded = self._files_in_session(session, job_id, "input")
@@ -1161,7 +1192,7 @@ class ArtifactJobService:
                         "artifact job was submitted under another request identity"
                     )
                 return self._view_in_session(session, artifact_job)
-            if artifact_job.state != "ready":
+            if ajs.preparation_of(artifact_job) != ajs.READY:
                 raise ArtifactJobError("artifact job is not ready")
             run = session.get(RecipeRun, artifact_job.run_id, with_for_update=True)
             if run is None or run.state != "running":
@@ -1171,9 +1202,7 @@ class ArtifactJobService:
                 .where(
                     ArtifactJob.run_id == run.id,
                     ArtifactJob.id != artifact_job.id,
-                    ArtifactJob.state.in_(
-                        {"queued", "running", "cancelling", "waiting-for-operator"}
-                    ),
+                    ArtifactJob.state.in_(ajs.LIVE),
                 )
                 .limit(1)
             )
@@ -1330,11 +1359,11 @@ class ArtifactJobService:
             if job is None:
                 raise KeyError(job_id)
             operation_id = job.operation_id
-            state = job.state
+            state = ajs.state_of(job)
             evidence = _result_evidence(job.result_evidence)
-        if state in {"succeeded", "failed"}:
+        if state in {ajs.SUCCEEDED, ajs.FAILED}:
             raise ArtifactJobError("artifact job is not cancellable")
-        if state == "cancelled" and operation_id is None:
+        if state == ajs.CANCELLED and operation_id is None:
             if (
                 evidence is not None
                 and evidence.get("cancel_request_id") == request_id
@@ -1356,7 +1385,7 @@ class ArtifactJobService:
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
             assert job is not None
-            if job.state not in {"succeeded", "failed", "cancelled"}:
+            if not ajs.is_ended(job):
                 adapter = ArtifactJobAdapter(session, clock=self._clock)
                 evidence = {
                     "cancel_request_id": request_id,
@@ -1572,7 +1601,7 @@ class ArtifactJobService:
             job = session.get(ArtifactJob, job_id)
             if job is None:
                 raise KeyError(job_id)
-            if job.state != "succeeded":
+            if ajs.state_of(job) != ajs.SUCCEEDED:
                 raise ArtifactJobError("artifact job result is not available")
             row = session.scalar(
                 select(ArtifactJobFile).where(
@@ -1629,7 +1658,7 @@ class ArtifactJobService:
         raw_result = getattr(message, "result", None)
         now = self._clock()
         adapter = ArtifactJobAdapter(session, clock=self._clock)
-        if state == "waiting-for-operator":
+        if state == agent_operation_states.WIRE_UNKNOWN:
             try:
                 waiting_result = RecipeJobRunResult.parse(raw_result)
                 if (
@@ -1782,7 +1811,10 @@ class ArtifactJobService:
                 AgentOperation.parent_job_id == job.operation_id
             )
         )
-        if job.state not in {"queued", "running"} or order not in {"queued", "running"}:
+        if ajs.state_of(job) not in ajs.QUEUED_OR_RUNNING or order not in {
+            "queued",
+            "running",
+        }:
             # A job that ended, or whose attempt lapsed (its order is only being
             # observed), is fenced: its bytes are no longer accepted.
             raise ArtifactJobTransferClosedError("artifact job transfer is closed")
@@ -1942,7 +1974,7 @@ class ArtifactJobService:
     def _view_in_session(self, session: Session, job: ArtifactJob) -> ArtifactJobView:
         submission = _artifact_submission_in_session(session, job)
         adapter = ArtifactJobAdapter(session, clock=self._clock)
-        state, actions = adapter.view(job)
+        state, actions, cancel_requested_at = adapter.view(job)
         inputs = tuple(
             self._file_mapping(item)
             for item in self._files_in_session(session, job.id, "input")
@@ -1966,6 +1998,8 @@ class ArtifactJobService:
             ),
             interface=job.interface,
             state=state,
+            preparation=ajs.preparation_of(job),
+            cancel_requested_at=cancel_requested_at,
             contract_sha256=job.contract_sha256,
             compiled_contract=contract,
             input_manifest_sha256=job.input_manifest_sha256,

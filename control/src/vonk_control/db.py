@@ -926,6 +926,11 @@ def adopt_legacy_rows(connection: Connection) -> None:
     adopted = adopt_legacy_orders(connection)
     if adopted:
         _LOGGER.info("Adopted %d Spark orders onto the lifecycle schedule", adopted)
+    from .artifact_job_states import adopt_legacy_artifact_jobs
+
+    adopted = adopt_legacy_artifact_jobs(connection)
+    if adopted:
+        _LOGGER.info("Adopted %d artifact jobs onto the core state vocabulary", adopted)
     from .lifecycle.model_cache import adopt_legacy_operations
 
     adopted = adopt_legacy_operations(connection)

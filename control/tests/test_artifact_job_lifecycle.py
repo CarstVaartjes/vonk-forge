@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import select
+from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_jobs import ArtifactJobResponse
 from vonk_control.lifecycle import Effect, Lifecycle, State
@@ -52,6 +53,12 @@ def _issued_job(tmp_path, suffix: int):
     claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
     return sessions, operations, service, agent_jobs, clock, submitted, claim, run_id
+
+
+def _cancelling(view) -> bool:
+    """A cancel was requested and the job has not ended: it completes by itself."""
+
+    return view.cancel_requested_at is not None and view.state not in ajs.ENDED
 
 
 def _drive(service, agent_jobs, clock, job_id: str, *, until: str) -> str:
@@ -142,7 +149,7 @@ def test_unsubmitted_jobs_have_nothing_to_stop(tmp_path) -> None:
     )
     row, view = _adopted(sessions, service, draft.id)
     assert (row.state, row.attempt, row.effect) == (State.QUEUED, 0, Effect.NONE)
-    assert view.state == "draft"
+    assert view.preparation == "draft"
     assert view.supported_actions == ()
     cancelled = service.cancel(
         draft.id,
@@ -183,17 +190,15 @@ def test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it(tmp_path) -> No
     clock.advance(seconds=31)
     agent_jobs.reconcile_orders()
     # The agent can no longer report: observed first, never a bare wait.
-    state = _drive(
-        service, agent_jobs, clock, submitted.id, until="waiting-for-operator"
-    )
+    state = _drive(service, agent_jobs, clock, submitted.id, until=ajs.NEEDS_OPERATOR)
     waiting = service.get(submitted.id)
-    assert state == "waiting-for-operator"
+    assert state == ajs.NEEDS_OPERATOR
     assert waiting.supported_actions == ("stop",)
 
     service.cancel(
         submitted.id, actor="operator", request_id=CANCEL_KEY, reason="lost job"
     )
-    assert service.get(submitted.id).state == "cancelling"
+    assert _cancelling(service.get(submitted.id))
     assert _drive(service, agent_jobs, clock, submitted.id, until="cancelled") == (
         "cancelled"
     )
@@ -215,7 +220,7 @@ def test_a_legacy_waiting_job_with_a_cancel_heals_to_cancelled(tmp_path) -> None
     assert row.state is State.NEEDS_OPERATOR
     assert row.cancel_requested
     # Nobody has to act on it: the legacy label reads as the cancel it is.
-    assert view.state == "cancelling"
+    assert _cancelling(view)
     assert view.supported_actions == ()
     assert _drive(service, agent_jobs, clock, submitted.id, until="cancelled") == (
         "cancelled"
@@ -233,7 +238,7 @@ def test_a_legacy_waiting_job_without_a_cancel_gets_the_stop_action(tmp_path) ->
     )
     _write_legacy_wait(sessions, submitted.id, cancel_requested=False)
     view = service.get(submitted.id)
-    assert view.state == "waiting-for-operator"
+    assert view.state == ajs.NEEDS_OPERATOR
     assert view.supported_actions == ("stop",)
     service.cancel(
         submitted.id, actor="operator", request_id=OTHER_KEY, reason="stop it"
@@ -291,13 +296,13 @@ def test_a_restart_in_the_middle_of_a_cancel_is_harmless(tmp_path) -> None:
             claim, submitted, state="waiting-for-operator", reason="could not stop"
         )
     )
-    assert service.get(submitted.id).state == "cancelling"
+    assert _cancelling(service.get(submitted.id))
     # The Controller restarts: new services over the same database, repeated passes.
     restarted = AgentJobService(sessions, clock=clock)
     ops._agent_jobs = restarted
     for _ in range(2):
         restarted.reconcile_orders()
-    assert service.get(submitted.id).state == "cancelling"
+    assert _cancelling(service.get(submitted.id))
     assert _drive(service, restarted, clock, submitted.id, until="cancelled") == (
         "cancelled"
     )
@@ -393,7 +398,7 @@ def test_no_stored_job_state_waits_without_an_action(state, attempt, cancelled) 
     job = ArtifactJob(state="queued", operation_id="op")
     adapter = ArtifactJobAdapter(object())  # type: ignore[arg-type]
     stored = adapter._stored_state(job, row)
-    if stored == "waiting-for-operator":
+    if stored == ajs.NEEDS_OPERATOR:
         assert adapter.actions(row) == ("stop",)
         assert attempt > 0 and not cancelled
         assert state is State.NEEDS_OPERATOR
@@ -427,3 +432,70 @@ def test_an_exact_stop_receipt_resolves_a_recorded_residue(tmp_path) -> None:
     assert resolved.state == "cancelled"
     assert resolved.result_evidence is not None
     assert resolved.result_evidence["active_scope_may_remain"] is False
+
+
+# ------------------------------------ the stored vocabulary is the core's
+
+
+def test_rows_written_before_the_rename_read_as_preparation_state_and_cancel(
+    tmp_path,
+) -> None:
+    sessions, _ops, _service, _agent_jobs, _clock, submitted, _claim, _run = (
+        _issued_job(tmp_path, 340)
+    )
+    with sessions.begin() as session:
+        job = session.get(ArtifactJob, submitted.id)
+        assert job is not None
+        job.state = "cancelling"
+        job.cancel_requested_at = None
+    with sessions() as session:
+        job = session.get(ArtifactJob, submitted.id)
+        assert job is not None
+        assert ajs.state_of(job) == ajs.OBSERVING
+        assert ajs.cancel_requested_at(job) is not None
+        assert ajs.is_live(job) and not ajs.is_ended(job)
+        for word in ("draft", "ready"):
+            job.state, job.preparation = word, None
+            assert ajs.state_of(job) is None and ajs.preparation_of(job) == word
+        job.state = "waiting-for-operator"
+        assert ajs.state_of(job) == ajs.NEEDS_OPERATOR
+        session.rollback()
+
+
+def test_the_startup_adoption_rewrites_old_rows_once(tmp_path) -> None:
+    sessions, _ops, _service, _agent_jobs, _clock, submitted, _claim, _run = (
+        _issued_job(tmp_path, 341)
+    )
+    with sessions.begin() as session:
+        job = session.get(ArtifactJob, submitted.id)
+        assert job is not None
+        job.state = "cancelling"
+        job.cancel_requested_at = None
+    with sessions.begin() as session:
+        connection = session.connection()
+        assert ajs.adopt_legacy_artifact_jobs(connection) == 1
+        assert ajs.adopt_legacy_artifact_jobs(connection) == 0  # idempotent
+    with sessions() as session:
+        job = session.get(ArtifactJob, submitted.id)
+        assert job is not None
+        assert job.state == ajs.OBSERVING
+        assert job.cancel_requested_at is not None
+    with sessions.begin() as session:
+        job = session.get(ArtifactJob, submitted.id)
+        assert job is not None
+        job.state = "draft"
+    with sessions.begin() as session:
+        assert ajs.adopt_legacy_artifact_jobs(session.connection()) == 1
+    with sessions() as session:
+        job = session.get(ArtifactJob, submitted.id)
+        assert job is not None
+        assert job.state is None and job.preparation == "draft"
+
+
+def test_a_new_job_is_born_preparing_with_no_state() -> None:
+    job = ArtifactJobAdapter.new_job(id="j")
+    assert job.state is None and job.preparation == ajs.DRAFT
+    ArtifactJobAdapter.mark_ready(job, NOW)
+    assert job.state is None and job.preparation == ajs.READY
+    ArtifactJobAdapter.mark_submitted(job, "op", NOW)
+    assert job.state == ajs.QUEUED and job.preparation is None

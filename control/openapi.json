@@ -661,6 +661,18 @@
       "ArtifactJobResponse": {
         "additionalProperties": false,
         "properties": {
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
           "compiled_contract": {
             "$ref": "#/components/schemas/CompiledArtifactContract"
           },
@@ -748,6 +760,21 @@
             ],
             "title": "Output Manifest Sha256"
           },
+          "preparation": {
+            "anyOf": [
+              {
+                "enum": [
+                  "draft",
+                  "ready"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preparation"
+          },
           "result_evidence": {
             "anyOf": [
               {
@@ -764,19 +791,25 @@
             "type": "string"
           },
           "state": {
-            "enum": [
-              "draft",
-              "ready",
-              "queued",
-              "running",
-              "succeeded",
-              "failed",
-              "cancelling",
-              "cancelled",
-              "waiting-for-operator"
+            "anyOf": [
+              {
+                "enum": [
+                  "queued",
+                  "running",
+                  "backoff",
+                  "observing",
+                  "needs-operator",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "State",
-            "type": "string"
+            "title": "State"
           },
           "status_reason": {
             "anyOf": [
@@ -1088,6 +1121,15 @@
         ],
         "title": "ArtifactOutputLimits",
         "type": "object"
+      },
+      "ArtifactPreparation": {
+        "description": "The stages of an artifact job before it is submitted.\n\nThese are preparation, not execution: a job is ``draft`` while its inputs are\nuploaded and ``ready`` once they are complete.  Its lifecycle ``state`` begins\nat ``queued`` on submit and is absent until then.  The old spelling kept both\nin the one ``state`` word, which is why :func:`legacy_preparation` exists.",
+        "enum": [
+          "draft",
+          "ready"
+        ],
+        "title": "ArtifactPreparation",
+        "type": "string"
       },
       "ArtifactSlotContract": {
         "additionalProperties": false,
@@ -9891,6 +9933,9 @@
           "agent_result_state": {
             "$ref": "#/components/schemas/AgentResultState"
           },
+          "artifact_preparation": {
+            "$ref": "#/components/schemas/ArtifactPreparation"
+          },
           "blocker_category": {
             "$ref": "#/components/schemas/BlockerCategory"
           },
@@ -9963,6 +10008,7 @@
           "lifecycle_subject",
           "state_alias",
           "observation_cause",
+          "artifact_preparation",
           "state_write_kind",
           "migration_step",
           "error_category",

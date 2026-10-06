@@ -68,7 +68,15 @@ function canonicalDefinition(interfaces: unknown[]): RecipeDefinition {
   } as unknown as RecipeDefinition;
 }
 
-function job(input: Partial<ArtifactJob> = {}): ArtifactJob {
+/** A job as the Controller reports it: preparing jobs have no state, a cancel is a timestamp. */
+type JobInput = Omit<Partial<ArtifactJob>, "state"> & {state?: ArtifactJob["state"] | "draft" | "ready" | "cancelling"};
+
+function job(given: JobInput = {}): ArtifactJob {
+  const {state, ...rest} = given;
+  const input: Partial<ArtifactJob> = {...rest};
+  if (state === "draft" || state === "ready") Object.assign(input, {state: null, preparation: state});
+  else if (state === "cancelling") Object.assign(input, {state: "observing", cancel_requested_at: "2026-08-28T12:02:00Z"});
+  else if (state !== undefined) Object.assign(input, {state});
   return {
     id: "00000000-0000-4000-8000-000000000020",
     run_id: run.run_id,
@@ -100,7 +108,7 @@ function job(input: Partial<ArtifactJob> = {}): ArtifactJob {
     updated_at: "2026-08-28T12:01:00Z",
     supported_actions: [],
     ...input,
-  };
+  } as ArtifactJob;
 }
 
 function api(initialJobs: ArtifactJob[] = []) {

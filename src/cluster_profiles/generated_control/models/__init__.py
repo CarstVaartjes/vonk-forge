@@ -18,13 +18,15 @@ from .artifact_job_create_parameters import ArtifactJobCreateParameters
 from .artifact_job_list_response import ArtifactJobListResponse
 from .artifact_job_response import ArtifactJobResponse
 from .artifact_job_response_interface import ArtifactJobResponseInterface
-from .artifact_job_response_state import ArtifactJobResponseState
+from .artifact_job_response_preparation_type_0 import ArtifactJobResponsePreparationType0
+from .artifact_job_response_state_type_0 import ArtifactJobResponseStateType0
 from .artifact_job_result_evidence import ArtifactJobResultEvidence
 from .artifact_job_storage_capabilities import ArtifactJobStorageCapabilities
 from .artifact_job_transport_capabilities import ArtifactJobTransportCapabilities
 from .artifact_output_contract import ArtifactOutputContract
 from .artifact_output_file import ArtifactOutputFile
 from .artifact_output_limits import ArtifactOutputLimits
+from .artifact_preparation import ArtifactPreparation
 from .artifact_slot_contract import ArtifactSlotContract
 from .artifact_storage_impact import ArtifactStorageImpact
 from .artifact_storage_impact_missing_spark_bytes_by_node_type_0 import ArtifactStorageImpactMissingSparkBytesByNodeType0
@@ -597,13 +599,15 @@ __all__ = (
     "ArtifactJobListResponse",
     "ArtifactJobResponse",
     "ArtifactJobResponseInterface",
-    "ArtifactJobResponseState",
+    "ArtifactJobResponsePreparationType0",
+    "ArtifactJobResponseStateType0",
     "ArtifactJobResultEvidence",
     "ArtifactJobStorageCapabilities",
     "ArtifactJobTransportCapabilities",
     "ArtifactOutputContract",
     "ArtifactOutputFile",
     "ArtifactOutputLimits",
+    "ArtifactPreparation",
     "ArtifactSlotContract",
     "ArtifactStorageImpact",
     "ArtifactStorageImpactMissingSparkBytesByNodeType0",

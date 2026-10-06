@@ -111,7 +111,8 @@ def _artifact_job_response() -> dict[str, object]:
         "id": "12345678-1234-4123-8123-123456789abc",
         "run_id": "12345678-1234-4123-8123-123456789abc",
         "interface": "image-job",
-        "state": "draft",
+        "state": None,
+        "preparation": "draft",
         "contract_sha256": "a" * 64,
         "compiled_contract": {
             "schema_version": 1,
@@ -770,7 +771,7 @@ def test_artifact_input_upload_streams_the_reverified_local_file(
         expected_size=len(content),
     )
 
-    assert result["state"] == "draft"
+    assert result["preparation"] == "draft"
     assert observed == [
         "https://forge.example.test/api/artifact-jobs/job-1/inputs/prompt.txt",
         "text/plain",
