@@ -506,11 +506,12 @@ LoadedPresence = RunPresence | UnavailableRunPresence
 
 
 def _unavailable_presence[M: StrictModel](
-    model: type[M], identity: Mapping[str, object], observed: Mapping[str, object]
+    identity: M, observed: Sequence[tuple[str, object]]
 ) -> M:
     """Retain each independently validating field, never repair or invent it."""
-    document = dict(identity)
-    for name, value in observed.items():
+    model = type(identity)
+    document = identity.model_dump()
+    for name, value in observed:
         try:
             model.model_validate({**document, name: value}, strict=True)
         except (TypeError, ValueError):
@@ -1050,24 +1051,23 @@ class FleetProjection:
                     if row[0].node_id not in fleet_node_ids:
                         continue
                     unavailable = _unavailable_presence(
-                        UnavailableRecipePresence,
-                        {
-                            "installation_id": installation_id,
-                            "complete": None,
-                            "projection_issue": "Stored group evidence is unreadable; membership details and health are unknown.",
-                        },
-                        {
-                            "recipe_id": row[4].id,
-                            "recipe_revision_id": row[3].id,
-                            "title": row[4].title,
-                            "topology_name": row[2].topology_name,
-                            "expected_rank_count": row[2].node_count,
-                            "rank": row[0].rank,
-                            "role": row[0].role,
-                            "group_state": row[1].state,
-                            "rank_state": row[0].state,
-                            "installed_bytes": row[0].installed_bytes,
-                        },
+                        UnavailableRecipePresence(
+                            installation_id=installation_id,
+                            complete=None,
+                            projection_issue="Stored group evidence is unreadable; membership details and health are unknown.",
+                        ),
+                        (
+                            ("recipe_id", row[4].id),
+                            ("recipe_revision_id", row[3].id),
+                            ("title", row[4].title),
+                            ("topology_name", row[2].topology_name),
+                            ("expected_rank_count", row[2].node_count),
+                            ("rank", row[0].rank),
+                            ("role", row[0].role),
+                            ("group_state", row[1].state),
+                            ("rank_state", row[0].state),
+                            ("installed_bytes", row[0].installed_bytes),
+                        ),
                     )
                     projected_group.setdefault(row[0].node_id, []).append(unavailable)
             for node_id, values in projected_group.items():
@@ -1204,25 +1204,24 @@ class FleetProjection:
                     if row[0].node_id not in fleet_node_ids:
                         continue
                     unavailable = _unavailable_presence(
-                        UnavailableRunPresence,
-                        {
-                            "run_id": run_id,
-                            "healthy": None,
-                            "projection_issue": "Stored group evidence is unreadable; membership details and health are unknown.",
-                        },
-                        {
-                            "installation_id": row[1].installation_id,
-                            "recipe_id": row[5].id,
-                            "recipe_revision_id": row[4].id,
-                            "title": row[5].title,
-                            "alias": row[1].alias,
-                            "expected_rank_count": row[2].node_count,
-                            "rank": row[0].rank,
-                            "role": row[0].role,
-                            "run_state": row[1].state,
-                            "route_state": row[1].route_state,
-                            "rank_state": row[0].state,
-                        },
+                        UnavailableRunPresence(
+                            run_id=run_id,
+                            healthy=None,
+                            projection_issue="Stored group evidence is unreadable; membership details and health are unknown.",
+                        ),
+                        (
+                            ("installation_id", row[1].installation_id),
+                            ("recipe_id", row[5].id),
+                            ("recipe_revision_id", row[4].id),
+                            ("title", row[5].title),
+                            ("alias", row[1].alias),
+                            ("expected_rank_count", row[2].node_count),
+                            ("rank", row[0].rank),
+                            ("role", row[0].role),
+                            ("run_state", row[1].state),
+                            ("route_state", row[1].route_state),
+                            ("rank_state", row[0].state),
+                        ),
                     )
                     projected_group.setdefault(row[0].node_id, []).append(unavailable)
             for node_id, values in projected_group.items():

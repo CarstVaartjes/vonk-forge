@@ -420,6 +420,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 "ip_address": "192.168.1.211",
                 "lifecycle": "managed",
                 "labels": {"rack": "left"},
+                "projection_issues": None,
                 "connection": {
                     "agent_state": "active",
                     "certificate_state": "valid",
@@ -489,6 +490,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 "ip_address": None,
                 "lifecycle": "managed",
                 "labels": {"rack": "right"},
+                "projection_issues": None,
                 "connection": {
                     "agent_state": "active",
                     "certificate_state": "valid",

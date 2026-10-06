@@ -202,7 +202,7 @@ test("unreadable removal effects show unknown and preserve the original operatio
   const accepted: RecipeOperatorResponse = {
     action: "remove", selector: "vonk-forge/recipe", request_key: "request",
     operation_id: "operation", recipe_revision_id: "revision", with_model: false,
-    state: "running", progress: {phase: "reclaiming", total_bytes_known: false},
+    state: "running", progress: {phase: "reclaiming", completed_bytes: 0, total_bytes_known: false},
     reclaimed_bytes: 0,
   };
   const intent = {kind: "recipe" as const, selector: accepted.selector,

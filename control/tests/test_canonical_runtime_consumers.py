@@ -43,7 +43,7 @@ def _revision(
         kind="recipe",
         schema_version=2,
         state=state,
-        document=document,
+        document=recipe.model_dump(mode="json"),
         content_digest=digest or document_sha256(recipe.model_dump(mode="json")),
     )
 

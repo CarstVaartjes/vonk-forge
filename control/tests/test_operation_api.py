@@ -2213,7 +2213,14 @@ def test_durable_retire_refuses_a_parked_operation_whose_lease_is_live(
 def test_zero_target_upgrade_job_still_projects_a_valid_progress_object() -> None:
     jobs = Jobs()
     jobs.job = EnqueuedJob(kind="agent-upgrade", state="succeeded", targets=())
-    client, operator, _ = _client(jobs=jobs)
+    services = OperationApiServices(
+        agents=lambda: (),
+        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
+            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
+        ),
+        resume_job=lambda _job_id: None,
+    )
+    client, operator, _ = _client(jobs=jobs, operations=services)
 
     response = client.get(f"/api/jobs/{jobs.job.id}", headers=operator)
 
