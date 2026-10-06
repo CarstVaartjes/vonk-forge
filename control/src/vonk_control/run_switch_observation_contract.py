@@ -4,13 +4,34 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter
-from vonk_agent_protocol import OperationProgress
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+)
+from vonk_agent_protocol import OperationProgress, canonical_message
 
-from .recipe_image_availability_clocks_contract import readable_or_none
 from .recipe_lifecycle_contract import LifecycleNodeResult
 from .run_switch_contract import RunSwitchMemberReceipt
 from .runtime_image_preparation import RuntimeImageReceipt
+
+
+def readable_or_none[T](adapter: TypeAdapter[T]) -> BeforeValidator:
+    """Retain a readable field without accepting a coerced identity."""
+
+    def read(value: object) -> object:
+        try:
+            return adapter.validate_python(value, strict=True)
+        except (TypeError, ValueError):
+            try:
+                return adapter.validate_json(canonical_message(value), strict=True)
+            except (TypeError, ValueError):
+                return None
+
+    return BeforeValidator(read)
 
 
 class RunSwitchObservedEvidence(BaseModel):
@@ -77,9 +98,7 @@ class RunSwitchStoredIdentity(BaseModel):
 
 
 DigestValue = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-ObservedBytes = Annotated[
-    int | None, readable_or_none(TypeAdapter(Annotated[int, Field(ge=0)]))
-]
+ObservedBytes = Annotated[int, Field(ge=0)] | None
 ObservedDigests = Annotated[
     list[DigestValue] | None, readable_or_none(TypeAdapter(list[DigestValue]))
 ]
@@ -122,3 +141,18 @@ class RunSwitchObservedImageIdentity(BaseModel):
     image_bytes: int | None = None
     architecture: str | None = None
     runtime_interface: str | None = None
+
+
+class RunSwitchStoredChildIdentity(BaseModel):
+    """An issued exact child remains observable when sibling progress is damaged."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+    child_operation_id: (
+        Annotated[
+            str,
+            StringConstraints(
+                pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            ),
+        ]
+        | None
+    ) = None

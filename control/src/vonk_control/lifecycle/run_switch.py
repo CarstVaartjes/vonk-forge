@@ -70,7 +70,10 @@ from ..run_switch_contract import (
     RunSwitchMemberState,
     RunSwitchOperationResult,
 )
-from ..run_switch_observation_contract import RunSwitchStoredIdentity
+from ..run_switch_observation_contract import (
+    RunSwitchStoredChildIdentity,
+    RunSwitchStoredIdentity,
+)
 from .adapter import Dispatch
 from .agent_operation import AgentOperationAdapter
 from .composite import aggregate
@@ -135,6 +138,16 @@ def _intent_ordinal(job: Job) -> int | None:
     except (TypeError, ValueError):
         return None
     return identity.workload_intent_ordinal
+
+
+def _stored_child(value: object) -> str | None:
+    try:
+        evidence = RunSwitchStoredChildIdentity.model_validate_json(
+            canonical_message(value), strict=True
+        )
+    except (TypeError, ValueError):
+        return None
+    return evidence.child_operation_id
 
 
 def set_member_state(
@@ -298,11 +311,7 @@ class RunSwitchAdapter:
         with self._read() as session:
             job = session.get(Job, row.id)
             result = None if job is None else job.result
-            child = (
-                result.get("child_operation_id")
-                if isinstance(result, Mapping)
-                else None
-            )
+            child = _stored_child(result)
             if not isinstance(child, str) or not child:
                 return ()
             orders = session.scalars(
@@ -326,11 +335,7 @@ class RunSwitchAdapter:
         with self._read() as session:
             job = session.get(Job, row.id)
             result = None if job is None else job.result
-            child = (
-                result.get("child_operation_id")
-                if isinstance(result, Mapping)
-                else None
-            )
+            child = _stored_child(result)
         if not isinstance(child, str) or not child:
             return Observed(Effect.NONE)
         if aggregate(self.children(row)) is State.SUCCEEDED:
@@ -345,11 +350,7 @@ class RunSwitchAdapter:
             if job is None:
                 return StopResult.CONFIRMED
             result = job.result
-            child = (
-                result.get("child_operation_id")
-                if isinstance(result, Mapping)
-                else None
-            )
+            child = _stored_child(result)
             if not isinstance(child, str) or not child:
                 return StopResult.CONFIRMED
             if self._stopper is not None and self._stopper(session, job, self.now()):

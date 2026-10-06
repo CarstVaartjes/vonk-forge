@@ -75,7 +75,7 @@ from .artifact_reference_scan import (
     require_model_sets_open,
 )
 from .attempt_residues import unowned_never_installed
-from .bounded_json import require_integer, require_mapping, require_sequence
+from .bounded_json import require_integer, require_mapping
 from .categorized_errors import (
     InvalidValue,
     MissingRecord,
@@ -204,6 +204,7 @@ from .recipe_execution_contract import (
     parse_stored_installation_plan,
     parse_stored_run_plan,
 )
+from .recipe_lifecycle_contract import RecipeLifecycleResult
 from .recipe_operations import (
     RecipeArtifactJobCancellationPending,
     RecipeInstallPreflightExpired,
@@ -269,6 +270,7 @@ from .run_switch_contract import (
     RunSwitchContainerBuildResult,
     RunSwitchContainerBuildState,
     RunSwitchCoverage,
+    RunSwitchDistributionChildResult,
     RunSwitchFinalVerifyResult,
     RunSwitchMemberProgress,
     RunSwitchMemberReceipt,
@@ -9600,14 +9602,44 @@ def _phase_result(
     return result
 
 
+_ARTIFACT_CHILD_ADAPTER = TypeAdapter(
+    RunSwitchDistributionChildResult | RunSwitchPhaseResult
+)
+
+
+def _child_result(
+    child: object,
+) -> (
+    RunSwitchDistributionChildResult
+    | RunSwitchPhaseResult
+    | RecipeLifecycleResult
+    | None
+):
+    """Read native typed receipts; only artifact transport DTOs may need parsing."""
+    from .distribution_executor import _ChildView
+
+    if isinstance(child, RecipeOperationView):
+        return child.lifecycle_result
+    if isinstance(child, _ChildView):
+        if isinstance(child.result, BaseModel):
+            return _ARTIFACT_CHILD_ADAPTER.validate_python(child.result, strict=True)
+        try:
+            return _ARTIFACT_CHILD_ADAPTER.validate_json(
+                canonical_message(child.result), strict=True
+            )
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _child_progress_payload(child: object) -> RunSwitchObservedEvidence:
     """Consume explicit executor DTOs at their typed observation boundary."""
     from .distribution_executor import _ChildView
 
     if isinstance(child, RecipeOperationView):
-        result, state, reason = child.result, child.state, child.status_reason
+        result, state, reason = _child_result(child), child.state, child.status_reason
     elif isinstance(child, _ChildView):
-        result, state, reason = child.result, child.state, None
+        result, state, reason = _child_result(child), child.state, None
     elif isinstance(child, RunSwitchOperation):
         result, state, reason = child.progress, child.state, child.status_reason
     else:
