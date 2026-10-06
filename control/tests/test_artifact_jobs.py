@@ -17,6 +17,8 @@ from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
     RecipeJobFile,
+    RecipeJobInputFile,
+    RecipeJobOutputLimits,
     RecipeJobRunResult,
     canonical_message,
     recipe_job_manifest_document,
@@ -38,7 +40,10 @@ from vonk_control.artifact_jobs import (
 )
 from vonk_control.bounded_json import require_mapping
 from vonk_control.categorized_errors import MissingRecord
-from vonk_control.compiled_artifact_contract import validate_parameter_definition
+from vonk_control.compiled_artifact_contract import (
+    ParameterScalar,
+    validate_parameter_definition,
+)
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -117,7 +122,7 @@ class _ArtifactCreateRequest(TypedDict):
 
     run_id: str
     interface: str
-    parameters: dict[str, object]
+    parameters: dict[str, ParameterScalar]
     inputs: list[dict[str, object]]
     output_limits: dict[str, object]
     timeout_seconds: int
@@ -130,10 +135,6 @@ def _mapping(value: object) -> dict[str, object]:
     return value
 
 
-def _validate_parameter_definition(raw: dict[str, object]) -> dict[str, object]:
-    return validate_parameter_definition(raw).model_dump(mode="json")
-
-
 def _sequence(value: object) -> list[object]:
     assert isinstance(value, list)
     return value
@@ -142,7 +143,7 @@ def _sequence(value: object) -> list[object]:
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
 def test_artifact_float_settings_require_finite_values(value: float) -> None:
     with pytest.raises((TypeError, ValueError)):
-        _validate_parameter_definition(
+        validate_parameter_definition(
             {
                 "name": "guidance",
                 "type": "float",
@@ -154,7 +155,7 @@ def test_artifact_float_settings_require_finite_values(value: float) -> None:
 
 
 def test_artifact_settings_preserve_strict_float_and_max64_name_contract() -> None:
-    definition = _validate_parameter_definition(
+    definition = validate_parameter_definition(
         {
             "name": "guidance_scale",
             "type": "float",
@@ -163,16 +164,14 @@ def test_artifact_settings_preserve_strict_float_and_max64_name_contract() -> No
             "maximum": 64.0,
         }
     )
-    assert _effective_parameters(
-        {"parameters": [definition]}, {"guidance_scale": 2.25}
-    ) == {"guidance_scale": 2.25}
+    assert _effective_parameters([definition], {"guidance_scale": 2.25}) == {
+        "guidance_scale": 2.25
+    }
     with pytest.raises(ArtifactJobError, match="wrong type"):
-        _effective_parameters(
-            {"parameters": [definition]}, {"guidance_scale": float("nan")}
-        )
+        _effective_parameters([definition], {"guidance_scale": float("nan")})
 
     with pytest.raises((TypeError, ValueError)):
-        _validate_parameter_definition(
+        validate_parameter_definition(
             {
                 "name": "a" * 65,
                 "type": "float",
@@ -190,14 +189,14 @@ def test_artifact_settings_preserve_strict_float_and_max64_name_contract() -> No
         "github_token",
     ):
         with pytest.raises((TypeError, ValueError)):
-            _validate_parameter_definition(
+            validate_parameter_definition(
                 {"name": name, "type": "string", "default": "secret"}
             )
     for name in ("max_tokens", "token_budget", "tokenizer"):
-        definition = _validate_parameter_definition(
+        definition = validate_parameter_definition(
             {"name": name, "type": "integer", "default": 1}
         )
-        assert definition["name"] == name
+        assert definition.name == name
 
 
 def _configure_artifact_recipe(document: dict[str, object]) -> None:
@@ -380,6 +379,29 @@ def artifact_create_request(run_id: str, request_id: str) -> _ArtifactCreateRequ
     }
 
 
+def create_artifact_job(service: ArtifactJobService, *args, **request):
+    """Create a job from plain request documents, as the HTTP route does.
+
+    The service takes typed inputs and limits; a test describes them as plain
+    documents, so the contract models are built (and validated) here.
+    """
+
+    if "inputs" in request:
+        request["inputs"] = [
+            item
+            if isinstance(item, RecipeJobInputFile)
+            else RecipeJobInputFile.model_validate(item)
+            for item in request["inputs"]
+        ]
+    if "output_limits" in request and not isinstance(
+        request["output_limits"], RecipeJobOutputLimits
+    ):
+        request["output_limits"] = RecipeJobOutputLimits.model_validate(
+            request["output_limits"]
+        )
+    return service.create(*args, **request)
+
+
 class MutableClock:
     def __init__(self, now: datetime) -> None:
         self.now = now
@@ -397,7 +419,7 @@ def submitted_artifact_job(
     request = artifact_create_request(
         run_id, f"00000000-0000-4000-8000-{request_suffix:012d}"
     )
-    job = service.create(**request)
+    job = create_artifact_job(service, **request)
     content = b"png"
     service.put_input(
         job.id,
@@ -451,11 +473,11 @@ def test_artifact_job_create_idempotency_compares_canonical_semantics(
         running_artifact_service(tmp_path)
     )
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000114")
-    first = service.create(**request)
+    first = create_artifact_job(service, **request)
 
     replay = copy.deepcopy(request)
     replay["parameters"] = {"seed": 0, "prompt": "fox"}
-    replayed = service.create(**replay)
+    replayed = create_artifact_job(service, **replay)
 
     assert replayed.id == first.id
 
@@ -467,7 +489,7 @@ def test_artifact_job_create_request_lookup_recovers_the_original_draft(
         running_artifact_service(tmp_path)
     )
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000154")
-    created = service.create(**request)
+    created = create_artifact_job(service, **request)
 
     recovered = service.get_by_request_id(request["request_id"])
 
@@ -503,12 +525,12 @@ def test_artifact_job_create_rejects_semantically_different_replay(
         running_artifact_service(tmp_path)
     )
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000115")
-    service.create(**request)
+    create_artifact_job(service, **request)
     replay = copy.deepcopy(request)
     change(replay)
 
     with pytest.raises(ArtifactJobError, match="request key"):
-        service.create(**replay)
+        create_artifact_job(service, **replay)
 
 
 def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
@@ -518,7 +540,7 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
         tmp_path
     )
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000116")
-    service.create(**request)
+    create_artifact_job(service, **request)
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None
@@ -551,7 +573,7 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
         installation.recipe_revision_id = replacement.id
 
     with pytest.raises(ArtifactJobError, match="request key"):
-        service.create(**request)
+        create_artifact_job(service, **request)
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -562,7 +584,7 @@ def test_artifact_job_damaged_contract_is_rebuilt_from_its_recipe_before_project
         tmp_path
     )
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000118")
-    created = service.create(**request)
+    created = create_artifact_job(service, **request)
     assert isinstance(created.compiled_contract, CompiledArtifactContract)
 
     with sessions.begin() as session:
@@ -585,7 +607,7 @@ def test_artifact_job_persisted_parameters_are_validated_before_compilation(
         tmp_path
     )
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000119")
-    created = service.create(**request)
+    created = create_artifact_job(service, **request)
     content = b"png"
     digest = hashlib.sha256(content).hexdigest()
     service.put_input(
@@ -624,7 +646,9 @@ def test_artifact_job_create_exact_concurrent_replay_has_one_identity(
 
     with ThreadPoolExecutor(max_workers=2) as workers:
         identifiers = tuple(
-            workers.map(lambda _index: service.create(**request).id, range(2))
+            workers.map(
+                lambda _index: create_artifact_job(service, **request).id, range(2)
+            )
         )
 
     assert len(set(identifiers)) == 1
@@ -661,7 +685,8 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
     )
     input_content = b"png"
     input_digest = hashlib.sha256(input_content).hexdigest()
-    job = service.create(
+    job = create_artifact_job(
+        service,
         run_id,
         interface="image-job",
         parameters={"prompt": "fox / meadow", "seed": 0},
@@ -960,7 +985,8 @@ def test_artifact_job_rejects_unsafe_names_and_timeout(tmp_path) -> None:
         "request_id": "00000000-0000-4000-8000-000000000105",
     }
     with pytest.raises(Exception, match="name"):
-        service.create(
+        create_artifact_job(
+            service,
             **request,
             inputs=[
                 {
@@ -974,7 +1000,7 @@ def test_artifact_job_rejects_unsafe_names_and_timeout(tmp_path) -> None:
             timeout_seconds=60,
         )
     with pytest.raises(ArtifactJobError, match="timeout"):
-        service.create(**request, inputs=[], timeout_seconds=3601)
+        create_artifact_job(service, **request, inputs=[], timeout_seconds=3601)
 
 
 @pytest.mark.parametrize(
@@ -1028,7 +1054,7 @@ def test_artifact_job_server_contract_rejects_client_escalation(
     }
     change(request)
     with pytest.raises(ArtifactJobError, match=message):
-        service.create(**request)
+        create_artifact_job(service, **request)
 
 
 @pytest.mark.parametrize(
@@ -1057,7 +1083,7 @@ def test_artifact_job_dispatches_exact_signed_output_mapping(
         **request["output_limits"],
         "allowed_media_types": [media_type],
     }
-    job = service.create(**request)
+    job = create_artifact_job(service, **request)
     content = b"png"
     service.put_input(
         job.id,
@@ -1101,8 +1127,9 @@ def test_artifact_job_rejects_unrepresentable_output_media_mapping(tmp_path) -> 
     )
 
     with pytest.raises(ArtifactJobError, match="output slot contract"):
-        service.create(
-            **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000132")
+        create_artifact_job(
+            service,
+            **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000132"),
         )
 
 
@@ -1127,8 +1154,9 @@ def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) ->
     )
 
     with pytest.raises(ArtifactJobError, match="extensions"):
-        service.create(
-            **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000133")
+        create_artifact_job(
+            service,
+            **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000133"),
         )
 
 
@@ -1176,7 +1204,7 @@ def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
         "max_files": 2,
         "allowed_media_types": [media_type],
     }
-    job = service.create(**request)
+    job = create_artifact_job(service, **request)
     content = b"png"
     service.put_input(
         job.id,
@@ -1241,7 +1269,8 @@ def test_logical_job_run_blocks_stop_and_serializes_full_model_jobs(tmp_path) ->
     content = b"png"
 
     def create(request_id: str):
-        job = service.create(
+        job = create_artifact_job(
+            service,
             run_id,
             interface="image-job",
             parameters={"prompt": "fox", "seed": 0},
@@ -1428,7 +1457,7 @@ def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> N
         "recoverable": True,
         "active_scope_may_remain": True,
         "elapsed_milliseconds": 10,
-    }.items() <= view.result_evidence.items()
+    }.items() <= view.result_evidence.model_dump(exclude_none=True).items()
     assert recipe_operations.preview_stop(run_id).allowed
 
     for _ in range(40):
@@ -1440,9 +1469,9 @@ def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> N
     assert ended.state == "cancelled"
     assert ended.supported_actions == ()
     assert ended.result_evidence is not None
-    assert ended.result_evidence["active_scope_may_remain"] is True
-    assert ended.result_evidence["failure_kind"] == "cancellation-stop-uncertain"
-    assert ended.result_evidence["cancel_request_id"] == (
+    assert ended.result_evidence.active_scope_may_remain is True
+    assert ended.result_evidence.failure_kind == "cancellation-stop-uncertain"
+    assert ended.result_evidence.cancel_request_id == (
         "00000000-0000-4000-8000-000000000123"
     )
     # An ended job never blocks the run's Stop: its residue is recorded, not awaited.
@@ -1474,8 +1503,8 @@ def test_artifact_lease_expiry_is_observed_then_stoppable(tmp_path) -> None:
     assert observed.state == ajs.OBSERVING
     assert observed.supported_actions == ("stop",)
     assert observed.result_evidence is not None
-    assert observed.result_evidence["failure_kind"] == "agent-lease-expired"
-    assert observed.result_evidence["late_results_accepted"] is False
+    assert observed.result_evidence.failure_kind == "agent-lease-expired"
+    assert observed.result_evidence.late_results_accepted is False
     with pytest.raises(StaleAgentAttempt):
         agent_jobs.record_result(
             cancellation_result(
@@ -1509,15 +1538,16 @@ def test_artifact_lease_expiry_is_observed_then_stoppable(tmp_path) -> None:
     ended = service.get(submitted.id)
     assert ended.state == "cancelled"
     assert ended.result_evidence is not None
-    assert ended.result_evidence["active_scope_may_remain"] is True
+    assert ended.result_evidence.active_scope_may_remain is True
 
 
 def test_draft_artifact_cancel_idempotency_rejects_mismatched_replay(tmp_path) -> None:
     _sessions, _operations, _queue, service, run_id, _node_id = (
         running_artifact_service(tmp_path)
     )
-    job = service.create(
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000127")
+    job = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000127"),
     )
     request = {
         "actor": "operator",
@@ -1582,7 +1612,7 @@ def test_blob_store_reconcile_unlinks_only_objects_with_positive_evidence(
     # Neither is referenced, but only one is proven unused.
     store.reconcile(set(), orphan_grace_seconds=0, reclaimable_sha256={proven})
 
-    assert store.usage()["used_bytes"] == len(b"unproven")
+    assert store.usage().used_bytes == len(b"unproven")
 
 
 def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None:
@@ -1614,7 +1644,7 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
         )
         await first_streaming.wait()
         usage = second_store.usage()
-        assert usage == {
+        assert usage.model_dump() == {
             "max_stored_bytes": 6,
             "used_bytes": 0,
             "reserved_bytes": 4,
@@ -1640,18 +1670,18 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
         return [await first]
 
     results = asyncio.run(exercise())
-    assert first_store.usage()["used_bytes"] <= 6
+    assert first_store.usage().used_bytes <= 6
     survivor = next((item for item in results if not isinstance(item, Exception)), None)
     referenced = {survivor.sha256} if survivor is not None else set()
     orphan = b"x"
     orphan_digest = hashlib.sha256(orphan).hexdigest()
-    if first_store.usage()["remaining_bytes"]:
+    if first_store.usage().remaining_bytes:
         first_store.put_bytes(orphan_digest, orphan, maximum_bytes=1)
     report = first_store.reconcile(
         referenced, orphan_grace_seconds=0, reclaimable_sha256={orphan_digest}
     )
-    assert report["missing_referenced_blobs"] == []
-    assert report["removed_orphan_blobs"] in {0, 1}
+    assert report.missing_referenced_blobs == []
+    assert report.removed_orphan_blobs in {0, 1}
 
 
 def test_terminal_job_retention_removes_only_unreferenced_cas_bytes(tmp_path) -> None:
@@ -1660,7 +1690,8 @@ def test_terminal_job_retention_removes_only_unreferenced_cas_bytes(tmp_path) ->
     )
     content = b"png"
     digest = hashlib.sha256(content).hexdigest()
-    job = service.create(
+    job = create_artifact_job(
+        service,
         run_id,
         interface="image-job",
         parameters={"prompt": "fox", "seed": 0},
@@ -1701,7 +1732,7 @@ def test_terminal_job_retention_removes_only_unreferenced_cas_bytes(tmp_path) ->
         assert stored is not None
         stored.completed_at = NOW - timedelta(days=8)
     report = service.reconcile_storage()
-    assert report["expired_jobs"] == 1
+    assert report.expired_jobs == 1
     with sessions() as session:
         assert session.get(ArtifactJob, job.id) is None
         assert session.get(ArtifactJobBlob, digest) is None
@@ -1736,8 +1767,8 @@ def test_reconcile_never_deletes_blobs_on_an_empty_reference_scan(tmp_path) -> N
 
     report = service.reconcile_storage()
 
-    assert report["expired_jobs"] == 0
-    assert report["removed_blob_records"] == 0
+    assert report.expired_jobs == 0
+    assert report.removed_blob_records == 0
     assert stored.path.is_file()
     with sessions() as session:
         assert session.get(ArtifactJobBlob, digest) is not None
@@ -1753,8 +1784,9 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(tmp_path) -> None:
     expired_digest = hashlib.sha256(expired_content).hexdigest()
     unproven_content = b"unproven bytes"
     unproven_digest = hashlib.sha256(unproven_content).hexdigest()
-    job = service.create(
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000150")
+    job = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000150"),
     )
     service.put_input(
         job.id,
@@ -1793,8 +1825,8 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(tmp_path) -> None:
 
     report = service.reconcile_storage()
 
-    assert report["expired_jobs"] == 1
-    assert report["removed_blob_records"] == 1
+    assert report.expired_jobs == 1
+    assert report.removed_blob_records == 1
     assert not expired_path.exists()
     assert seeded.path.is_file()
     with sessions() as session:
@@ -1810,8 +1842,9 @@ def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
     )
     content = b"png"
     digest = hashlib.sha256(content).hexdigest()
-    job = service.create(
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000129")
+    job = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000129"),
     )
     root = tmp_path / "artifact-blobs"
     seeded = ArtifactBlobStore(root).put_bytes(
@@ -1865,12 +1898,12 @@ def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
         assert upload.result(timeout=2).id == job.id
         report = gc.result(timeout=2)
 
-    assert report["removed_orphan_blobs"] == 0
+    assert report.removed_orphan_blobs == 0
     assert seeded.path.is_file()
     with sessions() as session:
         attached = session.scalar(select(ArtifactJob).where(ArtifactJob.id == job.id))
         assert attached is not None
-        assert service.get(job.id).input_files[0]["sha256"] == digest
+        assert service.get(job.id).input_files[0].sha256 == digest
 
 
 @pytest.mark.parametrize(
@@ -1883,8 +1916,9 @@ def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
     )
-    created = service.create(
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000151")
+    created = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000151"),
     )
     assert service.get(created.id).input_declarations == created.input_declarations
     with sessions.begin() as session:
@@ -1919,8 +1953,9 @@ def test_artifact_input_manifest_is_rebuilt_from_the_uploaded_inputs(tmp_path):
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
     )
-    created = service.create(
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000154")
+    created = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000154"),
     )
     content = b"png"
     service.put_input(
@@ -1946,8 +1981,9 @@ def test_artifact_cancel_completes_over_corrupt_evidence(tmp_path, evidence):
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
     )
-    created = service.create(
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000152")
+    created = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000152"),
     )
     with sessions.begin() as session:
         row = session.get(ArtifactJob, created.id)
@@ -1966,8 +2002,9 @@ def test_artifact_cancel_preserves_declared_evidence_and_meaningful_values(
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
     )
-    created = service.create(
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000153")
+    created = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000153"),
     )
     evidence = {
         "elapsed_milliseconds": 0,
@@ -1983,5 +2020,5 @@ def test_artifact_cancel_preserves_declared_evidence_and_meaningful_values(
     )
     assert cancelled.result_evidence is not None
     for key, value in evidence.items():
-        assert cancelled.result_evidence[key] == value
+        assert getattr(cancelled.result_evidence, key) == value
     assert service.get(created.id).result_evidence == cancelled.result_evidence

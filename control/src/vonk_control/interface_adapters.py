@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 
 
@@ -14,18 +13,6 @@ class InterfaceAdapterError(ValueError):
 class InterfaceAdapter:
     name: str
     publication: str
-
-    def readiness(self, status: Mapping[str, object]) -> bool:
-        return status.get("ready") is True
-
-    def invocation_request(self, request: Mapping[str, object]) -> dict[str, object]:
-        return dict(request)
-
-    def evidence(self, result: Mapping[str, object]) -> dict[str, object]:
-        return dict(result)
-
-    def withdrawal(self) -> dict[str, object]:
-        return {"publication": self.publication, "withdrawn": True}
 
 
 _ADAPTERS = {

@@ -24,10 +24,18 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from vonk_control.compiled_execution_plan import compile_verified_execution_plan
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledExecutionPlan as WireCompiledExecutionPlan,
+)
+from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
+from vonk_control.compiled_execution_plan import (
+    CompiledRuntimeImage,
+    VerifiedModelObject,
+    compile_verified_execution_plan,
+)
 from vonk_control.execution_plan_service import _bind_runtime_artifacts, _placement
 from vonk_control.models import ClusterMappingNode
-from vonk_control.recipe_runtime_specs import OPTION_CHOICES_KEY, compile_runtime_spec
+from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -40,14 +48,14 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 INPUTS = Path(__file__).resolve().parent / "fixtures" / "catalog_launch"
 PAYLOADS = REPOSITORY / "agent_protocol" / "tests" / "fixtures" / "catalog-launch"
 
-_SYNTHETIC_IMAGE = {
-    "image_digest": "sha256:" + "a" * 64,
-    "oci_layout_sha256": "f" * 64,
-    "image_bytes": 4096,
-    "build_id": "catalog-fixture-build",
-    "local_image_config_id": "sha256:" + "b" * 64,
-    "runtime_interface_label": "v1",
-}
+_SYNTHETIC_IMAGE = CompiledRuntimeImage(
+    image_digest="sha256:" + "a" * 64,
+    oci_layout_sha256="f" * 64,
+    image_bytes=4096,
+    build_id="catalog-fixture-build",
+    local_image_config_id="sha256:" + "b" * 64,
+    runtime_interface_label="v1",
+)
 
 
 def load_inputs() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
@@ -174,6 +182,61 @@ def expected_payload_names(recipe: RecipeDefinition) -> set[str]:
     }
 
 
+def compile_launch_plan(
+    recipe: RecipeDefinition,
+    recipe_digest: str,
+    models: Mapping[str, ModelDefinition],
+    *,
+    role: str,
+    rank: int,
+    option_choices: Mapping[str, str] | None = None,
+) -> WireCompiledExecutionPlan:
+    """One rank's launch plan, compiled through the production pipeline.
+
+    Only the simulated fleet addresses are supplied; memory and port semantics
+    come from the production placement constructor.
+    """
+
+    receipts = _receipts(models)
+    compiled = compile_runtime_spec(
+        recipe,
+        models=models,
+        recipe_digest=recipe_digest,
+        package_handle=_package(recipe),
+        option_choices=option_choices,
+        role=role,
+        rank=rank,
+    )
+    runtime = _bind_runtime_artifacts(compiled, models)
+    selected = {
+        (artifact.model.content_sha256, artifact.file_id)
+        for artifact in runtime.artifacts
+    }
+    plan = compile_verified_execution_plan(
+        runtime,
+        model_artifact_set_sha256="c" * 64,
+        model_objects=[
+            VerifiedModelObject.model_validate(receipt)
+            for receipt in receipts
+            if (receipt["model_content_sha256"], receipt["file_id"]) in selected
+        ],
+        runtime_image=_SYNTHETIC_IMAGE,
+    )
+    world_size = recipe.topology.world_size
+    placement = _placement(
+        recipe, runtime, ClusterMappingNode(rank=rank, role=role), world_size
+    )
+    simulated = placement.model_dump(mode="json")
+    if placement.port is not None:
+        simulated["endpoint_address"] = "100.100.20.30"
+    if world_size > 1:
+        simulated["local_address"] = f"100.100.20.{rank + 2}"
+        simulated["master_address"] = "100.100.20.2"
+    return plan.to_compiled_launch_payload(
+        runtime, placement=CompiledPlacement.model_validate(simulated)
+    )
+
+
 def compile_recipe_payloads(
     recipe_document: Mapping[str, Any], model_documents: Mapping[str, Mapping[str, Any]]
 ) -> dict[str, dict[str, Any]]:
@@ -188,49 +251,17 @@ def compile_recipe_payloads(
         assert document_sha256(document) == digest
         models[digest] = read_model(document)
         revisions.append(SimpleNamespace(document=document, content_digest=digest))
-    receipts = _receipts(models)
     slug = recipe.identity.slug
     payloads: dict[str, dict[str, Any]] = {}
     for variant, choices, role, rank in launch_cases(recipe):
-        parameters = {OPTION_CHOICES_KEY: choices} if choices else None
-        compiled = compile_runtime_spec(
+        payloads[payload_name(slug, variant, rank)] = compile_launch_plan(
             recipe,
-            models=models,
-            recipe_digest=recipe_digest,
-            package_handle=_package(recipe),
-            parameters=parameters,
+            recipe_digest,
+            models,
             role=role,
             rank=rank,
-        )
-        runtime: dict[str, Any] = _bind_runtime_artifacts(compiled, revisions)
-        selected = {
-            (artifact["model"]["content_sha256"], artifact["file_id"])
-            for artifact in runtime["artifacts"]
-        }
-        plan = compile_verified_execution_plan(
-            runtime,
-            model_artifact_set_sha256="c" * 64,
-            model_objects=[
-                receipt
-                for receipt in receipts
-                if (receipt["model_content_sha256"], receipt["file_id"]) in selected
-            ],
-            runtime_image=_SYNTHETIC_IMAGE,
-        )
-        world_size = recipe.topology.world_size
-        placement = _placement(
-            recipe, runtime, ClusterMappingNode(rank=rank, role=role), world_size
-        )
-        # Only the simulated fleet addresses are supplied here; memory and
-        # port semantics come from the production placement constructor.
-        if placement["port"] is not None:
-            placement["endpoint_address"] = "100.100.20.30"
-        if world_size > 1:
-            placement["local_address"] = f"100.100.20.{rank + 2}"
-            placement["master_address"] = "100.100.20.2"
-        payloads[payload_name(slug, variant, rank)] = plan.to_compiled_launch_payload(
-            runtime, placement=placement
-        )
+            option_choices=choices,
+        ).model_dump(mode="json")
     return payloads
 
 

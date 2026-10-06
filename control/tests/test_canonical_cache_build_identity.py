@@ -6,7 +6,6 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
-from typing import cast
 
 import pytest
 from sqlalchemy import create_engine
@@ -470,7 +469,7 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
 
     # Profile loads and the library see revision 2's model as cached.
     status = service.resolve_latest_cached(recipe_identity=second_recipe.id)
-    assert "model-not-cached" not in cast(list[str], status["blockers"])
+    assert "model-not-cached" not in status.blockers
 
     # Compilation asks for exactly that: capture what it binds.
     bound: list[tuple[dict[str, object], ...]] = []

@@ -18,15 +18,18 @@ import hashlib
 import json
 from pathlib import Path
 
-from vonk_control.compiled_execution_plan import (
-    compile_verified_execution_plan,
-    execution_identity_sha256,
-)
 from vonk_control.execution_plan_service import _bind_runtime_artifacts
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from control.tests.test_catalog_entities import _model
-from control.tests.test_compiled_execution_plan import _image, _spec
+from control.tests.test_compiled_execution_plan import (
+    _image,
+    _launch,
+    _spec,
+    _typed,
+    compile_verified_execution_plan,
+    execution_identity_sha256,
+)
 
 
 def _json_object(value: object) -> dict[str, object]:
@@ -71,7 +74,6 @@ def main() -> None:
                 "mount": {
                     "source": "/run/vonk/models/primary",
                     "target": "/models",
-                    "read_only": True,
                 },
                 "model": {
                     "publisher": "vonk-forge",
@@ -127,24 +129,16 @@ def main() -> None:
     _json_object(runtime_spec["identity"])["execution_sha256"] = (
         execution_identity_sha256(runtime_spec)
     )
-    bound = _bind_runtime_artifacts(
-        runtime_spec,
-        [
-            type(
-                "Revision",
-                (),
-                {"document": model_document, "content_digest": model_digest},
-            )()
-        ],
-    )
+    bound = _bind_runtime_artifacts(_typed(runtime_spec), {model_digest: model})
     plan = compile_verified_execution_plan(
-        bound,
+        bound.document(),
         model_artifact_set_sha256="d" * 64,
         model_objects=model_objects,
         runtime_image=_image(),
     )
-    payload = plan.to_compiled_launch_payload(
-        bound,
+    payload = _launch(
+        plan,
+        bound.document(),
         placement={
             "endpoint_address": None,
             "rank": 0,
@@ -156,7 +150,6 @@ def main() -> None:
             "port": 8000,
             "reserved_memory_bytes": 1,
             "memory_floor_bytes": 0,
-            "memory_kind": "unified",
         },
     )
     output = Path(__file__).with_name("compiled_plan_751.json")

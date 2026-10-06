@@ -76,12 +76,17 @@ from .recipe_image_availability import (
     RecipeImageAvailabilityService,
 )
 from .recipe_operations import RecipeOperationConflict
-from .recipe_runtime_specs import compile_runtime_spec, resolve_recipe_entities
+from .recipe_runtime_specs import (
+    ResolvedRecipe,
+    compile_runtime_spec,
+    resolve_recipe_entities,
+)
 from .recovery_policy import RecoveryDecision, classify, kind_for_agent_error
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     OciLayoutImageTransport,
 )
+from .runtime_spec_contract import SpecRuntime
 from .strict_json import read_stored_model
 from .worker_memory_contract import WorkerMemoryComponent
 
@@ -371,7 +376,7 @@ def build_recipe_image_availability(
             try:
                 runtime = _compile_consistent_runtime(
                     recipe,
-                    resolved_entities=entities,
+                    resolved=entities,
                     package_handle=package_handle,
                 )
             except RecipeImageAvailabilityError:
@@ -1494,9 +1499,9 @@ __all__ = [
 def _compile_consistent_runtime(
     recipe: RecipeDefinition,
     *,
-    resolved_entities: Mapping[str, object],
+    resolved: ResolvedRecipe,
     package_handle: object,
-) -> Mapping[str, object]:
+) -> dict[str, object]:
     """Compile every canonical role/rank and require one image identity."""
 
     roles = tuple(recipe.topology.roles)
@@ -1506,32 +1511,26 @@ def _compile_consistent_runtime(
             "canonical recipe has no topology roles",
             reason=InvalidRequestReason.MALFORMED,
         )
-    compiled: list[Mapping[str, object]] = []
+    compiled: list[SpecRuntime] = []
     first_rank = 0
+    models = resolved.models
     for role in roles:
         role_count = int(role.count)
         for rank in range(first_rank, first_rank + role_count):
             projection = compile_runtime_spec(
                 recipe,
-                resolved_entities=resolved_entities,
+                recipe_digest=resolved.recipe_digest,
+                models=models,
+                package_handle=package_handle,
                 role=role.name,
                 rank=rank,
-                package_handle=package_handle,
             )
-            runtime = projection.get("runtime")
-            if not isinstance(runtime, Mapping):
-                raise AvailabilityInvalid(
-                    RecipeImageCode.RUNTIME_INVALID,
-                    "compiled runtime projection is unavailable",
-                    reason=InvalidRequestReason.MALFORMED,
-                )
-            compiled.append(runtime)
+            compiled.append(projection.runtime)
         first_rank += role_count
     first = compiled[0]
-    identity = tuple(first.get(key) for key in ("image", "architecture", "interface"))
+    identity = (first.image, first.architecture, first.interface)
     if any(
-        tuple(runtime.get(key) for key in ("image", "architecture", "interface"))
-        != identity
+        (runtime.image, runtime.architecture, runtime.interface) != identity
         for runtime in compiled[1:]
     ):
         raise AvailabilityInvalid(
@@ -1539,7 +1538,7 @@ def _compile_consistent_runtime(
             "canonical recipe roles do not share one runtime image identity",
             reason=InvalidRequestReason.MALFORMED,
         )
-    return first
+    return first.document()
 
 
 def _build_progress(

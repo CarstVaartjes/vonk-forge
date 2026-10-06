@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .catalog_revision_contract import PrebuiltImage
+    from .catalog_sync_contract import ManagedCatalogSyncProblem
     from .recipe_packages import RecipePackageHandle
 
 
@@ -63,14 +64,34 @@ class RecipeLibraryItem:
 
 
 @dataclass(frozen=True, slots=True)
+class RecipePackageEntry:
+    """One recipe's package as the signed index declares it."""
+
+    publisher: str
+    slug: str
+    source_path: str
+    recipe_content_sha256: str
+    package_sha256: str
+    size: int
+    location: str
+    title: str
+    description: str
+    tags: tuple[str, ...]
+    #: The published recipe document, carried as published: its digest is over
+    #: exactly these JSON values and is verified where it is imported.
+    document: dict[str, object]
+    prebuilt_image: PrebuiltImage | None
+    publication_commit: str
+
+
+@dataclass(frozen=True, slots=True)
 class RecipeLibrarySnapshot:
     commit: str
     items: tuple[RecipeLibraryItem, ...]
     repository: str = "CarstVaartjes/vonk-forge-recipes"
     catalog_entities: tuple[dict[str, object], ...] = ()
-    # Index documents skipped because they could not be read, each a
-    # ``{"recipe_uri", "code", "detail"}`` sync problem.
-    problems: tuple[dict[str, object], ...] = ()
+    # Index documents skipped because they could not be read, each a sync problem.
+    problems: tuple[ManagedCatalogSyncProblem, ...] = ()
     # The library release version (its contract version) and when its
     # recipes last changed.
     version: str | None = None
@@ -84,4 +105,5 @@ __all__ = [
     "RecipeLibrarySnapshot",
     "RecipeLibrarySourceContext",
     "RecipeLibrarySourceFile",
+    "RecipePackageEntry",
 ]

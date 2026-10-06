@@ -63,7 +63,7 @@ from .artifact_lifecycle import (
 )
 from .artifact_reference_scan import require_model_sets_open
 from .auth import MUTATION_ROLES, Actor
-from .bounded_json import integer, require_mapping, sequence
+from .bounded_json import integer, sequence
 from .catalog_revision_contract import read_catalog_document
 from .categorized_errors import (
     InvalidType,
@@ -74,6 +74,10 @@ from .cluster_mappings import mapping_option_choices
 from .failure_classification import error_code, is_security_failure
 from .fleet_profile_contract import (
     MAX_PROFILE_WARNINGS,
+    FleetAssignmentModelView,
+    FleetAssignmentRecipeView,
+    FleetCacheSummary,
+    FleetNodeView,
     FleetProfileAction,
     FleetProfileAdmissionDecision,
     FleetProfileApplicationCancellationIntent,
@@ -144,6 +148,7 @@ from .lifecycle.fleet_profile import (
 from .lifecycle.types import Effect as _LifecycleEffect
 from .lifecycle.types import State as _LifecycleState
 from .logging import redact_text
+from .model_cache_contract import CachedResourceEstimate, CacheResolution
 from .models import (
     STOPPABLE_RUN_STATES,
     AgentNode,
@@ -1725,12 +1730,8 @@ class RunSwitchFleetProfileAdapter:
                 "the recipe revision is not stored",
             )
         resolved = resolve_recipe_entities(session, revision.document)
-        models = resolved.get("models")
-        model_digest = (
-            models[0].content_digest
-            if isinstance(models, Sequence) and models
-            else None
-        )
+        models = resolved.model_revisions
+        model_digest = models[0].content_digest if models else None
         if not isinstance(model_digest, str):
             # The recipe revision this assignment names no longer resolves to an
             # exact model: unknown, not a verdict.  The caller leaves the
@@ -3592,7 +3593,7 @@ def build_production_fleet_profile_service(
     *,
     clock: Callable[[], datetime],
     run_switch_operations: RunSwitchOperationService,
-    cache_resolver: Callable[..., Mapping[str, object]] | None = None,
+    cache_resolver: Callable[..., CacheResolution] | None = None,
 ) -> FleetProfileService:
     """Compose the Controller's Fleet profile service and its authority.
 
@@ -3622,7 +3623,7 @@ class FleetProfileService:
         *,
         clock: Callable[[], datetime],
         switch_adapter: FleetProfileSwitchAdapter | None = None,
-        cache_resolver: Callable[..., Mapping[str, object]] | None = None,
+        cache_resolver: Callable[..., CacheResolution] | None = None,
         assessment_provider: _AssessmentProvider | None = None,
     ) -> None:
         self._sessions = sessions
@@ -3960,7 +3961,7 @@ class FleetProfileService:
     def _resolve_choice(
         self, session: Session, choice: FleetProfileAssignmentInput
     ) -> (
-        tuple[CatalogDocument, CatalogDocumentRevision, Mapping[str, object] | None]
+        tuple[CatalogDocument, CatalogDocumentRevision, CacheResolution | None]
         | Residue
     ):
         """Resolve one choice once for both presentation and execution.
@@ -3975,7 +3976,7 @@ class FleetProfileService:
         if isinstance(resolved, Residue):
             return resolved
         document, revision = resolved
-        cache: Mapping[str, object] | None = None
+        cache: CacheResolution | None = None
         if self._cache_resolver is not None:
             try:
                 candidate = self._cache_resolver(
@@ -3991,27 +3992,14 @@ class FleetProfileService:
                     f"{type(error).__name__}: {error}",
                 )
                 return document, revision, None
-            if not isinstance(candidate, Mapping):
-                retire_as_unknown(
-                    "profile-cache-resolution",
-                    document.id,
-                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
-                    "the cache resolver returned an invalid contract",
-                )
-                return document, revision, None
             cache = candidate
-            recipe_part = candidate.get("recipe")
-            chosen_id = (
-                recipe_part.get("recipe_revision_id")
-                if isinstance(recipe_part, Mapping)
-                else None
-            )
+            chosen_id = candidate.recipe.recipe_revision_id
             # The resolver is asked for the current head revision, so a
             # different revision back is a resolution defect, not an older
             # cached substitute.  Its evidence is not used (the profile is never
             # bound to bytes the operator did not select) and the choice
             # resolves without cache evidence.
-            if isinstance(chosen_id, str) and chosen_id != revision.id:
+            if chosen_id != revision.id:
                 retire_as_unknown(
                     "profile-cache-resolution",
                     document.id,
@@ -4225,12 +4213,12 @@ class FleetProfileService:
                         )
                     )
                 }
-            fleet: list[dict[str, object]] = [
-                {
-                    "selector": node.node_id,
-                    "display_name": display_names.get(node.node_id, node.node_id),
-                    "state": "Idle",
-                }
+            fleet = [
+                FleetNodeView(
+                    selector=node.node_id,
+                    display_name=display_names.get(node.node_id, node.node_id),
+                    state="Idle",
+                )
                 for node in roster
             ]
             document = {
@@ -10078,29 +10066,13 @@ class FleetProfileService:
                 warnings.append(
                     "Cache resolution is unavailable until the cache service is configured"
                 )
-            recipe_part = (
-                require_mapping(
-                    cache.get("recipe", {}), "profile cache recipe is invalid"
-                )
-                if cache
-                else None
-            )
-            model_part = (
-                require_mapping(
-                    cache.get("model", {}), "profile cache model is invalid"
-                )
-                if cache
-                else None
-            )
             recipe_state = (
                 "Cached"
-                if recipe_part and bool(recipe_part.get("cached"))
+                if cache is not None and cache.recipe.cached
                 else "Recipe not cached"
             )
-            cache_blockers = cache.get("blockers") if cache is not None else None
-            if isinstance(cache_blockers, Sequence) and any(
-                blocker == ModelCacheBlockerCode.RECIPE_NOT_CACHED
-                for blocker in cache_blockers
+            if cache is not None and (
+                ModelCacheBlockerCode.RECIPE_NOT_CACHED in cache.blockers
             ):
                 # The selected exact revision is bound into the profile, so the
                 # operator has to prepare this cache entry rather than accept a
@@ -10112,7 +10084,7 @@ class FleetProfileService:
                 )
             model_state = (
                 "Cached"
-                if model_part and bool(model_part.get("cached"))
+                if cache is not None and cache.model.cached
                 else "Model not cached"
             )
             if cache is None:
@@ -10122,19 +10094,12 @@ class FleetProfileService:
             else:
                 cache_missing += 1
             resources = (
-                dict(
-                    require_mapping(
-                        cache.get("resources", {}),
-                        "profile cache resources are invalid",
-                    )
-                )
-                if cache
-                else {}
+                cache.resources if cache is not None else CachedResourceEstimate()
             )
-            model_document = sequence(
-                resolve_recipe_entities(session, revision.document).get("models", ())
-            )
-            candidate_model = next(iter(model_document or ()), None)
+            model_document = resolve_recipe_entities(
+                session, revision.document
+            ).model_revisions
+            candidate_model = next(iter(model_document), None)
             model = (
                 candidate_model
                 if isinstance(candidate_model, CatalogDocumentRevision)
@@ -10164,23 +10129,21 @@ class FleetProfileService:
                     spark_ids=list(choice.spark_ids),
                     required_sparks=required,
                     assigned_sparks=len(choice.spark_ids),
-                    model={
-                        "selector": model_selector,
-                        "name": model_name,
-                        "variant": choice.model_variant,
-                        "state": model_state,
-                        "content_sha256": (
-                            model_part.get("content_sha256")
-                            if model_part is not None
-                            else None
+                    model=FleetAssignmentModelView(
+                        selector=model_selector,
+                        name=model_name,
+                        variant=choice.model_variant,
+                        state=model_state,
+                        content_sha256=(
+                            cache.model.content_sha256 if cache is not None else None
                         ),
-                    },
-                    recipe={
-                        "selector": f"{recipe.publisher}/{recipe.slug}",
-                        "name": recipe.title,
-                        "state": recipe_state,
-                        "revision_id": revision.id,
-                    },
+                    ),
+                    recipe=FleetAssignmentRecipeView(
+                        selector=f"{recipe.publisher}/{recipe.slug}",
+                        name=recipe.title,
+                        state=recipe_state,
+                        revision_id=revision.id,
+                    ),
                     resources=resources,
                     option_choices=effective_choices,
                     observed_state=self._observed_assignment_state(
@@ -10226,12 +10189,12 @@ class FleetProfileService:
                 )
             )
         }
-        fleet: list[dict[str, object]] = [
-            {
-                "selector": node.node_id,
-                "display_name": display_names.get(node.node_id, node.node_id),
-                "state": "Assigned" if node.node_id in assigned_nodes else "Idle",
-            }
+        fleet = [
+            FleetNodeView(
+                selector=node.node_id,
+                display_name=display_names.get(node.node_id, node.node_id),
+                state="Assigned" if node.node_id in assigned_nodes else "Idle",
+            )
             for node in roster
         ]
         document = _profile_document(row)
@@ -10256,11 +10219,9 @@ class FleetProfileService:
             fleet=fleet,
             status="loaded" if loaded_revision is not None else "draft",
             loaded_revision=loaded_revision,
-            cache_summary={
-                "cached": cache_cached,
-                "missing": cache_missing,
-                "unknown": cache_unknown,
-            },
+            cache_summary=FleetCacheSummary(
+                cached=cache_cached, missing=cache_missing, unknown=cache_unknown
+            ),
             warnings=sorted(set(warnings)),
             next_actions=[
                 *(
@@ -10371,11 +10332,12 @@ class FleetProfileService:
             recipe_id=document_id,
             spark_ids=list(choice.spark_ids),
             assigned_sparks=len(choice.spark_ids),
-            model={"variant": choice.model_variant, "state": "Needs attention"},
-            recipe={
-                "selector": choice.recipe_selector,
-                "state": "Needs attention",
-            },
+            model=FleetAssignmentModelView(
+                variant=choice.model_variant, state="Needs attention"
+            ),
+            recipe=FleetAssignmentRecipeView(
+                selector=choice.recipe_selector, state="Needs attention"
+            ),
             observed_state=(
                 self._observed_assignment_state(
                     session,
@@ -10396,10 +10358,10 @@ class FleetProfileService:
         # here is a referenced model revision that is not currently active,
         # for which a missing display title is deliberate.
         try:
-            models = resolve_recipe_entities(session, document).get("models")
+            models = resolve_recipe_entities(session, document).model_revisions
         except (KeyError, RuntimeError, TypeError, ValueError):
             return None
-        if not isinstance(models, Sequence) or not models:
+        if not models:
             return None
         model = models[0]
         root = session.get(CatalogDocument, model.document_id)

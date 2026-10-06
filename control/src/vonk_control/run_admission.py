@@ -499,24 +499,13 @@ class RunAdmissionService:
                     "exact recipe dependencies are unavailable",
                     reason=InvalidRequestReason.NOT_FOUND,
                 ) from error
-            resolved_models = resolved_entities.get("models")
-            model_documents = (
-                {
-                    (item.publisher, item.slug, item.content_digest): item.document
-                    for item in resolved_models
-                    if isinstance(item, CatalogDocumentRevision)
-                }
-                if isinstance(resolved_models, Sequence)
-                else {}
-            )
-            model_version = (
-                resolved_models[0]
-                if isinstance(resolved_models, Sequence)
-                and not isinstance(resolved_models, (str, bytes))
-                and resolved_models
-                else None
-            )
-            model_document = getattr(model_version, "document", None)
+            resolved_models = resolved_entities.model_revisions
+            model_documents = {
+                (item.publisher, item.slug, item.content_digest): item.document
+                for item in resolved_models
+            }
+            model_version = resolved_models[0] if resolved_models else None
+            model_document = model_version.document if model_version else None
             if not isinstance(model_document, Mapping):
                 raise InvalidValue(
                     "exact model license authority is unavailable",

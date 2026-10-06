@@ -27,7 +27,7 @@ def test_a_damaged_reservation_file_does_not_block_uploads(tmp_path: Path) -> No
     stored = store.put_bytes(_digest(content), content, maximum_bytes=1024)
 
     assert stored.path.read_bytes() == content
-    assert store.usage()["in_flight_uploads"] == 0
+    assert store.usage().in_flight_uploads == 0
 
 
 def test_a_damaged_stored_object_is_replaced_by_the_verified_upload(

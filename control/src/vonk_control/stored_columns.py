@@ -27,7 +27,7 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
-from .artifact_jobs import ArtifactJobResultEvidence
+from .artifact_job_evidence import ArtifactJobResultEvidence
 from .catalog_revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,

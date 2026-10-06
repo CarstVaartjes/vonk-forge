@@ -18,6 +18,7 @@ from vonk_control.enrollment import EnrollmentDenied, RemoteRevocationUncertain
 from vonk_control.library_api import _error as library_error
 from vonk_control.logging import current_request_id
 from vonk_control.operator_projection_api import (
+    FleetActionResponse,
     FleetOperatorServices,
     _AgentEnrollmentAdapter,
     _operator_error,
@@ -48,11 +49,20 @@ class _Enrollment:
     def revoke_grant(self, grant_id: str, *, actor: str):
         raise AssertionError("not used")
 
-    def create_named(self, **kwargs: object) -> dict[str, object]:
+    def create_named(self, **kwargs: object) -> FleetActionResponse:
         assert kwargs["name"] == "Friendly Spark"
-        return {"display_name": "Friendly Spark", "state": "pending", "grant": _GRANT}
+        return FleetActionResponse.model_validate(
+            {
+                "action": "enroll",
+                "display_name": "Friendly Spark",
+                "state": "pending",
+                "grant": _GRANT,
+            }
+        )
 
-    def create_reenrollment(self, *args: object, **kwargs: object) -> dict[str, object]:
+    def create_reenrollment(
+        self, *args: object, **kwargs: object
+    ) -> FleetActionResponse:
         raise AssertionError("not used")
 
     def revoke_node(self, node_id: str, actor: str) -> None:
@@ -304,7 +314,7 @@ def test_agent_enrollment_adapter_binds_the_reviewed_display_name() -> None:
     )
 
     assert enrollment.created == ("Living Spark", "admin", 900)
-    assert result["display_name"] == "Living Spark"
+    assert result.display_name == "Living Spark"
 
 
 class _SnapshotProjection:
@@ -505,10 +515,12 @@ class _RefusingEnrollment(_Enrollment):
     def __init__(self, error: Exception) -> None:
         self._error = error
 
-    def create_named(self, **kwargs: object) -> dict[str, object]:
+    def create_named(self, **kwargs: object) -> FleetActionResponse:
         raise AssertionError("not used")
 
-    def create_reenrollment(self, *args: object, **kwargs: object) -> dict[str, object]:
+    def create_reenrollment(
+        self, *args: object, **kwargs: object
+    ) -> FleetActionResponse:
         raise AssertionError("not used")
 
     def revoke_node(self, node_id: str, actor: str) -> None:

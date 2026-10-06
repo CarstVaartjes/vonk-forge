@@ -33,6 +33,7 @@ from pydantic import Field
 from .build_import import RecipeBuildCleanupEvidence, RecipeBuildEvidence
 from .contracts import (
     AgentFailureKind,
+    AgentFailureResult,
     AgentInstallResult,
     AgentUpgradeResult,
     ArtifactDistributionResult,
@@ -160,31 +161,10 @@ def outcome_state(
     )
 
 
-def _evidence_fields(evidence: OutcomeEvidence | None) -> dict[str, object]:
-    if evidence is None:
-        return {}
-    document: dict[str, object] = {}
-    if evidence.stage is not None:
-        document["stage"] = evidence.stage
-    if evidence.diagnostic is not None:
-        document["diagnostic"] = evidence.diagnostic
-    if evidence.helper_error_code is not None:
-        document["helper_error_code"] = evidence.helper_error_code
-    if evidence.helper_exit_code is not None:
-        document["helper_exit_code"] = evidence.helper_exit_code
-    if evidence.diagnostics is not None:
-        document["diagnostics"] = evidence.diagnostics.model_dump(mode="json")
-    if evidence.package_activation is not None:
-        document["package_activation"] = evidence.package_activation.model_dump(
-            mode="json"
-        )
-    return document
-
-
 def outcome_body(
     outcome: OutcomeDone | OutcomeFailed | OutcomeUnknown,
-) -> dict[str, object]:
-    """The stored result body of an outcome.
+) -> OutcomeResult | AgentFailureResult:
+    """The stored result body of an outcome, as its typed model.
 
     This is the shape the Controller persists and every downstream reader
     already understands (an operation's success model, an
@@ -193,24 +173,37 @@ def outcome_body(
     """
 
     if isinstance(outcome, OutcomeDone):
-        return outcome.result.model_dump(mode="json", exclude_none=True)
+        return outcome.result
     if outcome.receipt is not None:
-        return outcome.receipt.model_dump(mode="json", exclude_none=True)
-    document: dict[str, object] = {"reason": outcome.reason}
-    if outcome.retry_after_seconds is not None:
-        document["retry_after_seconds"] = outcome.retry_after_seconds
-    document.update(_evidence_fields(outcome.evidence))
+        return outcome.receipt
+    evidence = outcome.evidence or OutcomeEvidence()
     if isinstance(outcome, OutcomeUnknown):
-        document["wait_reason"] = outcome.wait_reason.value
-        document["failure_kind"] = AgentFailureKind.UNCERTAIN_EFFECT.value
-        document["uncertain"] = True
-        return document
-    document["error_code"] = outcome.code.value
-    if outcome.failure_kind is not None:
-        document["failure_kind"] = outcome.failure_kind.value
-    if outcome.code is not FailureCode.OPERATION_CANCELLED:
-        document["status"] = "failed"
-    return document
+        return AgentFailureResult(
+            reason=outcome.reason,
+            retry_after_seconds=outcome.retry_after_seconds,
+            wait_reason=outcome.wait_reason,
+            failure_kind=AgentFailureKind.UNCERTAIN_EFFECT,
+            uncertain=True,
+            diagnostics=evidence.diagnostics,
+            package_activation=evidence.package_activation,
+            stage=evidence.stage,
+            diagnostic=evidence.diagnostic,
+            helper_error_code=evidence.helper_error_code,
+            helper_exit_code=evidence.helper_exit_code,
+        )
+    return AgentFailureResult(
+        reason=outcome.reason,
+        retry_after_seconds=outcome.retry_after_seconds,
+        error_code=outcome.code.value,
+        failure_kind=outcome.failure_kind,
+        status=None if outcome.code is FailureCode.OPERATION_CANCELLED else "failed",
+        diagnostics=evidence.diagnostics,
+        package_activation=evidence.package_activation,
+        stage=evidence.stage,
+        diagnostic=evidence.diagnostic,
+        helper_error_code=evidence.helper_error_code,
+        helper_exit_code=evidence.helper_exit_code,
+    )
 
 
 class SecurityRefusal(WireModel):

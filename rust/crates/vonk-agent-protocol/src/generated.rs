@@ -9,6 +9,69 @@ pub struct ActivateRequest {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct ActivationManifest {
+    pub authority_id: ::std::string::String,
+    pub evidence_set_digest: ::std::string::String,
+    pub generation: u64,
+    pub litellm_sha256: ::std::string::String,
+    pub plan_digest: ::std::string::String,
+    pub routes_sha256: ::std::string::String,
+    pub schema_version: u8,
+    pub state: ActivationManifestState,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum ActivationManifestState {
+    #[serde(rename = "maintenance")]
+    Maintenance,
+    #[serde(rename = "published")]
+    Published,
+}
+impl ::std::fmt::Display for ActivationManifestState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Maintenance => f.write_str("maintenance"),
+            Self::Published => f.write_str("published"),
+        }
+    }
+}
+impl ::std::str::FromStr for ActivationManifestState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "maintenance" => Ok(Self::Maintenance),
+            "published" => Ok(Self::Published),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ActivationManifestState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ActivationManifestState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct ActivationMarker {
     pub authority_id: ::std::string::String,
     pub directory: ::std::string::String,
@@ -12931,6 +12994,62 @@ impl<'de> ::serde::Deserialize<'de> for ActivateRequest {
             generation: raw.generation,
             node_id: raw.node_id,
         })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ActivationManifest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ActivationManifest", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub authority_id: ::std::string::String,
+            pub evidence_set_digest: ::std::string::String,
+            pub generation: u64,
+            pub litellm_sha256: ::std::string::String,
+            pub plan_digest: ::std::string::String,
+            pub routes_sha256: ::std::string::String,
+            pub schema_version: u8,
+            pub state: ActivationManifestState,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            authority_id: raw.authority_id,
+            evidence_set_digest: raw.evidence_set_digest,
+            generation: raw.generation,
+            litellm_sha256: raw.litellm_sha256,
+            plan_digest: raw.plan_digest,
+            routes_sha256: raw.routes_sha256,
+            schema_version: raw.schema_version,
+            state: raw.state,
+        })
+    }
+}
+impl ActivationManifestState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Maintenance => "maintenance",
+            Self::Published => "published",
+        }
+    }
+}
+impl ::std::ops::Deref for ActivationManifestState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ActivationManifestState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ActivationManifestState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ActivationMarker {

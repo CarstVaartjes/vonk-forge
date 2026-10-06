@@ -58,7 +58,7 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 72,
-    "unaudited": 366,
+    "unaudited": 360,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
@@ -1052,11 +1052,8 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
       "sites": [
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "CompiledExecutionPlan.to_compiled_launch_payload", "runtime-port-is-missing", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "_verified_model_object", "verified-model-object-receipt-is-invalid", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "runtime-spec-model-artifacts-are-missing", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "verified-execution-plan-receipts-are-inconsistent", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "execution_identity_document", "runtime-spec-model-artifacts-are-missing", 1]
+        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "verified-execution-plan-receipts-are-inconsistent", 1]
       ]
     },
     {
@@ -1065,32 +1062,21 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class CompiledExecutionPlanError validates a contract or request.",
       "sites": [
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "CompiledExecutionPlan.to_compiled_launch_payload", "compiled-launch-plan-must-contain-exactly-one-endpoint-or-jo", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "CompiledExecutionPlan.to_compiled_launch_payload", "compiled-runtime-environment-is-invalid", 2],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "CompiledExecutionPlan.to_compiled_launch_payload", "compiled-runtime-executable-and-argv-are-invalid", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "CompiledExecutionPlan.to_compiled_launch_payload", "compiled-security-has-an-unsupported-network-mode", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "CompiledExecutionPlan.to_compiled_launch_payload", "compiled-security-mount-is-not-controller-owned", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "CompiledExecutionPlan.to_compiled_launch_payload", "compiled-security-mounts-are-invalid", 2],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "CompiledExecutionPlan.to_compiled_launch_payload", "runtime-role-is-invalid", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "CompiledExecutionPlan.to_compiled_launch_payload._required_int", "message", 1],
+        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "CompiledExecutionPlan.to_compiled_launch_payload", "message", 2],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "_digest", "message", 2],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "_mapping", "message", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "canonical-runtime-artifact-cannot-bind-the-verified-model-ob", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "runtime-execution-identity-does-not-cover-the-compiled-launc", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "runtime-model-artifact-contains-retired-or-unknown-authority", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "runtime-model-artifact-identity-is-incomplete", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "runtime-model-artifact-is-not-covered-by-the-verified-cache", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "runtime-model-artifact-physical-identity-conflicts", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "runtime-model-artifact-set-digest-does-not-match-the-cache-a", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "runtime-model-file-path-digest-or-size-does-not-match-the-v", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "runtime-model-identity-contains-upstream-authority", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "runtime-model-selection-identity-is-invalid", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "runtime-spec-has-no-selected-model-artifacts", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "verified-cache-objects-do-not-exactly-cover-the-selected-mod", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "verified-model-object-sequence-is-empty", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "verified-model-objects-repeat-a-model-file-identity", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "verified-runtime-image-cannot-be-bound-to-the-execution-plan", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "verified-runtime-image-does-not-match-the-compiled-runtime-p", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "execution_identity_document", "runtime-model-dependencies-are-invalid", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "validate_compiled_launch_payload", "compiled-launch-plan-is-not-json", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "validate_compiled_launch_payload", "compiled-launch-plan-is-too-large", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "validate_compiled_launch_payload", "message", 1]
@@ -1168,7 +1154,7 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class ExecutionPlanCompilationError validates a contract or request.",
       "sites": [
-        ["control/src/vonk_control/distribution_executor.py", "ExecutionPlanCompilationError", "CompositeDistributionPhaseExecutor._prepare_runtime_image", "canonical-model-projection-is-invalid", 1]
+        ["control/src/vonk_control/distribution_executor.py", "RecipeRuntimeSpecError", "CompositeDistributionPhaseExecutor._prepare_runtime_image", "canonical-model-projection-is-invalid", 1]
       ]
     },
     {
@@ -1261,12 +1247,10 @@
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-build-receipt-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-revision-digest-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "verified-model-artifact-set-receipt-is-unavailable", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_bind_runtime_artifacts", "canonical-runtime-model-artifacts-are-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_build_package", "successful-controller-build-receipt-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_image_digest", "compiled-runtime-image-digest-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_placement", "compiled-runtime-endpoint-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_runtime_receipt_mapping", "runtime-image-receipt-is-invalid", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "compiled-runtime-identity-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "compiled-runtime-job-settings-are-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-build-receipt-is-unavailable", 1]
       ]
@@ -1279,11 +1263,7 @@
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "compiled-execution-plan-for", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "compiled-execution-plan-has-no-mapped-targets", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-does-not-satisfy-the-canonical-contract", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_bind_runtime_artifacts", "canonical-model-projection-is-invalid", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_bind_runtime_artifacts", "canonical-runtime-model-artifact-is-invalid", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_bind_runtime_artifacts", "selected-model-file-integrity-metadata-is-invalid", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_bind_runtime_artifacts", "selected-model-file-is-absent-from-the-canonical-model-manif", 2],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_bind_runtime_artifacts", "selected-model-file-mount-is-invalid", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_bind_runtime_artifacts", "selected-model-file-is-absent-from-the-canonical-model-manif", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_bind_runtime_artifacts", "selected-model-file-path-does-not-match-the-canonical-manife", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_image_digest", "compiled-runtime-image-digest-is-invalid", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_placement", "compiled-runtime-endpoint-port-is-invalid", 1],
@@ -1576,7 +1556,6 @@
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "installation-exceeds-its-reviewed-disk-claim", 1],
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "mapping-or-build-changed-while-reserving", 1],
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "require_admissible", "install.plan_invalid", 1],
-        ["control/src/vonk_control/install_admission.py", "InvalidType", "InstallAdmissionService.plan_install", "compiled-execution-plan-mapping-is-invalid", 1],
         ["control/src/vonk_control/install_admission.py", "InvalidType", "InstallAdmissionService.plan_install", "mapping-role-is-absent-from-recipe-topology", 1],
         ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "cluster-mapping-is-not-ready", 1],
         ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "recipe-revision-is-not-resolved", 1],
@@ -2107,7 +2086,6 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
       "sites": [
-        ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "_recipe_digest", "recipe-document-digest-is-unavailable", 1],
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "compile_runtime_spec", "canonical-harness-binding-is-missing", 1],
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "compile_runtime_spec", "canonical-harness-telemetry-is-missing", 1]
       ]
@@ -2125,14 +2103,13 @@
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "_package_paths", "package-paths-are-invalid", 1],
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "_recipe", "recipe-does-not-satisfy-recipedefinition-v2", 1],
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "_recipe", "recipe-projection-is-invalid", 1],
-        ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "_resolved_inputs", "resolved-inputs-contain-retired-authorities", 1],
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "compile_runtime_spec", "mapped-rank-is-invalid", 1],
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "compile_runtime_spec", "mapped-role-is-invalid", 1],
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "compile_runtime_spec", "message", 2],
-        ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "compile_runtime_spec", "resolved-canonical-inputs-are-invalid", 1],
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "resolve_recipe_entities", "exact-recipe-model-is-not-active", 1],
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "resolve_recipe_entities", "recipe-does-not-satisfy-the-canonical-contract", 1],
-        ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "split_option_choices", "recipe-option-choices-are-invalid", 1]
+        ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "split_option_choices", "recipe-option-choices-are-invalid", 1],
+        ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "split_option_choices", "recipe-setting-values-are-invalid", 1]
       ]
     },
     {
@@ -2421,8 +2398,6 @@
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-an-invalid-sign-response", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-an-unexpected-intermediate", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-inconsistent-certificate-chain-fields", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-invalid-certificate-pem", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-unexpected-sign-response-fields", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-ca-certificate", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-for-another-public-key", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-outside-the-allowed-clock-ske", 1],
@@ -2904,7 +2879,6 @@
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-input-names-must-be-unique", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-has-too-many-input-files", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-input-bytes-exceed-the-limit", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-parameters-must-be-an-object", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-request-key-collision", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-timeout-is-invalid", 2],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.finalize", "artifact-job-cannot-be-finalized", 1],
@@ -2919,15 +2893,13 @@
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "artifact-job-was-submitted-under-another-request-identity", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "recipe-job-workload-identity-is-unavailable", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "recipe-run-is-not-accepting-jobs", 2],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_canonical_declared_parameters", "artifact-job-parameters-are-not-canonical-json", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_canonical_declared_parameters", "artifact-job-parameters-must-be-a-json-object", 3],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_canonical_declared_parameters", "artifact-job-parameters-must-be-a-json-object", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_output_limits", "artifact-output-limits-are-invalid", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_output_limits", "artifact-output-limits-cannot-satisfy-the-recipe-contract", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_output_limits", "artifact-output-limits-exceed-the-recipe-contract", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_parameters", "artifact-job-contains-undeclared-parameters", 2],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_parameters", "artifact-job-parameter", 6],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_parameters", "artifact-parameter-contract-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_parameters", "artifact-parameter-pattern-is-invalid", 2],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_parameters", "artifact-job-contains-undeclared-parameters", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_parameters", "artifact-job-parameter", 3],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_parameters", "artifact-parameter-pattern-is-invalid", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_translate_blob_error", "message", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_validate_inputs_against_contract", "artifact-input", 3],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_validate_inputs_against_contract", "artifact-input-slot", 3],
@@ -3035,7 +3007,7 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class AvailabilityInvalid is of the input-validation error type; class InvalidValue is of the input-validation error type.",
       "sites": [
-        ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "_compile_consistent_runtime", "recipe_image.runtime_invalid", 3],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "_compile_consistent_runtime", "recipe_image.runtime_invalid", 2],
         ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "recipe_image.recipe_invalid", 1],
         ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "recipe_image.recipe_unavailable", 1],
         ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "recipe_image.runtime_invalid", 1],
@@ -3243,8 +3215,6 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again.",
       "sites": [
-        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidType", "make_runtime_image_receipt_preparer.prepare", "compiled-runtime-projection-is-unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidType", "stored_runtime_image_resolver.resolve", "runtime-image-preparation-is-required-runtime-projection-is", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-architecture-is-not-supported", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-interface-is-not-supported", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-interface-label-is-not-supported", 1],

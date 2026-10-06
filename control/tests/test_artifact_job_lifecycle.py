@@ -25,6 +25,7 @@ from .test_artifact_jobs import (
     NOW,
     MutableClock,
     cancellation_result,
+    create_artifact_job,
     running_artifact_service,
     submitted_artifact_job,
 )
@@ -144,8 +145,9 @@ def test_unsubmitted_jobs_have_nothing_to_stop(tmp_path) -> None:
     sessions, _ops, _queue, service, run_id, _node = running_artifact_service(tmp_path)
     from .test_artifact_jobs import artifact_create_request
 
-    draft = service.create(
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000311")
+    draft = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000311"),
     )
     row, view = _adopted(sessions, service, draft.id)
     assert (row.state, row.attempt, row.effect) == (State.QUEUED, 0, Effect.NONE)
@@ -205,7 +207,7 @@ def test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it(tmp_path) -> No
     ended = service.get(submitted.id)
     assert ended.supported_actions == ()
     assert ended.result_evidence is not None
-    assert ended.result_evidence["active_scope_may_remain"] is True
+    assert ended.result_evidence.active_scope_may_remain is True
 
 
 # ------------------------------------------------------- legacy adoption
@@ -228,7 +230,7 @@ def test_a_legacy_waiting_job_with_a_cancel_heals_to_cancelled(tmp_path) -> None
     )
     ended = service.get(submitted.id)
     assert ended.result_evidence is not None
-    assert ended.result_evidence["active_scope_may_remain"] is True
+    assert ended.result_evidence.active_scope_may_remain is True
 
 
 def test_a_legacy_waiting_job_without_a_cancel_gets_the_stop_action(tmp_path) -> None:
@@ -331,7 +333,7 @@ def test_the_job_follows_its_order_without_a_second_state(tmp_path) -> None:
     assert ended.state == "cancelled"
     # The agent receipted the cancel: stopped, so no residue is recorded.
     assert ended.result_evidence is not None
-    assert "active_scope_may_remain" not in ended.result_evidence
+    assert ended.result_evidence.active_scope_may_remain is None
     with sessions() as session:
         order = session.scalar(
             select(AgentOperation).where(
@@ -420,7 +422,7 @@ def test_an_exact_stop_receipt_resolves_a_recorded_residue(tmp_path) -> None:
     assert _drive(service, agent_jobs, clock, submitted.id, until="cancelled") == (
         "cancelled"
     )
-    assert service.get(submitted.id).result_evidence["active_scope_may_remain"] is True  # type: ignore[index]
+    assert service.get(submitted.id).result_evidence.active_scope_may_remain is True  # type: ignore[index]
     with sessions.begin() as session:
         job = session.get(ArtifactJob, submitted.id)
         assert job is not None
@@ -432,7 +434,7 @@ def test_an_exact_stop_receipt_resolves_a_recorded_residue(tmp_path) -> None:
     resolved = service.get(submitted.id)
     assert resolved.state == "cancelled"
     assert resolved.result_evidence is not None
-    assert resolved.result_evidence["active_scope_may_remain"] is False
+    assert resolved.result_evidence.active_scope_may_remain is False
 
 
 # ------------------------------------ the stored vocabulary is the core's

@@ -16,6 +16,7 @@ from pydantic import (
 from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
+    ModelCacheBlockerCode,
     ModelCacheOperatorStatus,
     canonical_message,
     state_adopter,
@@ -646,12 +647,65 @@ class ModelCacheUpdatesResponse(StrictModel):
     next_cursor: str | None = Field(default=None, max_length=1024)
 
 
+class CachedRecipeResolution(StrictModel):
+    """The recipe revision a cache resolution selected and its image evidence."""
+
+    recipe_revision_id: str
+    document_id: str
+    publisher: str
+    slug: str
+    revision_number: int = Field(ge=1)
+    content_sha256: str | None
+    cached: bool
+    cache_state: Literal["cached", "missing"]
+    artifact_set_sha256: str | None
+    expected_bytes: int | None = Field(ge=0)
+    verified_bytes: int | None = Field(ge=0)
+    image_digest: str | None
+    update_available: bool
+
+
+class CachedModelResolution(StrictModel):
+    """The model the selected revision uses and its cache evidence."""
+
+    content_sha256: str
+    cached: bool
+    cache_state: Literal["cached", "missing"]
+    artifact_set_sha256: str | None
+    expected_bytes: int | None = Field(ge=0)
+    verified_bytes: int | None = Field(ge=0)
+    variant: str | None
+
+
+class CachedResourceEstimate(StrictModel):
+    """What loading the resolved revision needs; ``None`` is unknown."""
+
+    per_spark_memory_bytes: int | None = Field(default=None, ge=0)
+    additional_disk_bytes: int | None = Field(default=None, ge=0)
+    model_bytes: int | None = Field(default=None, ge=0)
+    image_bytes: int | None = Field(default=None, ge=0)
+
+
+class CacheResolution(StrictModel):
+    """One logical recipe resolved to the revision, image and model it can use."""
+
+    schema_version: Literal[2] = 2
+    recipe: CachedRecipeResolution
+    model: CachedModelResolution
+    resources: CachedResourceEstimate
+    blockers: list[ModelCacheBlockerCode] = Field(max_length=8)
+
+
 __all__ = [
     "CacheArtifactResponse",
     "CacheEntryResponse",
     "CacheManifest",
     "CacheManifestArtifact",
+    "CacheResolution",
     "CacheStorageResponse",
+    "CachedModelResolution",
+    "CachedRecipeResolution",
+    "CachedResourceEstimate",
     "ModelCacheAccessRecheck",
     "ModelCacheAccessResumeRequest",
     "ModelCacheCancellation",

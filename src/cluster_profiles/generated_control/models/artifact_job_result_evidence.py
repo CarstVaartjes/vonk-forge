@@ -25,11 +25,7 @@ T = TypeVar("T", bound="ArtifactJobResultEvidence")
 
 @_attrs_define
 class ArtifactJobResultEvidence:
-    """ Every fact the Controller records beside an artifact job's result.
-
-    The run's measurements (``elapsed_milliseconds``, ``peak_memory_bytes``),
-    the cancellation that was asked for, and, for a job whose active scope may
-    still exist, what is known about that residue.
+    """ What the Controller knows about how a job ended, to every field.
 
         Attributes:
             active_scope_may_remain (bool | None | Unset):

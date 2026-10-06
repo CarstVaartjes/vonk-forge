@@ -93,45 +93,45 @@ def _catalog_problem(
     )
 
 
-def _managed_sync(value: CatalogSyncView) -> dict[str, object]:
-    return {
-        "sync_id": value.id,
-        "request_key": value.request_key,
-        "trigger": value.trigger,
-        "state": value.state,
-        "repository": value.repository,
-        "commit": value.commit,
-        "expected_commit": value.expected_commit,
-        "library_version": value.library_version,
-        "library_updated_at": (
+def _managed_sync(value: CatalogSyncView) -> ManagedCatalogSyncResponse:
+    return ManagedCatalogSyncResponse(
+        sync_id=value.id,
+        request_key=value.request_key,
+        trigger=value.trigger,
+        state=value.state,
+        repository=value.repository,
+        commit=value.commit,
+        expected_commit=value.expected_commit,
+        library_version=value.library_version,
+        library_updated_at=(
             value.library_updated_at.isoformat()
             if value.library_updated_at is not None
             else None
         ),
-        "total_count": value.total_count,
-        "processed_count": value.processed_count,
-        "imported_count": value.imported_count,
-        "updated_count": value.updated_count,
-        "unchanged_count": value.unchanged_count,
-        "skipped_count": value.skipped_count,
-        "withdrawn_count": value.withdrawn_count,
-        "withdrawn_recipes": list(value.withdrawn_recipes),
-        "stale_recipes": list(value.stale_recipes),
-        "problems": list(value.problems),
-        "created_at": value.created_at.isoformat(),
-        "completed_at": (
+        total_count=value.total_count,
+        processed_count=value.processed_count,
+        imported_count=value.imported_count,
+        updated_count=value.updated_count,
+        unchanged_count=value.unchanged_count,
+        skipped_count=value.skipped_count,
+        withdrawn_count=value.withdrawn_count,
+        withdrawn_recipes=list(value.withdrawn_recipes),
+        stale_recipes=list(value.stale_recipes),
+        problems=list(value.problems),
+        created_at=value.created_at.isoformat(),
+        completed_at=(
             value.completed_at.isoformat() if value.completed_at is not None else None
         ),
-        "last_error": (
-            {
-                "code": value.last_error.code,
-                "detail": value.last_error.detail,
-                "occurred_at": value.last_error.occurred_at.isoformat(),
-            }
+        last_error=(
+            ManagedCatalogSyncFailure(
+                code=value.last_error.code,
+                detail=value.last_error.detail,
+                occurred_at=value.last_error.occurred_at.isoformat(),
+            )
             if value.last_error is not None
             else None
         ),
-    }
+    )
 
 
 def install_catalog_routes(

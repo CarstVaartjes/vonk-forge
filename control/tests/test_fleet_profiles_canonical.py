@@ -12,12 +12,18 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import DesiredAssignmentState
+from vonk_agent_protocol import DesiredAssignmentState, ModelCacheBlockerCode
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
 from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
+from vonk_control.model_cache_contract import (
+    CachedModelResolution,
+    CachedRecipeResolution,
+    CachedResourceEstimate,
+    CacheResolution,
+)
 from vonk_control.models import (
     AgentNode,
     AgentNodeProfile,
@@ -382,7 +388,7 @@ def test_numbered_autosave_uses_revision_and_load_freezes_whole_roster() -> None
         actor="test",
     )
     assert created.number == 2
-    assert created.fleet == [
+    assert [item.model_dump() for item in created.fleet] == [
         {"selector": NODE_1, "display_name": "Spark One", "state": "Idle"},
         {"selector": NODE_2, "display_name": "Spark Two", "state": "Idle"},
     ]
@@ -408,6 +414,49 @@ def test_numbered_autosave_uses_revision_and_load_freezes_whole_roster() -> None
     assert application.state == "succeeded"
     assert application.progress.intended_profile is not None
     assert application.progress.intended_profile.scope.node_ids == [NODE_1, NODE_2]
+
+
+def _resolution(
+    revision_id: object,
+    *,
+    recipe_cached: bool,
+    blockers: tuple[str, ...] = (),
+    per_spark_memory_bytes: int | None = None,
+    additional_disk_bytes: int | None = None,
+) -> CacheResolution:
+    """A typed cache resolution for a recipe revision, as the resolver answers."""
+
+    return CacheResolution(
+        recipe=CachedRecipeResolution(
+            recipe_revision_id=str(revision_id),
+            document_id=RECIPE_DOCUMENT_ID,
+            publisher="vonk-forge",
+            slug="synthetic-tiny-build",
+            revision_number=1,
+            content_sha256=None,
+            cached=recipe_cached,
+            cache_state="cached" if recipe_cached else "missing",
+            artifact_set_sha256=None,
+            expected_bytes=None,
+            verified_bytes=None,
+            image_digest=None,
+            update_available=False,
+        ),
+        model=CachedModelResolution(
+            content_sha256="a" * 64,
+            cached=True,
+            cache_state="cached",
+            artifact_set_sha256=None,
+            expected_bytes=None,
+            verified_bytes=None,
+            variant="fp16",
+        ),
+        resources=CachedResourceEstimate(
+            per_spark_memory_bytes=per_spark_memory_bytes,
+            additional_disk_bytes=additional_disk_bytes,
+        ),
+        blockers=[ModelCacheBlockerCode(item) for item in blockers],
+    )
 
 
 def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
@@ -436,18 +485,14 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
         )
     calls: list[dict[str, object]] = []
 
-    def resolve(**kwargs: object) -> dict[str, object]:
+    def resolve(**kwargs: object) -> CacheResolution:
         calls.append(kwargs)
-        return {
-            "schema_version": 2,
-            "recipe": {
-                "recipe_revision_id": kwargs["exact_revision_id"],
-                "cached": True,
-            },
-            "model": {"cached": True, "variant": "fp16"},
-            "resources": {"per_spark_memory_bytes": 10, "additional_disk_bytes": 20},
-            "blockers": [],
-        }
+        return _resolution(
+            kwargs["exact_revision_id"],
+            recipe_cached=True,
+            per_spark_memory_bytes=10,
+            additional_disk_bytes=20,
+        )
 
     from .test_fleet_profiles import _SwitchAdapter
 
@@ -477,8 +522,8 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
             "exact_revision_id": newer_revision_id,
         }
     ]
-    assert profile.assignments[0].recipe["state"] == "Cached"
-    assert profile.assignments[0].model["state"] == "Cached"
+    assert profile.assignments[0].recipe.state == "Cached"
+    assert profile.assignments[0].model.state == "Cached"
     preview = service.preview(profile.id)
     assert preview.assignments[0].recipe_revision_id == newer_revision_id
     application = service.load(
@@ -523,14 +568,13 @@ def test_profile_read_ignores_a_resolver_that_substitutes_an_older_revision() ->
             )
         )
 
-    def substitute(**_kwargs: object) -> dict[str, object]:
-        return {
-            "schema_version": 2,
-            "recipe": {"recipe_revision_id": RECIPE_REVISION_ID, "cached": True},
-            "model": {"cached": True, "variant": "fp16"},
-            "resources": {"per_spark_memory_bytes": 10, "additional_disk_bytes": 20},
-            "blockers": [],
-        }
+    def substitute(**_kwargs: object) -> CacheResolution:
+        return _resolution(
+            RECIPE_REVISION_ID,
+            recipe_cached=True,
+            per_spark_memory_bytes=10,
+            additional_disk_bytes=20,
+        )
 
     from .test_fleet_profiles import _SwitchAdapter
 
@@ -555,7 +599,7 @@ def test_profile_read_ignores_a_resolver_that_substitutes_an_older_revision() ->
     )
     # Bound to the selected head; the substituted cache claim is not shown as cached.
     assert [item.recipe_id for item in created.assignments] == [RECIPE_DOCUMENT_ID]
-    assert all(not item.recipe.get("cached") for item in created.assignments)
+    assert all(item.recipe.state != "Cached" for item in created.assignments)
 
 
 def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> None:
@@ -586,20 +630,12 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
             )
         )
 
-    def uncached(**kwargs: object) -> dict[str, object]:
-        return {
-            "schema_version": 2,
-            "recipe": {
-                "recipe_revision_id": kwargs["exact_revision_id"],
-                "cached": False,
-            },
-            "model": {"cached": True, "variant": "fp16"},
-            "resources": {
-                "per_spark_memory_bytes": None,
-                "additional_disk_bytes": None,
-            },
-            "blockers": ["recipe-not-cached"],
-        }
+    def uncached(**kwargs: object) -> CacheResolution:
+        return _resolution(
+            kwargs["exact_revision_id"],
+            recipe_cached=False,
+            blockers=("recipe-not-cached",),
+        )
 
     from .test_fleet_profiles import _SwitchAdapter
 
@@ -623,8 +659,8 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
         actor="test",
     )
 
-    assert profile.assignments[0].recipe["revision_id"] == newer_revision_id
-    assert profile.assignments[0].recipe["state"] == "Recipe not cached"
+    assert profile.assignments[0].recipe.revision_id == newer_revision_id
+    assert profile.assignments[0].recipe.state == "Recipe not cached"
     assert any("is not in the local cache" in warning for warning in profile.warnings)
 
 
@@ -673,7 +709,7 @@ def test_profile_reads_the_newest_readable_revision_of_its_recipe() -> None:
 
     # The newest revision is unreadable, so the profile keeps the readable one.
     view = service.get_number(profile.number)
-    assert view.assignments[0].recipe["revision_id"] == RECIPE_REVISION_ID
+    assert view.assignments[0].recipe.revision_id == RECIPE_REVISION_ID
 
     with sessions.begin() as session:
         session.execute(
@@ -684,7 +720,7 @@ def test_profile_reads_the_newest_readable_revision_of_its_recipe() -> None:
 
     # Nothing readable: the choice needs attention, the profile still reads.
     view = service.get_number(profile.number)
-    assert view.assignments[0].recipe["state"] == "Needs attention"
+    assert view.assignments[0].recipe.state == "Needs attention"
     assert view.assignments[0].spark_ids == [NODE_1]
 
 

@@ -10,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..models.compiled_artifact_contract_interface import check_compiled_artifact_contract_interface
 from ..models.compiled_artifact_contract_interface import CompiledArtifactContractInterface
-from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
 
@@ -19,7 +18,6 @@ if TYPE_CHECKING:
   from ..models.artifact_output_contract import ArtifactOutputContract
   from ..models.artifact_output_limits import ArtifactOutputLimits
   from ..models.boolean_parameter import BooleanParameter
-  from ..models.compiled_artifact_contract_engine_type_0 import CompiledArtifactContractEngineType0
   from ..models.enum_parameter import EnumParameter
   from ..models.float_parameter import FloatParameter
   from ..models.integer_parameter import IntegerParameter
@@ -45,7 +43,6 @@ class CompiledArtifactContract:
             output_limits (ArtifactOutputLimits):
             parameters (list[BooleanParameter | EnumParameter | FloatParameter | IntegerParameter | StringParameter]):
             schema_version (Literal[1]):
-            engine (CompiledArtifactContractEngineType0 | None | Unset):
      """
 
     input_: ArtifactInputContract
@@ -55,7 +52,6 @@ class CompiledArtifactContract:
     output_limits: ArtifactOutputLimits
     parameters: list[BooleanParameter | EnumParameter | FloatParameter | IntegerParameter | StringParameter]
     schema_version: Literal[1]
-    engine: CompiledArtifactContractEngineType0 | None | Unset = UNSET
 
 
 
@@ -66,7 +62,6 @@ class CompiledArtifactContract:
         from ..models.artifact_output_contract import ArtifactOutputContract # noqa: PLC0415
         from ..models.artifact_output_limits import ArtifactOutputLimits # noqa: PLC0415
         from ..models.boolean_parameter import BooleanParameter # noqa: PLC0415
-        from ..models.compiled_artifact_contract_engine_type_0 import CompiledArtifactContractEngineType0 # noqa: PLC0415
         from ..models.enum_parameter import EnumParameter # noqa: PLC0415
         from ..models.float_parameter import FloatParameter # noqa: PLC0415
         from ..models.integer_parameter import IntegerParameter # noqa: PLC0415
@@ -101,14 +96,6 @@ class CompiledArtifactContract:
 
         schema_version = self.schema_version
 
-        engine: dict[str, Any] | None | Unset
-        if isinstance(self.engine, Unset):
-            engine = UNSET
-        elif isinstance(self.engine, CompiledArtifactContractEngineType0):
-            engine = self.engine.to_dict()
-        else:
-            engine = self.engine
-
 
         field_dict: dict[str, Any] = {}
 
@@ -121,8 +108,6 @@ class CompiledArtifactContract:
             "parameters": parameters,
             "schema_version": schema_version,
         })
-        if engine is not UNSET:
-            field_dict["engine"] = engine
 
         return field_dict
 
@@ -134,7 +119,6 @@ class CompiledArtifactContract:
         from ..models.artifact_output_contract import ArtifactOutputContract # noqa: PLC0415
         from ..models.artifact_output_limits import ArtifactOutputLimits # noqa: PLC0415
         from ..models.boolean_parameter import BooleanParameter # noqa: PLC0415
-        from ..models.compiled_artifact_contract_engine_type_0 import CompiledArtifactContractEngineType0 # noqa: PLC0415
         from ..models.enum_parameter import EnumParameter # noqa: PLC0415
         from ..models.float_parameter import FloatParameter # noqa: PLC0415
         from ..models.integer_parameter import IntegerParameter # noqa: PLC0415
@@ -223,26 +207,6 @@ class CompiledArtifactContract:
         if schema_version != 1:
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 
-        def _parse_engine(data: object) -> CompiledArtifactContractEngineType0 | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                engine_type_0 = CompiledArtifactContractEngineType0.from_dict(data)
-
-
-
-                return engine_type_0
-            except (TypeError, ValueError, AttributeError, KeyError):
-                pass
-            return cast(CompiledArtifactContractEngineType0 | None | Unset, data)
-
-        engine = _parse_engine(d.pop("engine", UNSET))
-
-
         compiled_artifact_contract = cls(
             input_=input_,
             interface=interface,
@@ -251,7 +215,6 @@ class CompiledArtifactContract:
             output_limits=output_limits,
             parameters=parameters,
             schema_version=schema_version,
-            engine=engine,
         )
 
         return compiled_artifact_contract

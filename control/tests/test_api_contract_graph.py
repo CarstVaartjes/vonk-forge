@@ -13,14 +13,7 @@ from vonk_control.jobs import JobService
 
 # These values are intentionally defined by the selected engine or authority
 # document. Their surrounding request, response, and receipt remain typed.
-EXTENSION_OBJECTS = {
-    "ArtifactJobCreate.properties.parameters": "Engine-defined parameter values",
-    "FleetProfileAssignmentView.properties.model": "Current model projection",
-    "FleetProfileAssignmentView.properties.recipe": "Current recipe projection",
-    "FleetProfileAssignmentView.properties.resources": "Current resource projection",
-    "FleetProfileView.properties.cache_summary": "Current cache projection",
-    "FleetProfileView.properties.fleet.items": "Current fleet projection",
-}
+EXTENSION_OBJECTS: dict[str, str] = {}
 
 
 def _open_objects(value: object, path: tuple[str, ...] = ()) -> Iterator[str]:

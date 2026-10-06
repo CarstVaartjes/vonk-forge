@@ -8,6 +8,8 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 
+from pydantic import BaseModel
+
 from .fleet_event_contract import validate_fleet_event_payload
 from .fleet_events import FleetEvent, FleetEventRepository, FleetReplayBatch
 from .fleet_projection import FleetProjection, FleetSnapshot, telemetry_point
@@ -48,9 +50,9 @@ def _iso(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _json(value: Mapping[str, object]) -> str:
+def _json(value: BaseModel) -> str:
     return json.dumps(
-        value,
+        serialize_json_value(value),
         allow_nan=False,
         ensure_ascii=False,
         separators=(",", ":"),
@@ -61,7 +63,7 @@ def _json(value: Mapping[str, object]) -> str:
 def _event_frame(
     identifier: int,
     event_type: str,
-    data: Mapping[str, object],
+    data: BaseModel,
     *,
     retry: bool,
 ) -> str:
@@ -80,10 +82,8 @@ def _keepalive_frame(now: datetime, *, retry: bool) -> str:
     return "\n".join(lines) + "\n\n"
 
 
-def _snapshot_data(snapshot: FleetSnapshot, reason: str) -> dict[str, object]:
-    return serialize_json_value(
-        FleetSnapshotEvent(reset_reason=reason, snapshot=snapshot)
-    )
+def _snapshot_data(snapshot: FleetSnapshot, reason: str) -> FleetSnapshotEvent:
+    return FleetSnapshotEvent(reset_reason=reason, snapshot=snapshot)
 
 
 class FleetStream:
@@ -220,7 +220,7 @@ class FleetStream:
     @staticmethod
     def _event_data(
         event: FleetEvent, samples: Mapping[str, TelemetrySampleView]
-    ) -> dict[str, object]:
+    ) -> FleetTelemetryEvent | FleetChangeEvent:
         if event.event_type == "node-telemetry":
             validate_fleet_event_payload(
                 event.event_type,
@@ -233,11 +233,9 @@ class FleetStream:
             sample = samples.get(sample_id) if isinstance(sample_id, str) else None
             if sample is None or sample.node_id != event.node_id:
                 raise RuntimeError("Fleet telemetry event hydration is inconsistent")
-            return serialize_json_value(
-                FleetTelemetryEvent(
-                    node_id=sample.node_id,
-                    sample=telemetry_point(sample),
-                )
+            return FleetTelemetryEvent(
+                node_id=sample.node_id,
+                sample=telemetry_point(sample),
             )
         if event.event_type not in {"node-profile", "recipe-state", "operation-state"}:
             raise RuntimeError("Fleet stream event type is invalid")
@@ -248,16 +246,14 @@ class FleetStream:
             event.node_id,
             event.payload,
         )
-        return serialize_json_value(
-            FleetChangeEvent(
-                change=FleetChangeAdapter.validate_python(
-                    {
-                        "entity_kind": event.entity_kind,
-                        "entity_id": event.entity_id,
-                        "node_id": event.node_id,
-                        "occurred_at": event.occurred_at,
-                        "fields": fields,
-                    }
-                )
+        return FleetChangeEvent(
+            change=FleetChangeAdapter.validate_python(
+                {
+                    "entity_kind": event.entity_kind,
+                    "entity_id": event.entity_id,
+                    "node_id": event.node_id,
+                    "occurred_at": event.occurred_at,
+                    "fields": fields,
+                }
             )
         )

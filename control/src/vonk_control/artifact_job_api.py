@@ -7,7 +7,11 @@ from typing import Annotated, Any
 from fastapi import FastAPI, Header, HTTPException, Path, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
-from vonk_agent_protocol import AgentProtocolError
+from vonk_agent_protocol import (
+    AgentProtocolError,
+    RecipeJobInputFile,
+    RecipeJobOutputLimits,
+)
 
 from .artifact_blob_store import ArtifactBlobStore
 from .artifact_jobs import (
@@ -22,6 +26,7 @@ from .artifact_jobs import (
     OutputLimits,
 )
 from .auth import Actor, agent_identity_from_scope
+from .compiled_artifact_contract import ParameterScalar
 from .download_contract import download_responses, upload_request_body
 from .operation_api import bounded_error_responses
 
@@ -39,7 +44,7 @@ class ArtifactJobCreate(StrictModel):
     interface: str = Field(
         pattern=r"^(audio-job|video-job|image-job|mesh-job|artifact-job)$"
     )
-    parameters: dict[str, object] = Field(default_factory=dict)
+    parameters: dict[str, ParameterScalar] = Field(default_factory=dict)
     inputs: list[ArtifactFileDeclaration] = Field(default_factory=list, max_length=32)
     output_limits: OutputLimits
     timeout_seconds: int = Field(ge=1, le=3_600)
@@ -121,8 +126,13 @@ def install_artifact_job_routes(
                     run_id,
                     interface=body.interface,
                     parameters=body.parameters,
-                    inputs=[item.model_dump() for item in body.inputs],
-                    output_limits=body.output_limits.model_dump(),
+                    inputs=[
+                        RecipeJobInputFile.model_validate(item.model_dump())
+                        for item in body.inputs
+                    ],
+                    output_limits=RecipeJobOutputLimits.model_validate(
+                        body.output_limits.model_dump()
+                    ),
                     timeout_seconds=body.timeout_seconds,
                     actor=actor.subject,
                     request_id=request_id,

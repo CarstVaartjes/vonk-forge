@@ -13,7 +13,7 @@ import httpx2
 import pytest
 from vonk_control import recipe_packages
 from vonk_control.bounded_json import require_mapping
-from vonk_control.recipe_library_types import RecipeLibrarySnapshot
+from vonk_control.recipe_library_types import RecipeLibrarySnapshot, RecipePackageEntry
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     PACKAGE_REPOSITORY,
@@ -558,10 +558,10 @@ def test_one_bad_package_skips_only_its_recipe_and_names_it(
     client.prepare(snapshot)
     assert snapshot.items == ()
     [problem] = snapshot.problems
-    assert problem["code"] == "recipe_package.release_incomplete"
-    assert named in str(problem["detail"])
-    assert "fixture/tiny-recipe" in str(problem["detail"])
-    assert problem["recipe_uri"] == (
+    assert problem.code == "recipe_package.release_incomplete"
+    assert named in str(problem.detail)
+    assert "fixture/tiny-recipe" in str(problem.detail)
+    assert problem.recipe_uri == (
         f"vonk://catalog/fixture/tiny-recipe@sha256:{row['content_sha256']}"
     )
     client.close()
@@ -585,19 +585,27 @@ def test_release_mid_update_keeps_the_previous_verified_library(
 
 
 def test_bundle_member_names_are_bounded_and_safe() -> None:
+    def entry(slug: str, location: str) -> RecipePackageEntry:
+        return RecipePackageEntry(
+            publisher="vonk-forge",
+            slug=slug,
+            source_path="recipes/x.json",
+            recipe_content_sha256="b" * 64,
+            package_sha256="a" * 64,
+            size=1,
+            location=location,
+            title="",
+            description="",
+            tags=(),
+            document={},
+            prebuilt_image=None,
+            publication_commit=SIGNED_COMMIT,
+        )
+
     packages = {
-        "vonk-forge/recipe-0": {
-            "location": "packages/../etc/passwd",
-            "package_sha256": "a" * 64,
-        },
-        "vonk-forge/recipe-1": {
-            "location": "packages/bad\nname.tar.gz",
-            "package_sha256": "a" * 64,
-        },
-        "vonk-forge/recipe-2": {
-            "location": "packages/recipe-2.tar.gz",
-            "package_sha256": "a" * 64,
-        },
+        "vonk-forge/recipe-0": entry("recipe-0", "packages/../etc/passwd"),
+        "vonk-forge/recipe-1": entry("recipe-1", "packages/bad\nname.tar.gz"),
+        "vonk-forge/recipe-2": entry("recipe-2", "packages/recipe-2.tar.gz"),
     }
     snapshot, kept = recipe_packages._bind_release(
         RecipeLibrarySnapshot(commit=SIGNED_COMMIT, items=()),
@@ -612,7 +620,7 @@ def test_bundle_member_names_are_bounded_and_safe() -> None:
         ),
     )
     assert list(kept) == ["vonk-forge/recipe-2"]
-    details = [str(problem["detail"]) for problem in snapshot.problems]
+    details = [str(problem.detail) for problem in snapshot.problems]
     assert "package.path" in details[0] and "vonk-forge/recipe-0" in details[0]
     assert "\n" not in details[1] and all(len(item) <= 256 for item in details)
 

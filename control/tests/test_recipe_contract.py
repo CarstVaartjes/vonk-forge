@@ -70,7 +70,7 @@ def _compile(
         package_handle=package_handle,
         role="entrypoint",
         rank=0,
-    )
+    ).document()
 
 
 def test_recipe_uses_the_canonical_model_and_topology_bindings(

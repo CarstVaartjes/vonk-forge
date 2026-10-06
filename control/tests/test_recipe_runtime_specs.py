@@ -86,7 +86,7 @@ def _compile(
         package_handle=package_handle,
         role=role,
         rank=rank,
-    )
+    ).document()
 
 
 def _distributed_sglang_recipe() -> dict[str, object]:

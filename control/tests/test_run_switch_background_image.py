@@ -248,7 +248,7 @@ def _background_image_switch(
         assert tick_done.wait(10)
         return prepare_runtime_image(
             document,
-            runtime=runtime_spec["runtime"],
+            runtime=runtime_spec.runtime,
             storage=storage,
             transport=cast(Any, Transport()),
             build_receipt={
