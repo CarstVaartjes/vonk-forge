@@ -259,7 +259,7 @@ def test_dead_removal_gate_reconciles_before_fresh_reference_admission(
                 Job(
                     id=owner_id,
                     request_id="8f19e31a-7155-45da-9f1b-c7da400180b8",
-                    kind="recipe.cache.remove.v1",
+                    kind="recipe.cache.remove.v2",
                     state=owner_state,
                     actor="operator",
                     authority_revision="revision",
@@ -316,7 +316,7 @@ def test_reaper_rechecks_owner_and_does_not_clear_a_restarted_removal(
             Job(
                 id=owner_id,
                 request_id="8f19e31a-7155-45da-9f1b-c7da400180b8",
-                kind="recipe.cache.remove.v1",
+                kind="recipe.cache.remove.v2",
                 state="failed",
                 actor="operator",
                 authority_revision="revision",

@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import Engine, select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.models import Base, Job, JobAttempt
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 
-@pytest.fixture
-def history_sessions(postgres_engine: Engine) -> sessionmaker[Session]:
-    Base.metadata.create_all(postgres_engine)
-    return sessionmaker(postgres_engine, expire_on_commit=False)
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+def history_sessions(request: pytest.FixtureRequest) -> Iterator[sessionmaker[Session]]:
+    engine = (
+        create_engine("sqlite:///:memory:")
+        if request.param == "sqlite"
+        else request.getfixturevalue("postgres_engine")
+    )
+    Base.metadata.create_all(engine)
+    yield sessionmaker(engine, expire_on_commit=False)
+    if request.param == "sqlite":
+        engine.dispose()
 
 
 def _job(
@@ -100,7 +108,7 @@ def test_unreadable_live_authority_defers_pruning_until_repaired(
     unreadable = _job(now, state="running")
     # Empty documents are allowed fixture placeholders; the canonical reader
     # correctly reports this as a missing required recipe-operation document.
-    unreadable.kind = "recipe.start.v1"
+    unreadable.kind = "recipe.start"
     with history_sessions.begin() as session:
         session.add_all((removable, unreadable))
     collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)

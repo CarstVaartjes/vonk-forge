@@ -15,12 +15,14 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from sqlalchemy import select
 from vonk_control.attempt_residues import (
     LEFTOVER_GRACE,
     AttemptResidueReconciler,
+    LeftoverRemoval,
     incomplete_installation_ids,
 )
 from vonk_control.fleet_profile_contract import FleetProfileInput
@@ -649,6 +651,65 @@ def _uninstalls(load, installation_id: str) -> list[Job]:
             )
             if job.payload.get("owner_id") == installation_id
         ]
+
+
+@pytest.mark.parametrize("kind", ["leftover", "never-installed"])
+def test_unknown_residue_cleanup_backs_off_then_resumes(tmp_path, kind):
+    """Catches retrying busy ownership on every tick or never revisiting it."""
+    from sqlalchemy import create_engine
+    from vonk_control.install_admission import InstallAdmissionBusy
+    from vonk_control.models import Base
+
+    from .test_catalog_revision_collection import Catalog
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'residues.sqlite'}")
+    Base.metadata.create_all(engine)
+    catalog = Catalog(engine)
+    revision = catalog.revision("glm", 1, head="active")
+    installation_id, _ = catalog.workload(
+        revision,
+        installation="planned" if kind == "never-installed" else "partial",
+        run="stopped",
+    )
+    if kind == "never-installed":
+        with catalog.sessions.begin() as session:
+            for member in session.scalars(select(InstallationNode)):
+                member.state = "planned"
+                member.installed_bytes = 0
+    calls = []
+
+    def uninstall(owner, **kwargs):
+        calls.append(owner)
+        if len(calls) == 1:
+            raise InstallAdmissionBusy("capacity writer busy")
+        with catalog.sessions.begin() as session:
+            row = session.get(RecipeInstallation, owner)
+            assert row is not None
+            row.state = "uninstalled"
+
+    removal = SimpleNamespace(
+        preview_uninstall=lambda owner: SimpleNamespace(
+            allowed=True, plan_digest="exact"
+        ),
+        uninstall=uninstall,
+    )
+    reconciler = AttemptResidueReconciler(
+        catalog.sessions,
+        abandon_never_installed=uninstall
+        if kind == "never-installed"
+        else lambda owner: None,
+        removal=cast(LeftoverRemoval, removal),
+        clock=lambda: catalog.now,
+    )
+    reconciler.tick()
+    reconciler.tick()
+    assert calls == [installation_id]
+    catalog.now += timedelta(seconds=5)
+    assert reconciler.tick()
+    assert calls == [installation_id] * 2
+    with catalog.sessions() as session:
+        row = session.get(RecipeInstallation, installation_id)
+        assert row is not None and row.state == "uninstalled"
 
 
 @pytest.mark.parametrize(

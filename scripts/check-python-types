@@ -37,7 +37,14 @@ def _diagnostics() -> list[dict[str, object]]:
     # this same interpreter; its version check is the only network access it
     # would otherwise attempt.
     completed = subprocess.run(
-        [sys.executable, "-m", "pyright", "--outputjson", "--pythonpath", sys.executable],
+        [
+            sys.executable,
+            "-m",
+            "pyright",
+            "--outputjson",
+            "--pythonpath",
+            sys.executable,
+        ],
         cwd=ROOT,
         env={**os.environ, "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1"},
         capture_output=True,
@@ -58,6 +65,8 @@ def _diagnostics() -> list[dict[str, object]]:
             {
                 "file": Path(diagnostic["file"]).resolve().relative_to(ROOT).as_posix(),
                 "rule": diagnostic.get("rule") or "unknown",
+                "line": diagnostic.get("range", {}).get("start", {}).get("line", 0) + 1,
+                "message": diagnostic.get("message", ""),
             }
         )
     return diagnostics
@@ -117,7 +126,9 @@ def evaluate(
     return problems
 
 
-def _write(counts: dict[tuple[str, str], int], previous: list[dict[str, object]]) -> None:
+def _write(
+    counts: dict[tuple[str, str], int], previous: list[dict[str, object]]
+) -> None:
     reasons = {
         (str(entry.get("file", "")), str(entry.get("rule", ""))): str(
             entry.get("reason", "")
@@ -136,15 +147,15 @@ def _write(counts: dict[tuple[str, str], int], previous: list[dict[str, object]]
             for (file, rule), count in sorted(counts.items())
         ],
     }
-    BASELINE.write_text(
-        json.dumps(document, indent=2) + "\n", encoding="utf-8"
-    )
+    BASELINE.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     missing = sorted(
         f"{entry['file']} {entry['rule']}"
         for entry in document["exceptions"]
         if not entry["reason"]
     )
-    print(f"baseline updated: {sum(counts.values())} error(s) in {len(counts)} entry(s)")
+    print(
+        f"baseline updated: {sum(counts.values())} error(s) in {len(counts)} entry(s)"
+    )
     if missing:
         print("write a reason for:", file=sys.stderr)
         for entry in missing:
@@ -156,15 +167,28 @@ def main() -> int:
     parser.add_argument("--update", action="store_true", help="rewrite the baseline")
     args = parser.parse_args()
 
-    counts = _counts(_diagnostics())
+    diagnostics = _diagnostics()
+    counts = _counts(diagnostics)
     if args.update:
         _write(counts, _load(BASELINE))
         return 0
 
-    problems = evaluate(counts, _load(BASELINE))
+    exceptions = _load(BASELINE)
+    problems = evaluate(counts, exceptions)
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:
+        reviewed = {
+            (str(entry["file"]), str(entry["rule"])): entry["count"]
+            for entry in exceptions
+        }
+        for diagnostic in diagnostics:
+            key = (str(diagnostic["file"]), str(diagnostic["rule"]))
+            if counts[key] != reviewed.get(key, 0):
+                print(
+                    f"{diagnostic['file']}:{diagnostic['line']}: {diagnostic['rule']}: {diagnostic['message']}",
+                    file=sys.stderr,
+                )
         print(
             f"\n{len(problems)} problem(s); {sum(counts.values())} current type "
             f"error(s)",

@@ -1052,6 +1052,42 @@ def test_one_refused_installation_does_not_stop_the_others(world: Catalog) -> No
     assert _kept(result, "refused") == 1
 
 
+def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
+    world, monkeypatch
+):
+    """Catches treating temporary ownership uncertainty as a refusal or hot loop."""
+    from vonk_agent_protocol import WaitReason
+    from vonk_control.recipe_operations import RecipeRetryLater
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    first, _ = world.workload(old, run="stopped")
+    second, _ = world.workload(old, run="stopped")
+    lifecycle = FakeLifecycle(world.sessions, apply=True)
+    collector = _collector(world, lifecycle)
+    actual = lifecycle.uninstall
+    calls = []
+
+    def uninstall(installation_id, **kwargs):
+        calls.append(installation_id)
+        if installation_id == first and calls.count(first) == 1:
+            raise RecipeRetryLater(
+                "unknown ownership", reason=WaitReason.OBSERVATION_UNAVAILABLE
+            )
+        return actual(installation_id, **kwargs)
+
+    monkeypatch.setattr(lifecycle, "uninstall", uninstall)
+    result = collector.collect()
+    assert lifecycle.removed == [second]
+    assert _kept(result, "deferred") == 1
+    _report_disk(world.sessions, GIB + 2, at=world.now)
+    collector.collect()
+    assert calls.count(first) == 1, "unknown outcome retried without backoff"
+    world.now += collector._scan_interval
+    collector.collect()
+    assert calls.count(first) == 2 and first in lifecycle.removed
+
+
 def test_a_sweep_that_runs_out_of_budget_continues_on_the_next_pass(
     world: Catalog,
 ) -> None:
@@ -1144,7 +1180,7 @@ def test_unused_installation_is_uninstalled_without_taking_a_new_intent(
     assert _ordinals(sessions) == before
 
 
-def test_removal_is_refused_when_the_target_sparks_hold_different_intents(
+def test_removal_retries_when_the_target_sparks_rejoin_a_shared_intent(
     tmp_path: Path,
 ) -> None:
     """With no shared intent there is none to join; taking one would supersede."""
@@ -1156,14 +1192,30 @@ def test_removal_is_refused_when_the_target_sparks_hold_different_intents(
         node.workload_intent_ordinal += 5
     before = _ordinals(sessions)
     collector = _real_collector(sessions, service, nodes)
+    clock = [_REAL_CLOCK]
+    collector._clock = lambda: clock[0]
 
     result = collector.collect()
 
     assert result.installations == 0
-    assert _kept(result, "refused") == 1
+    assert _kept(result, "deferred RecipeRetryLater") == 1
     with sessions() as session:
         assert session.scalar(select(Job).where(Job.kind == "recipe.uninstall")) is None
     assert _ordinals(sessions) == before
+
+    # A later authorized intent converges the ranks. Cleanup can now join it,
+    # but must neither retry before its scan deadline nor take another intent.
+    with sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            node.workload_intent_ordinal = max(before.values())
+    converged = _ordinals(sessions)
+    assert collector.collect().installations == 0
+    clock[0] += collector._scan_interval
+    for node in nodes:
+        _report_disk(sessions, GIB, at=clock[0], node=node)
+    recovered = collector.collect()
+    assert recovered.installations == 1, recovered.kept
+    assert _ordinals(sessions) == converged
 
 
 def test_removal_a_guard_refuses_queues_nothing(tmp_path: Path) -> None:
