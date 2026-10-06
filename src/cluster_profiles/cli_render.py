@@ -10,6 +10,8 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
+from pydantic import TypeAdapter
+
 from . import cli_states
 from .cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
 
@@ -63,15 +65,13 @@ def _warn(message: str) -> None:
     )
 
 
-def _projection_issues(node: Mapping[str, object]) -> list[str]:
-    value = node.get("projection_issues")
+_PROJECTION_ISSUES = TypeAdapter(list[str])
+
+
+def _projection_issues(value: object) -> list[str]:
     if value is None:
         return []
-    if not isinstance(value, list) or any(
-        not isinstance(issue, str) for issue in value
-    ):
-        raise TypeError("expected a list of projection issues")
-    return [str(issue) for issue in value]
+    return _PROJECTION_ISSUES.validate_python(value, strict=True)
 
 
 def _words(value: object) -> str:
@@ -306,7 +306,7 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
             _field("Installation", recipe.get("installation_id"))
             _field("Installation state", recipe.get("group_state"))
             _field("Members", _words(recipe.get("member_node_ids")))
-    for issue in _projection_issues(node):
+    for issue in _projection_issues(node.get("projection_issues")):
         _warn(f"{_text(name)}: {_text(issue)}")
     _reasons(node.get("warnings"), subject=name)
 
@@ -449,7 +449,7 @@ def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
             inventory = _optional(node.get("inventory"), "inventory").get("freshness")
             if inventory not in {None, "fresh"}:
                 notes.append(f"{name} inventory is {_text(inventory)}")
-        for issue in _projection_issues(node):
+        for issue in _projection_issues(node.get("projection_issues")):
             notes.append(f"{name}: {_text(issue)}")
         warnings = node.get("warnings")
         if not isinstance(warnings, list):
