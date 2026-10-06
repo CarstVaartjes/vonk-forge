@@ -1552,7 +1552,7 @@ class SparkLifecycle:
 
     def _configure_receipt_fault_relay(self) -> None:
         assert self.bundle is not None
-        root = self.bundle / "acceptance-receipts"
+        root = self.bundle.parent / "acceptance-receipts"
         root.mkdir(mode=0o770, exist_ok=True)
         self._run_command(
             ["sudo", "/usr/bin/chown", f"{os.getuid()}:10001", os.fspath(root)],
@@ -1560,15 +1560,15 @@ class SparkLifecycle:
             timeout=30,
         )
         os.chmod(root, 0o770)
-        relay = self.bundle / "acceptance-receipt-fault.py"
+        relay = self.bundle.parent / "acceptance-receipt-fault.py"
         shutil.copyfile(Path(__file__).with_name("receipt_fault.py"), relay)
         os.chmod(relay, 0o644)
         path = self.bundle / "docker-compose.yaml"
         compose = yaml.safe_load(path.read_text(encoding="utf-8"))
         service = compose["services"]["control-api"]
         for mount in (
-            "./acceptance-receipt-fault.py:/acceptance/receipt_fault.py:ro",
-            "./acceptance-receipts:/acceptance-state",
+            f"{relay}:/acceptance/receipt_fault.py:ro",
+            f"{root}:/acceptance-state",
         ):
             if mount not in service["volumes"]:
                 service["volumes"].append(mount)
@@ -1579,7 +1579,7 @@ class SparkLifecycle:
         assert self.bundle is not None
         if self.lost_start_proof is not None:
             return
-        root = self.bundle / "acceptance-receipts"
+        root = self.bundle.parent / "acceptance-receipts"
         for name in ("blocked.json", "replayed.json", "recovered.json"):
             if (root / name).exists():
                 raise LifecycleError("lost Start receipt acceptance state is not fresh")
@@ -1695,7 +1695,7 @@ class SparkLifecycle:
         if bundle is None:
             return
         assert self.temporary_root is not None
-        path = bundle / "acceptance-receipts/blocked.json"
+        path = bundle.parent / "acceptance-receipts/blocked.json"
         if not path.is_file():
             return
         if path.stat().st_size > 64 * 1024:
@@ -1772,7 +1772,7 @@ class SparkLifecycle:
             cwd=self.temporary_root,
             timeout=30,
         )
-        recovered = bundle / "acceptance-receipts/recovered.json"
+        recovered = bundle.parent / "acceptance-receipts/recovered.json"
         recovered.write_text(json.dumps({"fence": fence}), encoding="utf-8")
         os.chmod(recovered, 0o644)
         self.lost_start_proof = LostStartProof(
@@ -1796,7 +1796,7 @@ class SparkLifecycle:
         proof = self.lost_start_proof
         if proof is None or proof.run_id != run_id:
             raise LifecycleError("canary never exercised an unacknowledged exact Start")
-        path = self.bundle / "acceptance-receipts/replayed.json"
+        path = self.bundle.parent / "acceptance-receipts/replayed.json"
         if not path.is_file():
             raise LifecycleError(
                 "Controller did not accept a fresh Start receipt after journal loss"
