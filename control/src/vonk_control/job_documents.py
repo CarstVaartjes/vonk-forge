@@ -194,6 +194,9 @@ class RecipeBuildParent(_RecipeParent):
     force_rebuild: bool | None = None
     prebuilt_image: str | None = Field(default=None, min_length=1, max_length=512)
     prebuilt_node_id: NodeText | None = None
+    # The claim a Controller process holds on a prebuilt pull, renewed on a lease.
+    prebuilt_claim_owner: str | None = Field(default=None, min_length=1, max_length=256)
+    prebuilt_claim_until: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class RecipeBuildCleanupParent(_RecipeParent):

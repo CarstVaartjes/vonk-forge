@@ -748,6 +748,7 @@ def test_sync_marks_reader_failure_failed_and_releases_active_slot(
 @pytest.mark.parametrize(
     "damage", ["missing-problems", "string-count", "null", "invalid-problem", "extra"]
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_sync_heals_an_unreadable_stored_result_by_resync(tmp_path, damage):
     sessions, service, reader, _item = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)

@@ -494,6 +494,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_database_local_projection_reads_cache_build_and_spark_evidence(
     tmp_path: Path,
 ) -> None:
@@ -512,6 +513,7 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
     assert recipes[0].local.running_on == [node_id]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_stored_image_that_cannot_be_read_is_named_not_a_cache_miss(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -547,6 +549,7 @@ def test_a_stored_image_that_cannot_be_read_is_named_not_a_cache_miss(
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_stored_image_with_a_damaged_manifest_reads_as_not_cached(
     tmp_path: Path,
 ) -> None:
@@ -818,6 +821,7 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
 
 
 @pytest.mark.parametrize("total_bytes", [0, -1])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_cached_download_progress_preserves_zero_and_reads_a_negative_total_as_unknown(
     tmp_path: Path,
     total_bytes: int,
