@@ -215,6 +215,14 @@
       "reason": "A cooperative stop is recorded as a resumable partial and any other cache error is recorded through the failure path; both report an unknown outcome to the cache operation's lifecycle, which retries the exact transfer with bounded backoff."
     },
     {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.reconcile_removal_gates",
+      "catches": [
+        "_ArtifactWriterBusy"
+      ],
+      "reason": "The removal reconciliation pass retains a busy gate and continues its bounded inventory; the worker's advance_removals callback repeats the inventory after cursor wrap, then takes the same exact storage lock before rechecking the owner."
+    },
+    {
       "path": "control/src/vonk_control/recipe_image_availability.py",
       "function": "RecipeImageAvailabilityService._advance_recipe_image_removal",
       "catches": [
@@ -1048,7 +1056,6 @@
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.create_draft", "catalog.document_exists", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.resolve", "catalog.not_candidate", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.resolve", "catalog.stale_revision", 1],
-        ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.revise", "catalog.candidate_exists", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.revise", "catalog.stale_revision", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogRevisionContractError", "_rederive_projection", "catalog-revision", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService._bind_recipe_models", "catalog.model_reference_invalid", 2],
@@ -1250,7 +1257,11 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
       "sites": [
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._authorize_uncached", "distribution.revoked", 1]
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "DistributionService._authorize_uncached", "distribution.revoked", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "forbidden", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "permission-denied", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "nas-cache-object-access-was-refused", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "permission-denied", 1]
       ]
     },
     {

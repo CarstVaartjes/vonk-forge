@@ -48,6 +48,8 @@ IMAGE = re.compile(
 KEY = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\Z")
 MAX_EVIDENCE_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024
+# Allow the maximum artifact at one MiB/s plus the existing metadata budget.
+RCLONE_TRANSFER_TIMEOUT = 30 + MAX_ARTIFACT_BYTES / (1024 * 1024)
 MAX_RCLONE_CANDIDATE_WORKERS = 8
 UPLOAD_ATTEMPTS = 3
 VERIFICATION_ATTEMPTS = 5
@@ -248,12 +250,14 @@ def _acceptance_public_key(path: Path, expected_fingerprint: str) -> bytes:
         text=True,
         capture_output=True,
         check=False,
+        timeout=30,
     )
     encoded = subprocess.run(
         ["openssl", "pkey", "-pubin", "-in", path, "-outform", "DER"],
         cwd=ROOT,
         capture_output=True,
         check=False,
+        timeout=30,
     )
     if (
         description.returncode != 0
@@ -381,7 +385,7 @@ def _render_bootstrap(
         for platform, path in sorted(packages.items()):
             command.extend(("--package", f"{platform}={path}"))
     result = subprocess.run(
-        command, cwd=ROOT, text=True, capture_output=True, check=False
+        command, cwd=ROOT, text=True, capture_output=True, check=False, timeout=30
     )
     if result.returncode != 0:
         message = result.stderr.strip() or "bootstrap rendering failed"
@@ -399,6 +403,7 @@ def _signing_public_key(private_key: Path, public_key: Path) -> bytes:
         cwd=ROOT,
         capture_output=True,
         check=False,
+        timeout=30,
     )
     if result.returncode != 0 or result.stdout != expected:
         raise PublicationError("installer signing keys do not match")
@@ -408,6 +413,7 @@ def _signing_public_key(private_key: Path, public_key: Path) -> bytes:
         text=True,
         capture_output=True,
         check=False,
+        timeout=30,
     )
     if description.returncode != 0 or not re.search(
         r"Public-Key: \((?:2048|3072|4096) bit\)", description.stdout
@@ -438,6 +444,7 @@ def _sign(private_key: Path, claims: bytes) -> str:
             cwd=ROOT,
             capture_output=True,
             check=False,
+            timeout=30,
         )
         if result.returncode != 0:
             raise PublicationError("installer release signing failed")
@@ -470,6 +477,7 @@ def _verify_signature(
             cwd=ROOT,
             capture_output=True,
             check=False,
+            timeout=30,
         )
     if result.returncode != 0:
         raise PublicationError(f"{label} signature is invalid")
@@ -1371,6 +1379,7 @@ def _rclone_object_exists(remote: str, key: str) -> bool:
         stderr=subprocess.DEVNULL,
         text=True,
         check=False,
+        timeout=30,
     )
     if result.returncode != 0:
         return False
@@ -1390,7 +1399,17 @@ def _rclone_digest(remote: str, key: str) -> str | None:
     if not _rclone_object_exists(remote, key):
         return None
     process = subprocess.Popen(
-        ["rclone", "cat", f"{remote}/{key}"],
+        [
+            "rclone",
+            "cat",
+            f"{remote}/{key}",
+            "--contimeout",
+            "30s",
+            "--timeout",
+            "30s",
+            "--max-duration",
+            f"{RCLONE_TRANSFER_TIMEOUT:g}s",
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
@@ -1407,7 +1426,17 @@ def _rclone_bytes(remote: str, key: str, maximum: int) -> bytes | None:
     if not _rclone_object_exists(remote, key):
         return None
     process = subprocess.Popen(
-        ["rclone", "cat", f"{remote}/{key}"],
+        [
+            "rclone",
+            "cat",
+            f"{remote}/{key}",
+            "--contimeout",
+            "30s",
+            "--timeout",
+            "30s",
+            "--max-duration",
+            f"{RCLONE_TRANSFER_TIMEOUT:g}s",
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
@@ -1429,14 +1458,25 @@ def _verification_delay(attempt: int) -> float:
     return min(base * (2**attempt), 8.0)
 
 
-def _rclone_upload(
-    source: Path, remote: str, key: str, *, immutable: bool
-) -> bool:
+def _rclone_upload(source: Path, remote: str, key: str, *, immutable: bool) -> bool:
     command = ["rclone", "copyto"]
     if immutable:
         command.append("--immutable")
     command.extend((str(source), f"{remote}/{key}"))
-    return subprocess.run(command, check=False).returncode == 0
+    try:
+        return (
+            subprocess.run(
+                command, check=False, timeout=RCLONE_TRANSFER_TIMEOUT
+            ).returncode
+            == 0
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"R2 upload exceeded {RCLONE_TRANSFER_TIMEOUT:g}s; "
+            "checking the exact object before retrying.",
+            file=sys.stderr,
+        )
+        return False
 
 
 def _await_digest(remote: str, key: str, expected: str) -> str | None:
@@ -1760,6 +1800,7 @@ def _reuse_existing_acceptance(
                     cwd=ROOT,
                     capture_output=True,
                     check=False,
+                    timeout=30,
                 )
                 if encoded.returncode != 0:
                     raise PublicationError("published acceptance public key is invalid")
@@ -2084,7 +2125,7 @@ def main(argv: list[str] | None = None) -> int:
             promote(arguments)
         else:
             refresh(arguments)
-    except (OSError, PublicationError, ValueError) as error:
+    except (OSError, PublicationError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"install-release-publication: {error}", file=sys.stderr)
         return 2
     return 0

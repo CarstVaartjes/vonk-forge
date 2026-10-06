@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -84,7 +85,7 @@ def test_transient_fetch_retries_without_publishing_partial_stdout(
     module = _module()
     state = _fetcher(tmp_path, monkeypatch, [error, error, ""], command[0])
     delays = []
-    monkeypatch.setattr(module.time, "sleep", delays.append)
+    monkeypatch.setattr(module, "sleep", delays.append)
     assert module.main(command) == 0
     assert json.loads(state.read_text()) == []
     assert delays == [2, 4]
@@ -127,7 +128,7 @@ def test_permanent_fetch_failure_is_not_retried(tmp_path, monkeypatch, error, co
 def test_transient_failure_stops_at_attempt_limit(tmp_path, monkeypatch):
     module = _module()
     state = _fetcher(tmp_path, monkeypatch, ["connection reset by peer"] * 4)
-    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(module, "sleep", lambda _: None)
     assert module.main(["uv", "sync"]) == 17
     assert len(json.loads(state.read_text())) == 1
 
@@ -148,3 +149,32 @@ def test_cannot_wrap_build_or_test_execution(tmp_path, monkeypatch, command):
     state = _fetcher(tmp_path, monkeypatch, [""], command[0])
     assert module.main(command) == 64
     assert json.loads(state.read_text()) == [""]
+
+
+def test_expired_fetch_reaps_child_and_resumes_without_partial_stdout(
+    tmp_path, monkeypatch, capsys
+):
+    module = _module()
+    executable = tmp_path / "uv"
+    marker = tmp_path / "first-pid"
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import os, pathlib, time\n"
+        f"marker = pathlib.Path({str(marker)!r})\n"
+        "if not marker.exists():\n"
+        "    marker.write_text(str(os.getpid()))\n"
+        "    print('partial output', flush=True)\n"
+        "    time.sleep(3600)\n"
+        "print('verified output')\n"
+    )
+    executable.chmod(0o755)
+    monkeypatch.setattr(module, "FETCH_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(module, "sleep", lambda _: None)
+    assert module.main([str(executable), "sync"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "verified output\n"
+    assert "partial output" in captured.err
+    assert "exceeded 1s" in captured.err
+    assert "retry 2/3" in captured.err
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(marker.read_text()), 0)

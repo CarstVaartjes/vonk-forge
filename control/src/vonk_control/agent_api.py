@@ -44,6 +44,7 @@ from vonk_agent_protocol import (
     RecipeRunObservationsWire,
     RouteState,
     RunState,
+    SecurityRefusalError,
     SignedHostHelperGrant,
     canonical_message,
 )
@@ -1785,7 +1786,7 @@ def install_agent_routes(
             if _DISTRIBUTION_ERROR_CODE.fullmatch(error.code)
             else {}
         )
-        if error.code in {
+        if isinstance(error, SecurityRefusalError) or error.code in {
             DistributionCode.UNASSIGNED,
             DistributionCode.WRONG_NODE,
             DistributionCode.EXPIRED,
