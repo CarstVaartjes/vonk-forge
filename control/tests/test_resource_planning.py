@@ -317,6 +317,81 @@ def test_fresh_aggregate_shortfall_remains_a_physical_capacity_blocker() -> None
     }
 
 
+def _declared_demand(total: int):
+    settings = resolve_effective_settings(
+        _recipe_document(_recipe_settings(context=65_536))
+    ).settings
+    assert settings is not None
+    return resource_demand(
+        settings,
+        ResourceEvidence(
+            weights_bytes=total,
+            runtime_overhead_bytes=None,
+            declared_total_bytes=total,
+            baseline_context_tokens=32_768,
+            baseline_concurrency=1,
+            evidence_state="declared",
+        ),
+    )
+
+
+def test_envelope_larger_than_the_spark_is_a_typed_terminal_refusal() -> None:
+    # Peak plus reserve (105) exceeds the 100-byte Spark with nothing claimed.
+    capacity = memory_capacity_snapshot(
+        "rank-0",
+        "unified",
+        host=(100, 96),
+        accelerator=(100, 96),
+        reservations=MemoryReservationTotals({}, {}, {}),
+        memory_pool="shared",
+        evidence_state="fresh",
+    )
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(100)}, [capacity], memory_floor_bytes=5
+    )
+    assert not plan.allowed
+    codes = {reason.code for reason in plan.nodes[0].reasons}
+    assert "resource.envelope_exceeds_capacity" in codes
+    assert not codes & {
+        "resource.insufficient_capacity",
+        "resource.insufficient_reservation_budget",
+    }
+    detail = next(
+        reason.detail
+        for reason in plan.nodes[0].reasons
+        if reason.code == "resource.envelope_exceeds_capacity"
+    )
+    assert "105 bytes" in detail and "100-byte" in detail
+    assert not plan.nodes[0].stop_required
+
+
+def test_envelope_that_fits_the_spark_but_not_its_free_memory_stays_waitable() -> None:
+    # 95 + 4 fits the 100-byte Spark; the OS leaves only 96 free and no claim
+    # holds memory, so this is the ordinary capacity refusal, not the terminal one.
+    capacity = memory_capacity_snapshot(
+        "rank-0",
+        "unified",
+        host=(100, 96),
+        accelerator=(100, 96),
+        reservations=MemoryReservationTotals({}, {}, {}),
+        memory_pool="shared",
+        evidence_state="fresh",
+    )
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(95)}, [capacity], memory_floor_bytes=4
+    )
+    assert not plan.allowed
+    codes = {reason.code for reason in plan.nodes[0].reasons}
+    assert "resource.envelope_exceeds_capacity" not in codes
+    assert "resource.insufficient_capacity" in codes
+    detail = next(
+        reason.detail
+        for reason in plan.nodes[0].reasons
+        if reason.code == "resource.insufficient_capacity"
+    )
+    assert "No Vonk claim holds memory" in detail
+
+
 def test_uncertain_bound_still_refuses_actual_free_floor_and_budget_exhaustion() -> (
     None
 ):

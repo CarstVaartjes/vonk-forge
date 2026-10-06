@@ -53,6 +53,10 @@ class _EffectiveSettingsProjection(Protocol):
     parallelism: _ParallelismProjection
 
 
+# A recipe whose declared peak plus reserve exceeds a Spark's physical memory.
+ENVELOPE_EXCEEDS_CAPACITY = "resource.envelope_exceeds_capacity"
+
+
 @dataclass(frozen=True, slots=True)
 class ResourceReason:
     code: str
@@ -1055,6 +1059,35 @@ def plan_capacity(
         current_without_unknown = available - occupied - unmaterialized - total_bytes
         current = current_without_unknown - unknown_upper_bytes
         budget_after = available - reserved - total_bytes - memory_floor_bytes
+        if available - total_bytes - memory_floor_bytes < 0:
+            # The declared envelope alone exceeds the Spark's physical memory,
+            # with no claim or running workload counted. Stopping or waiting
+            # can never free it, so this is a typed, terminal refusal rather
+            # than a capacity wait.
+            node_reasons.append(
+                _reason(
+                    ENVELOPE_EXCEEDS_CAPACITY,
+                    f"The recipe's declared memory envelope ({total_bytes} bytes peak plus "
+                    f"{memory_floor_bytes} bytes reserve = {total_bytes + memory_floor_bytes} bytes) "
+                    f"exceeds this Spark's {available}-byte memory capacity by "
+                    f"{total_bytes + memory_floor_bytes - available} bytes; it can never be admitted "
+                    "here until the recipe declares a smaller envelope.",
+                    node_id=node_id,
+                )
+            )
+            nodes.append(
+                NodeCapacityPlan(
+                    node_id,
+                    demand.total_bytes,
+                    current,
+                    current,
+                    current,
+                    False,
+                    False,
+                    tuple(node_reasons),
+                )
+            )
+            continue
         release = releases.get((node_id, capacity.memory_kind), 0)
         if not release:
             release = max(
@@ -1102,7 +1135,16 @@ def plan_capacity(
                     "resource.insufficient_capacity",
                     f"Observed free capacity less definite claims and selected demand leaves "
                     f"{current_without_unknown} bytes before the required "
-                    f"{memory_floor_bytes}-byte reserve, even if retained runs use zero bytes.",
+                    f"{memory_floor_bytes}-byte reserve, even if retained runs use zero bytes."
+                    + (
+                        " No Vonk claim holds memory on this Spark, so the shortfall is "
+                        "memory used outside Vonk's workloads (the operating system "
+                        "or other processes); stopping workloads cannot free it."
+                        if reserved == 0
+                        and unmaterialized == 0
+                        and not unknown_residuals
+                        else ""
+                    ),
                     node_id=node_id,
                 )
             )

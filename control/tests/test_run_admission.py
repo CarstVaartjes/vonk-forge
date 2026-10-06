@@ -359,6 +359,32 @@ def test_system_reserve_still_blocks_a_run_without_headroom(
     }
 
 
+def test_envelope_larger_than_the_spark_is_terminal_not_a_capacity_wait(
+    tmp_path,
+) -> None:
+    from vonk_control.run_admission import (
+        RunAdmissionBusy,
+        RunPlanConflict,
+        require_admissible,
+    )
+
+    # 225 peak + 776 reserve = 1001 bytes on a 1000-byte Spark.
+    sessions, now, _node, installation = setup(
+        tmp_path, free_memory=300, system_reserve=776
+    )
+    plan = RunAdmissionService(sessions, inventory_max_age=300).plan_run(
+        installation, alias="qwen", now=now
+    )
+
+    codes = {reason.code for reason in plan.nodes[0].blockers}
+    assert plan.allowed is False
+    assert "resource.envelope_exceeds_capacity" in codes
+    assert "run.insufficient_memory" not in codes
+    with pytest.raises(RunPlanConflict) as raised:
+        require_admissible(plan)
+    assert not isinstance(raised.value, RunAdmissionBusy)
+
+
 def test_stopped_run_can_repeat_the_same_plan_digest(tmp_path) -> None:
     sessions, now, _node, installation = setup(tmp_path, free_memory=300)
     service = RunAdmissionService(
