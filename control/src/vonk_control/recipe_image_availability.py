@@ -4626,8 +4626,20 @@ class RecipeImageAvailabilityService:
                 )
                 if not self._retry_due(payload, now):
                     continue
-                if self._holds_live_lease(payload, now):
-                    continue
+                if operation.state == "running":
+                    claimed_until = payload.get("claim_until")
+                    if isinstance(claimed_until, str):
+                        try:
+                            parsed_until = datetime.fromisoformat(claimed_until)
+                            parsed_until = (
+                                parsed_until
+                                if parsed_until.tzinfo is not None
+                                else parsed_until.replace(tzinfo=UTC)
+                            )
+                            if now < parsed_until:
+                                continue
+                        except ValueError:
+                            pass
                 # The admission snapshot is canonical; an unreadable legacy row
                 # continues through its existing preparation recovery path.
                 try:
@@ -4664,20 +4676,6 @@ class RecipeImageAvailabilityService:
                     # Only the model download is outstanding: no worker slot is
                     # spent polling it, so ready work is never queued behind it.
                     continue
-                if operation.state == "running":
-                    claimed_until = payload.get("claim_until")
-                    if isinstance(claimed_until, str):
-                        try:
-                            parsed_until = datetime.fromisoformat(claimed_until)
-                            parsed_until = (
-                                parsed_until
-                                if parsed_until.tzinfo is not None
-                                else parsed_until.replace(tzinfo=UTC)
-                            )
-                            if now < parsed_until:
-                                continue
-                        except ValueError:
-                            pass
                 self._lifecycle.claim(
                     operation,
                     owner_id,
