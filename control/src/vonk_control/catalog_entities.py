@@ -300,11 +300,6 @@ class CatalogEntityService:
                 raise CatalogConflict(
                     CatalogCode.STALE_REVISION, "document revision changed"
                 )
-            if head.candidate_revision_id is not None:
-                raise CatalogConflict(
-                    CatalogCode.CANDIDATE_EXISTS,
-                    "document already has a pending candidate",
-                )
             revision = _revision(
                 root, parsed, clean, latest.revision_number + 1, actor, now
             )

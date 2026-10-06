@@ -11,8 +11,9 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -45,6 +46,22 @@ def test_a_reviewed_exception_with_a_reason_is_accepted() -> None:
     key = ("control/tests/example.py", "reportArgumentType")
 
     assert module.evaluate({key: 1}, [_exception()]) == []
+
+
+def test_typecheck_timeout_fails_with_a_visible_cause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+
+    def expired(command: list[str], **kwargs: object) -> None:
+        assert kwargs["timeout"] == module.TYPECHECK_TIMEOUT_SECONDS
+        raise subprocess.TimeoutExpired(
+            command, float(module.TYPECHECK_TIMEOUT_SECONDS)
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", expired)
+    with pytest.raises(SystemExit, match="600-second execution timeout"):
+        module._diagnostics()
 
 
 def test_an_unlisted_error_fails_even_at_the_same_total() -> None:
@@ -136,3 +153,35 @@ def test_update_keeps_known_reasons_and_reports_new_ones(
     assert entries[added]["count"] == 2
     assert entries[added]["reason"] == ""
     assert "control/src/example.py reportGeneralTypeIssues" in capsys.readouterr().err
+
+
+def test_failed_gate_preserves_the_actual_diagnostic_location_and_cause(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _module()
+    target = tmp_path / "baseline.json"
+    target.write_text(json.dumps({"schema_version": 1, "exceptions": []}))
+    monkeypatch.setattr(module, "BASELINE", target)
+    monkeypatch.setattr(module.sys, "argv", [str(SCRIPT)])
+    report = {
+        "generalDiagnostics": [
+            {
+                "file": str(ROOT / "control/src/example.py"),
+                "severity": "error",
+                "rule": "reportAttributeAccessIssue",
+                "message": "CanonicalEvidence is not exported",
+                "range": {"start": {"line": 29, "character": 0}},
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout=json.dumps(report), stderr="", returncode=1
+        ),
+    )
+    assert module.main() == 1
+    detail = capsys.readouterr().err
+    assert "control/src/example.py:30: reportAttributeAccessIssue" in detail
+    assert "CanonicalEvidence is not exported" in detail

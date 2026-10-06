@@ -29,6 +29,7 @@ from vonk_agent_protocol import (
     DistributionCode,
     DistributionObject,
     ModelFileState,
+    SecurityRefusalError,
     SecurityRefusalReason,
     canonical_message,
 )
@@ -56,6 +57,16 @@ class DistributionError(ValueError):
         super().__init__(detail)
         self.code = code
         self.detail = detail
+
+
+class DistributionRefused(SecurityRefusalError, DistributionError):
+    """Denied source access or exact distribution authority; never a cache miss."""
+
+    def __init__(
+        self, code: str, detail: str, *, reason: SecurityRefusalReason
+    ) -> None:
+        DistributionError.__init__(self, code, detail)
+        self.typed_reason = reason
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +155,11 @@ class FilesystemObjectSource:
                 or root_stat.st_uid not in {0, os.geteuid()}
                 or root_stat.st_mode & 0o022
             ):
-                raise OSError("unsafe object root")
+                raise DistributionRefused(
+                    SecurityRefusalReason.FORBIDDEN,
+                    "managed distribution object root is unsafe",
+                    reason=SecurityRefusalReason.FORBIDDEN,
+                )
             descriptor = os.open(
                 os.fspath(root),
                 os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),
@@ -174,6 +189,12 @@ class FilesystemObjectSource:
             return OpenedObject(source, expected_bytes, digest, root / digest)
         except DistributionError:
             raise
+        except PermissionError as error:
+            raise DistributionRefused(
+                SecurityRefusalReason.PERMISSION_DENIED,
+                "managed distribution object access was denied",
+                reason=SecurityRefusalReason.PERMISSION_DENIED,
+            ) from error
         except OSError as error:
             raise DistributionError(
                 DistributionCode.OBJECT_UNAVAILABLE, "stored object is unavailable"
@@ -384,6 +405,22 @@ class ModelCacheObjectSource:
             return OpenedObject(verified_path.open("rb"), size, digest, verified_path)
         except DistributionError:
             raise
+        except SecurityRefusalError as error:
+            raise DistributionRefused(
+                getattr(
+                    error,
+                    "code",
+                    (error.typed_reason or SecurityRefusalReason.FORBIDDEN).value,
+                ),
+                "NAS cache object access was refused",
+                reason=error.typed_reason or SecurityRefusalReason.FORBIDDEN,
+            ) from error
+        except PermissionError as error:
+            raise DistributionRefused(
+                SecurityRefusalReason.PERMISSION_DENIED,
+                "NAS cache object access was denied",
+                reason=SecurityRefusalReason.PERMISSION_DENIED,
+            ) from error
         except Exception as error:
             raise DistributionError(
                 DistributionCode.OBJECT_UNAVAILABLE, "NAS cache object is unavailable"
@@ -488,9 +525,13 @@ class CompositeObjectSource:
         # shared NAS object is never copied into a second Controller store.
         try:
             return self.model_source.open_object(digest, expected_bytes)
+        except SecurityRefusalError:
+            raise
         except DistributionError as model_error:
             try:
                 return self.oci_source.open_object(digest, expected_bytes)
+            except SecurityRefusalError:
+                raise
             except DistributionError:
                 raise model_error
 
@@ -855,9 +896,10 @@ class DistributionService:
                         )
                     )
                 elif row.state != "active":
-                    raise DistributionError(
+                    raise DistributionRefused(
                         SecurityRefusalReason.DISTRIBUTION_REVOKED.value,
                         "assignment is no longer active",
+                        reason=SecurityRefusalReason.DISTRIBUTION_REVOKED,
                     )
                 else:
                     assignment = self._from_row(row)
@@ -1026,6 +1068,7 @@ def record_distributed_runtime_image(
 __all__ = [
     "CompositeObjectSource",
     "DistributionError",
+    "DistributionRefused",
     "DistributionService",
     "FilesystemObjectSource",
     "MemoryObjectSource",
