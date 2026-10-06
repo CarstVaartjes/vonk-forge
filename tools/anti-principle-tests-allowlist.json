@@ -2002,7 +2002,7 @@
     },
     {
       "path": "control/tests/test_recipe_operations.py",
-      "function": "test_install_ignores_old_digest_but_request_keys_remain_scoped",
+      "function": "test_install_requires_reviewed_digest_and_request_keys_remain_scoped",
       "kind": "ending-without-fresh-request",
       "count": 1
     },

@@ -1431,5 +1431,14 @@
       "count": 1
     }
   ],
-  "exceptions": []
+  "exceptions": [
+    {
+      "path": "control/src/vonk_control/admission_locking.py",
+      "function": "admission_wait_exhausted",
+      "kind": "loop-without-deadline",
+      "count": 1,
+      "reason": "input-validation",
+      "justification": "Walks an already materialized finite Python exception cause chain to classify SQLSTATE before retry; object identities are recorded in seen and repeated identities or None terminate traversal. It performs no external wait or sleep."
+    }
+  ]
 }

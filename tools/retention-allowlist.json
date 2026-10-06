@@ -40,18 +40,6 @@
     },
     {
       "path": "control/src/vonk_control/models.py",
-      "function": "AgentOperation",
-      "kind": "table-without-delete-path",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/models.py",
-      "function": "AgentOperationAttempt",
-      "kind": "table-without-delete-path",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/models.py",
       "function": "AgentPresence",
       "kind": "table-without-delete-path",
       "count": 1
@@ -112,55 +100,13 @@
     },
     {
       "path": "control/src/vonk_control/models.py",
-      "function": "Job",
-      "kind": "table-without-delete-path",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/models.py",
-      "function": "JobAttempt",
-      "kind": "table-without-delete-path",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/models.py",
-      "function": "ModelCacheOperation",
-      "kind": "table-without-delete-path",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/models.py",
-      "function": "NodeArtifact",
-      "kind": "table-without-delete-path",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/models.py",
       "function": "NodeTelemetryLatest",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
       "path": "control/src/vonk_control/models.py",
-      "function": "RecipeLibrarySyncRun",
-      "kind": "table-without-delete-path",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/models.py",
       "function": "RecipeRouteAuthority",
-      "kind": "table-without-delete-path",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/models.py",
-      "function": "ResourceReservation",
-      "kind": "table-without-delete-path",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/models.py",
-      "function": "RoutePublication",
       "kind": "table-without-delete-path",
       "count": 1
     },
