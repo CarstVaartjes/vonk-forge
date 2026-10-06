@@ -33,7 +33,8 @@ use crate::{
 };
 use vonk_agent_protocol::generated::{
     AgentFailureKind, AgentInstallResult, AgentOperation, ArtifactDistributionResult, FailureCode,
-    RecipeReconcileResult, RecipeStartResult, RecipeStopResult, RecipeUninstallResult, WaitReason,
+    RecipeReconcileResult, RecipeStartResult, RecipeStopResult, RecipeUninstallResult,
+    SecurityRefusalReason, WaitReason,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, OperationProgress,
@@ -674,14 +675,36 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
+        self.stop_run_exact(claim, run_id, stop_timeout_seconds, cancel_pending_start)
+            .await
+            .map_err(|stall| stall.result)
+    }
+
+    /// Stop the run of this order and clear its retained record.
+    ///
+    /// The helper removes a container only when its labels equal this order's
+    /// whole identity (managed, run, target, installation, generation, plan
+    /// digest); a container that differs is refused, never touched, and that
+    /// refusal is reported as `identity_refused`.
+    #[allow(clippy::result_large_err)]
+    async fn stop_run_exact(
+        &self,
+        claim: &AgentClaim,
+        run_id: &str,
+        stop_timeout_seconds: u32,
+        cancel_pending_start: bool,
+    ) -> Result<(), StopStall>
+    where
+        R: ProcessRunner,
+    {
         let Some(stop_plan) = exact_stop_plan_from_claim(claim, run_id, cancel_pending_start)
         else {
-            return Err(unconfirmed(
+            return Err(StopStall::unproven(unconfirmed(
                 WaitReason::StopUnconfirmed,
                 "workload stop remains unconfirmed",
                 UnknownEvidence::at("stop-plan")
                     .because("no exact stop plan could be derived from the claim"),
-            ));
+            )));
         };
         if stop_plan
             .compiled_execution_plan
@@ -689,31 +712,65 @@ impl<R> RecipeExecutor<'_, R> {
             .stop_timeout_seconds
             != stop_timeout_seconds
         {
-            return Err(unconfirmed(
+            return Err(StopStall::unproven(unconfirmed(
                 WaitReason::StopUnconfirmed,
                 "workload stop remains unconfirmed",
                 UnknownEvidence::at("stop-plan")
                     .because("the stop timeout differs from the authorized plan"),
-            ));
+            )));
         }
         if let Err(error) = self
             .execute_host_runtime_plan(claim, Vec::new(), HostRuntimePlan::Stop(stop_plan))
             .await
         {
-            return Err(unconfirmed(
-                WaitReason::StopUnconfirmed,
-                "workload stop remains unconfirmed",
-                host_runtime_evidence("stop", &error),
-            ));
+            return Err(StopStall {
+                identity_refused: matches!(
+                    &error,
+                    crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }
+                        if vocabulary::is(code, SecurityRefusalReason::OperationInvalidArtifact)
+                ),
+                result: unconfirmed(
+                    WaitReason::StopUnconfirmed,
+                    "workload stop remains unconfirmed",
+                    host_runtime_evidence("stop", &error),
+                ),
+            });
         }
         if let Err(error) = self.runtime.complete_stop(run_id) {
-            return Err(unconfirmed(
+            return Err(StopStall::unproven(unconfirmed(
                 WaitReason::CleanupUnconfirmed,
                 "workload local cleanup remains unconfirmed",
                 UnknownEvidence::at("stop-cleanup").because(error.safe_category()),
-            ));
+            )));
         }
         Ok(())
+    }
+
+    /// A retained run that is not exactly this start's: remove what is proven
+    /// this order's and let the start go on, or refuse what is not.
+    ///
+    /// The exact stop is the proof: it removes a container only when every
+    /// identity label matches the authorized order. A container that does not
+    /// match is another party's (or another generation's, which the Controller
+    /// stops through its own recovery) and is left untouched.
+    #[allow(clippy::result_large_err)]
+    async fn heal_retained_run(
+        &self,
+        claim: &AgentClaim,
+        run_id: &str,
+        stop_timeout_seconds: u32,
+    ) -> Result<(), ExecutionResult>
+    where
+        R: ProcessRunner,
+    {
+        match self
+            .stop_run_exact(claim, run_id, stop_timeout_seconds, false)
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(stall) if stall.identity_refused => Err(retained_container_foreign(run_id)),
+            Err(stall) => Err(stall.result),
+        }
     }
 
     /// Finish the model-custody ACL transition of a start.
@@ -1891,7 +1948,24 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         Err(crate::oci::OciError::ReconciliationBusy) => {
                             return temporary_runtime_observation_failure();
                         }
-                        Err(error) => return retained_identity_failure(&error),
+                        Err(_) => {
+                            // The agent's own record of this run is not this
+                            // start's (another generation, another identity,
+                            // unreadable). Remove what is proven this order's,
+                            // clear the record and start fresh; a container
+                            // that is not proven is refused, never touched.
+                            if let Err(result) = self
+                                .heal_retained_run(
+                                    claim,
+                                    &run_id,
+                                    spec.lifecycle.stop_timeout_seconds,
+                                )
+                                .await
+                            {
+                                return result;
+                            }
+                            None
+                        }
                     }
                 };
                 let retained_existing = retained_plan.is_some();
@@ -2094,12 +2168,31 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             if temporary_observation_error(&error) {
                                 return temporary_runtime_observation_failure();
                             }
-                            // A foreign or uninspectable exact container: the
-                            // helper's verdict is the evidence, and removing a
-                            // container this agent does not own is never its
-                            // call. The start fails definitively with that
-                            // evidence and the Controller decides what to do
-                            // with the run.
+                            // The helper found the exact-name container is not
+                            // this start's. Remove it only when the exact stop
+                            // proves it this order's, then re-issue; refuse
+                            // (untouched) when it is not. Any other failure is
+                            // reported with the helper's evidence.
+                            if matches!(
+                                &error,
+                                crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }
+                                    if vocabulary::is(
+                                        code,
+                                        SecurityRefusalReason::OperationInvalidArtifact
+                                    )
+                            ) {
+                                return match self
+                                    .heal_retained_run(
+                                        claim,
+                                        &run_id,
+                                        spec.lifecycle.stop_timeout_seconds,
+                                    )
+                                    .await
+                                {
+                                    Ok(()) => retained_container_removed(&run_id),
+                                    Err(result) => result,
+                                };
+                            }
                             return runtime_observation_failure(&error);
                         }
                         if !collective_readiness
@@ -2483,6 +2576,55 @@ fn retryable_reconciliation_storage_error(error: &OciError) -> bool {
     })
 }
 
+/// An exact stop that could not be confirmed.
+struct StopStall {
+    /// The unknown outcome the stop reports when nothing more is known.
+    result: ExecutionResult,
+    /// The helper refused because the container's identity is not this order's.
+    identity_refused: bool,
+}
+
+impl StopStall {
+    fn unproven(result: ExecutionResult) -> Self {
+        Self {
+            result,
+            identity_refused: false,
+        }
+    }
+}
+
+/// A container this agent cannot prove it owns occupies the name the start
+/// needs. The name is quoted because the text sanitizer redacts a bare 40+
+/// character identifier-like word, and the operator needs this one. It is left untouched, the start waits visibly (a prerequisite, not a
+/// broken contract) and proceeds once the name is free.
+fn retained_container_foreign(run_id: &str) -> ExecutionResult {
+    ExecutionResult::Failed(
+        Failure::new(format!(
+            "container \"vonk-{run_id}\" occupies the name this start needs and is not \
+             provably this order's; it was left untouched, and the start proceeds once it is gone"
+        ))
+        .code(FailureCode::RetainedContainerForeign)
+        .kind(AgentFailureKind::ResourcePrerequisite)
+        .retry_after(Some(RETAINED_FOREIGN_RETRY_SECONDS))
+        .stage("retained-container")
+        .diagnostic(format!("container=\"vonk-{run_id}\"")),
+    )
+}
+
+/// The exact retained container was removed: the next attempt starts fresh.
+fn retained_container_removed(run_id: &str) -> ExecutionResult {
+    ExecutionResult::Failed(
+        Failure::new("a retained container of this order was removed; the start is re-issued")
+            .kind(AgentFailureKind::TemporaryDependency)
+            .retry_after(Some(2))
+            .stage("retained-container")
+            .diagnostic(format!("removed=\"vonk-{run_id}\"")),
+    )
+}
+
+/// How soon a start refused for a foreign container looks at the name again.
+const RETAINED_FOREIGN_RETRY_SECONDS: u32 = 30;
+
 /// The effect could not be established; the Controller observes it.
 fn unconfirmed(
     wait_reason: WaitReason,
@@ -2532,20 +2674,6 @@ fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) ->
         HostRuntimeError::HelperProtocolBound { .. } => false,
         HostRuntimeError::StopUncertain => false,
     }
-}
-
-/// The agent's own retained record of this run does not match the authorized
-/// start (another generation, another installation, unreadable metadata). That
-/// is proven locally, so the start fails with a definite code; the cause is the
-/// bounded stage and category, never the content of the record. Nothing is
-/// removed: the retained run may belong to a container that is still running.
-fn retained_identity_failure(error: &OciError) -> ExecutionResult {
-    let (stage, category) = error.safe_start_context();
-    ExecutionResult::Failed(
-        Failure::new("retained workload identity does not match the authorized start")
-            .stage("retained-identity")
-            .diagnostic(format!("stage={stage}; category={category}")),
-    )
 }
 
 fn temporary_runtime_observation_failure() -> ExecutionResult {
@@ -5059,29 +5187,50 @@ mod tests {
     }
 
     #[test]
-    fn a_retained_identity_mismatch_is_a_definite_start_failure_with_its_evidence() {
-        // Wrong implementation: the mismatch was reported as a wait with no
-        // evidence and no action, and a re-issued start met the same retained
-        // record again.
+    fn a_foreign_container_is_refused_untouched_and_named_not_an_invalid_contract() {
+        // Wrong implementation: the start failed with no failure kind, which the
+        // Controller reads as an invalid contract and ends; or it waited with no
+        // action. The refusal is a prerequisite that names the container.
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let run_id = "11111111-1111-4111-8111-111111111111";
+        let failed = failed_outcome(&start_claim, super::retained_container_foreign(run_id));
+
+        assert_eq!(failed.code, FailureCode::RetainedContainerForeign);
+        assert_eq!(
+            failed.failure_kind,
+            Some(AgentFailureKind::ResourcePrerequisite)
+        );
+        assert!(
+            failed
+                .retry_after_seconds
+                .is_some_and(|seconds| seconds > 0)
+        );
+        assert!(failed.reason.contains(&format!("\"vonk-{run_id}\"")));
+        let evidence = evidence_of(&failed);
+        assert_eq!(evidence.stage.as_deref(), Some("retained-container"));
+        assert_eq!(
+            evidence.diagnostic.as_deref(),
+            Some(format!("container=\"vonk-{run_id}\"").as_str())
+        );
+    }
+
+    #[test]
+    fn a_removed_retained_container_re_issues_the_start() {
+        // Wrong implementation: after removing its own stale container the start
+        // reported a terminal failure, so the load ended instead of starting fresh.
         let mut start_claim = claim();
         start_claim.operation = "recipe.start".parse().unwrap();
         let failed = failed_outcome(
             &start_claim,
-            super::retained_identity_failure(&crate::oci::OciError::Runtime),
+            super::retained_container_removed("11111111-1111-4111-8111-111111111111"),
         );
 
-        assert_eq!(failed.code, FailureCode::RecipeStartFailed);
-        assert_eq!(failed.failure_kind, None);
-        let evidence = evidence_of(&failed);
-        assert_eq!(evidence.stage.as_deref(), Some("retained-identity"));
-        assert!(
-            evidence
-                .diagnostic
-                .as_deref()
-                .is_some_and(|text| text.contains("category=runtime")),
-            "the cause is the bounded category, got {:?}",
-            evidence.diagnostic
+        assert_eq!(
+            failed.failure_kind,
+            Some(AgentFailureKind::TemporaryDependency)
         );
+        assert_ne!(failed.code, FailureCode::RetainedContainerForeign);
     }
 
     #[test]

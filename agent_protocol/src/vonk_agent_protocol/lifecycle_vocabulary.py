@@ -569,6 +569,9 @@ class FailureCode(WireEnum):
     RECIPE_RECONCILIATION_DEPENDENCY_UNAVAILABLE = (
         "recipe_reconciliation_dependency_unavailable"
     )
+    #: A container this agent cannot prove it owns occupies the exact name a start
+    #: needs. It is left untouched; the start waits for the name to be free.
+    RETAINED_CONTAINER_FOREIGN = "retained_container_foreign"
 
 
 class LifecycleVocabulary(WireModel):

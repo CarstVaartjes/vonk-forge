@@ -341,11 +341,17 @@ wait: `ExecutionResult::unknown` takes an `UnknownEvidence` (the stage that
 stopped and a bounded cause or helper code), which reaches the Controller as the
 outcome's `evidence`. Work that is safe to repeat is repeated locally first (the
 model-custody step of a start, three bounded retries on transient storage
-errors), and a proven mismatch (a retained run whose identity is not the
-authorized start's, a foreign container the helper cannot confirm) is a
-definite `Failed` outcome with that evidence, never a wait and never a removal
-of something the agent does not own. `rust/crates/vonk-agent/tests/wait_actions.rs`
-requires an advertised action for every wait reason the agent constructs.
+errors). A retained run that is not exactly the start's is healed or refused by
+the exact stop, which removes a container only when every identity label equals
+the authorized order's: what is proven the order's is removed and the start goes
+on; a container that is not proven (another party's, or another generation's,
+which the Controller stops through its own recovery) is left untouched and the
+start ends as `retained_container_foreign` with `failure_kind: resource-prerequisite`,
+naming the container. The Controller reads that as a prerequisite, re-issues the
+start with backoff and keeps the load open until the name is free; it is never an
+invalid contract and never removes anything the agent does not own.
+`rust/crates/vonk-agent/tests/wait_actions.rs` requires an advertised action
+for every wait reason the agent constructs.
 
 The three error categories, `SecurityRefusal`, `InvalidRequest` and
 `UnknownError`, are the only things a lifecycle adapter may raise or report, each

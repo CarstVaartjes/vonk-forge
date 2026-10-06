@@ -2040,6 +2040,60 @@ def test_transient_start_failure_retries_automatically_without_operator(
     assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
 
 
+def test_a_foreign_container_refusal_waits_visibly_and_the_start_resumes_when_it_is_gone(
+    service,
+) -> None:
+    """The typed refusal is a prerequisite wait, not an invalid contract.
+
+    Catches the refusal read as ``invalid-contract``: the start order ended
+    failed and the load with it, although the container may be removed a moment
+    later.  The order stays re-issuable, names the container in its reason, and
+    its parent stays open so the same intent starts once the name is free.
+    """
+
+    from vonk_agent_protocol import AgentResult
+
+    jobs, sessions, clock = service
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.record_result(
+        AgentResult.model_validate_json(
+            json.dumps(
+                {
+                    "fence": claim.model_dump(mode="json")["fence"],
+                    "state": "failed",
+                    "result": {
+                        "kind": "failed",
+                        "code": "retained_container_foreign",
+                        "reason": "container vonk-x occupies the name this start needs",
+                        "failure_kind": "resource-prerequisite",
+                        "retry_after_seconds": 30,
+                        "evidence": {
+                            "stage": "retained-container",
+                            "diagnostic": "container=vonk-x",
+                        },
+                    },
+                }
+            )
+        )
+    )
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state == "waiting-for-operator"
+        assert "vonk-x" in (stored.status_reason or "")
+        assert stored.next_action_at is not None
+        due = stored.next_action_at.replace(tzinfo=UTC)
+    assert due >= clock.now + timedelta(seconds=30)
+    assert job_state(sessions, operation.parent_job_id).state == "queued"
+    clock.now = due + timedelta(seconds=1)
+    retry = claim_agent(jobs, NODE_A, "serial-a")
+    assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
+
+
 def test_spent_start_budget_fails_a_parked_start_instead_of_waiting(service) -> None:
     """A start past its immutable deadline is failed, never parked or retried.
 

@@ -239,6 +239,7 @@ export const FailureCode = {
   RUNTIME_OBSERVATION_UNAVAILABLE: "runtime_observation_unavailable",
   INSTALLATION_RECONCILIATION_BUSY: "installation_reconciliation_busy",
   RECIPE_RECONCILIATION_DEPENDENCY_UNAVAILABLE: "recipe_reconciliation_dependency_unavailable",
+  RETAINED_CONTAINER_FOREIGN: "retained_container_foreign",
 } as const;
 export type FailureCode = (typeof FailureCode)[keyof typeof FailureCode];
 

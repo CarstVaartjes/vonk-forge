@@ -124,7 +124,7 @@
     },
     {
       "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "RecipeExecutor::stop_start_run",
+      "function": "RecipeExecutor::stop_run_exact",
       "kind": "rust-result",
       "operation_kinds": [
         "recipe.start",
