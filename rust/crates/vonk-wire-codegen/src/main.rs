@@ -243,6 +243,30 @@ fn strip_docs(item: &mut Item) {
         item.attrs
             .push(parse_quote!(#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]));
     }
+    // A closed word set whose members all live in one namespace (`run.*`,
+    // `resource.*`) names every variant with that namespace as its prefix.
+    // The wire words, not the Rust names, are the contract.
+    if let Item::Enum(item) = item
+        && item.variants.len() >= 3
+        && item
+            .variants
+            .iter()
+            .all(|variant| matches!(variant.fields, syn::Fields::Unit))
+    {
+        let prefixes: std::collections::BTreeSet<String> = item
+            .variants
+            .iter()
+            .map(|variant| {
+                let name = variant.ident.to_string();
+                let tail = name.chars().skip(1).position(char::is_uppercase);
+                name[..tail.map_or(name.len(), |index| index + 1)].to_string()
+            })
+            .collect();
+        if prefixes.len() == 1 {
+            item.attrs
+                .push(parse_quote!(#[allow(clippy::enum_variant_names)]));
+        }
+    }
     if let Item::Struct(item) = item {
         for field in &mut item.fields {
             if let syn::Type::Path(path) = &field.ty {

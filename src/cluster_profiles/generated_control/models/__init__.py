@@ -456,9 +456,11 @@ from .recipe_validation_check_kind import RecipeValidationCheckKind
 from .removed_recipe_node_result import RemovedRecipeNodeResult
 from .request_validation_issue import RequestValidationIssue
 from .request_validation_problem import RequestValidationProblem
+from .resource_blocker_code import ResourceBlockerCode
 from .resource_demand_evidence import ResourceDemandEvidence
 from .resource_demand_evidence_evidence_state import ResourceDemandEvidenceEvidenceState
 from .rollout_preparation import RolloutPreparation
+from .run_admission_code import RunAdmissionCode
 from .run_memory_residual_range import RunMemoryResidualRange
 from .run_memory_residual_range_reservation_kind import RunMemoryResidualRangeReservationKind
 from .run_node_change import RunNodeChange
@@ -1036,9 +1038,11 @@ __all__ = (
     "RemovedRecipeNodeResult",
     "RequestValidationIssue",
     "RequestValidationProblem",
+    "ResourceBlockerCode",
     "ResourceDemandEvidence",
     "ResourceDemandEvidenceEvidenceState",
     "RolloutPreparation",
+    "RunAdmissionCode",
     "RunMemoryResidualRange",
     "RunMemoryResidualRangeReservationKind",
     "RunNodeChange",

@@ -74,6 +74,8 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     OperatorSurface,
+    ResourceBlockerCode,
+    RunAdmissionCode,
     SecurityRefusalReason,
     WaitReason,
     WaitVerdict,
@@ -441,7 +443,14 @@ def exception_classes(trees: Sequence[ast.Module]) -> frozenset[str]:
 #: (``SecurityRefusalReason.GRANT_INVALID.value``).
 _CONTRACT_CODE_ENUMS = {
     enum.__name__: enum
-    for enum in (SecurityRefusalReason, FailureCode, WaitReason, InvalidRequestReason)
+    for enum in (
+        SecurityRefusalReason,
+        FailureCode,
+        WaitReason,
+        InvalidRequestReason,
+        RunAdmissionCode,
+        ResourceBlockerCode,
+    )
 }
 
 

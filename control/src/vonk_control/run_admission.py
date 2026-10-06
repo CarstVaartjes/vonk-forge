@@ -12,6 +12,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import ResourceBlockerCode, RunAdmissionCode
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 
@@ -64,11 +65,11 @@ from .topology import Placement, TopologyError, validate_topology
 
 _PORT_CONFLICTS = {
     "service": (
-        "run.port_occupied",
+        RunAdmissionCode.PORT_OCCUPIED,
         "Port {port} is already reserved on this GPU node.",
     ),
     "rendezvous": (
-        "run.rendezvous_port_occupied",
+        RunAdmissionCode.RENDEZVOUS_PORT_OCCUPIED,
         "Multi-node rendezvous port {port} is already reserved.",
     ),
 }
@@ -270,7 +271,7 @@ def run_port_blockers(
 
 
 class RunPlanConflict(RuntimeError):
-    code = "run.plan_invalid"
+    code = RunAdmissionCode.PLAN_INVALID
 
 
 class RunAdmissionBusy(RunPlanConflict):
@@ -282,7 +283,7 @@ class RunAdmissionBusy(RunPlanConflict):
     real cause instead of a generic busy writer.
     """
 
-    code = "run.capacity_busy"
+    code = RunAdmissionCode.CAPACITY_BUSY
 
     def __init__(
         self,
@@ -311,18 +312,18 @@ def _blocker_text(blockers: Iterable[AdmissionReason]) -> str:
 
 #: Typed non-contention waits a run admission can name besides plan blockers.
 RUN_ADMISSION_WAIT_CODES = (
-    "run.target_membership_changed",
-    "run.mapping_not_ready",
+    RunAdmissionCode.TARGET_MEMBERSHIP_CHANGED,
+    RunAdmissionCode.MAPPING_NOT_READY,
 )
 
 RETRYABLE_PLAN_BLOCKERS = frozenset(
     {
-        "run.inventory_missing",
-        "run.stale_inventory",
-        "run.insufficient_memory",
-        "run.port_occupied",
-        "run.rendezvous_port_occupied",
-        "resource.insufficient",
+        RunAdmissionCode.INVENTORY_MISSING,
+        RunAdmissionCode.STALE_INVENTORY,
+        RunAdmissionCode.INSUFFICIENT_MEMORY,
+        RunAdmissionCode.PORT_OCCUPIED,
+        RunAdmissionCode.RENDEZVOUS_PORT_OCCUPIED,
+        ResourceBlockerCode.INSUFFICIENT,
     }
 )
 
@@ -563,7 +564,7 @@ class RunAdmissionService:
             for run_id, run_alias in unreconciled_lost_ranks.get(placement.node_id, ()):
                 blockers.append(
                     AdmissionReason(
-                        "run.unreconciled_lost_rank",
+                        RunAdmissionCode.UNRECONCILED_LOST_RANK,
                         f"Spark {placement.node_id} still has rank state for lost "
                         f"model {run_alias} ({run_id}); reconcile it before placing work.",
                     )
@@ -578,21 +579,22 @@ class RunAdmissionService:
             ) not in installed_nodes:
                 blockers.append(
                     AdmissionReason(
-                        "run.not_installed",
+                        RunAdmissionCode.NOT_INSTALLED,
                         "Recipe content is not installed for this mapped rank.",
                     )
                 )
             if snapshot is None:
                 blockers.append(
                     AdmissionReason(
-                        "run.inventory_missing",
+                        RunAdmissionCode.INVENTORY_MISSING,
                         "No authenticated memory inventory is available.",
                     )
                 )
             elif snapshot.stale:
                 blockers.append(
                     AdmissionReason(
-                        "run.stale_inventory", "GPU node memory inventory is stale."
+                        RunAdmissionCode.STALE_INVENTORY,
+                        "GPU node memory inventory is stale.",
                     )
                 )
             role = role_by_name.get(placement.role)
@@ -656,7 +658,7 @@ class RunAdmissionService:
             ):
                 blockers.append(
                     AdmissionReason(
-                        "run.fabric_address_missing",
+                        RunAdmissionCode.FABRIC_ADDRESS_MISSING,
                         "Authenticated direct-fabric evidence is unavailable.",
                     )
                 )
@@ -697,8 +699,8 @@ class RunAdmissionService:
             free_after = memory_fit.selected_free_after_bytes
             for reason in memory_fit.reasons:
                 projected = AdmissionReason(
-                    "run.insufficient_memory"
-                    if reason.code.startswith("resource.insufficient")
+                    RunAdmissionCode.INSUFFICIENT_MEMORY
+                    if reason.code.startswith(ResourceBlockerCode.INSUFFICIENT)
                     else reason.code,
                     reason.detail,
                 )
@@ -731,7 +733,7 @@ class RunAdmissionService:
             )
         if multi_node and len(fabric_addresses) != len(set(fabric_addresses)):
             duplicate = AdmissionReason(
-                "run.fabric_address_duplicate",
+                RunAdmissionCode.FABRIC_ADDRESS_DUPLICATE,
                 "Mapped GPU nodes must have unique direct-fabric addresses.",
             )
             plans = [
@@ -893,13 +895,13 @@ class RunAdmissionService:
         if {node.node_id for node in fresh.nodes} != set(node_ids):
             raise RunAdmissionBusy(
                 "run target membership changed during admission",
-                code="run.target_membership_changed",
+                code=RunAdmissionCode.TARGET_MEMBERSHIP_CHANGED,
             )
         plan = fresh
         if mapping is None or mapping.state != "ready":
             raise RunAdmissionBusy(
                 "run mapping is waiting to become ready",
-                code="run.mapping_not_ready",
+                code=RunAdmissionCode.MAPPING_NOT_READY,
             )
         if (
             installation is None
@@ -916,11 +918,11 @@ class RunAdmissionService:
                 for node in plan.nodes
             )
         ):
-            raise RunPlanConflict("run.plan_stale")
+            raise RunPlanConflict(RunAdmissionCode.PLAN_STALE)
         try:
             resolve_recipe_entities(session, revision.document)
         except RecipeRuntimeSpecError as error:
-            raise RunPlanConflict("run.dependencies_stale") from error
+            raise RunPlanConflict(RunAdmissionCode.DEPENDENCIES_STALE) from error
         # The fresh plan above chose each node's endpoint host port under the
         # node locks this admission holds; reserve exactly that port.
         port_demands = {
@@ -990,7 +992,7 @@ class RunAdmissionService:
                 }
             )
         except RecipeExecutionContractError as error:
-            raise RunPlanConflict("run.plan_invalid") from error
+            raise RunPlanConflict(RunAdmissionCode.PLAN_INVALID) from error
         run = RecipeRun(
             installation_id=plan.installation_id,
             mapping_id=plan.mapping_id,

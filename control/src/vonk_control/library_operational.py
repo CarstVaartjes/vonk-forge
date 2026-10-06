@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import RunAdmissionCode
 
 from .library_contract import (
     _MAX_CANDIDATE_NODES,
@@ -133,7 +134,7 @@ def _run_health(
             expected_rank_count=0,
             healthy_rank_count=0,
             healthy=False,
-            evidence_code="run.plan_invalid",
+            evidence_code=RunAdmissionCode.PLAN_INVALID,
             evidence_detail="The persisted run plan does not contain a valid nodes list; rank health fails closed.",
         )
     expected_count = len(raw_expected)
@@ -170,7 +171,7 @@ def _run_health(
             expected_rank_count=expected_count,
             healthy_rank_count=0,
             healthy=False,
-            evidence_code="run.plan_invalid",
+            evidence_code=RunAdmissionCode.PLAN_INVALID,
             evidence_detail="The persisted run plan has malformed or duplicate member evidence; rank health fails closed.",
         )
 

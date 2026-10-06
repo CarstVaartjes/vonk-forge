@@ -255,6 +255,35 @@ export const FailureCode = {
 } as const;
 export type FailureCode = (typeof FailureCode)[keyof typeof FailureCode];
 
+export const RunAdmissionCode = {
+  PLAN_INVALID: "run.plan_invalid",
+  PLAN_STALE: "run.plan_stale",
+  DEPENDENCIES_STALE: "run.dependencies_stale",
+  CAPACITY_BUSY: "run.capacity_busy",
+  TARGET_MEMBERSHIP_CHANGED: "run.target_membership_changed",
+  MAPPING_NOT_READY: "run.mapping_not_ready",
+  INVENTORY_MISSING: "run.inventory_missing",
+  STALE_INVENTORY: "run.stale_inventory",
+  INSUFFICIENT_MEMORY: "run.insufficient_memory",
+  PORT_OCCUPIED: "run.port_occupied",
+  RENDEZVOUS_PORT_OCCUPIED: "run.rendezvous_port_occupied",
+  UNRECONCILED_LOST_RANK: "run.unreconciled_lost_rank",
+  NOT_INSTALLED: "run.not_installed",
+  FABRIC_ADDRESS_MISSING: "run.fabric_address_missing",
+  FABRIC_ADDRESS_DUPLICATE: "run.fabric_address_duplicate",
+} as const;
+export type RunAdmissionCode = (typeof RunAdmissionCode)[keyof typeof RunAdmissionCode];
+
+export const ResourceBlockerCode = {
+  CAPACITY_UNKNOWN: "resource.capacity_unknown",
+  INSUFFICIENT: "resource.insufficient",
+  INSUFFICIENT_CAPACITY: "resource.insufficient_capacity",
+  INSUFFICIENT_CAPACITY_AFTER_STOP: "resource.insufficient_capacity_after_stop",
+  INSUFFICIENT_RESERVATION_BUDGET: "resource.insufficient_reservation_budget",
+  RESIDENT_USAGE_UNKNOWN: "resource.resident_usage_unknown",
+} as const;
+export type ResourceBlockerCode = (typeof ResourceBlockerCode)[keyof typeof ResourceBlockerCode];
+
 /** What a retired state spelling means, accepted as input for one release. */
 export const STATE_INPUT_ALIASES = {
   "waiting-for-operator": LifecycleState.NEEDS_OPERATOR,

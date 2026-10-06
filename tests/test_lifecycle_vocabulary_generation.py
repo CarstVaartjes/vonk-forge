@@ -30,6 +30,8 @@ from vonk_agent_protocol import (
     OperatorActionName,
     OperatorSurface,
     OutcomeKind,
+    ResourceBlockerCode,
+    RunAdmissionCode,
     SecurityRefusalReason,
     StateAlias,
     StateWriteKind,
@@ -64,6 +66,8 @@ VOCABULARY: tuple[type[Enum], ...] = (
     InvalidRequestReason,
     SecurityRefusalReason,
     FailureCode,
+    RunAdmissionCode,
+    ResourceBlockerCode,
 )
 
 
