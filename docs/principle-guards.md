@@ -25,6 +25,7 @@ Each supports `--lower`, which refuses new or increased counts. The tests also
 compare allowances against `origin/main`: increasing a listed count or adding
 new debt fails. A new exception requires one of `security-edge`,
 `irreversible-keep`, `legacy-alias-read`, `input-validation`, `service-absent`,
+`dependency-unavailable`,
 and a written justification. Exception counts are ratcheted too. Run the guard
 suite after editing an exception; it must match actual findings exactly.
 
@@ -57,7 +58,7 @@ The transient classification is heuristic and current findings require review
 by the track that owns the behavior. It does not rewrite product tests.
 
 `non_blocking.assert_ended_without_blocking` accepts fixture adapters exposing
-`state` and `request_key`. Failed endings must carry a typed reason via
+a string `state` and a `request_key` or canonical Job `request_id`. Failed endings must carry a typed reason via
 `reason_code`, `blockers[].code`, or `failure.code`; an exposed `refusal` must
 be empty for a fresh receipt. Actual Job ORM rows may expose the identity as
 `request_id`; the helper compares either form without inventing receipt fields.

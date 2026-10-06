@@ -2733,14 +2733,16 @@
       "function": "test_missing_source_observations_follow_exact_file_and_survive_restart",
       "kind": "transient-failed-assertion",
       "count": 1,
-      "reason": "Confirmed consecutive HTTP 404 observations exhaust the exact file bound across restart; source_gone is an intentional terminal fact, while earlier observations remain queued."
+      "justification": "Confirmed consecutive HTTP 404 observations exhaust the exact file bound across restart; source_gone is an intentional terminal fact, while earlier observations remain queued.",
+      "reason": "dependency-unavailable"
     },
     {
       "path": "control/tests/test_model_cache.py",
       "function": "test_permanent_missing_source_ends_and_admits_a_fresh_download",
       "kind": "transient-failed-assertion",
       "count": 2,
-      "reason": "Five confirmed HTTP 404 or 410 observations establish source_gone after bounded retries; the same connected test proves a fresh authorized download succeeds and retains the original ending receipt."
+      "justification": "Five confirmed HTTP 404 or 410 observations establish source_gone after bounded retries; the same connected test proves a fresh authorized download succeeds and retains the original ending receipt.",
+      "reason": "dependency-unavailable"
     }
   ]
 }

@@ -27,6 +27,7 @@ REASONS = frozenset(
         "legacy-alias-read",
         "input-validation",
         "service-absent",
+        "dependency-unavailable",
     }
 )
 ALLOWLISTS = {
