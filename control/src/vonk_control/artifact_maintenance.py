@@ -7,15 +7,17 @@ import json
 import logging
 import os
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Literal
 
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from .artifact_jobs import StorageReconciliation
 from .logging import log_event
 
 _LOGGER = logging.getLogger(__name__)
-_STATE_VERSION = 1
 
 
 def _aware_utc(value: datetime) -> datetime:
@@ -24,12 +26,25 @@ def _aware_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+class _CadenceState(BaseModel):
+    """The durable cadence record every Controller process shares."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    version: Literal[1] = 1
+    next_due_at: str | None = None
+    last_attempt_at: str | None = None
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+    last_failure_type: str | None = None
+
+
 class ArtifactMaintenanceCadence:
     """Run one bounded reconciliation per shared, durable cadence interval."""
 
     def __init__(
         self,
-        reconcile: Callable[..., Mapping[str, object]],
+        reconcile: Callable[..., StorageReconciliation],
         *,
         state_root: Path,
         interval_seconds: int,
@@ -85,17 +100,17 @@ class ArtifactMaintenanceCadence:
                 # API startup already reconciles the store. Persisting the baseline
                 # prevents worker restarts or replicas from resetting the cadence.
                 next_due_at = now + self._interval
-                self._write_state({"next_due_at": next_due_at.isoformat()})
+                self._write_state(_CadenceState(next_due_at=next_due_at.isoformat()))
                 self._next_local_check_at = next_due_at
                 return
             if now < next_due_at:
                 self._next_local_check_at = next_due_at
                 return
 
-            state["last_attempt_at"] = now.isoformat()
-            state["next_due_at"] = (now + self._interval).isoformat()
-            state.pop("last_failure_at", None)
-            state.pop("last_failure_type", None)
+            state.last_attempt_at = now.isoformat()
+            state.next_due_at = (now + self._interval).isoformat()
+            state.last_failure_at = None
+            state.last_failure_type = None
             self._write_state(state)
             self._next_local_check_at = now + self._interval
             try:
@@ -105,54 +120,52 @@ class ArtifactMaintenanceCadence:
                     "artifact storage reconciliation failed",
                     extra={"failure_type": type(error).__name__},
                 )
-                state["last_failure_at"] = now.isoformat()
-                state["last_failure_type"] = type(error).__name__
+                state.last_failure_at = now.isoformat()
+                state.last_failure_type = type(error).__name__
                 self._write_state(state)
                 return
-            state["last_success_at"] = now.isoformat()
+            state.last_success_at = now.isoformat()
             self._write_state(state)
             log_event(
                 self._logger,
                 "artifact-storage.reconciled",
                 service="control-worker",
                 batch_limit=self._batch_limit,
-                **dict(result),
+                **result.model_dump(),
             )
         finally:
             os.close(descriptor)
 
-    def _read_state(self) -> dict[str, Any]:
+    def _read_state(self) -> _CadenceState:
         path = self._state_root / ".maintenance.json"
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         try:
             descriptor = os.open(path, flags)
         except FileNotFoundError:
-            return {}
+            return _CadenceState()
         with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
             raw = stream.read()
-        parsed = json.loads(raw)
-        if not isinstance(parsed, dict) or parsed.get("version") != _STATE_VERSION:
-            raise ValueError("artifact maintenance state is invalid")
-        return parsed
+        try:
+            return _CadenceState.model_validate_json(raw)
+        except ValidationError as error:
+            raise ValueError("artifact maintenance state is invalid") from error
 
     @staticmethod
-    def _next_due_at(state: Mapping[str, Any]) -> datetime | None:
-        value = state.get("next_due_at")
+    def _next_due_at(state: _CadenceState) -> datetime | None:
+        value = state.next_due_at
         if value is None:
             return None
-        if not isinstance(value, str):
-            raise TypeError("artifact maintenance next due time is invalid")
         try:
             parsed = datetime.fromisoformat(value)
         except ValueError as error:
             raise ValueError("artifact maintenance next due time is invalid") from error
         return _aware_utc(parsed)
 
-    def _write_state(self, state: Mapping[str, Any]) -> None:
+    def _write_state(self, state: _CadenceState) -> None:
         path = self._state_root / ".maintenance.json"
         temporary = self._state_root / f".maintenance.{uuid.uuid4().hex}.tmp"
-        document = {"version": _STATE_VERSION, **state}
+        document = state.model_dump(exclude_none=True)
         flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_CLOEXEC", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         try:

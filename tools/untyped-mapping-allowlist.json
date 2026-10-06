@@ -126,6 +126,55 @@
       "annotation": "dict[str, object]",
       "count": 1,
       "reason": "JSON serialization of the typed evidence model for its JSON column; the model is the contract and the column binding belongs to the stored-JSON registry."
+    },
+    {
+      "path": "control/src/vonk_control/auth.py",
+      "function": "CursorCodec.decode",
+      "annotation": "Mapping[str, object]",
+      "count": 1,
+      "reason": "Generic signed-cursor codec: the context is the caller's own opaque pagination key and the codec never reads inside it."
+    },
+    {
+      "path": "control/src/vonk_control/auth.py",
+      "function": "CursorCodec.encode",
+      "annotation": "Mapping[str, object]",
+      "count": 1,
+      "reason": "Generic signed-cursor codec: the context is the caller's own opaque pagination key and the codec never reads inside it."
+    },
+    {
+      "path": "control/src/vonk_control/auth.py",
+      "function": "agent_identity_from_scope",
+      "annotation": "dict[str, Any]",
+      "count": 1,
+      "reason": "The ASGI scope is Starlette's own mapping type; only a typed, verification-marked identity value is read from it."
+    },
+    {
+      "path": "control/src/vonk_control/auth.py",
+      "function": "agent_source_from_scope",
+      "annotation": "dict[str, Any]",
+      "count": 1,
+      "reason": "The ASGI scope is Starlette's own mapping type; only a typed source value bound to the verified identity is read from it."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_library_types.py",
+      "function": "RecipeLibraryItem",
+      "annotation": "dict[str, object]",
+      "count": 2,
+      "reason": "The recipe document exactly as the signed library published it: its content digest is over these JSON values and is verified where it is imported."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_library_types.py",
+      "function": "RecipeLibrarySnapshot",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "Catalog model documents exactly as the signed library published them: their content digest is over these JSON values."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_library_types.py",
+      "function": "RecipePackageEntry",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "The recipe document exactly as the signed library published it: its content digest is over these JSON values and is verified where it is imported."
     }
   ],
   "debt": [
@@ -158,24 +207,8 @@
       "count": 4
     },
     {
-      "path": "control/src/vonk_control/artifact_blob_store.py",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/artifact_jobs.py",
-      "count": 23
-    },
-    {
-      "path": "control/src/vonk_control/artifact_maintenance.py",
-      "count": 4
-    },
-    {
       "path": "control/src/vonk_control/artifact_reference_scan.py",
       "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/auth.py",
-      "count": 4
     },
     {
       "path": "control/src/vonk_control/availability_production.py",
@@ -187,10 +220,6 @@
     },
     {
       "path": "control/src/vonk_control/cache_removal_review.py",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/catalog_api.py",
       "count": 1
     },
     {
@@ -206,16 +235,12 @@
       "count": 10
     },
     {
-      "path": "control/src/vonk_control/catalog_sync.py",
-      "count": 10
-    },
-    {
       "path": "control/src/vonk_control/cluster_mappings.py",
       "count": 15
     },
     {
       "path": "control/src/vonk_control/compiled_artifact_contract.py",
-      "count": 6
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/compiled_execution_plan.py",
@@ -270,10 +295,6 @@
       "count": 30
     },
     {
-      "path": "control/src/vonk_control/fleet_stream.py",
-      "count": 4
-    },
-    {
       "path": "control/src/vonk_control/harnesses/canonical.py",
       "count": 8
     },
@@ -284,10 +305,6 @@
     {
       "path": "control/src/vonk_control/install_admission.py",
       "count": 15
-    },
-    {
-      "path": "control/src/vonk_control/interface_adapters.py",
-      "count": 6
     },
     {
       "path": "control/src/vonk_control/jobs.py",
@@ -406,10 +423,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/recipe_library_types.py",
-      "count": 4
-    },
-    {
       "path": "control/src/vonk_control/recipe_lifecycle_contract.py",
       "count": 1
     },
@@ -423,7 +436,7 @@
     },
     {
       "path": "control/src/vonk_control/recipe_packages.py",
-      "count": 16
+      "count": 5
     },
     {
       "path": "control/src/vonk_control/recipe_release.py",
@@ -500,10 +513,6 @@
     {
       "path": "control/src/vonk_control/source_policy.py",
       "count": 2
-    },
-    {
-      "path": "control/src/vonk_control/step_ca.py",
-      "count": 4
     },
     {
       "path": "control/src/vonk_control/strict_json.py",

@@ -7,12 +7,13 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from importlib import metadata
-from typing import Protocol
+from typing import Literal, Protocol
 
+from pydantic import TypeAdapter
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -23,9 +24,14 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .bounded_json import require_integer, require_sequence
 from .catalog_service import CatalogService
-from .catalog_sync_contract import SEMVER_PATTERN, ManagedCatalogSyncResult
+from .catalog_sync_contract import (
+    SEMVER_PATTERN,
+    ManagedCatalogStaleRecipe,
+    ManagedCatalogSyncProblem,
+    ManagedCatalogSyncResult,
+    ManagedCatalogWithdrawnRecipe,
+)
 from .models import RecipeLibrarySyncRun
 from .recipe_library_types import (
     RecipeLibraryError,
@@ -64,12 +70,16 @@ class CatalogSyncError(RuntimeError):
         super().__init__(self.detail)
 
 
+SyncTrigger = Literal["manual", "automatic"]
+_TRIGGER = TypeAdapter(SyncTrigger)
+
+
 @dataclass(frozen=True, slots=True)
 class CatalogSyncView:
     id: str
     request_key: str
-    trigger: str
-    state: str
+    trigger: SyncTrigger
+    state: CatalogSyncState
     repository: str
     expected_commit: str | None
     commit: str | None
@@ -82,9 +92,9 @@ class CatalogSyncView:
     unchanged_count: int
     skipped_count: int
     withdrawn_count: int
-    withdrawn_recipes: tuple[dict[str, object], ...]
-    stale_recipes: tuple[dict[str, object], ...]
-    problems: tuple[dict[str, object], ...]
+    withdrawn_recipes: tuple[ManagedCatalogWithdrawnRecipe, ...]
+    stale_recipes: tuple[ManagedCatalogStaleRecipe, ...]
+    problems: tuple[ManagedCatalogSyncProblem, ...]
     created_at: datetime
     completed_at: datetime | None
     # The newest failure since the last completed sync, so a Controller that
@@ -153,7 +163,7 @@ class ManagedRecipeCatalogSyncService:
             current_count=0,
             conflict_count=0,
             missing_count=0,
-            result=_empty_result(),
+            result=json.loads(canonical_message(_empty_result())),
             error_code=None,
             error_detail=None,
             actor=actor,
@@ -360,9 +370,11 @@ class ManagedRecipeCatalogSyncService:
             ):
                 latest.completed_at = now
                 return
-            failed = json.loads(canonical_message(_result(_empty_result())))
-            failed["state"] = CatalogSyncState.FAILED.value
-            failed["problems"] = [{"recipe_uri": None, "code": code, "detail": detail}]
+            failed = _empty_result()
+            failed.state = CatalogSyncState.FAILED
+            failed.problems = [
+                ManagedCatalogSyncProblem(recipe_uri=None, code=code, detail=detail)
+            ]
             session.add(
                 RecipeLibrarySyncRun(
                     request_key=str(uuid.uuid4()),
@@ -379,7 +391,7 @@ class ManagedRecipeCatalogSyncService:
                     current_count=0,
                     conflict_count=0,
                     missing_count=0,
-                    result=json.loads(canonical_message(_result(failed))),
+                    result=json.loads(canonical_message(failed)),
                     error_code=code,
                     error_detail=detail,
                     actor="system:recipe-library-sync",
@@ -396,18 +408,14 @@ class ManagedRecipeCatalogSyncService:
         *,
         actor: str,
         trigger: str = "automatic",
-    ) -> dict[str, object]:
+    ) -> ManagedCatalogSyncResult:
         result = _empty_result()
         self._catalog.refresh_build_policy()
         # Index documents the reader could not validate were already skipped;
         # report each one without holding up the rest of the snapshot.
         for problem in snapshot.problems:
-            uri = problem.get("recipe_uri")
             self._record_problem_values(
-                result,
-                uri=uri if isinstance(uri, str) else None,
-                code=str(problem.get("code", CatalogSyncCode.ITEM_FAILED)),
-                detail=str(problem.get("detail", "catalog document was skipped")),
+                result, uri=problem.recipe_uri, code=problem.code, detail=problem.detail
             )
             self._progress(run_id, result)
         # Catalog index entries are independent immutable documents. Import each
@@ -453,13 +461,7 @@ class ManagedRecipeCatalogSyncService:
                     or previous.package_sha256 == item.package_sha256
                 )
             ):
-                result["unchanged_count"] = (
-                    require_integer(
-                        result["unchanged_count"],
-                        "stored catalog sync unchanged_count is invalid",
-                    )
-                    + 1
-                )
+                result.unchanged_count += 1
             else:
                 try:
                     hydrated = self._reader.fetch(item.uri)
@@ -516,13 +518,10 @@ class ManagedRecipeCatalogSyncService:
                             hydrated, "source_bundle_sha256", None
                         ),
                     )
-                    key = "imported_count" if previous is None else "updated_count"
-                    result[key] = (
-                        require_integer(
-                            result[key], "stored catalog sync count is invalid"
-                        )
-                        + 1
-                    )
+                    if previous is None:
+                        result.imported_count += 1
+                    else:
+                        result.updated_count += 1
                 except Exception as error:  # noqa: BLE001 - isolate untyped fetch failures per recipe
                     self._record_problem(
                         result,
@@ -542,19 +541,22 @@ class ManagedRecipeCatalogSyncService:
             retracted = self._catalog.retract_recipes_absent_from(
                 [(item.publisher, item.slug) for item in snapshot.items]
             )
-            withdrawn = result["withdrawn_recipes"]
-            assert isinstance(withdrawn, list)
             for revision in retracted:
-                entry: dict[str, object] = {"recipe_id": revision.recipe_id}
                 # The catalog accepts looser release labels than the result
                 # contract's semantic versions; the label is informative, so
                 # one outside the contract is left out, never stored.
-                if revision.release_version is not None and re.fullmatch(
-                    SEMVER_PATTERN, revision.release_version
-                ):
-                    entry["release_version"] = revision.release_version
-                withdrawn.append(entry)
-            result["withdrawn_count"] = len(retracted)
+                release_version = (
+                    revision.release_version
+                    if revision.release_version is not None
+                    and re.fullmatch(SEMVER_PATTERN, revision.release_version)
+                    else None
+                )
+                result.withdrawn_recipes.append(
+                    ManagedCatalogWithdrawnRecipe(
+                        recipe_id=revision.recipe_id, release_version=release_version
+                    )
+                )
+            result.withdrawn_count = len(retracted)
         # Prebuilt images can arrive after their revision (CI publishes the
         # bundle first and adds image digests once the builds finish), so
         # every sync records them for unchanged revisions too.
@@ -576,9 +578,9 @@ class ManagedRecipeCatalogSyncService:
                     code=CatalogSyncCode.PREBUILT_IMAGES_FAILED,
                     detail=str(error)[:256] or type(error).__name__,
                 )
-        result["state"] = (
-            CatalogSyncState.PARTIAL if result["problems"] else CatalogSyncState.CURRENT
-        ).value
+        result.state = (
+            CatalogSyncState.PARTIAL if result.problems else CatalogSyncState.CURRENT
+        )
         return result
 
     def _store_source_bundle(self, item: RecipeLibraryItem, actor: str) -> None:
@@ -590,34 +592,29 @@ class ManagedRecipeCatalogSyncService:
             )
 
     def _record_problem(
-        self, result: dict[str, object], item: RecipeLibraryItem, code: str, detail: str
+        self,
+        result: ManagedCatalogSyncResult,
+        item: RecipeLibraryItem,
+        code: str,
+        detail: str,
     ) -> None:
         self._record_problem_values(result, uri=item.uri, code=code, detail=detail)
 
     def _record_problem_values(
         self,
-        result: dict[str, object],
+        result: ManagedCatalogSyncResult,
         *,
         uri: str | None,
         code: str,
         detail: str,
     ) -> None:
-        result["skipped_count"] = (
-            require_integer(
-                result["skipped_count"], "stored catalog sync skipped_count is invalid"
+        result.skipped_count += 1
+        if len(result.problems) < _MAX_RESULT_ITEMS:
+            result.problems.append(
+                ManagedCatalogSyncProblem(
+                    recipe_uri=uri, code=code[:128], detail=detail[:256]
+                )
             )
-            + 1
-        )
-        problems = list(
-            require_sequence(
-                result["problems"], "stored catalog sync problems are invalid"
-            )
-        )
-        if len(problems) < _MAX_RESULT_ITEMS:
-            problems.append(
-                {"recipe_uri": uri, "code": code[:128], "detail": detail[:256]}
-            )
-        result["problems"] = problems
 
     def _initialize(self, run_id: str, snapshot: RecipeLibrarySnapshot) -> None:
         with self._sessions.begin() as session:
@@ -636,14 +633,14 @@ class ManagedRecipeCatalogSyncService:
                 + len(snapshot.problems)
             )
 
-    def _progress(self, run_id: str, result: Mapping[str, object]) -> None:
+    def _progress(self, run_id: str, result: ManagedCatalogSyncResult) -> None:
         with self._sessions.begin() as session:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != "running":
                 raise CatalogSyncError(
                     CatalogSyncCode.STATE_INVALID, "managed catalog sync state changed"
                 )
-            parsed = _result(result)
+            parsed = result
             run.heartbeat_at = self._clock()
             run.processed_count += 1
             run.imported_count = parsed.imported_count
@@ -652,7 +649,7 @@ class ManagedRecipeCatalogSyncService:
             run.conflict_count = parsed.skipped_count
             run.result = json.loads(canonical_message(parsed))
 
-    def _finish(self, run_id: str, result: Mapping[str, object]) -> None:
+    def _finish(self, run_id: str, result: ManagedCatalogSyncResult) -> None:
         with self._sessions.begin() as session:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != "running":
@@ -661,7 +658,7 @@ class ManagedRecipeCatalogSyncService:
                 )
             run.state = "succeeded"
             run.active_slot = None
-            run.result = json.loads(canonical_message(_result(result)))
+            run.result = json.loads(canonical_message(result))
             run.missing_count = 0
             run.completed_at = self._clock()
 
@@ -670,17 +667,17 @@ class ManagedRecipeCatalogSyncService:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != "running":
                 return
-            failed = json.loads(canonical_message(_result(run.result)))
-            problems = list(failed["problems"])
-            if len(problems) < _MAX_RESULT_ITEMS:
-                problems.append(
-                    {"recipe_uri": None, "code": code[:128], "detail": detail[:256]}
+            failed = _result(run.result)
+            if len(failed.problems) < _MAX_RESULT_ITEMS:
+                failed.problems.append(
+                    ManagedCatalogSyncProblem(
+                        recipe_uri=None, code=code[:128], detail=detail[:256]
+                    )
                 )
-            failed["state"] = CatalogSyncState.FAILED.value
-            failed["problems"] = problems
+            failed.state = CatalogSyncState.FAILED
             run.state = "failed"
             run.active_slot = None
-            run.result = json.loads(canonical_message(_result(failed)))
+            run.result = json.loads(canonical_message(failed))
             run.error_code = code[:128]
             run.error_detail = detail[:256]
             run.completed_at = self._clock()
@@ -763,9 +760,6 @@ def catalog_sync_failure_reason(error: Exception) -> str:
 
 
 # An unreadable record is neither current nor failed: the next sync redoes it.
-_UNREAD_OUTCOME = CatalogSyncState.PARTIAL.value
-
-
 def _result(value: object) -> ManagedCatalogSyncResult:
     """Read a stored sync result; one that cannot be read is unknown, never fatal.
 
@@ -778,33 +772,29 @@ def _result(value: object) -> ManagedCatalogSyncResult:
         return ManagedCatalogSyncResult.model_validate_json(canonical_message(value))
     except (TypeError, ValueError):
         unknown = _empty_result()
-        unknown["state"] = _UNREAD_OUTCOME
-        unknown["problems"] = [
-            {
-                "recipe_uri": None,
-                "code": CatalogSyncCode.RESULT_UNREADABLE,
-                "detail": "stored catalog sync result was unreadable; it is re-synced",
-            }
-        ]
-        return ManagedCatalogSyncResult.model_validate_json(canonical_message(unknown))
-
-
-def _empty_result() -> dict[str, object]:
-    return json.loads(
-        canonical_message(
-            ManagedCatalogSyncResult(
-                schema_version=1,
-                state=CatalogSyncState.CURRENT,
-                imported_count=0,
-                updated_count=0,
-                unchanged_count=0,
-                skipped_count=0,
-                withdrawn_count=0,
-                withdrawn_recipes=[],
-                stale_recipes=[],
-                problems=[],
+        unknown.state = CatalogSyncState.PARTIAL
+        unknown.problems = [
+            ManagedCatalogSyncProblem(
+                recipe_uri=None,
+                code=CatalogSyncCode.RESULT_UNREADABLE,
+                detail="stored catalog sync result was unreadable; it is re-synced",
             )
-        )
+        ]
+        return unknown
+
+
+def _empty_result() -> ManagedCatalogSyncResult:
+    return ManagedCatalogSyncResult(
+        schema_version=1,
+        state=CatalogSyncState.CURRENT,
+        imported_count=0,
+        updated_count=0,
+        unchanged_count=0,
+        skipped_count=0,
+        withdrawn_count=0,
+        withdrawn_recipes=[],
+        stale_recipes=[],
+        problems=[],
     )
 
 
@@ -815,7 +805,7 @@ def _view(row: RecipeLibrarySyncRun | None) -> CatalogSyncView:
     return CatalogSyncView(
         id=row.id,
         request_key=row.request_key,
-        trigger=row.trigger,
+        trigger=_TRIGGER.validate_python(row.trigger),
         state=CatalogSyncState.SYNCING
         if row.state == LifecycleState.RUNNING
         else result.state,
@@ -836,13 +826,9 @@ def _view(row: RecipeLibrarySyncRun | None) -> CatalogSyncView:
         unchanged_count=row.current_count,
         skipped_count=row.conflict_count,
         withdrawn_count=result.withdrawn_count,
-        withdrawn_recipes=tuple(
-            json.loads(canonical_message(item)) for item in result.withdrawn_recipes
-        ),
-        stale_recipes=tuple(
-            json.loads(canonical_message(item)) for item in result.stale_recipes
-        ),
-        problems=tuple(json.loads(canonical_message(item)) for item in result.problems),
+        withdrawn_recipes=tuple(result.withdrawn_recipes),
+        stale_recipes=tuple(result.stale_recipes),
+        problems=tuple(result.problems),
         created_at=row.created_at,
         completed_at=row.completed_at,
     )

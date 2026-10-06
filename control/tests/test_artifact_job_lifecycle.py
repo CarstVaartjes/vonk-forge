@@ -25,6 +25,7 @@ from .test_artifact_jobs import (
     NOW,
     MutableClock,
     cancellation_result,
+    create_artifact_job,
     running_artifact_service,
     submitted_artifact_job,
 )
@@ -144,8 +145,9 @@ def test_unsubmitted_jobs_have_nothing_to_stop(tmp_path) -> None:
     sessions, _ops, _queue, service, run_id, _node = running_artifact_service(tmp_path)
     from .test_artifact_jobs import artifact_create_request
 
-    draft = service.create(
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000311")
+    draft = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000311"),
     )
     row, view = _adopted(sessions, service, draft.id)
     assert (row.state, row.attempt, row.effect) == (State.QUEUED, 0, Effect.NONE)

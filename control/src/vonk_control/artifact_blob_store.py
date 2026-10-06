@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, Field
 from vonk_agent_protocol import (
     InvalidRequestError,
     InvalidRequestReason,
@@ -31,6 +32,28 @@ from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 # reconciliation.
 _REFERENCE_LOCK_BUDGET_SECONDS = 30.0
 _REFERENCE_LOCK_RETRY_SECONDS = 0.05
+
+
+class BlobStoreUsage(BaseModel):
+    """How much of the artifact store's quota is stored, reserved and left."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_stored_bytes: int = Field(ge=0)
+    used_bytes: int = Field(ge=0)
+    reserved_bytes: int = Field(ge=0)
+    in_flight_uploads: int = Field(ge=0)
+    remaining_bytes: int = Field(ge=0)
+
+
+class BlobReconciliation(BlobStoreUsage):
+    """What one bounded reconciliation pass removed, found missing and left."""
+
+    removed_temporary_files: int = Field(ge=0)
+    removed_reservation_files: int = Field(ge=0)
+    removed_orphan_blobs: int = Field(ge=0)
+    missing_referenced_blobs: list[str]
+    remaining_work: bool
 
 
 class ArtifactBlobStoreError(ValueError):
@@ -92,7 +115,7 @@ class ArtifactBlobStore:
     def max_stored_bytes(self) -> int:
         return self._max_stored_bytes
 
-    def usage(self) -> dict[str, int]:
+    def usage(self) -> BlobStoreUsage:
         self._prepare_root()
         with self._quota_lock():
             reservations = self._reservation_entries()
@@ -100,13 +123,13 @@ class ArtifactBlobStore:
             used = self._stored_bytes() + self._unreserved_temporary_bytes(
                 set(reservations)
             )
-            return {
-                "max_stored_bytes": self._max_stored_bytes,
-                "used_bytes": used,
-                "reserved_bytes": reserved,
-                "in_flight_uploads": len(reservations),
-                "remaining_bytes": max(0, self._max_stored_bytes - used - reserved),
-            }
+            return BlobStoreUsage(
+                max_stored_bytes=self._max_stored_bytes,
+                used_bytes=used,
+                reserved_bytes=reserved,
+                in_flight_uploads=len(reservations),
+                remaining_bytes=max(0, self._max_stored_bytes - used - reserved),
+            )
 
     @contextmanager
     def reference_attachment(self) -> Iterator[None]:
@@ -302,7 +325,7 @@ class ArtifactBlobStore:
         orphan_grace_seconds: int = 300,
         reclaimable_sha256: set[str],
         _reference_fenced: bool = False,
-    ) -> dict[str, object]:
+    ) -> BlobReconciliation:
         """Remove abandoned temporary/orphan bytes and report referenced gaps.
 
         ``reclaimable_sha256`` is required: only those content-addressed
@@ -409,14 +432,14 @@ class ArtifactBlobStore:
                         path.unlink()
                         removed_orphans += 1
                         remaining_budget -= 1
-        return {
-            "removed_temporary_files": removed_temporary,
-            "removed_reservation_files": removed_reservations,
-            "removed_orphan_blobs": removed_orphans,
-            "missing_referenced_blobs": sorted(missing),
-            "remaining_work": remaining_work,
-            **self.usage(),
-        }
+        return BlobReconciliation(
+            removed_temporary_files=removed_temporary,
+            removed_reservation_files=removed_reservations,
+            removed_orphan_blobs=removed_orphans,
+            missing_referenced_blobs=sorted(missing),
+            remaining_work=remaining_work,
+            **self.usage().model_dump(),
+        )
 
     @contextmanager
     def _reference_lock(self, *, exclusive: bool) -> Iterator[None]:

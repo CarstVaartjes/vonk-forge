@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -23,6 +22,8 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol import canonical_message
+from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts.recipe import RecipeFileSlot, RecipeJobInterface
 
 from .strict_json import StrictJSONModel
 
@@ -363,172 +364,123 @@ class CompiledArtifactContract(ArtifactContractModel):
         return hashlib.sha256(canonical_message(self.to_mapping())).hexdigest()
 
 
-def _slot(raw: Mapping[str, object]) -> dict[str, object]:
-    """Copy recipe slot values into a model-owned document."""
-    if not isinstance(raw, Mapping):
-        raise TypeError("artifact slot contract is invalid")
-    extensions = raw.get("extensions")
-    media_types = raw.get("media_types")
-    return {
-        "id": raw.get("id"),
-        "label": raw.get("label"),
-        "description": raw.get("description"),
-        "media_types": sorted(media_types)
-        if isinstance(media_types, list)
-        else media_types,
-        "extensions": sorted(extensions)
-        if isinstance(extensions, list)
-        else extensions,
-        "min_files": raw.get("min_files"),
-        "max_files": raw.get("max_files"),
-        "max_file_bytes": raw.get("max_file_bytes"),
-        "max_total_bytes": raw.get("max_total_bytes"),
-    }
+def _slot(item: RecipeFileSlot) -> ArtifactSlotContract:
+    """Copy one recipe slot into its canonical (sorted) contract form."""
+
+    return ArtifactSlotContract(
+        id=item.id,
+        label=item.label,
+        description=item.description,
+        media_types=tuple(sorted(item.media_types)),
+        extensions=tuple(sorted(item.extensions)),
+        min_files=item.min_files,
+        max_files=item.max_files,
+        max_file_bytes=item.max_file_bytes,
+        max_total_bytes=item.max_total_bytes,
+    )
+
+
+def _input_contract(interface: RecipeJobInterface) -> ArtifactInputContract:
+    declared = interface.input
+    if declared is None:
+        return ArtifactInputContract(
+            required=False, media_types=(), max_bytes=0, slots=()
+        )
+    if declared.slots is None:
+        # A recipe that declares one aggregate input is one unnamed slot.
+        slots = (
+            ArtifactSlotContract(
+                id="input",
+                label="Input",
+                description="Recipe input",
+                media_types=tuple(sorted(declared.media_types)),
+                extensions=(),
+                min_files=1 if declared.required else 0,
+                max_files=MAX_INPUT_FILES,
+                max_file_bytes=min(declared.max_bytes, MAX_INPUT_FILE_BYTES),
+                max_total_bytes=declared.max_bytes,
+            ),
+        )
+    else:
+        slots = tuple(_slot(item) for item in declared.slots)
+    return ArtifactInputContract(
+        required=declared.required,
+        media_types=tuple(sorted(set(declared.media_types))),
+        max_bytes=declared.max_bytes,
+        slots=slots,
+    )
+
+
+def _parameter(name: str, value: ParameterScalar) -> ParameterDefinition:
+    """One recipe knob, as the parameter an artifact job may override."""
+
+    if isinstance(value, bool):
+        kind = "boolean"
+    elif isinstance(value, int):
+        kind = "integer"
+    elif isinstance(value, float):
+        kind = "float"
+    else:
+        kind = "string"
+    return validate_parameter_definition(
+        {
+            "name": name,
+            "type": kind,
+            "default": value,
+            "minimum": None,
+            "maximum": None,
+            "allowed_values": [],
+            "pattern": None,
+        }
+    )
 
 
 def compile_artifact_contract(
-    document: Mapping[str, object], interface_name: str
+    recipe: RecipeDefinition, interface_name: str
 ) -> CompiledArtifactContract:
-    interfaces = document.get("interfaces")
-    interface = (
-        next(
-            (
-                item
-                for item in interfaces
-                if isinstance(item, Mapping) and item.get("adapter") == interface_name
-            ),
-            None,
-        )
-        if isinstance(interfaces, list)
-        else None
+    interface = next(
+        (
+            item
+            for item in recipe.interfaces
+            if isinstance(item, RecipeJobInterface) and item.adapter == interface_name
+        ),
+        None,
     )
-    if not isinstance(interface, Mapping):
+    if interface is None:
         raise TypeError("artifact job interface contract is unavailable")
-
-    raw_input = interface.get("input")
-    if raw_input is None:
-        input_document: dict[str, object] = {
-            "required": False,
-            "media_types": [],
-            "max_bytes": 0,
-            "slots": [],
-        }
-    elif isinstance(raw_input, Mapping):
-        media_types = raw_input.get("media_types")
-        max_bytes = raw_input.get("max_bytes")
-        required = raw_input.get("required")
-        raw_slots = raw_input.get("slots")
-        if (
-            raw_slots is None
-            and isinstance(media_types, list)
-            and isinstance(max_bytes, int)
-            and isinstance(required, bool)
-        ):
-            raw_slots = [
-                {
-                    "id": "input",
-                    "label": "Input",
-                    "description": "Recipe input",
-                    "media_types": media_types,
-                    "extensions": [],
-                    "min_files": 1 if required else 0,
-                    "max_files": MAX_INPUT_FILES,
-                    "max_file_bytes": min(max_bytes, MAX_INPUT_FILE_BYTES),
-                    "max_total_bytes": max_bytes,
-                }
-            ]
-        input_document = {
-            "required": required,
-            "media_types": sorted(set(media_types))
-            if isinstance(media_types, list)
-            else media_types,
-            "max_bytes": max_bytes,
-            "slots": [_slot(item) for item in raw_slots]
-            if isinstance(raw_slots, list)
-            else raw_slots,
-        }
-    else:
-        raise ValueError("artifact input contract is invalid")
-
-    settings = document.get("settings")
-    knobs = settings.get("knobs") if isinstance(settings, Mapping) else None
-    raw_parameters: list[dict[str, object]] = []
-    if knobs is not None:
-        if not isinstance(knobs, Mapping):
-            raise ValueError("artifact parameter contract is invalid")
-        for name, setting in knobs.items():
-            if not isinstance(setting, Mapping):
-                raise TypeError("artifact parameter contract is invalid")
-            value = setting.get("value")
-            if isinstance(value, bool):
-                kind = "boolean"
-            elif isinstance(value, int):
-                kind = "integer"
-            elif isinstance(value, float):
-                kind = "float"
-            elif isinstance(value, str):
-                kind = "string"
-            else:
-                raise TypeError("artifact parameter contract is invalid")
-            raw_parameters.append(
-                {
-                    "name": name,
-                    "type": kind,
-                    "default": value,
-                    "minimum": None,
-                    "maximum": None,
-                    "allowed_values": [],
-                    "pattern": None,
-                }
-            )
-
-    raw_output = interface.get("output")
-    if not isinstance(raw_output, Mapping):
-        raise TypeError("artifact output contract is unavailable")
-    aggregate = raw_output.get("max_total_bytes")
-    raw_slots = raw_output.get("slots")
-    output_document = {
-        "path": "/outputs",
-        "max_total_bytes": aggregate,
-        "slots": [_slot(item) for item in raw_slots]
-        if isinstance(raw_slots, list)
-        else raw_slots,
-    }
-    slots = output_document["slots"]
-    output_media = (
-        sorted({media for slot in slots for media in slot.get("media_types", [])})
-        if isinstance(slots, list) and all(isinstance(slot, Mapping) for slot in slots)
-        else []
-    )
-    output_limits = {
-        "max_files": min(
-            MAX_OUTPUT_FILES, sum(slot.get("max_files", 0) for slot in slots)
-        )
-        if isinstance(slots, list)
-        and all(
-            isinstance(slot, Mapping) and isinstance(slot.get("max_files"), int)
-            for slot in slots
-        )
-        else 0,
-        "max_file_bytes": max(
-            (slot.get("max_file_bytes", 0) for slot in slots), default=0
-        )
-        if isinstance(slots, list)
-        else 0,
-        "max_total_bytes": aggregate,
-        "allowed_media_types": output_media,
-    }
-    raw_document = {
-        "schema_version": 1,
-        "interface": interface_name,
-        "input": input_document,
-        "parameters": sorted(raw_parameters, key=lambda item: str(item.get("name"))),
-        "output": output_document,
-        "output_limits": output_limits,
-        "max_timeout_seconds": 3_600,
-    }
     try:
-        return CompiledArtifactContract.model_validate(raw_document)
+        slots = tuple(_slot(item) for item in interface.output.slots)
+        parameters = tuple(
+            sorted(
+                (
+                    _parameter(name, setting.value)
+                    for name, setting in recipe.settings.knobs.items()
+                ),
+                key=lambda item: item.name,
+            )
+        )
+        return CompiledArtifactContract.model_validate(
+            {
+                "schema_version": 1,
+                "interface": interface_name,
+                "input": _input_contract(interface),
+                "parameters": parameters,
+                "output": ArtifactOutputContract(
+                    path="/outputs",
+                    max_total_bytes=interface.output.max_total_bytes,
+                    slots=slots,
+                ),
+                "output_limits": ArtifactOutputLimits(
+                    max_files=min(MAX_OUTPUT_FILES, sum(s.max_files for s in slots)),
+                    max_file_bytes=max((s.max_file_bytes for s in slots), default=0),
+                    max_total_bytes=interface.output.max_total_bytes,
+                    allowed_media_types=tuple(
+                        sorted({media for s in slots for media in s.media_types})
+                    ),
+                ),
+                "max_timeout_seconds": 3_600,
+            }
+        )
     except ValidationError as error:
         first = error.errors()[0]
         raise ValueError(

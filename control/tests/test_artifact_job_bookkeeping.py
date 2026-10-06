@@ -11,6 +11,7 @@ from vonk_control.models import ArtifactJob, ArtifactJobFile, RecipeRun
 
 from .test_artifact_jobs import (
     artifact_create_request,
+    create_artifact_job,
     running_artifact_service,
     submitted_artifact_job,
 )
@@ -20,8 +21,9 @@ def test_a_run_that_cannot_accept_jobs_still_refuses_the_submit(tmp_path) -> Non
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
     )
-    created = service.create(
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000320")
+    created = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000320"),
     )
     with sessions.begin() as session:
         run = session.scalar(select(RecipeRun).where(RecipeRun.id == run_id))
