@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 from types import ModuleType
 
@@ -45,6 +46,22 @@ def test_a_reviewed_exception_with_a_reason_is_accepted() -> None:
     key = ("control/tests/example.py", "reportArgumentType")
 
     assert module.evaluate({key: 1}, [_exception()]) == []
+
+
+def test_typecheck_timeout_fails_with_a_visible_cause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+
+    def expired(command: list[str], **kwargs: object) -> None:
+        assert kwargs["timeout"] == module.TYPECHECK_TIMEOUT_SECONDS
+        raise subprocess.TimeoutExpired(
+            command, float(module.TYPECHECK_TIMEOUT_SECONDS)
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", expired)
+    with pytest.raises(SystemExit, match="600-second execution timeout"):
+        module._diagnostics()
 
 
 def test_an_unlisted_error_fails_even_at_the_same_total() -> None:
