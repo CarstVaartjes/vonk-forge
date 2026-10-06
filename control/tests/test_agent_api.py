@@ -115,7 +115,10 @@ STOP_PAYLOAD = RecipeStopPayload(
     recipe_revision_id="00000000-0000-4000-8000-000000000003",
     mapping_id="00000000-0000-4000-8000-000000000004",
     plan_digest="a" * 64,
-    compiled_execution_plan=_STOP_PLAN,
+    rank=_STOP_PLAN.runtime.placement.rank,
+    role=_STOP_PLAN.runtime.placement.role,
+    recipe_content_sha256=_STOP_PLAN.identity.recipe_revision_sha256,
+    stop_timeout_seconds=_STOP_PLAN.lifecycle.stop_timeout_seconds,
     cancel_pending_start=True,
 ).model_dump(mode="json")
 
