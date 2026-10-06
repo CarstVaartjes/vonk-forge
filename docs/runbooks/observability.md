@@ -112,7 +112,7 @@ allow the durable queue to issue a new attempt.
 operation that declared measurable progress and has not advanced for at least
 the stall window. A transfer phase is stall-able whenever bytes remain; a
 non-transfer phase only when the operation itself declared an incomplete byte or
-item total, so an unbounded build and an intentional `waiting-for-operator` wait
+item total, so an unbounded build and an intentional `needs-operator` wait
 never alert. Inspect the operation's progress and last accepted contact, then
 reconcile the actual effect before retrying; an expired lease alone does not
 prove the host action ended.
