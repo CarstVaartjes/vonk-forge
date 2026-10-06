@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 from vonk_agent_protocol import OperationCheckpoint, canonical_message
-from vonk_control.bounded_json import text
+from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.operation_contract import (
     OperationMemberProgress,
     OperationPhase,
