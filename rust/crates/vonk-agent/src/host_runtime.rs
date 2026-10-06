@@ -254,6 +254,19 @@ impl HostRuntimeError {
 pub struct HostRuntimeOutcome {
     pub exit_code: Option<i32>,
     pub stop_uncertain: bool,
+    /// A one-shot job that did not exit cleanly: its exit account and the
+    /// container's own output, captured by the helper before removal.
+    pub diagnostic: Option<String>,
+    pub process_logs: Option<Box<FailureProcessLogs>>,
+}
+
+/// What one read-only inspection of a managed run reported.
+pub struct RunInspectionReport {
+    pub running: bool,
+    /// The running container's bounded, sanitized tail when it was requested.
+    pub process_logs: Option<Box<FailureProcessLogs>>,
+    /// Why a requested tail is missing.
+    pub log_error: Option<String>,
 }
 
 /// The exact signed lifecycle plan carried beside a privileged runtime request.
@@ -296,6 +309,18 @@ impl HostRuntimeBoundary<'_> {
         &self,
         arguments: Vec<String>,
     ) -> Result<bool, HostRuntimeError> {
+        self.inspect_recipe_run_report(arguments, false)
+            .await
+            .map(|report| report.running)
+    }
+
+    /// Like `inspect_recipe_run`, and when `include_logs` is set also reads the
+    /// running container's bounded output without stopping it.
+    pub async fn inspect_recipe_run_report(
+        &self,
+        arguments: Vec<String>,
+        include_logs: bool,
+    ) -> Result<RunInspectionReport, HostRuntimeError> {
         let request = HostRuntimeRequest {
             action: HostRuntimeAction::RunInspect,
             fence: uuid::Uuid::new_v4(),
@@ -319,6 +344,7 @@ impl HostRuntimeBoundary<'_> {
         let frame = canonical_generated_json(&RecipeRunInspectionRequest {
             request_id,
             request_sha256: digest,
+            include_logs: include_logs.then_some(true),
         })
         .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let helper_socket = self.helper_socket.to_path_buf();
@@ -338,11 +364,31 @@ impl HostRuntimeBoundary<'_> {
                 HelperProtocolCause::InspectionOutcome,
             ));
         }
-        response
+        let running = response
             .process_running
             .ok_or(HostRuntimeError::HelperProtocol(
                 HelperProtocolCause::InspectionOutcome,
-            ))
+            ))?;
+        // A tail was never volunteered: only a request that asked for it may
+        // receive one, and the reason it is missing is typed.
+        if !include_logs && (response.process_logs.is_some() || response.diagnostic.is_some()) {
+            return Err(HostRuntimeError::HelperProtocol(
+                HelperProtocolCause::InspectionOutcome,
+            ));
+        }
+        Ok(RunInspectionReport {
+            running,
+            process_logs: response.process_logs.as_ref().map(|logs| {
+                Box::new(FailureProcessLogs {
+                    stdout: sanitize_tail(&logs.stdout),
+                    stderr: sanitize_tail(&logs.stderr),
+                })
+            }),
+            log_error: response
+                .diagnostic
+                .as_deref()
+                .map(crate::failure_evidence::sanitize_text),
+        })
     }
 
     pub async fn execute(
@@ -495,6 +541,16 @@ impl HostRuntimeBoundary<'_> {
             Ok(HostRuntimeOutcome {
                 exit_code: response.exit_code.map(|code| code as i32),
                 stop_uncertain,
+                diagnostic: response
+                    .diagnostic
+                    .as_deref()
+                    .map(crate::failure_evidence::sanitize_text),
+                process_logs: response.process_logs.as_ref().map(|logs| {
+                    Box::new(FailureProcessLogs {
+                        stdout: sanitize_tail(&logs.stdout),
+                        stderr: sanitize_tail(&logs.stderr),
+                    })
+                }),
             })
         }
         .await
@@ -559,7 +615,10 @@ fn require_executed_outcome(
     if response.process_running.is_some() {
         return Err(malformed());
     }
-    if response.diagnostic.is_some()
+    // An exit account and output accompany only a job that did not exit
+    // cleanly; they are evidence of that exit, never of a clean one.
+    let evidence = response.diagnostic.is_some() || response.process_logs.is_some();
+    if evidence && !response.exit_code.is_some_and(|code| code != 0)
         || !stop_uncertain
             && response.status != HostHelperResponseStatus::ContainerRuntimeRequestExecuted
     {

@@ -1303,6 +1303,14 @@
       "count": 1,
       "reason": "security-edge",
       "justification": "Finite traversal skips unissued effects outside the currently authorized adopted scope. Position increments each iteration and is bounded by the immutable queue length; it retains exact issued child identities and performs no external wait."
+    },
+    {
+      "path": "control/src/vonk_control/operation_contract.py",
+      "function": "sanitize_failure_evidence",
+      "kind": "loop-without-deadline",
+      "count": 1,
+      "reason": "input-validation",
+      "justification": "Bounded diagnostic normalization to the durable byte contract, not an external wait: each iteration removes an ancillary observation or halves a nontrivial text field. The finite item/text measure strictly decreases; when only structural/scalar fields remain it rejects an oversized document rather than repeating. Typed failure and exit facts remain explicit."
     }
   ]
 }

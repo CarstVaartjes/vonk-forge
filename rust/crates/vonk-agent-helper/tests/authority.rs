@@ -408,6 +408,13 @@ impl CommandRunner for RecordingRunner {
             && arguments.get(..2) == Some(&["container".to_owned(), "inspect".to_owned()])
         {
             match self.runtime_container.lock().unwrap().as_ref() {
+                Some(_)
+                    if arguments
+                        .get(3)
+                        .is_some_and(|format| format.contains(".State.ExitCode")) =>
+                {
+                    b"137\ttrue\t\n".to_vec()
+                }
                 Some((digest, run_id))
                     if arguments
                         .get(3)
@@ -740,6 +747,7 @@ fn ungranted_inspection_frame_can_only_inspect() {
     );
 
     let frame = canonical_json(&RecipeRunInspectionRequest {
+        include_logs: None,
         request_id: Uuid::new_v4(),
         request_sha256: "a".repeat(64),
     })

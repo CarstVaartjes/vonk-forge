@@ -540,7 +540,64 @@ pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDia
     if let Some(property) = failure.refusal_bound.as_ref().and_then(refusal_property) {
         value.preflight.push(property);
     }
+    for property in exit_properties(failure) {
+        if value.preflight.len() < 8 {
+            value.preflight.push(property);
+        }
+    }
+    if failure
+        .diagnostic
+        .as_deref()
+        .is_some_and(|text| text.contains("exit_cause=oom_killed"))
+    {
+        value.category = FailureCategory::Capacity;
+    }
     value
+}
+
+/// The stable facts of how a process ended, as discrete properties: the exit
+/// code and cause the helper reported for a container, and the failing step and
+/// exit status of an image build (read from the build's own retained output).
+/// Names and values are fixed tokens or bounded integers, never free text.
+fn exit_properties(failure: &Failure) -> Vec<FailureProperty> {
+    let mut found = Vec::new();
+    let mut push = |name: &str, value: String| {
+        found.push(FailureProperty {
+            name: name.into(),
+            value: value.chars().take(256).collect(),
+        })
+    };
+    if let Some(text) = failure.diagnostic.as_deref() {
+        for token in text.split_whitespace() {
+            if let Some((key, value)) = token.split_once('=')
+                && matches!(key, "exit_code" | "exit_cause" | "oom_killed")
+                && value
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                push(key, value.to_owned());
+            }
+        }
+    }
+    if let Some(logs) = &failure.process_logs {
+        let text = format!("{}\n{}", logs.stdout.text, logs.stderr.text);
+        if let Some(step) = text
+            .lines()
+            .rev()
+            .find_map(|line| line.split_once("building at STEP ").map(|(_, rest)| rest))
+        {
+            // `"RUN python3 x.py": while running runtime: exit status 1`
+            let command = step.split("\": ").next().unwrap_or(step).trim_matches('"');
+            push("build_step", command.to_owned());
+            if let Some((_, status)) = step.rsplit_once("exit status ") {
+                let digits: String = status.chars().take_while(char::is_ascii_digit).collect();
+                if !digits.is_empty() {
+                    push("exit_code", digits);
+                }
+            }
+        }
+    }
+    found
 }
 
 /// The refusing rule and the measured bound of a refused request, when the
@@ -570,6 +627,25 @@ fn refusal_property(bound: &RefusalBound) -> Option<FailureProperty> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_failed_image_build_names_its_step_and_exit_status() {
+        let failure = Failure::new("build failed").process_logs(Some(FailureProcessLogs {
+            stdout: log_tail(b""),
+            stderr: log_tail(
+                b"ray is not on PATH in the base image\nError: building at STEP \"RUN python3 /opt/vonk/verify-runtime.py\": while running runtime: exit status 1\n",
+            ),
+        }));
+        let found = exit_properties(&failure);
+        assert!(found.iter().any(
+            |p| p.name == "build_step" && p.value == "RUN python3 /opt/vonk/verify-runtime.py"
+        ));
+        assert!(
+            found
+                .iter()
+                .any(|p| p.name == "exit_code" && p.value == "1")
+        );
+    }
+
     #[test]
     fn diagnostic_commands_have_hard_time_and_output_bounds() {
         let start = Instant::now();

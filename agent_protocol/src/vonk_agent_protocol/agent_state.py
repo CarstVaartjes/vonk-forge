@@ -16,6 +16,7 @@ from pydantic import ConfigDict, Field, field_validator
 from .agent_words import HostHelperResponseStatus
 from .claims import AgentRuntimeIdentity
 from .compiled_execution_plan import CompiledPlacement
+from .helper_response import HostHelperProcessLogs
 from .host_helper import RecipeReconciliationIdentity, Uuid4Text
 from .package_upgrade import PackageActivationPhase, PackageRollbackAuthority
 from .wire_model import Digest, WireModel, strict_json_datetime
@@ -110,6 +111,10 @@ class HostOperationOutcome(WireModel):
     schema_version: Literal[1]
     status: HostHelperResponseStatus
     exit_code: I64 | None = None
+    # A one-shot job that did not exit cleanly: its exit account and the
+    # container's own bounded output, captured before the helper removed it.
+    diagnostic: Annotated[str, Field(max_length=8192)] | None = None
+    process_logs: HostHelperProcessLogs | None = None
 
 
 class HostRuntimeImageReceipt(WireModel):
