@@ -210,6 +210,29 @@ def _artifact(
     }
 
 
+@pytest.fixture
+def threaded_cache(tmp_path: Path):
+    """Background workers use independent connections, like the Controller."""
+
+    engine = create_engine(
+        f"sqlite+pysqlite:///{tmp_path / 'background-cache.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    service = ModelCacheService(
+        sessions,
+        tmp_path / "background-nas-cache",
+        reserve_bytes=0,
+        fixture_sources=True,
+    )
+    try:
+        yield service, sessions
+    finally:
+        service.close()
+        engine.dispose()
+
+
 def _download(
     service: ModelCacheService,
     artifacts: list[dict[str, object]],
@@ -4146,6 +4169,80 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
         assert served["/second.bin"] == 5
         gone = service.get_operation(operation.id)
         assert gone.state == "failed"
+        assert gone.failure is not None
+        assert gone.failure["code"] == "model_cache.source_gone"
+    finally:
+        service.close()
+        client.close()
+
+
+def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
+    threaded_cache, tmp_path, monkeypatch
+):
+    from concurrent.futures import Future, wait
+
+    _existing, sessions = threaded_cache
+    handler, payload, served = _gone_handler([404] * 5)
+    service, client = _http_cache_service(
+        tmp_path, sessions, handler, clock=lambda: NOW
+    )
+    try:
+        artifact = _http_artifact(payload)
+        preview = service.download_preview(
+            model_content_sha256="b" * 64, artifacts=[artifact]
+        )
+        operation = service.start_download(
+            actor="test",
+            request_key="00000000-0000-4000-8000-000000000951",
+            plan_digest=str(preview["plan_digest"]),
+            model_content_sha256="b" * 64,
+            artifacts=[artifact],
+        )
+        real_finish = service._finish_failed
+        lost_ack = [True]
+        first_report = []
+
+        def finish(*args, **kwargs):
+            if not first_report:
+                first_report.append((args, kwargs))
+            real_finish(*args, **kwargs)
+            if lost_ack[0]:
+                lost_ack[0] = False
+                raise ConnectionError("commit succeeded but its reply was lost")
+
+        monkeypatch.setattr(service, "_finish_failed", finish)
+        service.tick(limit=1)
+        futures = service._background_operations[operation.id]["futures"]
+        assert isinstance(futures, list)
+        running = [future for future in futures if isinstance(future, Future)]
+        assert len(running) == len(futures) == 1
+        assert not wait(running, timeout=1).not_done
+        with pytest.raises(ConnectionError, match="reply was lost"):
+            service.tick(limit=1)
+        waiting = service.get_operation(operation.id)
+        next_attempt = waiting.next_attempt_at
+        assert waiting.state == "queued"
+        service.tick(limit=1)  # same Future report, not another HTTP observation
+        assert served["count"] == 1
+        assert service.get_operation(operation.id).next_attempt_at == next_attempt
+        # Even this worker's fence cannot replay the old attempt into a newly
+        # claimed attempt. The fresh claim still owns its execution unchanged.
+        assert service._claim_operations(limit=1, respect_backoff=False) == [
+            (operation.id, "download")
+        ]
+        assert service._mark_running(operation.id) is not None
+        args, kwargs = first_report[0]
+        real_finish(*args, **kwargs)
+        assert service.get_operation(operation.id).state == "running"
+        assert served["count"] == 1
+        service._run_download(operation.id, force=False)
+        assert service.get_operation(operation.id).state == "queued"
+        for _ in range(2):
+            service.run_pending()
+            assert service.get_operation(operation.id).state == "queued"
+        service.run_pending()
+        assert served["count"] == 5
+        gone = service.get_operation(operation.id)
         assert gone.failure is not None
         assert gone.failure["code"] == "model_cache.source_gone"
     finally:
