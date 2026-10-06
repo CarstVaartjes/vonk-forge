@@ -2326,6 +2326,14 @@ class RunSwitchFleetProfileAdapter:
             self._write_state(session, application, state)
             session.flush()
             return self._view_from_state(application, state)
+        pending_cancellation = self._observe_superseded_agent_effects(
+            session, application, state
+        )
+        if pending_cancellation is not None:
+            # A newer selected effect may own the fence while an older executor
+            # still runs. Observe its exact cleanup before issuing replacement
+            # work; unrelated adopted scopes retain their execution path.
+            return pending_cancellation
         operation = self._start_child(
             application_id,
             item,

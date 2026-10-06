@@ -86,6 +86,41 @@ def test_new_lane_adopts_original_identity_without_fencing_its_spark():
         assert service._application_is_current_selection(session, old)
         assert service._adopted_application_scope(session, old) == (_node_id(1),)
         assert not service._superseding_intent(session, old, retained.progress)
+    # A third whole-fleet load replaces B while A still copies. The adoption
+    # link is flattened to original A; superseding aggregate B must not cancel A.
+    third_profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "A plus C",
+                "assignments": [
+                    {
+                        "recipe_selector": "vonk-forge/synthetic-tiny-build",
+                        "spark_ids": [_node_id(1)],
+                        "desired_state": "running",
+                        "assignment_name": "lane-one",
+                    },
+                    {
+                        "recipe_selector": "vonk-forge/synthetic-tiny-build",
+                        "spark_ids": [_node_id(2)],
+                        "desired_state": "running",
+                        "assignment_name": "lane-C",
+                    },
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    assert [
+        effect.application_id
+        for effect in service.preview(third_profile.id).effects.adopted
+    ] == [first.id]
+    service.apply(third_profile.id, request_key=_uuid(18006), actor="admin")
+    assert service.application(second.id).state == "superseded"
+    assert (
+        service.application(first.id).current_operation_id
+        == original.current_operation_id
+    )
+    assert adapter.cancellations[-1][0] == (_node_id(2),)
 
 
 def test_selected_cancel_fences_both_original_and_new_node_ordinals():
