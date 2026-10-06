@@ -416,7 +416,7 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         restart_probe, _probe_request("recover", first, data_root, server, certs)
     )
     assert interrupted.fence == first.fence
-    assert interrupted.state == "waiting-for-operator"
+    assert interrupted.state == "observing"
     # The real agent reports the interruption as a typed unknown outcome; the
     # Controller stores it in the shape every reader already understands.
     assert isinstance(interrupted.result, OutcomeUnknown)

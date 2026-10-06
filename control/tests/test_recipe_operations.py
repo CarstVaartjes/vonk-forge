@@ -861,7 +861,7 @@ def installed_recipe(
     return operation
 
 
-@pytest.mark.parametrize("retry_state", ["succeeded", "waiting-for-operator"])
+@pytest.mark.parametrize("retry_state", ["succeeded", "observing"])
 def test_restart_interrupted_install_result_keeps_lifecycle_pending_until_retry(
     tmp_path: Path,
     retry_state: str,
@@ -878,7 +878,7 @@ def test_restart_interrupted_install_result_keeps_lifecycle_pending_until_retry(
             )
         )
         assert child is not None
-        child.state = "waiting-for-operator"
+        child.state = "observing"
         child.next_action_at = NOW + timedelta(seconds=2)
         child.status_reason = "exact lifecycle retry scheduled"
         service.consume_agent_result(
@@ -886,7 +886,7 @@ def test_restart_interrupted_install_result_keeps_lifecycle_pending_until_retry(
             child,
             object(),
             SimpleNamespace(
-                state="waiting-for-operator",
+                state="observing",
                 result={
                     "reason": "agent restarted during install",
                     "error_code": "agent_restart_interrupted",

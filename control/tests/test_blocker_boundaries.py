@@ -126,11 +126,11 @@ def test_rust_results_are_keyed_by_the_enclosing_function() -> None:
         """
         impl Executor for RecipeExecutor {
             fn execute(&self) -> ExecutionResult {
-                return unconfirmed(WaitReason::StopUnconfirmed, "stop remains unconfirmed");
+                return AgentResultState::NeedsOperator;
             }
         }
         fn other() -> ExecutionResult {
-            ExecutionResult::unknown(WaitReason::StopUnconfirmed, "x")
+            AgentResultState::NeedsOperator
         }
         fn unconfirmed(wait: WaitReason, reason: &'static str) -> ExecutionResult {
             ExecutionResult::unknown(wait, reason)
@@ -461,8 +461,13 @@ def test_the_lifecycle_core_is_scanned_and_its_debt_is_small() -> None:
 
 def test_the_allowlist_keeps_a_few_real_waits() -> None:
     document = load_allowlist()
-    keep = [e for e in document["operator_waits"] if e["verdict"] == "KEEP"]  # type: ignore[attr-defined]
+    waits = document["operator_waits"]
+    assert isinstance(waits, list)
+    keep = [e for e in waits if e["verdict"] == "KEEP"]
     assert keep, "a genuinely irreversible wait is the reason the state exists"
+    assert all(e["operation_kinds"] == ["recipe.job.run.v1"] for e in keep)
+    assert len(keep) == len(waits)
+    assert all("Security edge:" in e["reason"] for e in keep)
 
 
 def test_a_keep_entry_without_an_effect_or_action_is_refused(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -547,3 +552,17 @@ def test_existing_error_types_that_joined_a_category_keep_their_handlers() -> No
     ):
         assert isinstance(error, category) and isinstance(error, builtin)
         assert type(error).__name__ in categorized
+
+
+def test_unknown_agent_outcomes_are_observations_not_operator_waits() -> None:
+    """The scanner must not mislabel a platform-owned observation as a human wait."""
+    source = 'fn execute() {\n ExecutionResult::unknown(WaitReason::StopUnconfirmed, "unconfirmed");\n}'
+    assert scan_rust_waits(source, path="rust/crates/vonk-agent/src/executor.rs") == []
+
+
+def test_an_unknown_constructor_cannot_hide_a_real_operator_wait() -> None:
+    source = "fn unconfirmed() { AgentResultState::NeedsOperator }"
+    sites = scan_rust_waits(source, path="rust/crates/vonk-agent/src/executor.rs")
+    assert [(site.kind, site.function) for site in sites] == [
+        (RUST_RESULT, "unconfirmed")
+    ]

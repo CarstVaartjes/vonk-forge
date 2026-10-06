@@ -3541,7 +3541,9 @@ def test_profile_load_with_missing_preparation_enqueues_it_and_waits() -> None:
 
     requested: list[str] = []
 
-    def _starter(recipe_revision_id: str, *, actor: str):
+    def _starter(
+        recipe_revision_id: str, *, actor: str, application_id: str | None = None
+    ):
         requested.append(recipe_revision_id)
         return [
             make_blocker(
@@ -4223,3 +4225,125 @@ def test_a_superseded_application_names_its_reason_and_never_a_failure() -> None
         type(view).model_validate(
             view.model_copy(update={"superseded_by": _uuid(982)}).model_dump()
         )
+
+
+@pytest.mark.parametrize(
+    "end_path", ["admission", "cache-recovery", "conflict-recovery"]
+)
+def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
+    monkeypatch, end_path: str
+) -> None:
+    """An exhausted chain must release its application scope, not poison new loads."""
+    from vonk_agent_protocol import RecipeImageCode, ReservationState
+    from vonk_control.models import FleetProfileApplication
+    from vonk_control.operation_blockers import make_blocker
+
+    from .non_blocking import assert_ended_without_blocking
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    scopes: list[str | None] = []
+
+    def missing(_session, _assignment, _node_ids, **_kwargs):
+        raise ValueError("no successful immutable runtime image build is available")
+
+    def prepare(
+        recipe_revision_id: str, *, actor: str, application_id: str | None = None
+    ):
+        scopes.append(application_id)
+        code = (
+            RecipeImageCode.PREPARATION_EXHAUSTED
+            if len(scopes) == (1 if end_path == "admission" else 2)
+            else RecipeImageCode.PREPARING
+        )
+        # A bounded UI projection must retain the ending reason even when many
+        # missing assets precede it; otherwise a restart would retry this end.
+        noise = [
+            make_blocker(
+                RecipeImageCode.PREPARING,
+                "Another asset is preparing",
+                severity="error",
+                node_ids=[_uuid(1000 + index)],
+            )
+            for index in range(32)
+        ]
+        return [
+            *noise,
+            make_blocker(code, "Bounded preparation result", severity="error"),
+        ]
+
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        assessment_provider=missing,
+        switch_adapter=_SwitchAdapter(),
+    )
+    service.bind_preparation_starter(prepare)
+    profile = service.create(_input(revision_id), actor="admin")
+    ended = service.apply(profile.id, request_key=_uuid(920), actor="admin")
+    if end_path != "admission":
+        from vonk_control import fleet_profiles as fp
+
+        for method in (
+            "_reconcile_selected_roster",
+            "_observe_pending_admissions",
+            "_heal_legacy_applications",
+            "_observe_pending_cancellation",
+        ):
+            monkeypatch.setattr(service, method, lambda now: False)
+        monkeypatch.setattr(
+            service, "_automatic_profile_recovery", lambda now: (ended.id, "admin")
+        )
+        monkeypatch.setattr(service, "_retry_eligible", lambda session, row: True)
+        error = (
+            fp._FleetProfileRecoveryBindingConflict
+            if end_path == "cache-recovery"
+            else fp.FleetProfileAdmissionEffectBusy
+        )
+
+        def interrupted(*args, **kwargs):
+            raise error("missing assets during automatic recovery")
+
+        monkeypatch.setattr(service, "retry", interrupted)
+        assert service.tick()
+        ended = service.application(ended.id)
+
+    def released() -> None:
+        with sessions() as session:
+            row = session.get(FleetProfileApplication, ended.id)
+            assert row is not None
+            assert not row.progress["admission_pending"]
+            assert row.progress.get("admission_retry_at") is None
+            assert row.progress.get("retry_due_at") is None
+            assert row.current_operation_id is None
+            from sqlalchemy import select
+            from vonk_control.models import ResourceReservation
+
+            assert (
+                list(
+                    session.scalars(
+                        select(ResourceReservation).where(
+                            ResourceReservation.owner_kind == "fleet-profile",
+                            ResourceReservation.owner_id == ended.id,
+                            ResourceReservation.state.in_(
+                                (ReservationState.ACTIVE, ReservationState.PROMISED)
+                            ),
+                        )
+                    )
+                )
+                == []
+            )
+        assert ended.next_attempt_at is None
+
+    ended, fresh = assert_ended_without_blocking(
+        None,
+        ended,
+        end=lambda view: view,
+        assert_released=released,
+        fresh=lambda _: service.apply(
+            profile.id, request_key=_uuid(921), actor="admin"
+        ),
+    )
+    assert RecipeImageCode.PREPARATION_EXHAUSTED in {b.code for b in ended.blockers}
+    assert scopes == [ended.id] * (1 if end_path == "admission" else 2) + [fresh.id]
+    assert fresh.id != ended.id

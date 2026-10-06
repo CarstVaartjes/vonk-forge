@@ -4879,7 +4879,7 @@ class AgentJobService:
             # reservation can be released, even if completion raced removal.
             set_parent_state(
                 job,
-                LifecycleState.NEEDS_OPERATOR.value,
+                LifecycleState.OBSERVING.value,
                 None,
                 self._clock(),
                 keep_reason=True,

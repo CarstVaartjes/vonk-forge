@@ -233,7 +233,7 @@ impl ExecutionResult {
             Self::Done(_) => AgentResultState::Succeeded,
             Self::Failed(failure) if failure.cancelled() => AgentResultState::Cancelled,
             Self::Failed(_) => AgentResultState::Failed,
-            Self::Unknown(_) => AgentResultState::WaitingForOperator,
+            Self::Unknown(_) => AgentResultState::Observing,
         }
     }
 

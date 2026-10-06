@@ -120,11 +120,8 @@ class LifecycleVocabulary:
         Attributes:
             agent_result_state (AgentResultState): The state words of an agent result on the wire.
 
-                The wire keeps four words, shared with agents already deployed.  A typed
-                outcome decides which one is truthful (``done`` is ``succeeded``, a
-                confirmed cancellation is ``cancelled``, any other definite failure is
-                ``failed`` and ``unknown`` is the legacy ``waiting-for-operator``); the
-                Controller maps them onto its stored state values unchanged.
+                Unknown effects are observed by the Controller with bounded retries. The
+                retired operator-wait spelling is adopted only when reading old receipts.
             artifact_preparation (ArtifactPreparation): The stages of an artifact job before it is submitted.
 
                 These are preparation, not execution: a job is ``draft`` while its inputs are

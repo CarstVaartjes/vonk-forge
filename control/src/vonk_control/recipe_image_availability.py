@@ -205,6 +205,11 @@ _LOGGER = logging.getLogger(__name__)
 _ACTIVE = "active"
 _WAITING = "waiting"
 _PREPARATION_RETRY_QUIET = timedelta(minutes=15)
+#: A finished preparation the plan still reports missing is asked again after this.
+_PREPARATION_RECHECK_QUIET = timedelta(minutes=2)
+#: Longest chain of re-asks one revision keeps (failures and stale successes).
+_PREPARATION_CHAIN_LIMIT = 64
+_SUCCEEDED = job_states.words(LifecycleState.SUCCEEDED)
 SCHEMA_VERSION = 2
 OPERATION_KIND = "recipe.image.availability.v2"
 REMOVE_OPERATION_KIND = RECIPE_CACHE_REMOVE_KIND
@@ -3324,6 +3329,8 @@ class RecipeImageAvailabilityService:
                 if child is None or child.state not in job_states.words(
                     LifecycleState.QUEUED,
                     LifecycleState.RUNNING,
+                    LifecycleState.OBSERVING,
+                    LifecycleState.BACKOFF,
                     LifecycleState.NEEDS_OPERATOR,
                 ):
                     return False
@@ -3371,6 +3378,8 @@ class RecipeImageAvailabilityService:
                             job_states.words(
                                 LifecycleState.QUEUED,
                                 LifecycleState.RUNNING,
+                                LifecycleState.OBSERVING,
+                                LifecycleState.BACKOFF,
                                 LifecycleState.NEEDS_OPERATOR,
                             )
                         ),
@@ -3660,7 +3669,12 @@ class RecipeImageAvailabilityService:
         return self._start_request(intent, actor=actor, request_id=request_id)
 
     def cancel_profile_preparation(
-        self, recipe_revision_id: str, *, actor: str, reason: str
+        self,
+        recipe_revision_id: str,
+        *,
+        actor: str,
+        reason: str,
+        application_id: str | None = None,
     ) -> tuple[str, ...]:
         """Cancel the pending preparation a profile load asked for, if any.
 
@@ -3672,11 +3686,13 @@ class RecipeImageAvailabilityService:
         namespace = uuid.NAMESPACE_URL
         request_id = str(
             uuid.uuid5(
-                namespace, f"vonk-forge:profile-preparation:{recipe_revision_id}"
+                namespace,
+                f"vonk-forge:profile-preparation:{recipe_revision_id}"
+                + (f":{application_id}" if application_id else ""),
             )
         )
         cancelled: list[str] = []
-        for _ in range(16):
+        for _ in range(_PREPARATION_CHAIN_LIMIT):
             with self._sessions.begin() as session:
                 job = session.scalar(
                     select(Job)
@@ -3705,7 +3721,7 @@ class RecipeImageAvailabilityService:
                     )
                     cancelled.append(job.id)
                     break
-                if job.state not in {"failed", "cancelled"}:
+                if job.state not in {"failed", "cancelled", *_SUCCEEDED}:
                     break
                 request_id = str(
                     uuid.uuid5(
@@ -3716,7 +3732,7 @@ class RecipeImageAvailabilityService:
         return tuple(cancelled)
 
     def ensure_preparation(
-        self, recipe_revision_id: str, *, actor: str
+        self, recipe_revision_id: str, *, actor: str, application_id: str | None = None
     ) -> tuple[OperationBlocker, ...]:
         """Start, or find, the preparation a load asks for; say what it waits on.
 
@@ -3728,11 +3744,39 @@ class RecipeImageAvailabilityService:
         namespace = uuid.NAMESPACE_URL
         request_id = str(
             uuid.uuid5(
-                namespace, f"vonk-forge:profile-preparation:{recipe_revision_id}"
+                namespace,
+                f"vonk-forge:profile-preparation:{recipe_revision_id}"
+                + (f":{application_id}" if application_id else ""),
             )
         )
-        for _ in range(16):
+        for _ in range(_PREPARATION_CHAIN_LIMIT):
             view = self.start(recipe_revision_id, actor=actor, request_id=request_id)
+            if view.state in _SUCCEEDED:
+                # The caller asks only because its plan still lacks the image
+                # or model, so an earlier success is stale (the image was
+                # removed or the revision's build changed). Replaying it would
+                # park the load for ever; ask again under a new identity,
+                # paced so an evidence mismatch cannot spin.
+                updated = datetime.fromisoformat(view.updated_at)
+                updated = updated if updated.tzinfo else updated.replace(tzinfo=UTC)
+                now = self._clock()
+                now = now if now.tzinfo else now.replace(tzinfo=UTC)
+                if now < updated + _PREPARATION_RECHECK_QUIET:
+                    return (
+                        make_blocker(
+                            RecipeImageCode.PREPARING,
+                            "Preparing finished a moment ago; checking that "
+                            "the model and runtime image are in place.",
+                            severity="info",
+                        ),
+                    )
+                request_id = str(
+                    uuid.uuid5(
+                        namespace,
+                        f"vonk-forge:profile-preparation:{recipe_revision_id}:{view.id}",
+                    )
+                )
+                continue
             if view.state not in {"failed", "cancelled"}:
                 break
             updated = datetime.fromisoformat(view.updated_at)
@@ -3760,8 +3804,8 @@ class RecipeImageAvailabilityService:
         else:
             return (
                 make_blocker(
-                    RecipeImageCode.PREPARATION_FAILED,
-                    "Preparing this recipe kept failing; inspect its operations.",
+                    RecipeImageCode.PREPARATION_EXHAUSTED,
+                    "The bounded preparation attempts ended without the required assets.",
                     severity="error",
                 ),
             )

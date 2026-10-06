@@ -844,7 +844,7 @@ impl AgentResult {
                     }
                     _ => false,
                 },
-                AgentResultState::Cancelled | AgentResultState::WaitingForOperator => {
+                AgentResultState::Cancelled | AgentResultState::Observing => {
                     match (body, operation) {
                         (AgentResultResult::AgentFailureResult(result), _) => {
                             result.reason.is_some() || result.error_code.is_some()
@@ -933,7 +933,7 @@ impl generated::AgentResultResult {
                     AgentResultState::Failed
                 })
             }
-            AgentResultResult::OutcomeUnknown(_) => Some(AgentResultState::WaitingForOperator),
+            AgentResultResult::OutcomeUnknown(_) => Some(AgentResultState::Observing),
             _ => None,
         }
     }
@@ -984,6 +984,18 @@ mod agent_result_binding_tests {
         }
     }
 
+    #[test]
+    fn retired_unknown_result_state_is_adopted_without_being_written() {
+        let old = serde_json::json!({
+            "fence": "00000000-0000-4000-8000-000000000001",
+            "state": "waiting-for-operator",
+            "result": {"reason": "legacy receipt"}
+        });
+        let adopted: AgentResult = serde_json::from_value(old).unwrap();
+        assert_eq!(adopted.state, AgentResultState::Observing);
+        assert_eq!(serde_json::to_value(adopted).unwrap()["state"], "observing");
+    }
+
     fn typed(state: AgentResultState, body: Value) -> AgentResult {
         result(state, body)
     }
@@ -1006,7 +1018,7 @@ mod agent_result_binding_tests {
             "wait_reason": "stop-unconfirmed",
             "reason": "workload stop remains unconfirmed",
         });
-        typed(AgentResultState::WaitingForOperator, unknown.clone())
+        typed(AgentResultState::Observing, unknown.clone())
             .validate_for_operation(&AgentOperation::RecipeStop)
             .unwrap();
         for wrong in [
@@ -1090,7 +1102,7 @@ mod agent_result_binding_tests {
     #[test]
     fn failure_result_retains_optional_fields_but_requires_failure_identity() {
         let failure = result(
-            AgentResultState::WaitingForOperator,
+            AgentResultState::Observing,
             serde_json::json!({"reason": "operator review required"}),
         );
         failure

@@ -797,6 +797,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Principle debt compares against the reviewed origin/main inventory.
+          fetch-depth: 0
       - name: Provide the canonical recipe library
         uses: ./.github/actions/recipe-library
       - name: Prepare the locked Python environment
