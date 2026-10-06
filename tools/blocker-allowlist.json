@@ -2553,7 +2553,7 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_canonical_distributed_readiness", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_profile_effect_scope", "profile-stop-target-scope-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_run_start_intent", "recipe-run-does-not-exist", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_validated_result", "recipe-operation-result-is-invalid", 2],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_validated_result", "recipe-operation-result-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_workload_owner_scope", "recipe-installation-does-not-exist", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_workload_owner_scope", "recipe-run-does-not-exist", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_workload_owner_scope", "workload-reconciliation-kind-is-invalid", 1]

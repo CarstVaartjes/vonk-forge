@@ -289,7 +289,7 @@
     },
     {
       "path": "control/src/vonk_control/distribution_executor.py",
-      "count": 25
+      "count": 8
     },
     {
       "path": "control/src/vonk_control/download_contract.py",
@@ -345,7 +345,7 @@
     },
     {
       "path": "control/src/vonk_control/lifecycle/run_switch.py",
-      "count": 17
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/lifecycle_preflight.py",
@@ -453,7 +453,7 @@
     },
     {
       "path": "control/src/vonk_control/run_switch_operations.py",
-      "count": 64
+      "count": 14
     },
     {
       "path": "control/src/vonk_control/runtime.py",

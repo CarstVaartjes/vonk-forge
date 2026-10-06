@@ -354,12 +354,22 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/resource_planning_contract.py",
+      "kind": "controller-contract",
+      "reason": "Canonical recipe resource read surface using shared settings, topology, and model selection."
+    },
+    {
       "module": "control/src/vonk_control/route_bundle_contract.py",
       "kind": "controller-contract"
     },
     {
       "module": "control/src/vonk_control/run_switch_contract.py",
       "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/run_switch_observation_contract.py",
+      "kind": "controller-contract",
+      "reason": "Canonical observations and retained identities for restart-safe run-switch recovery."
     },
     {
       "module": "control/src/vonk_control/runtime_image_preparation.py",
