@@ -641,6 +641,7 @@ class BuildThenCopyExecutor:
                 progress=progress,
             )
             if execution.operation_id is not None:
+                assert execution.result is not None
                 self.children[execution.operation_id] = _ChildView(
                     state="running", result=execution.result
                 )

@@ -10460,13 +10460,14 @@ def _validate_artifact_execution(
         return
     if phase.kind == "verify":
         try:
-            normalized = dict(raw_result)
-            normalized.setdefault("phase", "verify")
-            normalized.setdefault("subphase", "target-copy")
-            verification = read_stored_model(
-                RunSwitchVerifyResult, normalized, strict=True
-            )
-        except (TypeError, ValidationError) as error:
+            parsed_receipt = _phase_result(result, phase=phase)
+            if not isinstance(parsed_receipt, RunSwitchVerifyResult):
+                raise RunSwitchRetryLater(
+                    RunSwitchCode.ARTIFACT_VERIFICATION_RESULT_INVALID,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            verification = parsed_receipt
+        except (TypeError, ValidationError, RunSwitchRetryLater) as error:
             if (
                 plan.recipe_build_id is not None
                 and isinstance(raw_result, Mapping)
