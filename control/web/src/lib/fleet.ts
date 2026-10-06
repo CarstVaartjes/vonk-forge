@@ -46,12 +46,13 @@ export function warningText(warning: VisualFleetNode["warnings"][number]): strin
 
 /** Online, offline, or online but needing attention, with the reasons in plain words. */
 export function nodeStatus(node: VisualFleetNode, now: Date): {status: NodeStatus; reasons: string[]} {
-  if (node.connection.online_state !== "online") return {status: "offline", reasons: [offlineReasonLabel(node.connection.offline_reason)]};
+  const projectionIssues = node.projection_issues ?? [];
+  if (node.connection.online_state !== "online") return {status: "offline", reasons: [...projectionIssues, offlineReasonLabel(node.connection.offline_reason)]};
   const warnings = node.telemetry?.sample
     ? reconcileTelemetryWarnings(node.warnings, telemetryFreshnessAt(node.telemetry.sample.observed_at, now))
     : node.warnings;
   // Informational notices (a newer recipe revision exists) are not attention.
-  const reasons = warnings.filter(warning => warning.severity !== "info").map(warningText);
+  const reasons = [...projectionIssues, ...warnings.filter(warning => warning.severity !== "info").map(warningText)];
   return {status: reasons.length > 0 ? "needs attention" : "online", reasons};
 }
 
@@ -62,7 +63,7 @@ export function nodeRecipeUpdates(node: VisualFleetNode): {runId: string; title:
   for (const run of node.loaded) {
     if (!run.recipe_update || seen.has(run.run_id)) continue;
     seen.add(run.run_id);
-    updates.push({runId: run.run_id, title: run.title, detail: run.recipe_update.detail});
+    updates.push({runId: run.run_id, title: run.title ?? run.run_id, detail: run.recipe_update.detail});
   }
   return updates;
 }
@@ -119,7 +120,7 @@ export function nodeDisplayName(node: VisualFleetNode): string {
   if (explicit && !isTechnicalSparkIdentity(explicit)) return explicit;
 
   for (const key of ["display_name", "name", "spark_name"] as const) {
-    const candidate = node.labels[key]?.trim();
+    const candidate = node.labels?.[key]?.trim();
     if (candidate && !isTechnicalSparkIdentity(candidate)) return humanizeName(candidate);
   }
 
@@ -129,7 +130,7 @@ export function nodeDisplayName(node: VisualFleetNode): string {
     if (shortHostname) return humanizeName(shortHostname);
   }
 
-  const role = node.labels.role?.trim();
+  const role = node.labels?.role?.trim();
   return role ? `${humanizeName(role)} Spark` : "Unnamed Spark";
 }
 

@@ -367,8 +367,8 @@ function JobProgressDetails({
 
   const visibleTargets = detail?.targets.map(target => friendlyTarget(target, targetNames)) ?? [];
   const visibleOperations = detail?.operations ?? [];
-  const completed = detail?.progress.completed ?? 0;
-  const total = detail?.progress.total ?? 0;
+  const completed = detail?.progress?.completed ?? 0;
+  const total = detail?.progress?.total ?? 0;
   const completion = total > 0 ? Math.min(100, Math.max(0, completed / total * 100)) : 0;
   const agentRetryQueued = detail?.agent_upgrade_diagnostics?.targets.some(target => target.retry_queued) ?? false;
 
@@ -384,18 +384,19 @@ function JobProgressDetails({
         </header>
         {jobUpdatesAutomatically(detail) && <p className="activity-job-live" role="status"><span aria-hidden="true"/>{detail.state === "waiting" ? "The Controller rechecks automatically; this view refreshes about once a minute." : "Updates automatically while this operation is active."}</p>}
         {detail.status_reason && <div className="activity-job-reason"><span>State reason</span><strong>{detail.status_reason}</strong></div>}
-        <section className="activity-job-progress" aria-label="Operation progress">
+        {detail.projection_issue && <p className="activity-job-message" role="status">{detail.projection_issue}</p>}
+        {detail.progress && <section className="activity-job-progress" aria-label="Operation progress">
           <div><span>Completed</span><strong>{detail.progress.completed}</strong></div>
           <div><span>Running</span><strong>{detail.progress.running}</strong></div>
           <div><span>Failed</span><strong>{detail.progress.failed}</strong></div>
           <div><span>Total</span><strong>{detail.progress.total}</strong></div>
           <div className="activity-job-progress-track" role="img" aria-label={`${completed} of ${total} operation steps completed`}><span style={{width: `${completion}%`}}/></div>
-        </section>
+        </section>}
         {detail.kind !== "agent-upgrade" && <p className="activity-job-attempt">Current attempt <strong>{detail.current_attempt}</strong></p>}
         <AgentUpgradeDiagnostics detail={detail} targetNames={targetNames}/>
         {visibleTargets.length > 0 && <section className="activity-job-targets" aria-label="Affected targets"><h3>Affected targets</h3><ul>{visibleTargets.map((target, index) => <li key={`${detail.targets[index]}:${index}`}>{target}</li>)}</ul>{detail.target_total > detail.targets.length && <p>Showing {detail.targets.length} of {detail.target_total} affected targets.</p>}</section>}
-        {"operation" in detail.progress && detail.progress.operation != null && <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress.operation)}/>}
-        {visibleOperations.length > 0 && <section className="activity-job-steps" aria-label="Operation steps"><h3>Operation steps</h3><ul>{visibleOperations.map(operation => <li key={operation.id}><div><strong>{operation.kind === "artifact.distribution.v1" ? "Model distribution" : titleCase(operation.kind)}</strong><span>{friendlyTarget(operation.node_id, targetNames)}</span></div><StatusPill tone={statusTone(activityStatus({...event, action: `operation.${operation.kind}.${operation.state}`}))}>{activityStateLabel(operation.state)}</StatusPill>{operation.progress && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/>} {operation.evidence_download && <DiagnosticDownload id={operation.id} attempt={operation.attempt}/>}</li>)}</ul>{detail.operation_total > detail.operations.length && <p>Showing {detail.operations.length} of {detail.operation_total} operation steps.</p>}</section>}
+        {detail.progress && "operation" in detail.progress && detail.progress.operation != null && <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress.operation)}/>}
+        {visibleOperations.length > 0 && <section className="activity-job-steps" aria-label="Operation steps"><h3>Operation steps</h3><ul>{visibleOperations.map(operation => <li key={operation.id}><div><strong>{operation.kind === "artifact.distribution.v1" ? "Model distribution" : titleCase(operation.kind)}</strong><span>{friendlyTarget(operation.node_id, targetNames)}</span></div><StatusPill tone={statusTone(activityStatus({...event, action: `operation.${operation.kind}.${operation.state}`}))}>{activityStateLabel(operation.state)}</StatusPill>{operation.progress && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/>} {operation.evidence_download && <DiagnosticDownload id={operation.id} attempt={operation.attempt}/>}</li>)}</ul>{detail.operation_total != null && detail.operation_total > visibleOperations.length && <p>Showing {visibleOperations.length} of {detail.operation_total} operation steps.</p>}</section>}
         {isOperatorWait(detail.state) && (agentRetryQueued ? <section className="activity-job-resume"><div><strong>Retry queued behind safety delay</strong><p>{detail.agent_upgrade_diagnostics?.next_action}</p></div></section> : <section className="activity-job-resume"><div><strong>Operator action required</strong><p>{detail.agent_upgrade_diagnostics?.next_action || "This operation can be returned to the queue. Review the state reason and affected targets first."}</p></div><button type="button" className="button" disabled={resuming || loading} onClick={() => void resume()}>{resuming ? detail.kind === "agent-upgrade" ? "Queuing…" : "Resuming…" : detail.kind === "agent-upgrade" ? "Queue retry after inspection" : "Resume operation"}</button></section>)}
         {resumeNotice && <p className="activity-job-message is-success" role="status">{resumeNotice}</p>}
         {resumeError && <p className="activity-job-message is-error" role="alert">Operation was not resumed. {resumeError}</p>}
@@ -596,6 +597,11 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
         setError(`Unable to load activity. ${canonicalError}`);
         return;
       }
+      if (canonical.operations == null || canonical.total == null) {
+        setCanonicalAvailable(false);
+        setError(canonical.projection_issue || "Operation membership is currently unknown. Refresh to observe it again.");
+        return;
+      }
       canonicalIds.current = new Set(canonical.operations.map(operation => operation.id));
       setCanonicalCount(canonicalIds.current.size);
       setCanonicalTotal(canonical.total);
@@ -630,6 +636,11 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     const errors: string[] = [];
     if (canonicalResult.status === "fulfilled" && canonicalResult.value) {
       const next = canonicalResult.value;
+      if (next.operations == null || next.total == null) {
+        setPaginationError(next.projection_issue || "Older operation membership is currently unknown. Try again.");
+        setLoadingMore(false);
+        return;
+      }
       for (const operation of next.operations) {
         if (canonicalIds.current.has(operation.id)) continue;
         canonicalIds.current.add(operation.id);

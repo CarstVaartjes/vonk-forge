@@ -36,7 +36,8 @@ export type ModelCacheOperatorResponse = components["schemas"]["ModelCacheOperat
 export type RecipeImageAvailabilityResponse = components["schemas"]["RecipeImageAvailabilityResponse"];
 export type RecipeOperatorResponse = components["schemas"]["RecipeOperatorResponse"];
 export type RecipeUpdateResponse = components["schemas"]["RecipeUpdateResponse"];
-export type RecipeCacheOperation = RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse;
+export type RecipeRemovalUnavailable = components["schemas"]["RecipeRemovalUnavailableView"];
+export type RecipeCacheOperation = RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RecipeRemovalUnavailable;
 // The library ordering vocabulary is the generated query parameter, so the UI
 // cannot offer a `sort` the API would reject as a 422.
 export type LibrarySort = NonNullable<NonNullable<paths["/api/model/library"]["get"]["parameters"]["query"]>["sort"]>;
@@ -120,6 +121,10 @@ export type ArtifactJobList = components["schemas"]["ArtifactJobListResponse"];
 export type ArtifactJobCapabilities = components["schemas"]["ArtifactJobCapabilitiesResponse"];
 export type ArtifactTransferProgress = {loaded: number; total: number};
 export type FleetProfile = components["schemas"]["FleetProfileView"];
+export type FleetProfileRead = FleetProfile | components["schemas"]["UnavailableFleetProfileView"];
+export function readableProfile(profile: FleetProfileRead): profile is FleetProfile {
+  return !("projection_issue" in profile);
+}
 export type FleetProfileInput = components["schemas"]["FleetProfileInput"];
 export type FleetProfileList = components["schemas"]["FleetProfileList"];
 export type FleetProfilePreview = components["schemas"]["FleetProfilePreview"];
@@ -164,7 +169,7 @@ export interface LibraryApi {
 export interface ControlApi extends LibraryApi {
   downloadCliToken(): Promise<CliTokenDownload>;
   profiles(signal?: AbortSignal): Promise<FleetProfileList>;
-  profile(number: number, signal?: AbortSignal): Promise<FleetProfile>;
+  profile(number: number, signal?: AbortSignal): Promise<FleetProfileRead>;
   autosaveProfile(number: number, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile>;
   previewProfile(number: number, signal?: AbortSignal): Promise<FleetProfilePreview>;
   loadProfile(number: number, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView>;

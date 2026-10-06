@@ -946,12 +946,6 @@
     },
     {
       "path": "control/tests/test_fleet_projection.py",
-      "function": "test_projection_rejects_more_than_500_registered_nodes_before_state_queries",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_fleet_projection.py",
       "function": "test_projection_schema_is_finite_for_states_items_and_task3_numbers",
       "kind": "transient-failed-assertion",
       "count": 2
@@ -1120,12 +1114,6 @@
     },
     {
       "path": "control/tests/test_library_assessment.py",
-      "function": "test_late_assessment_is_discarded_and_selector_scan_does_not_assess",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_library_assessment.py",
       "function": "test_ready_uses_actual_nas_files_and_does_not_require_spark_copies",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -1134,7 +1122,7 @@
       "path": "control/tests/test_library_assessment.py",
       "function": "test_stale_capacity_is_unavailable_and_filter_cannot_report_empty_success",
       "kind": "refused-read-assertion",
-      "count": 2
+      "count": 1
     },
     {
       "path": "control/tests/test_library_canonical_projection.py",
@@ -1276,12 +1264,6 @@
     },
     {
       "path": "control/tests/test_operation_api.py",
-      "function": "test_corrupt_stored_evidence_decoration_is_a_declared_server_fault",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
       "function": "test_durable_resume_authorises_the_parked_operation_for_the_next_claim",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -1405,12 +1387,6 @@
       "function": "test_resume_action_disappearing_after_preflight_is_refused",
       "kind": "refused-read-assertion",
       "count": 1
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
-      "function": "test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault",
-      "kind": "refused-read-assertion",
-      "count": 2
     },
     {
       "path": "control/tests/test_operation_api.py",

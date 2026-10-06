@@ -63,6 +63,16 @@ def _warn(message: str) -> None:
     )
 
 
+def _projection_issues(value: object) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(
+        not isinstance(issue, str) for issue in value
+    ):
+        raise TypeError("expected a list of projection issues")
+    return [str(issue) for issue in value]
+
+
 def _words(value: object) -> str:
     if value is None:
         return "unavailable"
@@ -285,7 +295,7 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
             _reasons([run["degraded_reason"]], subject=name)
     if detail:
         _field("Lifecycle", node.get("lifecycle"))
-        for key, value in _object(node.get("labels", {}), "labels").items():
+        for key, value in _optional(node.get("labels", {}), "labels").items():
             _field("Label", f"{key}={_text(value)}")
         installed = _records(node, "installed")
         if not installed:
@@ -295,6 +305,8 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
             _field("Installation", recipe.get("installation_id"))
             _field("Installation state", recipe.get("group_state"))
             _field("Members", _words(recipe.get("member_node_ids")))
+    for issue in _projection_issues(node.get("projection_issues")):
+        _warn(f"{_text(name)}: {_text(issue)}")
     _reasons(node.get("warnings"), subject=name)
 
 
@@ -436,6 +448,8 @@ def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
             inventory = _optional(node.get("inventory"), "inventory").get("freshness")
             if inventory not in {None, "fresh"}:
                 notes.append(f"{name} inventory is {_text(inventory)}")
+        for issue in _projection_issues(node.get("projection_issues")):
+            notes.append(f"{name}: {_text(issue)}")
         warnings = node.get("warnings")
         if not isinstance(warnings, list):
             warnings = []
@@ -521,6 +535,9 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
         if stale:
             notes.append(f"{title} has stale rank reports from {', '.join(stale)}")
         for _, member in members:
+            if member.get("projection_issue") is not None:
+                notes.append(f"{title}: {_text(member.get('projection_issue'))}")
+                break
             if member.get("degraded_reason") is not None:
                 reason = member["degraded_reason"]
                 detail = (
@@ -538,6 +555,10 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
     stopped: dict[str, tuple[str, list[str]]] = {}
     for node in nodes:
         for presence in _records(node, "installed"):
+            if presence.get("projection_issue") is not None:
+                notes.append(
+                    f"{_text(presence.get('title'))}: {_text(presence.get('projection_issue'))}"
+                )
             installation = presence.get("installation_id")
             if not isinstance(installation, str) or installation in loaded:
                 continue
@@ -908,6 +929,15 @@ def _profile(payload: Mapping[str, object]) -> None:
     _field("Revision", payload.get("revision"))
     _field("Loaded revision", payload.get("loaded_revision"))
     _field("State", payload.get("status"))
+    if (
+        payload.get("definition") is None
+        and payload.get("projection_issue") is not None
+    ):
+        issue = _object(payload["projection_issue"], "profile projection issue")
+        _field("Definition", "unknown")
+        _field("Cause", issue.get("detail"))
+        _field("Next", issue.get("next_action"))
+        return
     _field("Retention", payload.get("installation_policy"))
     if "favorite" in payload:
         _field("Favorite", payload["favorite"])
@@ -1352,6 +1382,10 @@ def _operation(payload: Mapping[str, object], noun: str) -> None:
     _failure(payload.get("failure"))
     if "preserved" in payload:
         _field("Preserved", _words(payload["preserved"]))
+    if payload.get("projection_issue") is not None:
+        issue = _object(payload["projection_issue"], "removal projection issue")
+        _field("Cause", issue.get("detail"))
+        _field("Next", issue.get("next_action"))
     if "reclaimed_bytes" in payload:
         _field("Reclaimed", _bytes(payload["reclaimed_bytes"]))
     _actions(payload.get("actions") if availability else payload.get("next_actions"))
@@ -1372,6 +1406,10 @@ def _job(payload: Mapping[str, object]) -> None:
             f"{_text(progress.get('completed'))} / {_text(progress.get('total'))}",
         )
         _field("Failed", progress.get("failed"))
+    if payload.get("projection_issue") is not None:
+        _field("Observation", payload["projection_issue"])
+    if payload.get("operations") is None:
+        return
     for operation in _records(payload, "operations"):
         _field("Operation", operation.get("id"))
         _field("Spark", operation.get("node_id"))
@@ -1580,6 +1618,13 @@ def _locks(payload: Mapping[str, object]) -> None:
 def _activity(
     payload: Mapping[str, object], filters: Mapping[str, object] | None
 ) -> None:
+    if (
+        payload.get("operations") is None
+        and payload.get("total") is None
+        and isinstance(payload.get("projection_issue"), str)
+    ):
+        _field("Activity observation", payload["projection_issue"])
+        return
     operations = _records(payload, "operations")
     total = payload.get("total")
     if type(total) is not int or total < 0:
@@ -1933,6 +1978,11 @@ def render_payload(
                     for row in rows
                 ],
             )
+            for row in rows:
+                if row.get("projection_issue") is not None:
+                    issue = _object(row["projection_issue"], "profile projection issue")
+                    _field(f"Profile {row.get('number')} cause", issue.get("detail"))
+                    _field("Next", issue.get("next_action"))
         elif action == "preview":
             _preview(payload)
         elif action in {"progress", "load", "cancel"}:

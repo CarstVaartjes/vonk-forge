@@ -196,3 +196,28 @@ test.each(["disconnect", "timeout"])("an accepted POST with %s recovers through 
     with_model: false,
   });
 });
+
+
+test("unreadable removal effects show unknown and preserve the original operation", async () => {
+  const accepted: RecipeOperatorResponse = {
+    action: "remove", selector: "vonk-forge/recipe", request_key: "request",
+    operation_id: "operation", recipe_revision_id: "revision", with_model: false,
+    state: "running", progress: {phase: "reclaiming", completed_bytes: 0, total_bytes_known: false},
+    reclaimed_bytes: 0,
+  };
+  const intent = {kind: "recipe" as const, selector: accepted.selector,
+    requestKey: accepted.request_key, review: cacheRemovalReview({selector: accepted.selector, with_model: false})};
+  const unknown = {kind: "recipe.cache.remove.v2", action: "remove", operation_id: "operation",
+    request_key: "request", recipe_revision_id: "revision", state: "unknown", progress: null,
+    failure: null, observed_at: "2026-10-06T00:00:00Z", projection_issue: {
+      code: "recipe_image.removal_evidence_unavailable", detail: "Removal effects are unknown.", next_action: "Restore the accepted record and recheck."}};
+  const api = {recipeCacheOperation: vi.fn().mockResolvedValue(unknown)} as unknown as ControlApi;
+  const onComplete = vi.fn();
+  render(<CacheRemovalProgress api={api} intent={intent} initial={accepted}
+    onComplete={onComplete} onDismiss={vi.fn()} onRejected={vi.fn()}/>);
+  fireEvent.click(screen.getByRole("button", {name: "Refresh removal status"}));
+  expect(await screen.findByText(/Removal effects are unknown/)).toBeVisible();
+  expect(screen.getByText("Removal unknown: operation")).toBeVisible();
+  expect(screen.queryByRole("button", {name: "Retry same reviewed request"})).not.toBeInTheDocument();
+  expect(onComplete).not.toHaveBeenCalled();
+});

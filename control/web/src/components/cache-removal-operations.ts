@@ -4,6 +4,7 @@ import type {
   ControlApi,
   ModelCacheOperatorResponse,
   RecipeOperatorResponse,
+  RecipeRemovalUnavailable,
 } from "../api/types";
 
 export type CacheRemovalIntent =
@@ -13,7 +14,7 @@ export type CacheRemovalReviewTarget =
   | {kind: "model"; selector: string; modelContentSha256: string}
   | {kind: "recipe"; selector: string; withModel: boolean};
 
-export type CacheRemovalReceipt = ModelCacheOperatorResponse | RecipeOperatorResponse;
+export type CacheRemovalReceipt = ModelCacheOperatorResponse | RecipeOperatorResponse | RecipeRemovalUnavailable;
 
 export class CacheRemovalOutcomeUnknown extends Error {
   constructor(message: string) {
@@ -69,6 +70,17 @@ export function validateRemovalReceipt(
   }
   if (expectedOperationId !== undefined && value.operation_id !== expectedOperationId) {
     throw new Error("Controller returned a different removal operation.");
+  }
+  if (intent.kind === "recipe" && value.state === "unknown") {
+    if (value.kind !== "recipe.cache.remove.v2" || value.action !== "remove"
+      || value.request_key !== intent.requestKey || typeof value.operation_id !== "string"
+      || !isRecord(value.projection_issue) || typeof value.projection_issue.detail !== "string"
+      || typeof value.projection_issue.next_action !== "string") {
+      throw new Error("Controller returned an unavailable removal for a different request.");
+    }
+    // Correlation permits observation only; no target or reclaimed bytes are
+    // inferred from unreadable accepted intent.
+    return value as unknown as RecipeRemovalUnavailable;
   }
   const commonMatches =
     value.action === "remove"

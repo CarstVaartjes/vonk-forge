@@ -72,7 +72,7 @@
       "path": "control/src/vonk_control/api.py",
       "function": "create_app.job_view",
       "kind": "get-refusal",
-      "count": 2
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/api.py",

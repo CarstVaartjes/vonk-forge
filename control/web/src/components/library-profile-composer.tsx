@@ -1,11 +1,11 @@
 import {useEffect, useMemo, useState} from "react";
-import {canonicalRecipeSelector} from "../api/types";
-import type {ControlApi, FleetProfile, FleetProfileInput, LibraryViewRecipeDetail} from "../api/types";
+import {canonicalRecipeSelector, readableProfile} from "../api/types";
+import type {ControlApi, FleetProfile, FleetProfileRead, FleetProfileInput, LibraryViewRecipeDetail} from "../api/types";
 import {useLibraryNodeName} from "./library-node-names";
 import {RecipeOptionSelects, effectiveChoices} from "./recipe-option-selects";
 import type {OptionChoices} from "./recipe-option-selects";
 
-function nextProfileNumber(profiles: FleetProfile[]): number {
+function nextProfileNumber(profiles: FleetProfileRead[]): number {
   return Math.max(0, ...profiles.map(profile => profile.number)) + 1;
 }
 
@@ -16,7 +16,7 @@ function inputFromProfile(profile: FleetProfile): FleetProfileInput {
 export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: ControlApi; detail: LibraryViewRecipeDetail; preferredNodeId?: string}) {
   const nodeName = useLibraryNodeName();
   const [open, setOpen] = useState(false);
-  const [profiles, setProfiles] = useState<FleetProfile[]>([]);
+  const [profiles, setProfiles] = useState<FleetProfileRead[]>([]);
   const [target, setTarget] = useState("new");
   const [name, setName] = useState(`${detail.recipe.title} ready`);
   const [description, setDescription] = useState(`Keep ${detail.recipe.title} ready on its selected Spark group.`);
@@ -67,7 +67,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
       ...(recipeOptions.length > 0 ? {option_choices: effectiveChoices(recipeOptions, chosenOptions)} : {}),
     } satisfies NonNullable<FleetProfileInput["assignments"]>[number];
     try {
-      const existing = target === "new" ? undefined : profiles.find(profile => profile.number === Number(target));
+      const existing = target === "new" ? undefined : profiles.filter(readableProfile).find(profile => profile.number === Number(target));
       if (target !== "new" && !existing) throw new Error("Choose a saved profile.");
       if (existing?.assignments.some(item => item.recipe_selector === assignment.recipe_selector && item.spark_ids.join(",") === assignment.spark_ids.join(","))) {
         throw new Error("This recipe and Spark group are already part of the selected profile.");
@@ -95,7 +95,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
   return <section className="library-profile-composer" aria-labelledby="profile-composer-title">
     <header><div><h4 id="profile-composer-title">Add recipe to a Fleet Profile</h4><p>Save a recipe choice and Spark group. The latest compatible cached revision is selected when the profile loads.</p></div><button type="button" className="secondary-button" onClick={() => setOpen(false)}>Close</button></header>
     <div className="profile-composer-grid">
-      <label><span>Destination</span><select value={target} disabled={loadingProfiles} onChange={event => setTarget(event.target.value)}><option value="new">New Fleet Profile</option>{profiles.map(profile => <option key={profile.number} value={profile.number}>Profile {profile.number} · {profile.name} · {profile.assignments.length} workloads</option>)}</select></label>
+      <label><span>Destination</span><select value={target} disabled={loadingProfiles} onChange={event => setTarget(event.target.value)}><option value="new">New Fleet Profile</option>{profiles.map(profile => readableProfile(profile) ? <option key={profile.number} value={profile.number}>Profile {profile.number} · {profile.name} · {profile.assignments.length} workloads</option> : <option key={profile.number} value={profile.number} disabled>Profile {profile.number} · Definition unavailable</option>)}</select></label>
       {target === "new" && <><label><span>Profile name</span><input value={name} maxLength={120} onChange={event => setName(event.target.value)}/></label><label className="profile-composer-wide"><span>Purpose</span><textarea value={description} maxLength={1000} rows={2} onChange={event => setDescription(event.target.value)}/></label></>}
       <label><span>Desired state</span><select value={desiredState} onChange={event => setDesiredState(event.target.value as "installed" | "running")}><option value="running">Running</option><option value="installed">Installed</option></select></label>
       <label><span>Assignment name</span><input value={assignmentName} maxLength={128} onChange={event => setAssignmentName(event.target.value)}/></label>
