@@ -590,3 +590,55 @@ def test_the_cache_writes_backoff_never_partial(cache, tmp_path):
     from vonk_control import model_cache_states
 
     assert model_cache_states.BACKOFF == "backoff"
+
+
+# ------------------------------------ a background transfer's unknown outcome
+
+
+def _settle_background(service: ModelCacheService) -> None:
+    """Tick the pool worker until its in-flight transfers have been settled."""
+
+    import time
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        service.tick()
+        if not service._background_operations:
+            return
+        time.sleep(0.01)
+    raise AssertionError("the background transfers never settled")
+
+
+def test_a_background_transfer_with_an_unknown_outcome_is_kept_and_retried(
+    cache, tmp_path
+):
+    from vonk_control.model_cache import ModelCacheStorageUnknown
+
+    service, _sessions = cache
+    now = _clock_at(service)
+    operation, _artifact_spec = _queue(
+        service, tmp_path, "00000000-0000-4000-8000-00000000a061", b"flaky storage"
+    )
+    original = service._open_source
+    unavailable = True
+
+    def source(spec, offset):
+        if unavailable:
+            raise ModelCacheStorageUnknown(
+                "model_cache.source_unavailable", "the source is unavailable"
+            )
+        return original(spec, offset)
+
+    service._open_source = source
+    _settle_background(service)
+    waiting = service.get_operation(operation.id)
+    # The unknown outcome keeps the operation: queued with a bounded retry, not
+    # failed, and nobody is asked to resubmit.
+    assert waiting.state == "queued"
+    assert waiting.failure is not None and waiting.failure["retryable"] is True
+    assert waiting.next_attempt_at is not None
+
+    unavailable = False
+    now[0] = now[0] + timedelta(hours=1)
+    _settle_background(service)
+    assert service.get_operation(operation.id).state == "succeeded"

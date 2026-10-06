@@ -542,6 +542,51 @@ def test_install_admission_blocks_malformed_mapping_parameters(tmp_path) -> None
     )
 
 
+def test_unconfirmed_plan_evidence_is_a_wait_not_a_blocked_plan(tmp_path) -> None:
+    """A receipt that cannot be read now is observed again, never a verdict."""
+
+    from vonk_control.install_admission import require_admissible
+    from vonk_control.runtime_image_preparation import RuntimeImagePreparationUnknown
+
+    sessions, now, _node, mapping_id, build = setup(tmp_path)
+
+    def unreadable(**_unused: object) -> dict[str, dict[str, object]]:
+        raise RuntimeImagePreparationUnknown(
+            "runtime_image.receipt_unavailable", "the image receipt is unreadable"
+        )
+
+    plan = _service(
+        sessions, compiled_plan_provider=unreadable, inventory_max_age=300
+    ).plan_install(mapping_id, build, now=now)
+
+    assert plan.allowed is False
+    assert any(
+        blocker.detail.startswith("Waiting for evidence")
+        and "the image receipt is unreadable" in blocker.detail
+        for node in plan.nodes
+        for blocker in node.blockers
+    )
+    with pytest.raises(InstallAdmissionBusy):
+        require_admissible(plan)
+
+
+def test_a_plan_that_is_invalid_stays_blocked_not_waiting(tmp_path) -> None:
+    from vonk_control.install_admission import InstallPlanStale, require_admissible
+
+    sessions, now, _node, mapping_id, build = setup(tmp_path)
+
+    def invalid(**_unused: object) -> dict[str, dict[str, object]]:
+        raise ValueError("compiled launch payload is invalid")
+
+    plan = _service(
+        sessions, compiled_plan_provider=invalid, inventory_max_age=300
+    ).plan_install(mapping_id, build, now=now)
+
+    assert plan.allowed is False
+    with pytest.raises(InstallPlanStale):
+        require_admissible(plan)
+
+
 @pytest.mark.parametrize(("free", "allowed"), [(130, True), (129, False)])
 def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estimates(
     tmp_path, free: int, allowed: bool

@@ -190,6 +190,11 @@ class InstallPreflightExpired(InstallAdmissionBusy):
         super().__init__(f"{code}: {detail}" if detail else code, reason=reason)
 
 
+#: Starts the detail of a ``compiled_plan_unavailable`` blocker whose cause is an
+#: outcome that cannot be confirmed yet (as opposed to a plan that is invalid):
+#: the install waits and is admitted again instead of ending as blocked.
+UNSETTLED_PLAN_PREFIX = "Waiting for evidence: "
+
 _RETRYABLE_INSTALL_BLOCKERS = {
     InstallAdmissionCode.INVENTORY_MISSING,
     InstallAdmissionCode.STALE_INVENTORY,
@@ -222,7 +227,15 @@ def require_admissible(plan: InstallPlan) -> None:
         raise InstallPreflightExpired(
             blocker.code, blocker.detail, reason=WaitReason.STALE_PLAN
         )
-    if codes and codes <= _RETRYABLE_INSTALL_BLOCKERS:
+    if codes and all(
+        reason.code in _RETRYABLE_INSTALL_BLOCKERS
+        or (
+            reason.code == InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE
+            and reason.detail.startswith(UNSETTLED_PLAN_PREFIX)
+        )
+        for node in plan.nodes
+        for reason in node.blockers
+    ):
         causes = "; ".join(
             f"{node.node_id} {reason.code}: {reason.detail}"[:160]
             for node in plan.nodes
@@ -395,6 +408,7 @@ class InstallAdmissionService:
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             compiled_plan_error: str | None = None
+            compiled_plan_unsettled = False
             # The snapshot is complete. Production compilation consults managed
             # storage, so release the read transaction before invoking it.
             if _session is None:
@@ -413,6 +427,13 @@ class InstallAdmissionService:
                         parameters=validate_mapping_parameters(mapping.parameters),
                         resolved_entities=resolved_entities,
                     )
+                except UnknownOutcomeError as error:
+                    # Evidence that cannot be confirmed now (a receipt, storage
+                    # or bookkeeping) is no verdict on the plan: the blockers it
+                    # leaves are waiting ones, and the admitting owner retries.
+                    compiled_plan_error = str(error)[:512]
+                    compiled_plan_unsettled = True
+                    compiled_execution_plans = {}
                 except Exception as error:  # noqa: BLE001 - provider errors become typed admission evidence
                     compiled_plan_error = str(error)[:512]
                     compiled_execution_plans = {}
@@ -516,6 +537,8 @@ class InstallAdmissionService:
                 detail = "Controller-issued compiled execution plan is unavailable."
                 if compiled_plan_error:
                     detail = f"{detail} {compiled_plan_error}"
+                if compiled_plan_unsettled:
+                    detail = f"{UNSETTLED_PLAN_PREFIX}{detail}"
                 blockers.append(
                     AdmissionReason(
                         InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE, detail
@@ -540,7 +563,8 @@ class InstallAdmissionService:
                 blockers.append(
                     AdmissionReason(
                         InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE,
-                        "Controller-issued compiled model receipts are unavailable.",
+                        (UNSETTLED_PLAN_PREFIX if compiled_plan_unsettled else "")
+                        + "Controller-issued compiled model receipts are unavailable.",
                     )
                 )
                 compiled_artifacts = ()
@@ -568,7 +592,8 @@ class InstallAdmissionService:
                 blockers.append(
                     AdmissionReason(
                         InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE,
-                        "Controller-issued runtime image receipt is unavailable.",
+                        (UNSETTLED_PLAN_PREFIX if compiled_plan_unsettled else "")
+                        + "Controller-issued runtime image receipt is unavailable.",
                     )
                 )
             elif image_bytes > disk.image_bytes:

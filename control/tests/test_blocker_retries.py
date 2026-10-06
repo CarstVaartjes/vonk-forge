@@ -332,6 +332,62 @@ def test_a_callback_that_escapes_to_a_thread_is_not_credited_to_the_try() -> Non
     assert not proof.proven and "reference-escape" in _kinds(proof)
 
 
+_POOL = """
+    from concurrent.futures import ThreadPoolExecutor
+    class Svc:
+        def __init__(self) -> None:
+            self._pool = ThreadPoolExecutor(1)
+        def transfer(self):
+            raise Busy("x")
+        def start(self):
+            return self._pool.submit(self.transfer)
+        def tick(self, future):
+            try:
+                future.result()
+            except Busy:
+                pass
+    """
+
+
+def test_a_pool_task_without_a_declared_waiter_is_an_unlooped_entry() -> None:
+    proof = _prove(_POOL, "Svc.transfer", loops={"Svc.tick": ("Busy",)})
+    assert not proof.proven and "no-caller" in _kinds(proof)
+
+
+def test_a_pool_task_is_retried_where_the_waiter_of_its_future_catches_it() -> None:
+    declared = (
+        DeclaredEdge(
+            M,
+            "Svc.tick",
+            ((M, "Svc.transfer"),),
+            "the pool runs transfer and its exception surfaces at result()",
+        ),
+    )
+    proof = _prove(
+        _POOL, "Svc.transfer", loops={"Svc.tick": ("Busy",)}, declared=declared
+    )
+    assert proof.proven
+
+
+def test_a_pool_task_whose_result_is_read_outside_the_try_is_not_proven() -> None:
+    source = _POOL.replace(
+        "try:\n                future.result()\n            except Busy:\n                pass",
+        "future.result()\n            try:\n                pass\n            except Busy:\n                pass",
+    )
+    declared = (
+        DeclaredEdge(
+            M,
+            "Svc.tick",
+            ((M, "Svc.transfer"),),
+            "the pool runs transfer and its exception surfaces at result()",
+        ),
+    )
+    proof = _prove(
+        source, "Svc.transfer", loops={"Svc.tick": ("Busy",)}, declared=declared
+    )
+    assert not proof.proven
+
+
 def test_a_closure_returned_by_a_factory_is_called_through_its_alias() -> None:
     proof = _prove(
         """
@@ -788,3 +844,65 @@ def test_a_callback_through_an_injected_service_has_its_caller(
         "_prepare_from_build"
     ]
     assert callback not in graph.entries
+
+
+_ROUTE = """
+    @app.get("/x")
+    def show():
+        helper()
+    def helper():
+        raise Busy("x")
+    def guard(call):
+        try:
+            return call()
+        except Busy:
+            return None
+    """
+
+
+def _guarded(source: str, guards: dict[str, tuple[str, ...]]) -> Proof:
+    graph = _graph({"m": _BASE + textwrap.dedent(source)})
+    return Prover(
+        graph,
+        {},
+        {(M, name): frozenset(caught) for name, caught in guards.items()},
+    ).prove(M, "Busy", "helper")
+
+
+def test_a_route_is_an_unlooped_entry_without_a_guard() -> None:
+    proof = _guarded(_ROUTE, {})
+    assert not proof.proven and "route" in _kinds(proof)
+
+
+def test_a_route_guard_that_answers_the_class_proves_the_route_path() -> None:
+    assert _guarded(_ROUTE, {"guard": ("Busy",)}).proven
+
+
+def test_a_route_guard_answers_only_the_classes_it_names() -> None:
+    assert not _guarded(_ROUTE, {"guard": ("Other",)}).proven
+
+
+def test_a_route_guard_must_answer_without_re_raising() -> None:
+    document = copy.deepcopy(load_allowlist())
+    document["route_guards"] = [  # type: ignore[index]
+        {
+            "path": "control/src/vonk_control/strict_json.py",
+            "function": "ControllerAPIRoute.__init__",
+            "catches": ["UnknownOutcomeError"],
+            "reason": "this function does not answer anything at all",
+        }
+    ]
+    problems = loop_problems(document)
+    assert any("does not answer UnknownOutcomeError" in item for item in problems)
+
+
+def test_the_route_guards_of_the_allowlist_exist_and_answer() -> None:
+    document = load_allowlist()
+    assert document["route_guards"]  # type: ignore[index]
+    assert loop_problems(document) == []
+
+
+def test_a_route_whose_reference_also_escapes_is_still_a_guarded_route() -> None:
+    source = _ROUTE + "\n    handlers = [show]\n"
+    proof = _guarded(source, {"guard": ("Busy",)})
+    assert proof.proven

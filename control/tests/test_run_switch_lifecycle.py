@@ -681,3 +681,52 @@ def test_a_retry_never_lands_before_the_evidence_it_waits_for_can_exist() -> Non
         )
         due = datetime.fromisoformat(str(progress["observation_due_at"]))
         assert due >= threshold, (due, job.id)
+
+
+def test_an_unknown_outcome_of_a_phase_is_retried_even_when_not_flagged_retryable(
+    tmp_path: Path,
+) -> None:
+    """Unconfirmed storage or bookkeeping is observed again, never ended: the
+    preparation owner's ``retryable`` flag defaults to false, and an unknown
+    outcome must not read that as a definite failure."""
+
+    from vonk_control.runtime_image_preparation import RuntimeImagePreparationUnknown
+
+    executor = _ScriptedExecutor()
+    unknown = RuntimeImagePreparationUnknown(
+        "runtime_image.receipt_unavailable", "the image receipt is unavailable"
+    )
+    assert unknown.retryable is False
+    for kind in ("prepare", "transfer", "stop", "verify"):
+        executor.faults[kind] = unknown
+    harness = _Harness(tmp_path, executor)
+    for _ in range(3):
+        harness.service.tick()
+        harness.advance_to_due()
+    view = harness.view()
+    assert view.state != "failed", (view.state, view.status_reason)
+    assert _retrying(view) or view.state in {"queued", "running"}
+
+
+def test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick(
+    tmp_path: Path,
+) -> None:
+    from vonk_control.categorized_faults import OperationInterrupted
+
+    harness = _Harness(tmp_path, RecordingArtifactExecutor())
+    original = harness.service._advance
+    state = {"raise": True}
+
+    def advance(operation_id: str) -> bool:
+        if state["raise"]:
+            raise OperationInterrupted("the observation was interrupted")
+        return original(operation_id)
+
+    harness.service._advance = advance  # type: ignore[method-assign]
+    harness.service.tick()
+    held = harness.view()
+    assert _retrying(held), (held.state, held.status_reason)
+    state["raise"] = False
+    harness.advance_to_due()
+    harness.service.tick()
+    assert harness.view().state != "failed"

@@ -57,8 +57,8 @@
   },
   "max_debt": 9,
   "debt_ceiling": {
-    "total": 146,
-    "unaudited": 368,
+    "total": 85,
+    "unaudited": 314,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
   "categorized_raises": {
@@ -114,9 +114,10 @@
         "RunAdmissionBusy",
         "RunSwitchInstallPreflightExpired",
         "RunSwitchPostStopEvidencePending",
-        "RunSwitchOperationConflict"
+        "RunSwitchOperationConflict",
+        "UnknownOutcomeError"
       ],
-      "reason": "The run-switch advance loop holds the phase for a busy writer, changed build parent or pending evidence and enters the same idempotent phase again on its next advance; test_run_switch_lifecycle raises every phase-path conflict and observes the operation retrying."
+      "reason": "The run-switch advance loop holds the phase for a busy writer, changed build parent or pending evidence, and an unknown outcome from any phase dependency is recorded as a retry with the core's bounded backoff; it enters the same idempotent phase again on its next advance; test_run_switch_lifecycle raises every phase-path conflict and observes the operation retrying."
     },
     {
       "path": "control/src/vonk_control/agent_jobs.py",
@@ -139,9 +140,10 @@
       "path": "control/src/vonk_control/recipe_image_availability.py",
       "function": "RecipeImageAvailabilityService._run",
       "catches": [
-        "_AvailabilityClaimLost"
+        "_AvailabilityClaimLost",
+        "UnknownOutcomeError"
       ],
-      "reason": "A claim lost to a newer attempt or a cancel returns without writing; the new claim owner or the cancel reconcile carries the operation on."
+      "reason": "A claim lost to a newer attempt or a cancel returns without writing; an unknown outcome is recorded by _fail and the lifecycle core schedules the next attempt on its bounded backoff, so the claim loop runs the operation again."
     },
     {
       "path": "control/src/vonk_control/model_cache.py",
@@ -277,12 +279,116 @@
       "reason": "A removal step that meets unconfirmed evidence (a changed reference, a published length that differs) records the failure on the removal checkpoint with a five second retry floor and leaves the image in place; the next pass retries the same step when it is due."
     },
     {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._advance_background_operations",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "A background download that ends with an unknown outcome keeps its durable operation: the typed handler records the failure, the operation settles through the core's bounded backoff and the claim loop resumes the same transfer on a later worker tick."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService.tick",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "The worker tick contains one operation's unknown outcome: the failure is logged, _hold_after_advance_failure keeps the checkpoint and schedules a bounded retry that names its cause, and the rest of the batch advances; the next tick picks the operation up when due."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._advance.checkpoint_job",
+      "catches": [
+        "_RunSwitchBuildParentChanged",
+        "RecipeBuildAdmissionBusy"
+      ],
+      "reason": "A changed build parent or a busy build admission leaves the checkpoint untaken; every caller returns without writing and the operation enters the same idempotent phase on its next advance."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService.apply",
+      "catches": [
+        "FleetProfileAdmissionBusy",
+        "FleetProfileAdmissionEffectBusy",
+        "FleetProfileAdmissionStorageError"
+      ],
+      "reason": "A busy or storage-blocked admission is not raised to the caller: the request is stored as a pending application with a retry delay and the observation pass retries it automatically; the caller sees the queued application."
+    },
+    {
+      "path": "control/src/vonk_control/worker.py",
+      "function": "Worker.run_once",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "The worker pass contains one source's unknown outcome: the failure is logged, the pass moves on to the other sources and the heartbeat, and the failed source runs again on the next pass; no source state is ended by it."
+    },
+    {
+      "path": "control/src/vonk_control/worker.py",
+      "function": "Worker._run_housekeeping",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "A housekeeping task whose outcome is unknown is logged and contained; the worker pass runs the same task again on its next pass."
+    },
+    {
+      "path": "control/src/vonk_control/install_admission.py",
+      "function": "InstallAdmissionService.plan_install",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "An unknown outcome of the compiled-plan provider (a receipt, storage or bookkeeping that cannot be confirmed now) is recorded as waiting-for-evidence blockers instead of a verdict; require_admissible turns them into InstallAdmissionBusy, which every admitting owner retries (the run-switch advance loop, the pending-admission observation)."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.reconcile_retired_operations",
+      "catches": [
+        "RecipeOperationConflict",
+        "RecipeRouteError"
+      ],
+      "reason": "A retired operation whose owner is unavailable or in conflict is kept: the handler records the blocked cleanup and the next reconciliation time on the operation, and the worker tick reconciles it again on the next pass."
+    },
+    {
       "path": "control/src/vonk_control/availability_production.py",
       "function": "build_recipe_image_availability.builder",
       "catches": [
+        "RecipeBuildAdmissionBusy",
+        "BuildConsumerError",
         "AdmissionLockBusy"
       ],
-      "reason": "A Spark whose admission lock is held by another change is recorded as busy and the next candidate Spark is tried in the same selection loop; when every candidate is busy or occupied the wait is raised to the claim runner, which asks again on its bounded backoff, so a busy lock never fails the build."
+      "reason": "A busy build admission, a busy Spark admission lock or a build dependency that cannot be taken is returned as BuildUnsettled; the availability run records it and the lifecycle core schedules the next attempt on its bounded backoff, which runs the builder again."
+    }
+  ],
+  "call_edges": [
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._advance_background_operations",
+      "calls": [
+        {
+          "path": "control/src/vonk_control/model_cache.py",
+          "function": "ModelCacheService._download_one_unique"
+        }
+      ],
+      "reason": "The worker pool runs _download_one_unique and the exception it raised surfaces at future.result() in this function, under its typed handler."
+    },
+    {
+      "path": "control/src/vonk_control/worker.py",
+      "function": "Worker.run_once",
+      "calls": [
+        {
+          "path": "control/src/vonk_control/worker.py",
+          "function": "Worker._run_model_cache"
+        }
+      ],
+      "reason": "run_once stores the model-cache source in its source list and calls it as source() inside its try; the declaration names that call."
+    }
+  ],
+  "route_guards": [
+    {
+      "path": "control/src/vonk_control/strict_json.py",
+      "function": "_presence_policy_endpoint.policy_endpoint",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Every Controller route runs inside this wrapper (ControllerAPIRoute): an unknown outcome that the route itself did not handle is answered with a typed 503 and Retry-After, never a 500 or a refusal, and the caller (client, agent or worker) asks again."
     }
   ],
   "operator_waits": [
@@ -1358,7 +1464,6 @@
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
         ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._create_under", "litellm-refused-to-create-the-key-http", 1],
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._delete_alias", "litellm-refused-to-revoke-the-key-http", 1],
         ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._raw_keys", "litellm-refused-to-list-keys-http", 1],
         ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._raw_keys", "litellm-returned-a-malformed-key-list", 1],
         ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._request", "litellm-gateway-is-unavailable", 1],
@@ -1803,7 +1908,6 @@
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.cancellation_pending", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_busy", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_invalid", 2],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_profile_build_dependencies", "build.consumer_invalid", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "read_build_intent", "build.producer_invalid", 1]
       ]
     },
@@ -1813,7 +1917,6 @@
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.persist_plan_in_session", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.reserve_in_session", "message", 2],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildResolution.build_input_for_builder", "build.plan_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.capability_missing", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.insufficient_disk", 1],
@@ -1821,13 +1924,6 @@
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_missing", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_stale", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.network_capability_missing", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.insufficient_disk", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.insufficient_memory", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.inventory_missing", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.inventory_stale", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.node_unknown", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.plan_invalid", 5],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.runtime_changed", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "message", 2],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.check_source", "build.source_unavailable", 1],
@@ -1885,24 +1981,15 @@
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._ensure_model_child", "recipe_image.model_cache_invalid", 3],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._finish_recipe_removal", "artifact.reference_changed", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._lock_build_consumer", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_input_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_invalid", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._read_removal_owner", "recipe_image.operation_invalid", 4],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._refresh_authority", "recipe_image.metadata_refresh_failed", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "recipe_image.model_cache_failed", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "recipe_image.runtime_invalid", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_model_repair", "recipe_image.model_cache_invalid", 2],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_model_repair", "recipe_image.model_cache_unavailable", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_request", "recipe_image.build_input_missing", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_request", "recipe_image.runtime_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_cancelled", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_missing", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService.cancel", "recipe_image.cancel_busy", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService.remove_selector", "recipe_image.operation_missing", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "_AvailabilityClaimLost", "RecipeImageAvailabilityService._image_reference_intent_for_claim", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._ensure_model_child", "exact-model-artifact-preparation-could-not-be-queued", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._resume_model_child", "model-artifact-operation-could-not-be-resumed", 1]
+        ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._ensure_model_child", "exact-model-artifact-preparation-could-not-be-queued", 1]
       ]
     },
     {
@@ -2222,22 +2309,14 @@
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage._stored_image", "runtime_image.archive_unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.commit", "runtime_image.receipt_contract_newer", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.existing_archive", "runtime_image.cache_missing", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.lock_unavailable", 3],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.publication_contended", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.read_receipt", "message", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.remove_published", "runtime_image.removal_storage_failed", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "OciLayoutImageTransport.inspect_archive", "runtime_image.inspect_invalid", 2],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_atomic_json_replace", "runtime_image.receipt_write_failed", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_config_digest", "runtime_image.config_missing", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_load_receipt_document", "runtime_image.receipt_unavailable", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_invalid", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_prepare_from_build", "runtime_image.build_incomplete", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_prepare_from_build", "runtime_image.receipt_invalid", 2],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_run_json_text", "runtime_image.inspect_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "prepare_runtime_image", "runtime_image.receipt_persistence_failed", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "read_runtime_image_reference_intent", "runtime_image.reference_intent_invalid", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "message", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "runtime_image.receipt_unavailable", 3]
@@ -3170,23 +3249,11 @@
         ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.capacity_busy", 1],
         ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.membership_changed", 1],
         ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._queue_in_session", "install.capacity_busy", 3],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService._queue_prebuilt_build_in_session", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeReconciliationBlocked", "RecipeOperationService._reconciliation_authority_in_session.blocked", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._admit_workload_intent", "workload-intent-differs-across-the-target-sparks", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_build_in_session", "recipe-build-service-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_build_in_session", "stored-recipe-build-plan-is-unreadable-it-is-recorded-and-t", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_install_in_session", "stored-compiled-execution-plan-is-unreadable-for-install-ret", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_build_in_session", "recipe-build-service-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "compiled-execution-plan-is-unavailable-for-the-installed-rec", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "recipe-installation-is-not-runnable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "recipe-node-endpoint-evidence-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._stop_logical_job_run", "the-accepted-profile-stop-is-not-readable-yet-it-is-recorde", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.check_build_source", "recipe-build-service-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.preview_build", "recipe-build-service-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "prior-installation-intent-requires-exact-observation-before", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "recipe-installation-is-being-reconciled", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "stored-installation-plan-is-unreadable-it-is-recorded-and-t", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.stop", "the-run-s-route-withdrawal-has-not-settled-retry-the-stop", 1],
         ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._admit_workload_intent", "run-capacity-writer-is-busy", 2],
         ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._queue_in_session", "run-capacity-writer-is-busy", 3]
       ]
@@ -3222,9 +3289,7 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService._finish", "superseded-operation-has-no-completion-authority", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-expired", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-is-invalid", 1]
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService._finish", "superseded-operation-has-no-completion-authority", 1]
       ]
     },
     {
@@ -3280,8 +3345,7 @@
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
         ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_cached_build_receipt", "recipe_image.build_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.authority", "observation-unavailable", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder.admission_guard", "recipe_image.build_invalid", 1]
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.authority", "observation-unavailable", 1]
       ]
     },
     {
@@ -3312,31 +3376,6 @@
       ]
     },
     {
-      "family": "host_runtime_plan_authority.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "recovery-start-identity-is-inconsistent", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "recovery-start-phase-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "recovery-start-target-is-duplicated", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "singleton-recovery-target-is-duplicated", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_load_run_authority", "recipe-run-is-unavailable", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_load_run_authority", "recipe-run-plan-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_parse_job_run", "durable-jobrun-plan-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_parse_start", "durable-start-plan-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_parse_stop", "durable-stop-plan-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_service_run_authority", "service-run-plan-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_service_stop_authority", "durable-prior-start-authority-is-unavailable", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_child_record", "lifecycle-operation-manifest-is-missing", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-readiness-placement-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-generation-is-unavailable", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-placement-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-plan-is-invalid", 2],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-target-set-is-invalid", 2],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "singleton-recovery-start-placement-is-invalid", 1]
-      ]
-    },
-    {
       "family": "install_admission.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
@@ -3362,28 +3401,11 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflictUnknown", "ModelCacheService._require_managed_cache_coverage", "model_cache.coverage_incomplete", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheConflictUnknown", "ModelCacheService.cached_artifact_file", "model_cache.artifact_unverified", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._download_parallel_ranges", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._download_sequential", "model_cache.source_unavailable", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._open_github_release_asset", "model_cache.source_unavailable", 2],
         ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._open_http_response", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._open_source", "model_cache.source_unavailable", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._raise_github_http_status", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._validate_github_release_asset", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._append_part", "model-download-stopped-partial-files-preserved", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-cancelled-during-verification", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-stopped-partial-files-preserved", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-was-removed-during-verification", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_artifact", "model-download-was-removed-during-verification", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_locked", "cache-operation-document-is-unreadable", 2],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_locked", "model-download-cancellation-was-accepted-partial-files-pres", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_sequential", "download-interrupted-at-a-durable-checkpoint", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_split", "model-download-cancelled-during-assembly", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_split", "model-download-was-removed-during-assembly", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._require_transfer_running", "model-download-stopped-partial-files-preserved", 1],
         ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._sample_transfer.observe", "model-download-stopped-partial-files-preserved", 1],
-        ["control/src/vonk_control/model_cache.py", "_ArtifactWriterBusy", "ModelCacheService._download_one_unique", "message", 2],
         ["control/src/vonk_control/model_cache.py", "_ArtifactWriterBusy", "ModelCacheService._publication_allowed", "message", 1]
       ]
     },
@@ -3411,29 +3433,7 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
-        ["control/src/vonk_control/run_switch_operations.py", "RecipeBuildAdmissionBusy", "_lock_current_build_parent", "message", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor.preflight", "run-switch.preflight-recipe-changed", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_bound_workload_intent", "run-switch-workload-intent-is-unbound", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_build_receipt_in_session", "run-switch.container-build-receipt-unavailable", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-parent-invalid", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-plan-invalid", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_phase_result", "run-switch-phase-receipt-is-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RuntimeImagePreparationUnknown", "_persist_run_switch_runtime_image_reference", "artifact.reference_busy", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RuntimeImagePreparationUnknown", "_persist_run_switch_runtime_image_reference", "message", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RunSwitchBuildParentChanged", "_lock_current_build_parent", "run-switch.container-build-parent-changed", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "approved-recipe-build-is-no-longer-available", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "persisted-runswitch-plan-is-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runswitch-image-reference-changed-during-publication", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runswitch-plan-changed-before-image-publication", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runtime-image-callback-is-outside-its-phase", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runtime-image-execution-identities-are-not-unique", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "stored-runswitch-image-reference-is-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "verified-runtime-image-receipt-is-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-operation-no-longer-owns-image-publication", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-phase-no-longer-has-a-workload-claim", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-phase-was-cancelled-or-superseded", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-progress-no-longer-owns-image-publication", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-spark-scope-or-workload-claim-changed", 1]
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor.preflight", "run-switch.preflight-recipe-changed", 1]
       ]
     },
     {
@@ -3444,7 +3444,19 @@
         ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._install_once", "install.capacity_busy", 1],
         ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._reconcile_installation_once", "reconcile.capacity_busy", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService._build_once", "message", 2],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService._queue_prebuilt_build_in_session", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeBuildOwnershipBusy", "RecipeOperationService._cancel_current_build", "build.consumer_busy", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_build_in_session", "recipe-build-service-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_build_in_session", "stored-recipe-build-plan-is-unreadable-it-is-recorded-and-t", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_build_in_session", "recipe-build-service-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "compiled-execution-plan-is-unavailable-for-the-installed-rec", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "recipe-installation-is-not-runnable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "recipe-node-endpoint-evidence-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._stop_logical_job_run", "the-accepted-profile-stop-is-not-readable-yet-it-is-recorde", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "prior-installation-intent-requires-exact-observation-before", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "recipe-installation-is-being-reconciled", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "stored-installation-plan-is-unreadable-it-is-recorded-and-t", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.stop", "the-run-s-route-withdrawal-has-not-settled-retry-the-stop", 1],
         ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._activate_job_run_once", "run-capacity-writer-is-busy", 1],
         ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._start_once", "run-capacity-writer-is-busy", 1],
         ["control/src/vonk_control/recipe_operations.py", "_RouteNotWithdrawn", "RecipeOperationService._dispatch_stop_after_withdrawal", "message", 1]
@@ -3467,7 +3479,24 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._run_download", "model-download-was-removed-before-publication", 1]
+        ["control/src/vonk_control/model_cache.py", "ModelCacheConflictUnknown", "ModelCacheService._require_managed_cache_coverage", "model_cache.coverage_incomplete", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._download_parallel_ranges", "model_cache.source_unavailable", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._download_sequential", "model_cache.source_unavailable", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._open_source", "model_cache.source_unavailable", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._validate_github_release_asset", "model_cache.source_unavailable", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._append_part", "model-download-stopped-partial-files-preserved", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-cancelled-during-verification", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-stopped-partial-files-preserved", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-was-removed-during-verification", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_artifact", "model-download-was-removed-during-verification", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_locked", "cache-operation-document-is-unreadable", 2],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_locked", "model-download-cancellation-was-accepted-partial-files-pres", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_sequential", "download-interrupted-at-a-durable-checkpoint", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_split", "model-download-cancelled-during-assembly", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_split", "model-download-was-removed-during-assembly", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._require_transfer_running", "model-download-stopped-partial-files-preserved", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._run_download", "model-download-was-removed-before-publication", 1],
+        ["control/src/vonk_control/model_cache.py", "_ArtifactWriterBusy", "ModelCacheService._download_one_unique", "message", 2]
       ]
     },
     {
@@ -3511,7 +3540,133 @@
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._checkpoint_recipe_image_removal", "artifact.reference_changed", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RuntimeImagePreparationUnknown", "RecipeImageAvailabilityService._advance_recipe_image_removal", "runtime_image.archive_mismatch", 1]
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_input_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "recipe_image.model_cache_failed", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "recipe_image.runtime_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_cancelled", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService.remove_selector", "recipe_image.operation_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RuntimeImagePreparationUnknown", "RecipeImageAvailabilityService._advance_recipe_image_removal", "runtime_image.archive_mismatch", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._resume_model_child", "model-artifact-operation-could-not-be-resumed", 1]
+      ]
+    },
+    {
+      "family": "availability_production.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder.admission_guard", "recipe_image.build_invalid", 1]
+      ]
+    },
+    {
+      "family": "recipe_builds.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.reserve_in_session", "message", 2],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.insufficient_disk", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.insufficient_memory", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.inventory_missing", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.inventory_stale", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.node_unknown", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.plan_invalid", 5],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.runtime_changed", 1]
+      ]
+    },
+    {
+      "family": "run_switch_operations.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/run_switch_operations.py", "RecipeBuildAdmissionBusy", "_lock_current_build_parent", "message", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_bound_workload_intent", "run-switch-workload-intent-is-unbound", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_build_receipt_in_session", "run-switch.container-build-receipt-unavailable", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-parent-invalid", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-plan-invalid", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_phase_result", "run-switch-phase-receipt-is-invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RuntimeImagePreparationUnknown", "_persist_run_switch_runtime_image_reference", "artifact.reference_busy", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RuntimeImagePreparationUnknown", "_persist_run_switch_runtime_image_reference", "message", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RunSwitchBuildParentChanged", "_lock_current_build_parent", "run-switch.container-build-parent-changed", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "approved-recipe-build-is-no-longer-available", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "persisted-runswitch-plan-is-invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runswitch-image-reference-changed-during-publication", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runswitch-plan-changed-before-image-publication", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runtime-image-callback-is-outside-its-phase", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runtime-image-execution-identities-are-not-unique", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "stored-runswitch-image-reference-is-invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "verified-runtime-image-receipt-is-invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-operation-no-longer-owns-image-publication", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-phase-no-longer-has-a-workload-claim", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-phase-was-cancelled-or-superseded", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-progress-no-longer-owns-image-publication", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-spark-scope-or-workload-claim-changed", 1]
+      ]
+    },
+    {
+      "family": "runtime_image_preparation.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.commit", "runtime_image.receipt_contract_newer", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "OciLayoutImageTransport.inspect_archive", "runtime_image.inspect_invalid", 2],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_atomic_json_replace", "runtime_image.receipt_write_failed", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_config_digest", "runtime_image.config_missing", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_prepare_from_build", "runtime_image.build_incomplete", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_prepare_from_build", "runtime_image.receipt_invalid", 2],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_run_json_text", "runtime_image.inspect_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "prepare_runtime_image", "runtime_image.receipt_persistence_failed", 1]
+      ]
+    },
+    {
+      "family": "agent_jobs.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-expired", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "gateway_keys.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._delete_alias", "litellm-refused-to-revoke-the-key-http", 1]
+      ]
+    },
+    {
+      "family": "host_runtime_plan_authority.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "recovery-start-identity-is-inconsistent", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "recovery-start-phase-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "recovery-start-target-is-duplicated", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "singleton-recovery-target-is-duplicated", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_load_run_authority", "recipe-run-is-unavailable", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_load_run_authority", "recipe-run-plan-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_parse_job_run", "durable-jobrun-plan-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_parse_start", "durable-start-plan-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_parse_stop", "durable-stop-plan-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_service_run_authority", "service-run-plan-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_service_stop_authority", "durable-prior-start-authority-is-unavailable", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_child_record", "lifecycle-operation-manifest-is-missing", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-readiness-placement-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-generation-is-unavailable", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-placement-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-plan-is-invalid", 2],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-target-set-is-invalid", 2],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "singleton-recovery-start-placement-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "recipe_build_cancellation.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_profile_build_dependencies", "build.consumer_invalid", 1]
       ]
     }
   ]

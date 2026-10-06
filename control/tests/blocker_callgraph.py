@@ -36,10 +36,16 @@ Edges
   *escapes*: the function then has a caller the analysis cannot see and counts as
   a public entry.  A closure a factory returns is reached through the alias its
   caller binds (``prepare = make(...)``), not through the ``return``.
+* ``pool.submit(task, ...)``: the task is not an escape; it is an entry until a
+  ``call_edges`` entry names the function that calls ``future.result()`` (a
+  zero-argument ``.result()`` is a dynamic call) as its caller.
 * ``getattr(recv, "name", ...)`` with a literal name (or a conditional of literals),
   then called, is a call of that method.  Any other ``getattr`` that is called is a
   *dynamic* call; a ``call_edges`` entry of the allowlist declares where it goes,
-  with a reason, and the edge keeps the ``try`` context of the dynamic call.
+  with a reason, and the edge keeps the ``try`` context of the dynamic call.  A
+  call of a local name bound by the function itself (a callable taken from a
+  list) is a dynamic call too, and a declared edge gives a function whose
+  reference escaped into such a list its caller, so it stops being an entry.
 
 Entries
 -------
@@ -420,6 +426,8 @@ class CallGraph:
         self.callees: dict[Function, list[Edge]] = defaultdict(list)
         self.entries: dict[Function, str] = {}
         self.dynamic_calls: list[Function] = []
+        #: Functions registered as routes, whatever else their reference does.
+        self.route_functions: set[Function] = set()
         self.generic_calls = 0
         self.declared = tuple(declared)
         self._bind: dict[tuple[Function, str], set[Function]] = defaultdict(set)
@@ -1209,16 +1217,14 @@ class CallGraph:
                 for d in info.decorators
                 if d.split(".")[-1] not in _TRANSPARENT_DECORATORS
             ]
+            if any(_is_route_decorator(d) for d in kinds):
+                self.route_functions.add(function)
             if "property" in info.decorators or any(
                 d.endswith(".setter") for d in info.decorators
             ):
                 self.entries.setdefault(function, "property")
             elif kinds:
-                route = any(
-                    d.split(".")[0] in {"router", "app", "api"}
-                    or d.endswith((".get", ".post", ".put", ".delete", ".patch"))
-                    for d in kinds
-                )
+                route = any(_is_route_decorator(d) for d in kinds)
                 self.entries.setdefault(function, "route" if route else "decorated")
             elif (
                 function.simple.startswith("__")
@@ -1243,6 +1249,10 @@ class CallGraph:
                     continue
                 for tries in sites:
                     self._add_edge(caller, callee, tries, "declared")
+                # The declaration names who really calls a function whose
+                # reference was stored in a collection (an ``escape``).
+                if self.entries.get(callee) == "reference-escape":
+                    del self.entries[callee]
 
     def declared_problems(self) -> list[str]:
         problems: list[str] = []
@@ -1312,6 +1322,12 @@ class CallGraph:
 
 
 _ANCESTORS_ANY = frozenset({"Exception", "BaseException"})
+
+
+def _is_route_decorator(decorator: str) -> bool:
+    return decorator.split(".")[0] in {"router", "app", "api"} or decorator.endswith(
+        (".get", ".post", ".put", ".delete", ".patch")
+    )
 
 
 _LEAVES = frozenset(
@@ -1577,6 +1593,16 @@ class _Walker:
             self.function, tries, set(), [], None, [], None, [], False, False, node
         )
         self.resolve_callee(func, site, tries)
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "result"
+            and not node.args
+            and not node.keywords
+        ):
+            # ``future.result()`` re-raises what a pool task raised: where the
+            # exception comes from is not visible here, so the call is a
+            # dynamic one that ``call_edges`` may declare.
+            self.facts.dynamic.append(tries)
         task = self.awaited_task(node, site, tries)
         position = 0
         for argument in node.args:
@@ -1599,7 +1625,19 @@ class _Walker:
             and site.cb_param is None
             and not site.cb_attrs
         ):
+            pooled = (
+                isinstance(func, ast.Attribute)
+                and func.attr == "submit"
+                and site.external
+            )
             for arg in site.args:
+                if pooled and arg.index == 0 and arg.keyword is None:
+                    # A pool task is not an escape: it runs when the pool says
+                    # so, and the failure surfaces at the ``result()`` of its
+                    # future.  The task is an entry (nobody calls it) until a
+                    # ``call_edges`` entry declares the function that waits for
+                    # the future, with the ``try`` context of its ``result()``.
+                    continue
                 self.facts.escapes |= arg.refs
                 for cls in arg.classes:
                     self.facts.escapes |= self.graph._constructors(cls)
@@ -1680,6 +1718,11 @@ class _Walker:
                 site.ctors = list(classes)
                 return
             site.external = True
+            if self.is_bound_here(func):
+                # A callable the function picked out of a collection (``for name,
+                # source in sources: source()``): where it goes is not visible
+                # here, so it is a dynamic call that ``call_edges`` may declare.
+                self.facts.dynamic.append(tries)
             return
         if isinstance(func, ast.Call):
             targets = self.getattr_targets(func)
@@ -1752,6 +1795,29 @@ class _Walker:
                 site.static |= self.callable_targets(func)
         if not site.static and not site.cb_attrs:
             site.external = True
+
+    def is_bound_here(self, func: ast.Name) -> bool:
+        """A call of a name the function binds itself, outside any lambda.
+
+        A lambda body runs later, outside the ``try`` that creates it, so a call
+        in one is not the call a declared edge stands for.
+        """
+
+        if not hasattr(self, "_bound"):
+            node = self.function.node
+            self._bound: set[str] = {
+                child.id
+                for child in ast.walk(node)
+                if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store)
+            }
+            self._deferred: set[int] = {
+                id(call.func)
+                for lam in ast.walk(node)
+                if isinstance(lam, ast.Lambda)
+                for call in ast.walk(lam.body)
+                if isinstance(call, ast.Call)
+            }
+        return func.id in self._bound and id(func) not in self._deferred
 
     def callable_targets(self, func: ast.AST) -> set[Function]:
         """``x(...)`` where ``x`` is typed with a class that is itself callable."""
