@@ -1087,7 +1087,11 @@ def test_stop_works_without_start_jobs_and_with_unreadable_launch_plan(tmp_path)
             )
 
 
-def test_installation_cleanup_does_not_require_original_install_job(tmp_path):
+@pytest.mark.parametrize("damage_plan", [False, True])
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_installation_cleanup_does_not_require_original_install_job(
+    tmp_path, damage_plan
+):
     sessions, service, _queue, mapping, build, nodes = setup_services(tmp_path, nodes=2)
     installed = installed_recipe(
         service, mapping, build, nodes, request_id=str(uuid.uuid4())
@@ -1099,6 +1103,11 @@ def test_installation_cleanup_does_not_require_original_install_job(tmp_path):
         ):
             session.delete(child)
         session.delete(parent)
+        if damage_plan:
+            installation = _required(
+                session.get(RecipeInstallation, installed.owner_id)
+            )
+            installation.plan = {"unreadable": True}
     authority = service.preview_reconciliation_authority(installed.owner_id)
     assert authority.installation_id == installed.owner_id
     assert {target.node_id for target in authority.targets} == set(nodes)

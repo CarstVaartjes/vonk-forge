@@ -95,7 +95,6 @@ from .install_admission import (
     InstallAdmissionService,
     InstallPlan,
     InstallPlanConflict,
-    installation_plan_digest_from_stored_document,
 )
 from .install_admission import (
     require_admissible as require_install_admissible,
@@ -3519,7 +3518,7 @@ class RecipeOperationService:
         session: Session | None = None,
         allow_active_reconciliation: bool = False,
     ) -> InstallationReconciliationAuthority:
-        """Bind an explicit cleanup review to successful install provenance.
+        """Bind an explicit cleanup review to accepted installation identity.
 
         This path reads the admitted installation document only as opaque JSON.
         It never converts the damaged launch specification into an executable
@@ -3624,7 +3623,8 @@ class RecipeOperationService:
                         job_states.words(
                             LifecycleState.QUEUED,
                             LifecycleState.RUNNING,
-                            LifecycleState.NEEDS_OPERATOR,
+                            LifecycleState.OBSERVING,
+                            LifecycleState.BACKOFF,
                         )
                     ),
                     Job.payload["owner_kind"].as_string() == "installation",
@@ -3643,7 +3643,8 @@ class RecipeOperationService:
                             job_states.words(
                                 LifecycleState.QUEUED,
                                 LifecycleState.RUNNING,
-                                LifecycleState.NEEDS_OPERATOR,
+                                LifecycleState.OBSERVING,
+                                LifecycleState.BACKOFF,
                             )
                         ),
                         Job.payload["owner_kind"].as_string() == "run",
@@ -3770,13 +3771,6 @@ class RecipeOperationService:
         def blocked(code: str, detail: str) -> NoReturn:
             raise RecipeReconciliationBlocked(code, detail)
 
-        stored_plan = installation.plan
-        if not isinstance(stored_plan, Mapping):
-            blocked(
-                ReconcileCode.INSTALLATION_IDENTITY_UNAVAILABLE,
-                "The original installation identity is not a JSON object.",
-            )
-
         revision_statement = select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.id == installation.recipe_revision_id,
             CatalogDocumentRevision.kind == "recipe",
@@ -3786,67 +3780,19 @@ class RecipeOperationService:
                 of=CatalogDocumentRevision
             )
         revision = session.scalar(revision_statement)
-        if (
-            revision is None
-            or revision.content_digest is None
-            or not isinstance(revision.document, Mapping)
-            or revision.content_digest != stored_plan.get("recipe_content_sha256")
-        ):
+        if revision is None or revision.content_digest is None:
             blocked(
                 ReconcileCode.RECIPE_REVISION_UNAVAILABLE,
                 "The installation's exact accepted recipe revision is unavailable.",
             )
 
-        # This is the immutable admitted document, read only as generic JSON.
-        # A failed current launch schema check is the reason for this explicit
-        # cleanup route and must not be converted into an executable fallback.
-        try:
-            stored_plan_digest = installation_plan_digest_from_stored_document(
-                stored_plan
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            blocked(
-                ReconcileCode.INSTALLATION_IDENTITY_UNAVAILABLE,
-                f"The original installation identity cannot be fingerprinted: {error}",
-            )
-        expected_top_level = {
-            "mapping_id": installation.mapping_id,
-            "mapping_generation": installation.mapping_generation,
-            "recipe_build_id": installation.recipe_build_id,
-            "image_digest": installation.image_digest,
-            "recipe_revision_id": installation.recipe_revision_id,
-            "recipe_content_sha256": revision.content_digest,
-            "plan_digest": installation.plan_digest,
-        }
-        if (
-            any(
-                stored_plan.get(key) != value
-                for key, value in expected_top_level.items()
-            )
-            or stored_plan_digest != installation.plan_digest
-        ):
-            blocked(
-                ReconcileCode.INSTALLATION_IDENTITY_MISMATCH,
-                "The relational installation identity differs from its original admitted plan.",
-            )
-        model_identity = _primary_model_identity(revision.document)
-        if model_identity is None:
-            blocked(
-                ReconcileCode.RECIPE_REVISION_UNAVAILABLE,
-                "The exact accepted recipe revision has no model identity.",
-            )
-        recipe_model_content_sha256, _ = model_identity
-        if installation.model_content_sha256 not in {
-            None,
-            recipe_model_content_sha256,
-        }:
-            blocked(
-                ReconcileCode.INSTALLATION_IDENTITY_MISMATCH,
-                "The relational model identity differs from the exact accepted recipe revision.",
-            )
+        # Cleanup binds the accepted relational identity. Launch JSON is a
+        # projection that may no longer parse after upgrade; the helper still
+        # checks this installation's exact plan digest against local effects.
         if installation.state not in {
             InstallationState.INSTALLED,
             InstallationState.PARTIAL,
+            InstallationState.FAILED,
         }:
             blocked(
                 ReconcileCode.INSTALLATION_EFFECT_UNKNOWN,
@@ -3889,24 +3835,12 @@ class RecipeOperationService:
         mapping_membership = tuple(
             (node.node_id, node.rank, node.role) for node in mapping_nodes
         )
-        stored_nodes = stored_plan.get("nodes")
-        stored_membership = (
-            tuple(
-                (item.get("node_id"), item.get("rank"), item.get("role"))
-                for item in stored_nodes
-            )
-            if isinstance(stored_nodes, list)
-            and all(isinstance(item, Mapping) for item in stored_nodes)
-            else ()
-        )
         if (
             mapping is None
             or mapping.recipe_revision_id != revision.id
-            or mapping.generation != installation.mapping_generation
             or mapping.node_count != len(mapping_nodes)
             or not mapping_nodes
             or actual_membership != mapping_membership
-            or actual_membership != stored_membership
             or tuple(node.rank for node in all_nodes) != tuple(range(len(all_nodes)))
             or mapping.endpoint_owner_node_id
             not in {node.node_id for node in mapping_nodes}
@@ -3981,12 +3915,6 @@ class RecipeOperationService:
             )
 
         node_by_id = {node.node_id: node for node in all_nodes}
-        stored_compiled = stored_plan.get("compiled_execution_plans")
-        if not isinstance(stored_compiled, Mapping):
-            blocked(
-                ReconcileCode.INSTALLATION_IDENTITY_UNAVAILABLE,
-                "The opaque admitted plan has no exact per-node specification map.",
-            )
         agent_nodes_statement = (
             select(AgentNode)
             .where(AgentNode.node_id.in_(node_by_id))
@@ -3999,32 +3927,6 @@ class RecipeOperationService:
         targets: list[InstallationReconciliationTarget] = []
         for node in all_nodes:
             agent_node = agent_node_by_id.get(node.node_id)
-            compiled = stored_compiled.get(node.node_id)
-            if not isinstance(compiled, Mapping):
-                blocked(
-                    ReconcileCode.SPEC_IDENTITY_MISMATCH,
-                    f"The accepted specification for {node.node_id} is unavailable.",
-                )
-            identity = compiled.get("identity")
-            runtime = compiled.get("runtime")
-            runtime_image = compiled.get("runtime_image")
-            placement = (
-                runtime.get("placement") if isinstance(runtime, Mapping) else None
-            )
-            if (
-                not isinstance(identity, Mapping)
-                or not isinstance(runtime, Mapping)
-                or not isinstance(runtime_image, Mapping)
-                or not isinstance(placement, Mapping)
-                or identity.get("recipe_revision_sha256") != revision.content_digest
-                or runtime_image.get("image_digest") != installation.image_digest
-                or placement.get("rank") != node.rank
-                or placement.get("role") != node.role
-            ):
-                blocked(
-                    ReconcileCode.SPEC_IDENTITY_MISMATCH,
-                    f"The original specification for {node.node_id} is not bound to this recipe, image, and rank.",
-                )
             if (
                 agent_node is None
                 or agent_node.state != "active"
@@ -4054,10 +3956,10 @@ class RecipeOperationService:
             recipe_revision_id=revision.id,
             recipe_content_sha256=revision.content_digest,
             mapping_id=mapping.id,
-            mapping_generation=mapping.generation,
+            mapping_generation=installation.mapping_generation,
             recipe_build_id=installation.recipe_build_id,
             image_digest=installation.image_digest,
-            model_content_sha256=recipe_model_content_sha256,
+            model_content_sha256=installation.model_content_sha256,
             targets=tuple(targets),
         )
 
