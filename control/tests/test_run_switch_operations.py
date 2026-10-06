@@ -84,6 +84,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchCleanupPreviewRequest,
     RunSwitchCleanupResult,
     RunSwitchCleanupVerifyResult,
+    RunSwitchContainerBuildResult,
     RunSwitchDistributionChildResult,
     RunSwitchFinalVerifyResult,
     RunSwitchOperation,
@@ -93,6 +94,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchPlan,
     RunSwitchPreviewRequest,
     RunSwitchRetention,
+    RunSwitchRuntimeInstallResult,
     RunSwitchRuntimePlanResult,
     RunSwitchStartResult,
     RunSwitchTargetTransferEvidenceResult,
@@ -3200,7 +3202,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         actor="admin",
     )
     assert parent.result is not None
-    progress = parent.result.model_dump(mode="json")
+    progress = parent.result
     phase = next(phase for phase in plan.phases if phase.subphase == "container-build")
     execution = executor.execute(
         plan,
@@ -3211,14 +3213,12 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         progress=progress,
     )
     assert execution.operation_id == child_id
-    assert execution.result == {
-        "build_id": build_id,
-        "build_input_sha256": "e" * 64,
-        "state": "building",
-        "phase": "prepare",
-        "subphase": "container-build",
-    }
-    assert execution.result is not None
+    assert isinstance(execution.result, RunSwitchContainerBuildResult)
+    assert execution.result.build_id == build_id
+    assert execution.result.build_input_sha256 == "e" * 64
+    assert execution.result.state == "building"
+    assert execution.result.phase == "prepare"
+    assert execution.result.subphase == "container-build"
     assert _phase_result(execution.result, phase=phase) == execution.result
 
     # A durable plan mutation is rejected before dispatch; execution never
@@ -3976,10 +3976,16 @@ def test_start_phase_adopts_the_child_it_already_queued(tmp_path: Path) -> None:
             node = session.get(AgentNode, node_id)
             assert node is not None
             node.workload_intent_ordinal = 1
-    progress = {
-        "workload_intent_ordinal": 1,
-        "phase_results": [{"installation_id": installation.owner_id}],
-    }
+    progress = RunSwitchOperationResult(
+        workload_intent_ordinal=1,
+        phase_results=[
+            RunSwitchRuntimeInstallResult(
+                phase="prepare",
+                subphase="runtime-install",
+                installation_id=installation.owner_id,
+            )
+        ],
+    )
     request_key = str(uuid.uuid4())
 
     first = executor.execute(
@@ -4811,7 +4817,9 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(
         job = session.get(Job, parent.operation_id)
         assert job is not None
         plan = RunSwitchPlan.model_validate_json(json.dumps(job.payload["plan"]))
-        progress = dict(job.result or {})
+        progress = RunSwitchOperationResult.model_validate_json(
+            json.dumps(job.result), strict=True
+        )
     phase = plan.phases[0]
     assert phase.subphase == "container-build"
     request_key = request.request_key
@@ -4832,10 +4840,11 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(
     assert scheduled.result is not None
     assert lifecycle.get(scheduled.operation_id).state == "running"
     received = _phase_result(scheduled.result, phase=phase)
-    assert received["state"] == "building"
-    assert received["build_id"] == selected.build_id
-    assert received["build_input_sha256"] == selected.build_input_sha256
-    assert "image_digest" not in received
+    assert isinstance(received, RunSwitchContainerBuildResult)
+    assert received.state == "building"
+    assert received.build_id == selected.build_id
+    assert received.build_input_sha256 == selected.build_input_sha256
+    assert received.image_digest is None
     replay = execute()
     assert replay.operation_id == scheduled.operation_id
     assert replay.result is not None
