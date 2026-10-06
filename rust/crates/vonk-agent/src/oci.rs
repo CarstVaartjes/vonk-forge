@@ -11,12 +11,12 @@ use std::{
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use vonk_agent_protocol::generated::FailureStage;
 use vonk_agent_protocol::generated::{
     InstallationMetadataEntry, InstallationMetadataReceipt, InstallationReconciliationCheckpoint,
     InstallationReconciliationCheckpointState as InstallationReconciliationState,
     RunLifecycleRecord as RunLifecycle,
 };
-use vonk_agent_protocol::generated::FailureStage;
 use vonk_agent_protocol::{
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES, RecipeReconciliationIdentity,
     canonical_json as canonical_protocol_json,

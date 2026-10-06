@@ -13,11 +13,11 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::generated::{
-    ActivateRequest, AgentEvidenceCode, AgentUpgradeGrantRequest, BoundedErrorResponse, ClaimRequest,
-    ControllerErrorCode, ControllerRefusalBody, HostHelperGrantResponse, HostRuntimeGrantRequest,
-    HostRuntimeGrantRequestAction, IssuedCertificateResponse, PackageActivationGrantRequest,
-    ProgressPhase, RenewRequest, RequestValidationIssueLocItem, RequestValidationProblem,
-    SecurityRefusalReason, TelemetryRequest,
+    ActivateRequest, AgentEvidenceCode, AgentUpgradeGrantRequest, BoundedErrorResponse,
+    ClaimRequest, ControllerErrorCode, ControllerRefusalBody, HostHelperGrantResponse,
+    HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, IssuedCertificateResponse,
+    PackageActivationGrantRequest, ProgressPhase, RenewRequest, RequestValidationIssueLocItem,
+    RequestValidationProblem, SecurityRefusalReason, TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,

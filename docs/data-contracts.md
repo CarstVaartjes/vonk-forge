@@ -64,6 +64,23 @@ of the 50 hand-written serde types of the baseline are generated now.
 | `rust/crates/vonk-nas-setup/src/lib.rs` | `PrivateJwk` | external format: RFC 7517 JSON Web Key as step-ca consumes it |
 | `rust/crates/vonk-nas-setup/src/lib.rs` | `PublicJwk` | external format: RFC 7517 JSON Web Key as step-ca consumes it |
 | `rust/crates/vonk-spark-setup/src/lib.rs` | `WrittenConfig` | TOML agent configuration written by this setup program and read back for validation; TOML is not a generated JSON wire document, and the agent's tolerant reader of the same file is allowlisted for the same reason |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaAuthority` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaAuthorityIdentity` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaClaims` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaConfig` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaConfigIdentity` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaDatabase` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaLogger` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaOptions` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaProvisioner` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaProvisionerIdentity` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaRevocationList` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaX509Options` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-spark-setup/src/lib.rs` | `AddressInfo` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
+| `rust/crates/vonk-spark-setup/src/lib.rs` | `InterfaceEntry` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
+| `rust/crates/vonk-spark-setup/src/lib.rs` | `NeighbourEntry` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
+| `rust/crates/vonk-spark-setup/src/lib.rs` | `RdmaLink` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
+| `rust/crates/vonk-spark-setup/src/lib.rs` | `RouteEntry` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
 
 ## TypeScript shapes that stay hand-written
 
@@ -143,6 +160,7 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/inventory.py` | agent-protocol | 2 | Authenticated schema-1 inventory evidence reported by an agent. |
 | `agent_protocol/src/vonk_agent_protocol/job_inputs.py` | agent-protocol | 1 | The exact input manifest shared by job staging and container adapters. |
 | `agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py` | agent-protocol | 1 | The lifecycle and outcome vocabulary shared by Python, Rust and TypeScript. |
+| `agent_protocol/src/vonk_agent_protocol/optional_evidence.py` | agent-protocol | 1 | Mixin that drops invalid optional agent evidence and reports it as a typed warning instead of refusing the report. |
 | `agent_protocol/src/vonk_agent_protocol/outcome.py` | agent-protocol | 9 | The one outcome envelope of an agent operation result. |
 | `agent_protocol/src/vonk_agent_protocol/package_source.py` | agent-protocol | 1 | Immutable publication lookup for an exact installed agent binary. |
 | `agent_protocol/src/vonk_agent_protocol/package_upgrade.py` | agent-protocol | 3 | Exact source-bound rollback authority for the current package transaction. |
