@@ -3240,11 +3240,7 @@ class RunSwitchOperationService:
                         session=session,
                         allow_active_reconciliation=True,
                     )
-                    reconciliation_authority = (
-                        RunSwitchReconciliationAuthority.model_validate(
-                            authority.document()
-                        )
-                    )
+                    reconciliation_authority = authority
                 except (UnknownOutcomeError, SecurityRefusalError):
                     raise
                 except (
