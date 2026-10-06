@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
     OutcomeUnknown,
     WaitReason,
 )
+from vonk_agent_protocol.contracts import AgentResultPayload
 from vonk_control.agent_jobs import AgentJobService, _safe_retry_failure
 from vonk_control.agent_operation_facts import aware, operation_start_deadline
 from vonk_control.agent_outcome import agent_outcome, stored_report
@@ -165,7 +166,7 @@ def test_a_legacy_report_is_stored_exactly_as_it_arrived(
 
 
 def _old_report_event(
-    operation: Any, fence: str, parent: Any, state: str, result: dict[str, Any]
+    operation: Any, fence: str, parent: Any, state: str, result: AgentResultPayload
 ) -> Reported:
     """The event derivation before the typed contract, verbatim, as the oracle."""
 

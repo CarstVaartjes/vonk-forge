@@ -5591,7 +5591,7 @@ class RecipeImageAvailabilityService:
             exact_build_settled = (
                 isinstance(settled_build_id, str)
                 and dependency is not None
-                and dependency.operation_id == settled_build_id
+                and str(dependency.operation_id) == settled_build_id
             )
             if exact_build_settled or str(code) == RuntimeImageCode.CACHE_MISSING:
                 # The failed effect is settled; a later execution claim may
