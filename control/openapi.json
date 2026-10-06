@@ -8754,7 +8754,14 @@
         "additionalProperties": false,
         "properties": {
           "definition": {
-            "$ref": "#/components/schemas/FleetProfileDefinition"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetProfileDefinition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "id": {
             "anyOf": [
@@ -8772,6 +8779,16 @@
             "minimum": 1.0,
             "title": "Number",
             "type": "integer"
+          },
+          "projection_issue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SavedProfileProjectionIssue"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revision": {
             "minimum": 0.0,
@@ -9149,7 +9166,14 @@
           },
           "profiles": {
             "items": {
-              "$ref": "#/components/schemas/FleetProfileView"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FleetProfileView"
+                },
+                {
+                  "$ref": "#/components/schemas/UnavailableFleetProfileView"
+                }
+              ]
             },
             "maxItems": 128,
             "title": "Profiles",
@@ -18537,6 +18561,7 @@
           "profile.admission_effect_busy",
           "profile.application_intent.invalid",
           "profile.choices_unreadable",
+          "profile.definition_unavailable",
           "profile.cleanup_delegated",
           "profile.distributed_cross_scope",
           "profile.failure_repeated",
@@ -21308,6 +21333,7 @@
           "recipe_image.not_cancellable",
           "recipe_image.not_retryable",
           "recipe_image.operation_invalid",
+          "recipe_image.removal_evidence_unavailable",
           "recipe_image.operation_missing",
           "recipe_image.preparation_failed",
           "recipe_image.preparing",
@@ -23944,6 +23970,113 @@
           "released_at"
         ],
         "title": "RecipeRelease",
+        "type": "object"
+      },
+      "RecipeRemovalProjectionIssue": {
+        "properties": {
+          "code": {
+            "const": "recipe_image.removal_evidence_unavailable",
+            "default": "recipe_image.removal_evidence_unavailable",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "next_action": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Next Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail",
+          "next_action"
+        ],
+        "title": "RecipeRemovalProjectionIssue",
+        "type": "object"
+      },
+      "RecipeRemovalUnavailableView": {
+        "description": "Known Job identity with no claim about unreadable removal effects.",
+        "properties": {
+          "action": {
+            "const": "remove",
+            "default": "remove",
+            "title": "Action",
+            "type": "string"
+          },
+          "failure": {
+            "title": "Failure",
+            "type": "null"
+          },
+          "kind": {
+            "const": "recipe.cache.remove.v2",
+            "default": "recipe.cache.remove.v2",
+            "title": "Kind",
+            "type": "string"
+          },
+          "observed_at": {
+            "title": "Observed At",
+            "type": "string"
+          },
+          "operation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "null"
+          },
+          "projection_issue": {
+            "$ref": "#/components/schemas/RecipeRemovalProjectionIssue"
+          },
+          "recipe_revision_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Revision Id"
+          },
+          "request_key": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Key"
+          },
+          "state": {
+            "const": "unknown",
+            "default": "unknown",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "request_key",
+          "recipe_revision_id",
+          "projection_issue",
+          "observed_at"
+        ],
+        "title": "RecipeRemovalUnavailableView",
         "type": "object"
       },
       "RecipeRetryIntent": {
@@ -31584,6 +31717,36 @@
         "title": "RuntimeTelemetryProjection",
         "type": "object"
       },
+      "SavedProfileProjectionIssue": {
+        "additionalProperties": false,
+        "description": "An observation problem; it never authorizes changing saved intent.",
+        "properties": {
+          "code": {
+            "const": "profile.definition_unavailable",
+            "default": "profile.definition_unavailable",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "next_action": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Next Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail",
+          "next_action"
+        ],
+        "title": "SavedProfileProjectionIssue",
+        "type": "object"
+      },
       "SecurityRefusal": {
         "additionalProperties": false,
         "description": "A refused request at a security boundary; it fails closed.",
@@ -33309,6 +33472,48 @@
         ],
         "title": "TopologyCode",
         "type": "string"
+      },
+      "UnavailableFleetProfileView": {
+        "additionalProperties": false,
+        "description": "Keep an authorized saved identity visible without inventing its contents.",
+        "properties": {
+          "definition": {
+            "title": "Definition",
+            "type": "null"
+          },
+          "id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "number": {
+            "minimum": 1.0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "projection_issue": {
+            "$ref": "#/components/schemas/SavedProfileProjectionIssue"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "const": "unavailable",
+            "default": "unavailable",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "revision",
+          "projection_issue"
+        ],
+        "title": "UnavailableFleetProfileView",
+        "type": "object"
       },
       "UninstallPhaseOperation": {
         "additionalProperties": false,
@@ -37950,7 +38155,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetProfileView"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/FleetProfileView"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnavailableFleetProfileView"
+                    }
+                  ],
+                  "title": "Response Getprofile"
                 }
               }
             },
@@ -39194,6 +39407,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/RecipeUpdateResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RecipeRemovalUnavailableView"
                     }
                   ],
                   "title": "Response Getrecipeoperation"
@@ -39294,6 +39510,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/RecipeUpdateResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RecipeRemovalUnavailableView"
                     }
                   ],
                   "title": "Response Cancelrecipeoperation"
@@ -39403,6 +39622,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/RecipeUpdateResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RecipeRemovalUnavailableView"
                     }
                   ],
                   "title": "Response Getreciperequest"

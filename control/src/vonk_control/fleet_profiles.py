@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypedDict
 from typing import cast as _typing_cast
 
-from pydantic import ConfigDict, TypeAdapter, ValidationError
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import String, case, cast, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -117,6 +117,7 @@ from .fleet_profile_contract import (
     FleetProfilePlanSummary,
     FleetProfilePreparationDecision,
     FleetProfilePreview,
+    FleetProfileReadView,
     FleetProfileReason,
     FleetProfileReviewedDecision,
     FleetProfileRunEffect,
@@ -129,6 +130,8 @@ from .fleet_profile_contract import (
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildResult,
     FleetProfileView,
+    SavedProfileProjectionIssue,
+    UnavailableFleetProfileView,
     profile_switch_child_request_key,
 )
 from .lifecycle.core import RECOVERY
@@ -240,9 +243,6 @@ from .user_authority import serialize_user_authority
 if TYPE_CHECKING:
     from .operation_api import OperationProviderProtocol
 
-_STORED_ASSIGNMENTS = TypeAdapter(
-    list[FleetProfileAssignmentInput], config=ConfigDict(strict=True)
-)
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _ACTIVE_INSTALL_STATES = frozenset(
     {
@@ -4022,53 +4022,10 @@ class FleetProfileService:
         return value[:63].rstrip("-_.") or "assignment"
 
     @staticmethod
-    def _unreadable_choice_count(row: FleetProfile) -> int:
-        """How many saved choices of a profile cannot be read (and are left out)."""
-
-        raw = row.assignments
-        readable = len(FleetProfileService._choices(row))
-        return max(0, len(raw) - readable) if isinstance(raw, list) else 1
-
-    @staticmethod
     def _choices(row: FleetProfile) -> tuple[FleetProfileAssignmentInput, ...]:
-        """The saved choices of a profile; an unreadable choice is retired.
+        """Every saved choice belongs to the exact definition, including on review."""
 
-        The profile is read as a whole first.  When that fails the choices are read
-        one by one: a damaged choice is skipped (and logged), so one broken
-        element never makes the rest of the draft unreadable.
-        """
-
-        def read_all() -> tuple[FleetProfileAssignmentInput, ...]:
-            return tuple(
-                _STORED_ASSIGNMENTS.validate_json(canonical_message(row.assignments))
-            )
-
-        def read_each() -> tuple[FleetProfileAssignmentInput, ...] | None:
-            raw = row.assignments
-            if not isinstance(raw, list):
-                return None
-            readable: list[FleetProfileAssignmentInput] = []
-            for index, item in enumerate(raw):
-                try:
-                    readable.extend(
-                        _STORED_ASSIGNMENTS.validate_json(canonical_message([item]))
-                    )
-                except (TypeError, ValueError):
-                    retire_as_unknown(
-                        "profile-choice",
-                        f"{row.id}#{index}",
-                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
-                        "a saved choice does not parse",
-                    )
-            return tuple(readable)
-
-        value = read_or_rebuild(
-            kind="profile-choices",
-            subject=str(row.id),
-            read=read_all,
-            rebuild=read_each,
-        )
-        return () if isinstance(value, Residue) else value
+        return tuple(FleetProfileService._definition(row).assignments)
 
     def _validate_draft_review_identity(
         self,
@@ -4165,7 +4122,8 @@ class FleetProfileService:
                 )
             )
             return FleetProfileList(
-                generated_at=now, profiles=[self._view(session, row) for row in rows]
+                generated_at=now,
+                profiles=[self._read_view(session, row) for row in rows],
             )
 
     def get(self, profile_id: str) -> FleetProfileView:
@@ -4186,11 +4144,19 @@ class FleetProfileService:
                 raise MissingRecord(number, reason=InvalidRequestReason.NOT_FOUND)
             return self._view(session, row)
 
-    def read_number(self, number: int) -> FleetProfileView:
+    def read_number(self, number: int) -> FleetProfileReadView:
         """Read a stable unused number without creating persistent state."""
 
         try:
-            return self.get_number(number)
+            if type(number) is not int or number < 1:
+                raise MissingRecord(number, reason=InvalidRequestReason.NOT_FOUND)
+            with self._sessions() as session:
+                row = session.scalar(
+                    select(FleetProfile).where(FleetProfile.number == number)
+                )
+                if row is None:
+                    raise MissingRecord(number, reason=InvalidRequestReason.NOT_FOUND)
+                return self._read_view(session, row)
         except KeyError:
             if type(number) is not int or number < 1:
                 raise
@@ -4254,31 +4220,37 @@ class FleetProfileService:
 
     @staticmethod
     def _definition(row: FleetProfile) -> FleetProfileDefinition:
-        """The saved authoring intent; damaged choices are retired, never refused."""
+        """Read exact authoring intent; partial reconstruction could delete choices."""
 
-        document = {
-            name: getattr(row, name) for name in FleetProfileDefinition.model_fields
-        }
-
-        def read(value: Mapping[str, object] = document) -> FleetProfileDefinition:
-            return read_stored_model(
-                FleetProfileDefinition, canonical_message(value), from_json=True
-            )
-
-        def rebuild() -> FleetProfileDefinition:
-            retained = [
-                json.loads(canonical_message(choice))
-                for choice in FleetProfileService._choices(row)
-            ]
-            return read({**document, "assignments": retained})
-
-        value = read_or_rebuild(
-            kind="profile-definition",
-            subject=str(row.id),
-            read=_without_values(read),
-            rebuild=_rebuild_without_values(rebuild),
+        return read_stored_model(
+            FleetProfileDefinition,
+            canonical_message(
+                {
+                    name: getattr(row, name)
+                    for name in FleetProfileDefinition.model_fields
+                }
+            ),
+            from_json=True,
         )
-        return FleetProfileDefinition() if isinstance(value, Residue) else value
+
+    @staticmethod
+    def _definition_issue() -> SavedProfileProjectionIssue:
+        return SavedProfileProjectionIssue(
+            detail="The saved profile definition cannot be read. Its contents are unknown.",
+            next_action="Restore the saved definition or explicitly import a complete replacement at the current revision.",
+        )
+
+    def _read_view(self, session: Session, row: FleetProfile) -> FleetProfileReadView:
+        try:
+            self._definition(row)
+        except (TypeError, ValueError):
+            return UnavailableFleetProfileView(
+                id=row.id,
+                number=row.number,
+                revision=row.revision,
+                projection_issue=self._definition_issue(),
+            )
+        return self._view(session, row)
 
     def definition_number(self, number: int) -> FleetProfileDefinitionView:
         """Read authoring intent without consulting catalog, cache, or runtime."""
@@ -4297,11 +4269,21 @@ class FleetProfileService:
                         name="Default" if number == 1 else f"Profile {number}"
                     ),
                 )
+            try:
+                definition = self._definition(row)
+            except (TypeError, ValueError):
+                return FleetProfileDefinitionView(
+                    id=row.id,
+                    number=row.number,
+                    revision=row.revision,
+                    definition=None,
+                    projection_issue=self._definition_issue(),
+                )
             return FleetProfileDefinitionView(
                 id=row.id,
                 number=row.number,
                 revision=row.revision,
-                definition=self._definition(row),
+                definition=definition,
             )
 
     def create(
@@ -4701,20 +4683,6 @@ class FleetProfileService:
             assignment_assessments: list[FleetProfileAssignmentAssessment] = []
             reasons: list[FleetProfileReason] = []
             if accepted_intent is None and row is not None:
-                unreadable = self._unreadable_choice_count(row)
-                if unreadable:
-                    # The readable choices are planned; the reviewer sees what
-                    # was left out (and the effects that follow from it).
-                    reasons.append(
-                        FleetProfileReason(
-                            code=ProfileReasonCode.CHOICES_UNREADABLE,
-                            detail=(
-                                f"{unreadable} saved choice(s) cannot be read and "
-                                "are left out of this plan; save the profile again."
-                            ),
-                            severity="warning",
-                        )
-                    )
                 resolved_ids = {item.id for item in resolved_assignments}
                 for choice in self._choices(row):
                     if _choice_id(choice) in resolved_ids:
@@ -10017,12 +9985,6 @@ class FleetProfileService:
         cache_missing = 0
         cache_unknown = 0
         warnings: list[str] = []
-        unreadable = self._unreadable_choice_count(row)
-        if unreadable:
-            warnings.append(
-                f"{unreadable} saved choice(s) cannot be read and are left out; "
-                "save the profile again"
-            )
         selection = self._selected_profile_snapshot(session)
         if isinstance(selection, Residue):
             # Preserve draft reads even if the selected receipt is damaged.

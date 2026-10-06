@@ -1477,6 +1477,15 @@ def _validate_cache_removal_receipt(
 ) -> str:
     """Bind a removal receipt to its submitted target and durable identity."""
 
+    if noun == "recipe" and result.get("state") == "unknown":
+        unavailable = validate_control_document(
+            "RecipeRemovalUnavailableView", dict(result)
+        )
+        if unavailable["request_key"] != request_key:
+            raise ControlMalformedResponse("unknown removal identifies another request")
+        # This binds observation to the accepted Job; it does not confirm the
+        # unreadable target, retention choice, effect or successful outcome.
+        return _cache_operation_id(noun, unavailable)
     contract = (
         "ModelCacheOperatorResponse" if noun == "model" else "RecipeOperatorResponse"
     )
@@ -3432,6 +3441,11 @@ def _profile_authoring(
     current_revision = current["revision"]
     if type(current_revision) is not int:
         raise TypeError("profile revision is invalid")
+    if current["definition"] is None:
+        issue = current.get("projection_issue")
+        if not isinstance(issue, Mapping):
+            raise ControlMalformedResponse("unavailable profile has no diagnostic")
+        raise ControlClientError(f"{issue['detail']} {issue['next_action']}")
     definition = copy.deepcopy(
         validate_control_document("FleetProfileDefinition", current["definition"])
     )

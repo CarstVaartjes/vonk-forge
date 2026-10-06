@@ -147,6 +147,8 @@ from .recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalPlan,
     RecipeCacheRemovalResult,
+    RecipeRemovalProjectionIssue,
+    RecipeRemovalUnavailableView,
 )
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import UPDATE_KIND, RecipeUpdateResponse
@@ -4153,7 +4155,12 @@ class RecipeImageAvailabilityService:
 
     def get_operator_operation(
         self, operation_id: str
-    ) -> RecipeImageAvailabilityView | RecipeUpdateResponse | dict[str, object]:
+    ) -> (
+        RecipeImageAvailabilityView
+        | RecipeUpdateResponse
+        | RecipeRemovalUnavailableView
+        | dict[str, object]
+    ):
         """Observe either current recipe preparation or durable cache removal."""
 
         with self._sessions() as session:
@@ -4163,15 +4170,32 @@ class RecipeImageAvailabilityService:
             if operation.kind == OPERATION_KIND:
                 return self._view(operation)
             if operation.kind == REMOVE_OPERATION_KIND:
-                intent = self._read_removal_intent(operation)
-                return self._read_removal_result(operation, intent)
+                try:
+                    intent = self._read_removal_intent(operation)
+                    return self._read_removal_result(operation, intent)
+                except RecipeImageAvailabilityUnknown:
+                    return RecipeRemovalUnavailableView(
+                        operation_id=operation.id,
+                        request_key=operation.request_id,
+                        recipe_revision_id=operation.authority_revision,
+                        observed_at=_iso(operation.updated_at),
+                        projection_issue=RecipeRemovalProjectionIssue(
+                            detail="The accepted recipe removal record cannot be read. Its effects and outcome are unknown.",
+                            next_action="Restore the accepted removal record and recheck this operation. Do not submit another removal to infer its outcome.",
+                        ),
+                    )
             if operation.kind != UPDATE_KIND:
                 raise MissingRecord(operation_id)
         return self._updates.get(operation_id)
 
     def get_operator_request(
         self, request_key: str, *, actor: str
-    ) -> RecipeImageAvailabilityView | RecipeUpdateResponse | dict[str, object]:
+    ) -> (
+        RecipeImageAvailabilityView
+        | RecipeUpdateResponse
+        | RecipeRemovalUnavailableView
+        | dict[str, object]
+    ):
         """Correlate only this issuer's request within the recipe family."""
 
         with self._sessions() as session:

@@ -3524,8 +3524,18 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
             .where(FleetProfile.id == created.id)
             .values(assignments=assignments)
         )
-    # The damaged choice is retired (skipped), never a refusal to read the profile.
-    assert service.get(created.id).assignments == []
+    from vonk_control.fleet_profile_contract import UnavailableFleetProfileView
+
+    # Keep the exact saved identity observable. Dropping a malformed choice
+    # would let an ordinary edit silently delete accepted authoring intent.
+    observed = service.read_number(created.number)
+    assert isinstance(observed, UnavailableFleetProfileView)
+    assert observed.id == created.id and observed.revision == created.revision
+    assert observed.definition is None
+    assert observed.projection_issue.code == "profile.definition_unavailable"
+    with sessions() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None and row.assignments == assignments
 
 
 def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -> None:

@@ -915,6 +915,15 @@ def _profile(payload: Mapping[str, object]) -> None:
     _field("Revision", payload.get("revision"))
     _field("Loaded revision", payload.get("loaded_revision"))
     _field("State", payload.get("status"))
+    if (
+        payload.get("definition") is None
+        and payload.get("projection_issue") is not None
+    ):
+        issue = _object(payload["projection_issue"], "profile projection issue")
+        _field("Definition", "unknown")
+        _field("Cause", issue.get("detail"))
+        _field("Next", issue.get("next_action"))
+        return
     _field("Retention", payload.get("installation_policy"))
     if "favorite" in payload:
         _field("Favorite", payload["favorite"])
@@ -1355,6 +1364,10 @@ def _operation(payload: Mapping[str, object], noun: str) -> None:
     _failure(payload.get("failure"))
     if "preserved" in payload:
         _field("Preserved", _words(payload["preserved"]))
+    if payload.get("projection_issue") is not None:
+        issue = _object(payload["projection_issue"], "removal projection issue")
+        _field("Cause", issue.get("detail"))
+        _field("Next", issue.get("next_action"))
     if "reclaimed_bytes" in payload:
         _field("Reclaimed", _bytes(payload["reclaimed_bytes"]))
     _actions(payload.get("actions") if availability else payload.get("next_actions"))
@@ -1947,6 +1960,11 @@ def render_payload(
                     for row in rows
                 ],
             )
+            for row in rows:
+                if row.get("projection_issue") is not None:
+                    issue = _object(row["projection_issue"], "profile projection issue")
+                    _field(f"Profile {row.get('number')} cause", issue.get("detail"))
+                    _field("Next", issue.get("next_action"))
         elif action == "preview":
             _preview(payload)
         elif action in {"progress", "load", "cancel"}:

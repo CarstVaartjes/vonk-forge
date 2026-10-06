@@ -98,6 +98,7 @@ export function CacheRemovalProgress({api, intent, initial, initialError, onComp
     {receipt
       ? <p role="status">Removal {receipt.state}: {receipt.operation_id}</p>
       : <p role="status">Removal receipt not yet confirmed: {intent.requestKey}</p>}
+    {receipt?.state === "unknown" && <p role="status">{receipt.projection_issue.detail} {receipt.projection_issue.next_action}</p>}
     {receipt?.progress?.phase && <p>{receipt.progress.phase}</p>}
     {receipt?.failure && <p role="alert">{receipt.failure.code}: {receipt.failure.detail}</p>}
     <button type="button" className="button secondary" disabled={busy} onClick={() => void refresh()}>{receipt ? "Refresh removal status" : "Check request status"}</button>

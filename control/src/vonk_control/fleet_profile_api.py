@@ -16,6 +16,7 @@ from .fleet_profile_contract import (
     FleetProfileList,
     FleetProfileLoadRequest,
     FleetProfilePreview,
+    FleetProfileReadView,
     FleetProfileView,
 )
 from .fleet_profiles import (
@@ -83,13 +84,13 @@ def install_fleet_profile_routes(
 
     @app.get(
         _PROFILE_PATH,
-        response_model=FleetProfileView,
+        response_model=FleetProfileReadView,
         responses=bounded_error_responses(401, 422, 503),
         operation_id="getProfile",
     )
     def get_profile(
         number: Annotated[int, Path(ge=1)], _actor: Actor = authenticated
-    ) -> FleetProfileView:
+    ) -> FleetProfileReadView:
         try:
             return service().read_number(number)
         except HTTPException:

@@ -227,3 +227,21 @@ test("a profile named in the URL is selected", async () => {
     expect(await screen.findByRole("region", {name: "Profile 3 saved profile"})).toBeVisible();
   } finally { window.history.replaceState(null, "", "/"); }
 });
+
+
+test("an unreadable saved definition stays visible without becoming an editable empty profile", async () => {
+  const unavailable = {
+    id: "00000000-0000-4000-8000-000000000001", number: 1, revision: 8,
+    status: "unavailable" as const, definition: null,
+    projection_issue: {code: "profile.definition_unavailable" as const,
+      detail: "The saved profile definition cannot be read. Its contents are unknown.",
+      next_action: "Restore the saved definition or import a complete replacement."},
+  };
+  const api = apiFor({profiles: vi.fn(async () => ({generated_at: "2026-10-06T00:00:00Z", profiles: [unavailable, profile]}))});
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+  expect(await screen.findByText("Profile 1 · Definition unavailable")).toBeVisible();
+  expect(screen.getByText(unavailable.projection_issue.detail)).toBeVisible();
+  expect(screen.queryByRole("button", {name: /Profile 1/})).not.toBeInTheDocument();
+  expect((await screen.findAllByText("Profile 2 · Coding"))[0]).toBeVisible();
+  expect(api.autosaveProfile).not.toHaveBeenCalled();
+});
