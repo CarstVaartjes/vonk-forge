@@ -58,7 +58,7 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 74,
-    "unaudited": 267,
+    "unaudited": 265,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
   "categorized_raises": {
@@ -1973,9 +1973,6 @@
         ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.__init__", "availability-claim-lease-is-invalid", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.__init__", "availability-parallelism-is-invalid", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService._read_removal_owner", "stored-recipe-removal-owner-exceeds-the-scan-byte-budget", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService._view", "failed-image-availability-requires-failure-evidence", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService._view", "image-availability-result-requires-success", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService._view", "successful-image-availability-requires-a-result-and-no-failu", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.advance_removals", "recipe-removal-batch-limit-is-invalid", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.claim_pending", "availability-claim-limit-is-invalid", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.list_page", "availability-list-limit-is-invalid", 1],
@@ -3181,9 +3178,7 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class DistributedRecoveryInvalid is of the input-validation error type.",
       "sites": [
         ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_aware", "distributed-recovery-clock-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "enforce_recovery_deadline", "distributed-recovery-authority-is-invalid", 4],
         ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "enforce_recovery_deadline", "distributed-recovery-deadline-elapsed", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "recovery_start_plan", "distributed-recovery-authority-is-invalid", 1],
         ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "recovery_start_plan", "distributed-recovery-phases-are-invalid", 1]
       ]
     },
@@ -3474,8 +3469,6 @@
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_input_missing", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_invalid", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "recipe_image.model_cache_failed", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "recipe_image.runtime_invalid", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_cancelled", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_missing", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService.remove_selector", "recipe_image.operation_missing", 1],

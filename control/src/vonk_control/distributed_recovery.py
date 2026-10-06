@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
 
@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     InstallationState,
     InvalidRequestReason,
     RecipeStartPayload,
+    RecipeStopPayload,
     ReservationState,
     RouteState,
     RunState,
@@ -37,8 +38,12 @@ from .distributed_lifecycle import (
     canonical_distributed_readiness,
 )
 from .job_documents import (
+    DistributedRecoveryMarker,
     RecipeStartParent,
     RecipeStopParent,
+    RecoveryStartItem,
+    StartPhaseOperation,
+    StopPhaseOperation,
 )
 from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from .lifecycle.job import JobAdapter
@@ -63,6 +68,7 @@ from .recipe_execution_contract import (
     parse_stored_run_plan,
     run_plan_document,
 )
+from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_start_payloads import (
     RecipeStartPayloadError,
     RecipeStartPlacement,
@@ -75,7 +81,7 @@ from .recipe_stop_payloads import (
 )
 from .reservation_owners import run_has_live_operation
 from .stored_json import read_row_column
-from .strict_json import read_stored_model
+from .strict_json import read_stored_model, serialize_json_value
 
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _RECOVERY_RECHECK_SECONDS = 5
@@ -113,6 +119,28 @@ def _parent(job: Job) -> RecipeStartParent | RecipeStopParent | Residue:
     if isinstance(value, RecipeStartParent | RecipeStopParent | Residue):
         return value
     return _unproven(job.id, _DAMAGED, "stored recipe parent is invalid")
+
+
+RecoveryStartPhases = tuple[tuple[tuple[str, RecipeStartPayload], ...], ...]
+RecoveryStopPhases = tuple[tuple[tuple[str, RecipeStopPayload], ...], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _RecoveryAuthority:
+    deadline: str
+    workload_intent_ordinal: int | None
+    failed_rank: int
+    recipe_content_sha256: str
+    start_phases: RecoveryStartPhases
+    stop_phases: RecoveryStopPhases = ()
+
+
+def _cancelled(job: Job) -> bool:
+    result = read_row_column(job, "result")
+    return isinstance(result, Residue) or (
+        isinstance(result, RecipeOperationCancellationResult)
+        and result.cancel_requested
+    )
 
 
 def _active_recipe_revision(
@@ -170,7 +198,7 @@ class _RecoveryRunStops(Protocol):
         session: Session,
         run_id: str,
         *,
-        recovery_context: Mapping[str, object],
+        recovery_context: DistributedRecoveryMarker,
         workload_intent_ordinal: int,
         now: datetime,
     ) -> Job | Residue: ...
@@ -408,14 +436,12 @@ class DistributedRecoveryCoordinator:
                             _settle_unrecoverable(run, unowned.note, now)
                             worked = True
                             continue
-                        deadline = authority.get("deadline")
-                        start_phases = authority.get("start_phases")
-                        workload_intent_ordinal = authority.get(
-                            "workload_intent_ordinal"
-                        )
+                        deadline = authority.deadline
+                        start_phases = authority.start_phases
+                        workload_intent_ordinal = authority.workload_intent_ordinal
                         if (
                             not isinstance(deadline, str)
-                            or not isinstance(start_phases, list)
+                            or not start_phases
                             or type(workload_intent_ordinal) is not int
                             or workload_intent_ordinal < 1
                         ):
@@ -427,12 +453,12 @@ class DistributedRecoveryCoordinator:
                             _settle_unrecoverable(run, malformed.note, now)
                             worked = True
                             continue
-                        recovery_context = {
-                            "schema_version": 1,
-                            "failed_rank": 0,
-                            "deadline": deadline,
-                            "start_phases": _encode_phases(start_phases),
-                        }
+                        recovery_context = DistributedRecoveryMarker(
+                            schema_version=1,
+                            failed_rank=0,
+                            deadline=deadline,
+                            start_phases=_encode_phases(start_phases),
+                        )
                         job = self._recovery_run_stops.queue_recovery_stop_in_session(
                             session,
                             run.id,
@@ -580,90 +606,55 @@ def _unreadable_run_ids(session: Session) -> list[str]:
     return unreadable
 
 
-def recovery_start_plan(
-    payload: Mapping[str, object],
-    *,
-    now: datetime,
-    require_unexpired: bool = True,
-) -> (
-    tuple[tuple[tuple[tuple[str, Mapping[str, object]], ...], ...], dict[str, object]]
-    | None
-):
-    """Decode the trusted start phases carried by a recovery stop job."""
-
-    value = payload.get("recovery")
+def _recovery_marker(payload: object) -> DistributedRecoveryMarker | None:
+    if isinstance(payload, DistributedRecoveryMarker):
+        return payload
+    if isinstance(payload, RecipeStartParent | RecipeStopParent):
+        return payload.recovery
+    # The exported boundary also accepts a retained raw Job document.
+    value = payload.get("recovery") if isinstance(payload, Mapping) else None
     if value is None:
         return None
-    if not isinstance(value, Mapping) or set(value) != {
-        "schema_version",
-        "failed_rank",
-        "deadline",
-        "start_phases",
-    }:
+    try:
+        return DistributedRecoveryMarker.model_validate_json(canonical_message(value))
+    except (TypeError, ValueError) as error:
         raise DistributedRecoveryInvalid(
             "distributed recovery authority is invalid",
             reason=InvalidRequestReason.MALFORMED,
-        )
-    enforce_recovery_deadline(payload, now=now, require_unexpired=require_unexpired)
-    failed_rank = value["failed_rank"]
-    deadline_value = value["deadline"]
-    phases = _decode_phases(value.get("start_phases"))
+        ) from error
+
+
+def recovery_start_plan(
+    payload: object,
+    *,
+    now: datetime,
+    require_unexpired: bool = True,
+) -> tuple[RecoveryStartPhases, DistributedRecoveryMarker] | None:
+    """Decode the canonical start phases carried by a recovery stop job."""
+    marker = _recovery_marker(payload)
+    if marker is None:
+        return None
+    enforce_recovery_deadline(marker, now=now, require_unexpired=require_unexpired)
+    phases = _decode_phases(marker.start_phases)
     if phases is None:
         raise DistributedRecoveryInvalid(
             "distributed recovery phases are invalid",
             reason=InvalidRequestReason.MALFORMED,
         )
-    marker = {
-        "schema_version": 1,
-        "failed_rank": failed_rank,
-        "deadline": deadline_value,
-    }
-    return phases, marker
+    return phases, marker.model_copy(update={"start_phases": None})
 
 
 def enforce_recovery_deadline(
-    payload: Mapping[str, object],
+    payload: object,
     *,
     now: datetime,
     require_unexpired: bool = True,
 ) -> bool:
     """Validate and enforce a retained recovery marker at a trust boundary."""
-
-    value = payload.get("recovery")
-    if value is None:
+    marker = _recovery_marker(payload)
+    if marker is None:
         return False
-    if not isinstance(value, Mapping) or set(value) not in (
-        {"schema_version", "failed_rank", "deadline"},
-        {"schema_version", "failed_rank", "deadline", "start_phases"},
-    ):
-        raise DistributedRecoveryInvalid(
-            "distributed recovery authority is invalid",
-            reason=InvalidRequestReason.MALFORMED,
-        )
-    failed_rank = value.get("failed_rank")
-    deadline_value = value.get("deadline")
-    if (
-        value.get("schema_version") != 1
-        or type(failed_rank) is not int
-        or failed_rank < 0
-        or not isinstance(deadline_value, str)
-    ):
-        raise DistributedRecoveryInvalid(
-            "distributed recovery authority is invalid",
-            reason=InvalidRequestReason.MALFORMED,
-        )
-    try:
-        deadline = datetime.fromisoformat(deadline_value)
-    except ValueError as error:
-        raise DistributedRecoveryInvalid(
-            "distributed recovery authority is invalid",
-            reason=InvalidRequestReason.MALFORMED,
-        ) from error
-    if deadline.tzinfo is None or deadline.utcoffset() is None:
-        raise DistributedRecoveryInvalid(
-            "distributed recovery authority is invalid",
-            reason=InvalidRequestReason.MALFORMED,
-        )
+    deadline = datetime.fromisoformat(marker.deadline)
     if require_unexpired and _aware(now) >= _aware(deadline):
         raise DistributedRecoveryInvalid(
             "distributed recovery deadline elapsed",
@@ -897,7 +888,7 @@ def _singleton_recovery_authority(
     *,
     next_run_generation: int,
     start_timeout_seconds: int,
-) -> dict[str, object] | Residue | None:
+) -> _RecoveryAuthority | Residue | None:
     """Rebuild one exact accepted persistent Start after observed absence."""
 
     if not _proves_fresh_absence(run, run_node, now):
@@ -954,7 +945,7 @@ def _singleton_recovery_authority(
         or installation_plan.mapping_id != installation.mapping_id
         or installation_plan.mapping_generation != installation.mapping_generation
         or installation_plan.recipe_revision_id != revision.id
-        or installation_plan.get("recipe_content_sha256") != revision.content_digest
+        or installation_plan.recipe_content_sha256 != revision.content_digest
         or installation_plan.image_digest != installation.image_digest
         or len(run_nodes) != 1
         or set(compiled_plans) != {run_node.node_id}
@@ -1029,14 +1020,7 @@ def _singleton_recovery_authority(
     )
     if isinstance(accepted_start_payload, Residue):
         return accepted_start_payload
-    try:
-        accepted_start = read_stored_model(
-            RecipeStartPayload,
-            canonical_message(accepted_start_payload),
-            from_json=True,
-        )
-    except (TypeError, ValueError) as error:
-        return _unproven(run.id, _DAMAGED, "accepted Start payload is invalid", error)
+    accepted_start = accepted_start_payload
     compiled_plan = accepted_start.compiled_execution_plan
     for label, plan in (
         ("installed", install_compiled_plan),
@@ -1081,10 +1065,7 @@ def _singleton_recovery_authority(
         != canonical_message(install_compiled_identity)
     ):
         return _unproven(run.id, _MISMATCH, "accepted Start image authority is stale")
-    if start_job.result is not None and (
-        not isinstance(start_job.result, Mapping)
-        or start_job.result.get("cancel_requested") is True
-    ):
+    if _cancelled(start_job):
         return _unproven(
             run.id, _MISMATCH, "singleton recovery start authority was cancelled"
         )
@@ -1116,13 +1097,24 @@ def _singleton_recovery_authority(
         return _unproven(
             run.id, _DAMAGED, "singleton recovery start payload is invalid", error
         )
-    return {
-        "deadline": deadline.isoformat(),
-        "workload_intent_ordinal": start_ordinal,
-        "failed_rank": 0,
-        "recipe_content_sha256": revision.content_digest,
-        "start_phases": [[(run_node.node_id, start_payload)]],
-    }
+    return _RecoveryAuthority(
+        deadline=deadline.isoformat(),
+        workload_intent_ordinal=start_ordinal,
+        failed_rank=0,
+        recipe_content_sha256=revision.content_digest,
+        start_phases=(
+            (
+                (
+                    run_node.node_id,
+                    read_stored_model(
+                        RecipeStartPayload,
+                        canonical_message(start_payload),
+                        from_json=True,
+                    ),
+                ),
+            ),
+        ),
+    )
 
 
 def _accepted_start_authority(
@@ -1145,7 +1137,8 @@ def _accepted_start_authority(
     accepted = tuple(
         job
         for job in starts
-        if job.payload.get("recovery") is None
+        if isinstance((parent := _parent(job)), RecipeStartParent)
+        and parent.recovery is None
         and job.state == "succeeded"
         and _start_binds_current_run_plan(session, job, run)
     )
@@ -1153,12 +1146,17 @@ def _accepted_start_authority(
     targets = sorted(
         session.scalars(select(RunNode.node_id).where(RunNode.run_id == run.id))
     )
-    ordinal = original.payload.get("workload_intent_ordinal") if original else None
+    original_parent = _parent(original) if original is not None else None
+    ordinal = (
+        original_parent.workload_intent_ordinal
+        if isinstance(original_parent, RecipeStartParent)
+        else None
+    )
     if (
         original is None
-        or original.payload.get("schema_version") != 1
-        or original.payload.get("owner_kind") != "run"
-        or original.payload.get("owner_id") != run.id
+        or not isinstance(original_parent, RecipeStartParent)
+        or original_parent.owner_kind != "run"
+        or original_parent.owner_id != run.id
         or original.targets != targets
         or type(ordinal) is not int
         or ordinal < 1
@@ -1172,7 +1170,8 @@ def _accepted_start_authority(
         current = tuple(
             job
             for job in starts
-            if isinstance(job.payload.get("recovery"), Mapping)
+            if isinstance((parent := _parent(job)), RecipeStartParent)
+            and parent.recovery is not None
             and job.state == "succeeded"
             and _start_binds_current_run_plan(session, job, run)
             and _launch_generation(session, job, node_id) == run.run_generation
@@ -1194,16 +1193,14 @@ def _accepted_start_authority(
         )
         if isinstance(origin, Residue):
             return origin
+    start_parent = _parent(start)
     if (
-        start.payload.get("schema_version") != 1
-        or start.payload.get("owner_kind") != "run"
-        or start.payload.get("owner_id") != run.id
+        not isinstance(start_parent, RecipeStartParent)
+        or start_parent.owner_kind != "run"
+        or start_parent.owner_id != run.id
         or start.targets != targets
-        or start.payload.get("workload_intent_ordinal") != ordinal
-        or (
-            isinstance(start.result, Mapping)
-            and start.result.get("cancel_requested") is True
-        )
+        or start_parent.workload_intent_ordinal != ordinal
+        or _cancelled(start)
     ):
         return _unproven(
             run.id, _MISSING, "singleton recovery lacks exact current Start authority"
@@ -1216,18 +1213,19 @@ def _accepted_start_authority(
 
 def _launch_generation(session: Session, job: Job, node_id: str) -> int | None:
     """The run generation the node's fenced Start of this job launched."""
-    payload = session.scalar(
-        select(AgentOperation.payload)
+    operation = session.scalar(
+        select(AgentOperation)
         .where(
             AgentOperation.parent_job_id == job.id,
             AgentOperation.node_id == node_id,
+            AgentOperation.kind == "recipe.start",
             AgentOperation.state == "succeeded",
         )
         .order_by(AgentOperation.created_at.desc(), AgentOperation.id.desc())
         .limit(1)
     )
-    generation = payload.get("run_generation") if isinstance(payload, Mapping) else None
-    return generation if type(generation) is int else None
+    payload = read_row_column(operation, "payload") if operation is not None else None
+    return payload.run_generation if isinstance(payload, RecipeStartPayload) else None
 
 
 def _validate_singleton_recovery_start_origin(
@@ -1239,15 +1237,17 @@ def _validate_singleton_recovery_start_origin(
     targets: list[str],
     workload_intent_ordinal: int,
 ) -> Residue | None:
-    marker = start.payload.get("recovery")
-    deadline = marker.get("deadline") if isinstance(marker, Mapping) else None
+    start_parent = _parent(start)
+    marker = (
+        start_parent.recovery if isinstance(start_parent, RecipeStartParent) else None
+    )
+    deadline = marker.deadline if marker is not None else None
     if (
-        not isinstance(marker, Mapping)
-        or set(marker) != {"schema_version", "failed_rank", "deadline"}
-        or marker.get("schema_version") != 1
-        or marker.get("failed_rank") != 0
-        or not isinstance(deadline, str)
-        or start.payload.get("workload_intent_ordinal") != workload_intent_ordinal
+        marker is None
+        or marker.start_phases is not None
+        or marker.failed_rank != 0
+        or not isinstance(start_parent, RecipeStartParent)
+        or start_parent.workload_intent_ordinal != workload_intent_ordinal
     ):
         return _unproven(run.id, _DAMAGED, "singleton recovery Start marker is invalid")
     stop_request_id = str(
@@ -1271,7 +1271,10 @@ def _validate_singleton_recovery_start_origin(
         return _unproven(
             run.id, _MISSING, "singleton recovery Start lacks its exact completed Stop"
         )
-    recovery = stop.payload.get("recovery")
+    stop_parent = _parent(stop)
+    recovery = (
+        stop_parent.recovery if isinstance(stop_parent, RecipeStopParent) else None
+    )
     if stop.state != "succeeded" or stop.actor != "system:singleton-recovery":
         return _unproven(
             run.id,
@@ -1281,7 +1284,8 @@ def _validate_singleton_recovery_start_origin(
     if (
         stop.authority_revision != run.plan_digest
         or stop.targets != targets
-        or stop.payload.get("workload_intent_ordinal") != workload_intent_ordinal
+        or not isinstance(stop_parent, RecipeStopParent)
+        or stop_parent.workload_intent_ordinal != workload_intent_ordinal
         or stop.payload_digest
         != hashlib.sha256(canonical_message(stop.payload)).hexdigest()
     ):
@@ -1289,22 +1293,22 @@ def _validate_singleton_recovery_start_origin(
             run.id, _MISMATCH, "singleton recovery Stop has stale exact run authority"
         )
     if (
-        not isinstance(recovery, Mapping)
-        or set(recovery)
-        != {"schema_version", "failed_rank", "deadline", "start_phases"}
-        or any(recovery.get(key) != marker.get(key) for key in marker)
+        recovery is None
+        or recovery.start_phases is None
+        or recovery.failed_rank != marker.failed_rank
+        or recovery.deadline != marker.deadline
     ):
         return _unproven(
             run.id,
             _MISMATCH,
             "singleton recovery Stop continuation differs from its Start",
         )
-    phases = _decode_phases(recovery.get("start_phases"))
+    phases = _decode_phases(recovery.start_phases)
     if phases is None:
         return _unproven(
             run.id, _DAMAGED, "singleton recovery Stop continuation is invalid"
         )
-    projected_start_phases = _project_start_phases(start.payload.get("phases"))
+    projected_start_phases = _project_start_phases(start_parent.phases)
     if (
         projected_start_phases is None
         or canonical_message(_encode_phases(phases))
@@ -1342,82 +1346,67 @@ def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) 
         start.state == "succeeded"
         and revision is not None
         and start.authority_revision == revision.content_digest
-        and start.payload.get("plan_digest") == run.plan_digest
+        and isinstance((parent := _parent(start)), RecipeStartParent)
+        and parent.plan_digest == run.plan_digest
         and plan.plan_digest == run.plan_digest
         and start.payload_digest
         == hashlib.sha256(canonical_message(start.payload)).hexdigest()
     )
 
 
-def _project_start_phases(value: object) -> list[list[dict[str, object]]] | None:
-    if not isinstance(value, list) or not value:
+def _project_start_phases(
+    phases: list[list[StartPhaseOperation]] | None,
+) -> list[list[RecoveryStartItem]] | None:
+    if not phases or any(not group for group in phases):
         return None
-    projected: list[list[dict[str, object]]] = []
-    for raw_group in value:
-        if not isinstance(raw_group, list) or not raw_group:
-            return None
-        group: list[dict[str, object]] = []
-        for raw_item in raw_group:
-            if (
-                not isinstance(raw_item, Mapping)
-                or not isinstance(raw_item.get("node_id"), str)
-                or not isinstance(raw_item.get("payload"), Mapping)
-            ):
-                return None
-            group.append(
-                {
-                    "node_id": raw_item["node_id"],
-                    "payload": dict(raw_item["payload"]),
-                }
-            )
-        projected.append(group)
-    return projected
+    return [
+        [
+            RecoveryStartItem(node_id=item.node_id, payload=item.payload)
+            for item in group
+        ]
+        for group in phases
+    ]
 
 
 def _accepted_start_authority_payload(
     session: Session, start: Job, node_id: str
-) -> Mapping[str, object] | Residue:
+) -> RecipeStartPayload | Residue:
     """The exact payload of the one accepted singleton Start child of ``node_id``."""
-
-    phases = start.payload.get("phases")
-    if not isinstance(phases, list) or not phases:
+    parent = _parent(start)
+    if not isinstance(parent, RecipeStartParent) or not parent.phases:
         return _unproven(start.id, _MISSING, "accepted Start payload is missing")
-    if sum(len(phase) for phase in phases if isinstance(phase, list)) != 1:
+    if sum(len(phase) for phase in parent.phases) != 1:
         return _unproven(start.id, _DAMAGED, "accepted Start payload is not singleton")
     items = [
-        item
-        for phase in phases
-        if isinstance(phase, list)
-        for item in phase
-        if isinstance(item, Mapping) and item.get("node_id") == node_id
+        item for phase in parent.phases for item in phase if item.node_id == node_id
     ]
     if len(items) != 1:
         return _unproven(start.id, _DAMAGED, "accepted Start payload is not singleton")
     child = _accepted_start_child(session, start, node_id, items[0])
     if isinstance(child, Residue):
         return child
-    return dict(child.payload)
+    payload = read_row_column(child, "payload")
+    if not isinstance(payload, RecipeStartPayload):
+        return _unproven(start.id, _DAMAGED, "accepted Start child payload is invalid")
+    return payload
 
 
 def _accepted_start_child(
     session: Session,
     start: Job,
     node_id: str,
-    item: Mapping[str, object],
+    item: StartPhaseOperation,
 ) -> AgentOperation | Residue:
-    operation_id = item.get("operation_id")
-    payload = item.get("payload")
-    if not isinstance(operation_id, str) or not isinstance(payload, Mapping):
-        return _unproven(start.id, _DAMAGED, "accepted Start child identity is invalid")
-    child = session.get(AgentOperation, operation_id)
+    child = session.get(AgentOperation, item.operation_id)
+    payload = read_row_column(child, "payload") if child is not None else None
     if (
         child is None
         or child.parent_job_id != start.id
         or child.node_id != node_id
         or child.kind != "recipe.start"
         or child.state != "succeeded"
-        or not isinstance(child.payload, Mapping)
-        or canonical_message(child.payload) != canonical_message(payload)
+        or not isinstance(payload, RecipeStartPayload)
+        or canonical_message(child.payload) != canonical_message(item.payload)
         or child.payload_digest
         != hashlib.sha256(canonical_message(child.payload)).hexdigest()
     ):
@@ -1434,7 +1423,7 @@ def _recovery_authority(
     failed_rank: int,
     *,
     stop_run_generation: int,
-) -> dict[str, object] | Residue | None:
+) -> _RecoveryAuthority | Residue | None:
     installation = session.get(RecipeInstallation, run.installation_id)
     resolved = (
         _active_recipe_revision(session, installation.recipe_revision_id)
@@ -1546,7 +1535,7 @@ def _recovery_authority(
     start_deadline = (
         now + startup_budget + timedelta(seconds=stop_timeout * len(stop_order))
     ).isoformat()
-    start_payloads: dict[str, tuple[str, dict[str, object]]] = {}
+    start_payloads: dict[str, tuple[str, RecipeStartPayload]] = {}
     for node in nodes:
         plan = by_rank[node.rank]
         compiled_plan = compiled_plans.get(node.node_id)
@@ -1600,7 +1589,12 @@ def _recovery_authority(
             return _unproven(
                 run.id, _DAMAGED, "distributed recovery start payload is invalid", error
             )
-        start_payloads[node.role] = (node.node_id, payload)
+        start_payloads[node.role] = (
+            node.node_id,
+            read_stored_model(
+                RecipeStartPayload, canonical_message(payload), from_json=True
+            ),
+        )
     start_order = topology.start_order
     roles = {node.role for node in nodes}
     if (
@@ -1610,7 +1604,7 @@ def _recovery_authority(
         or len(stop_order) != len(roles)
     ):
         return _unproven(run.id, _DAMAGED, "distributed recovery order is invalid")
-    owner_role = owner.get("role")
+    owner_role = owner.role
     if not isinstance(owner_role, str) or owner_role not in start_payloads:
         return _unproven(run.id, _DAMAGED, "distributed recovery endpoint is invalid")
     owner_node_id, owner_payload = start_payloads[owner_role]
@@ -1634,56 +1628,48 @@ def _recovery_authority(
             "distributed recovery lacks exact prior Start Stop authority",
             error,
         )
-    return {
-        "deadline": start_deadline,
-        "workload_intent_ordinal": start_job.payload.get("workload_intent_ordinal"),
-        "failed_rank": failed_rank,
-        "recipe_content_sha256": revision.content_digest,
-        "start_phases": [
-            [start_payloads[str(role)] for role in start_order],
-            [
+    start_parent = _parent(start_job)
+    return _RecoveryAuthority(
+        deadline=start_deadline,
+        workload_intent_ordinal=start_parent.workload_intent_ordinal
+        if isinstance(start_parent, RecipeStartParent)
+        else None,
+        failed_rank=failed_rank,
+        recipe_content_sha256=revision.content_digest,
+        start_phases=(
+            tuple(start_payloads[str(role)] for role in start_order),
+            (
                 (
                     owner_node_id,
-                    {**owner_payload, "phase": "collective-readiness"},
-                )
-            ],
-        ],
-        "stop_phases": [
-            [
-                (
-                    node.node_id,
-                    json.loads(canonical_message(exact_stop_payloads[node.node_id])),
-                )
+                    owner_payload.model_copy(update={"phase": "collective-readiness"}),
+                ),
+            ),
+        ),
+        stop_phases=tuple(
+            tuple(
+                (node.node_id, exact_stop_payloads[node.node_id])
                 for node in nodes
                 if node.role == role
-            ]
+            )
             for role in stop_order
-        ],
-    }
+        ),
+    )
 
 
 def _enqueue_recovery_stop(
     session: Session,
     queue: _RecoveryJobQueue,
     run: RecipeRun,
-    authority: Mapping[str, object],
+    authority: _RecoveryAuthority,
     *,
     failed_rank: int,
     now: datetime,
 ) -> Job | Residue:
-    raw_stop_phases = authority.get("stop_phases")
-    raw_start_phases = authority.get("start_phases")
-    recipe_digest = authority.get("recipe_content_sha256")
-    deadline = authority.get("deadline")
-    if (
-        not isinstance(raw_stop_phases, list)
-        or not isinstance(raw_start_phases, list)
-        or not isinstance(recipe_digest, str)
-        or not isinstance(deadline, str)
-    ):
+    stop_phases = authority.stop_phases
+    start_phases = authority.start_phases
+    deadline = authority.deadline
+    if not stop_phases or any(not group for group in stop_phases) or not start_phases:
         return _unproven(run.id, _DAMAGED, "distributed recovery authority is invalid")
-    stop_phases = tuple(tuple(group) for group in raw_stop_phases)
-    start_phases = tuple(tuple(group) for group in raw_start_phases)
     request_id = str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
@@ -1700,31 +1686,29 @@ def _enqueue_recovery_stop(
         tuple((str(uuid.uuid4()), node_id, payload) for node_id, payload in group)
         for group in stop_phases
     )
-    job_payload = {
-        "schema_version": 1,
-        "owner_kind": "run",
-        "owner_id": run.id,
-        "plan_digest": run.plan_digest,
-        "phases": [
+    parent = RecipeStopParent(
+        schema_version=1,
+        owner_kind="run",
+        owner_id=run.id,
+        plan_digest=run.plan_digest,
+        phases=[
             [
-                {
-                    "operation_id": operation_id,
-                    "node_id": node_id,
-                    "payload": json.loads(canonical_message(payload)),
-                }
+                StopPhaseOperation(
+                    operation_id=operation_id, node_id=node_id, payload=payload
+                )
                 for operation_id, node_id, payload in group
             ]
             for group in stop_phase_operations
         ],
-        "recovery": {
-            "schema_version": 1,
-            "failed_rank": failed_rank,
-            "deadline": deadline,
-            "start_phases": _encode_phases(start_phases),
-        },
-    }
+        recovery=DistributedRecoveryMarker(
+            schema_version=1,
+            failed_rank=failed_rank,
+            deadline=deadline,
+            start_phases=_encode_phases(start_phases),
+        ),
+    )
     targets = sorted(node_id for group in stop_phases for node_id, _payload in group)
-    start_ordinal = authority.get("workload_intent_ordinal")
+    start_ordinal = authority.workload_intent_ordinal
     target_nodes = tuple(
         session.scalars(
             select(AgentNode)
@@ -1744,7 +1728,9 @@ def _enqueue_recovery_stop(
         return _unproven(
             run.id, _MISMATCH, "distributed recovery start authority was superseded"
         )
-    job_payload["workload_intent_ordinal"] = start_ordinal
+    job_payload = serialize_json_value(
+        parent.model_copy(update={"workload_intent_ordinal": start_ordinal})
+    )
     job = JobAdapter.new_job(
         state="running",
         id=job_id,
@@ -1767,7 +1753,7 @@ def _enqueue_recovery_stop(
             node_id,
             "recipe.stop",
             run.plan_digest.removeprefix("sha256:"),
-            payload,
+            serialize_json_value(payload),
             operation_id=operation_id,
         )
     return job
@@ -1801,8 +1787,15 @@ def _original_start_authority(
             run.id, _MISSING, "distributed recovery lacks its start authority"
         )
     start = starts[-1]
-    deadline_value = start.payload.get("start_deadline")
-    ordinal = start.payload.get("workload_intent_ordinal")
+    parent = _parent(start)
+    deadline_value = (
+        parent.start_deadline if isinstance(parent, RecipeStartParent) else None
+    )
+    ordinal = (
+        parent.workload_intent_ordinal
+        if isinstance(parent, RecipeStartParent)
+        else None
+    )
     targets = sorted(
         session.scalars(select(RunNode.node_id).where(RunNode.run_id == run.id))
     )
@@ -1810,13 +1803,13 @@ def _original_start_authority(
         type(ordinal) is not int
         or ordinal < 1
         or start.targets != targets
-        or not isinstance(deadline_value, str)
+        or deadline_value is None
     ):
         return _unproven(
             run.id, _DAMAGED, "distributed recovery start authority is invalid"
         )
     try:
-        parsed_deadline = datetime.fromisoformat(deadline_value)
+        parsed_deadline = deadline_value
         if parsed_deadline.utcoffset() is None:
             # A stored deadline without a zone is damaged bookkeeping, not a
             # clock fault.
@@ -1843,12 +1836,10 @@ def _original_start_authority(
     return start, duration
 
 
-def _encode_phases(
-    phases: Sequence[Sequence[tuple[str, Mapping[str, object]]]],
-) -> list[list[dict[str, object]]]:
+def _encode_phases(phases: RecoveryStartPhases) -> list[list[RecoveryStartItem]]:
     return [
         [
-            {"node_id": node_id, "payload": json.loads(canonical_message(payload))}
+            RecoveryStartItem(node_id=node_id, payload=payload)
             for node_id, payload in group
         ]
         for group in phases
@@ -1856,27 +1847,22 @@ def _encode_phases(
 
 
 def _decode_phases(
-    value: object,
-) -> tuple[tuple[tuple[str, Mapping[str, object]], ...], ...] | None:
-    """The stored start phases, or ``None`` when the stored value is damaged."""
-
-    if not isinstance(value, list) or not value:
+    value: list[list[RecoveryStartItem]] | None,
+) -> RecoveryStartPhases | None:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(
+            not isinstance(group, list)
+            or not group
+            or any(not isinstance(item, RecoveryStartItem) for item in group)
+            for group in value
+        )
+    ):
         return None
-    phases: list[tuple[tuple[str, Mapping[str, object]], ...]] = []
-    for raw_group in value:
-        if not isinstance(raw_group, list) or not raw_group:
-            return None
-        group: list[tuple[str, Mapping[str, object]]] = []
-        for item in raw_group:
-            if not isinstance(item, Mapping) or set(item) != {"node_id", "payload"}:
-                return None
-            node_id = item.get("node_id")
-            item_payload = item.get("payload")
-            if not isinstance(node_id, str) or not isinstance(item_payload, Mapping):
-                return None
-            group.append((node_id, dict(item_payload)))
-        phases.append(tuple(group))
-    return tuple(phases)
+    return tuple(
+        tuple((item.node_id, item.payload) for item in group) for group in value
+    )
 
 
 def _aware(value: datetime) -> datetime:

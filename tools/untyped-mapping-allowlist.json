@@ -281,7 +281,7 @@
     },
     {
       "path": "control/src/vonk_control/distributed_recovery.py",
-      "count": 20
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/distribution.py",
@@ -417,7 +417,7 @@
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
-      "count": 52
+      "count": 51
     },
     {
       "path": "control/src/vonk_control/recipe_packages.py",
@@ -449,7 +449,7 @@
     },
     {
       "path": "control/src/vonk_control/resource_planning.py",
-      "count": 13
+      "count": 8
     },
     {
       "path": "control/src/vonk_control/run_admission.py",

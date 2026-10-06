@@ -99,6 +99,7 @@ from .install_admission import (
 from .install_admission import (
     require_admissible as require_install_admissible,
 )
+from .job_documents import DistributedRecoveryMarker
 from .lifecycle import CancelRequested, Effect, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
 from .lifecycle.artifact_job import ArtifactJobAdapter
@@ -205,7 +206,7 @@ from .run_admission import (
 )
 from .source_policy import SourcePolicyReport
 from .storage_demands import StorageDemands, spark_scope
-from .strict_json import read_stored_model
+from .strict_json import read_stored_model, serialize_json_value
 
 # Longest rendered blocker reason kept in an install refusal.  Each reason names
 # the check and then the cause, so the bound has to preserve both ends.
@@ -3231,7 +3232,7 @@ class RecipeOperationService:
         session: Session,
         run_id: str,
         *,
-        recovery_context: Mapping[str, object],
+        recovery_context: DistributedRecoveryMarker,
         workload_intent_ordinal: int,
         now: datetime,
     ) -> Job | Residue:
@@ -3271,7 +3272,7 @@ class RecipeOperationService:
             )
         try:
             decoded = recovery_start_plan(
-                {"recovery": dict(recovery_context)},
+                recovery_context,
                 now=now,
                 require_unexpired=False,
             )
@@ -3340,7 +3341,7 @@ class RecipeOperationService:
             uuid.uuid5(
                 uuid.NAMESPACE_URL,
                 "vonk:singleton-recovery-stop:"
-                f"{run.id}:{accepted_start.run_generation}:{marker['deadline']}",
+                f"{run.id}:{accepted_start.run_generation}:{marker.deadline}",
             )
         )
         existing = self._idempotent_job_in_session(
@@ -3374,7 +3375,7 @@ class RecipeOperationService:
                 request_id=request_id,
                 workload_intent_ordinal=workload_intent_ordinal,
                 now=now,
-                job_context={"recovery": dict(recovery_context)},
+                job_context={"recovery": serialize_json_value(recovery_context)},
                 stop_run_generation=accepted_start.run_generation - 1,
             )
         except RecipeOperationConflict as error:
@@ -5667,14 +5668,23 @@ class RecipeOperationService:
                                 f"vonk:distributed-recovery-start:{job.id}",
                             )
                         ),
-                        node_payloads=unique_payloads,
-                        phases=phases,
+                        node_payloads=tuple(
+                            (node_id, serialize_json_value(payload))
+                            for node_id, payload in unique_payloads
+                        ),
+                        phases=tuple(
+                            tuple(
+                                (node_id, serialize_json_value(payload))
+                                for node_id, payload in phase
+                            )
+                            for phase in phases
+                        ),
                         authority_digest=revision.content_digest,
                         now=now,
                         workload_intent_ordinal=recovery_intent,
                         job_context={
-                            "recovery": marker,
-                            "start_deadline": marker["deadline"],
+                            "recovery": serialize_json_value(marker),
+                            "start_deadline": marker.deadline,
                         },
                     )
                     run.state = RunState.STARTING
