@@ -2482,7 +2482,7 @@ def test_late_result_is_retained_under_expired_fence_without_completing_operatio
         )
         assert stored.state in aos.PARKED
         assert aos.attempt_lapsed(attempt)
-        assert attempt.result == STOP_RESULT
+        assert attempt.result == STOP_RESULT.model_dump(mode="json")
     assert jobs.record_late_result(late) is True
 
 

@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
+from vonk_control.job_documents import AvailabilityModelChild
 from vonk_control.models import Base, Job, User
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityClaim
 from vonk_control.runtime_image_preparation import (
@@ -127,7 +128,7 @@ def test_expired_callback_preserves_the_new_claim(claimed_image, monkeypatch, bo
 
             def observe_after_takeover(*_args, **_kwargs):
                 takeover()
-                return {"id": str(uuid.uuid4()), "state": "running"}
+                return AvailabilityModelChild(id=str(uuid.uuid4()), state="running")
 
             patch.setattr(service, "_current_model_child", observe_after_takeover)
         elif boundary == "receipt":
@@ -151,10 +152,9 @@ def test_expired_callback_preserves_the_new_claim(claimed_image, monkeypatch, bo
                 patch.setattr(
                     service,
                     "_current_model_child",
-                    lambda *_args, **_kwargs: {
-                        "id": str(uuid.uuid4()),
-                        "state": "running",
-                    },
+                    lambda *_args, **_kwargs: AvailabilityModelChild(
+                        id=str(uuid.uuid4()), state="running"
+                    ),
                 )
         service.run_claim(original)
 
