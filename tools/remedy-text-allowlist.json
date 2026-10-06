@@ -34,12 +34,6 @@
     },
     {
       "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "FleetProfileService.preview",
-      "kind": "imperative-remedy",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/fleet_profiles.py",
       "function": "FleetProfileService.retry",
       "kind": "imperative-remedy",
       "count": 1
@@ -150,7 +144,7 @@
       "path": "src/cluster_profiles/cli.py",
       "function": "_plain_language_error",
       "kind": "imperative-remedy",
-      "count": 2
+      "count": 1
     },
     {
       "path": "src/cluster_profiles/cli_artifact_jobs.py",
