@@ -26,8 +26,12 @@ class ParsedFile(NamedTuple):
 _CACHE: dict[Path, tuple[tuple[int, int], ParsedFile]] = {}
 
 
-def parse_file(path: Path) -> ParsedFile:
-    """The source and syntax tree of ``path``, parsed at most once per version."""
+def parse_file(path: Path, *, cache: bool = True) -> ParsedFile:
+    """Reuse a versioned tree; optionally avoid retaining a one-shot test tree.
+
+    Existing cached trees are always reused. ``cache=False`` only declines to
+    retain a newly parsed tree that no other scanner consumes.
+    """
 
     stat = path.stat()
     version = (stat.st_size, stat.st_mtime_ns)
@@ -36,7 +40,8 @@ def parse_file(path: Path) -> ParsedFile:
         return cached[1]
     source = path.read_text(encoding="utf-8")
     parsed = ParsedFile(source, ast.parse(source, filename=str(path)))
-    _CACHE[path] = (version, parsed)
+    if cache:
+        _CACHE[path] = (version, parsed)
     return parsed
 
 
