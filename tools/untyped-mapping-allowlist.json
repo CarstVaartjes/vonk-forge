@@ -554,6 +554,158 @@
     {
       "path": "control/src/vonk_control/worker.py",
       "count": 3
+    },
+    {
+      "path": "scripts/agent-apt-state",
+      "count": 27
+    },
+    {
+      "path": "scripts/build-agent-deb",
+      "count": 2
+    },
+    {
+      "path": "scripts/build-nas-compose-bundle",
+      "count": 11
+    },
+    {
+      "path": "scripts/check-python-types",
+      "count": 5
+    },
+    {
+      "path": "scripts/dev-image-acceptance-receipt",
+      "count": 9
+    },
+    {
+      "path": "scripts/dev_agent_wire_linux.py",
+      "count": 1
+    },
+    {
+      "path": "scripts/development_slice_client.py",
+      "count": 1
+    },
+    {
+      "path": "scripts/export-agent-wire-schema",
+      "count": 1
+    },
+    {
+      "path": "scripts/generate-control-clients",
+      "count": 4
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "count": 22
+    },
+    {
+      "path": "scripts/lifecycle-canary",
+      "count": 1
+    },
+    {
+      "path": "scripts/qualify-recipe",
+      "count": 19
+    },
+    {
+      "path": "scripts/render-dev-compose",
+      "count": 3
+    },
+    {
+      "path": "scripts/repair-capsule-publication",
+      "count": 12
+    },
+    {
+      "path": "scripts/spark_lifecycle_contract.py",
+      "count": 13
+    },
+    {
+      "path": "scripts/tailscale-acceptance-tailnet",
+      "count": 4
+    },
+    {
+      "path": "scripts/validate-recipe-library",
+      "count": 5
+    },
+    {
+      "path": "scripts/validate_fabric.py",
+      "count": 13
+    },
+    {
+      "path": "scripts/verify-agent-binaries",
+      "count": 2
+    },
+    {
+      "path": "scripts/verify-agent-deb",
+      "count": 3
+    },
+    {
+      "path": "scripts/verify-agent-systemd",
+      "count": 2
+    },
+    {
+      "path": "scripts/verify-supply-chain",
+      "count": 2
+    },
+    {
+      "path": "src/cluster_profiles/build_identity.py",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/cli.py",
+      "count": 9
+    },
+    {
+      "path": "src/cluster_profiles/cli_artifact_jobs.py",
+      "count": 45
+    },
+    {
+      "path": "src/cluster_profiles/cli_files.py",
+      "count": 2
+    },
+    {
+      "path": "src/cluster_profiles/cli_outcome.py",
+      "count": 10
+    },
+    {
+      "path": "src/cluster_profiles/cli_render.py",
+      "count": 51
+    },
+    {
+      "path": "src/cluster_profiles/cli_states.py",
+      "count": 3
+    },
+    {
+      "path": "src/cluster_profiles/cli_update.py",
+      "count": 11
+    },
+    {
+      "path": "src/cluster_profiles/control_client.py",
+      "count": 12
+    },
+    {
+      "path": "src/cluster_profiles/controller_cli.py",
+      "count": 105
+    },
+    {
+      "path": "src/cluster_profiles/error_reporting.py",
+      "count": 2
+    },
+    {
+      "path": "src/cluster_profiles/fleet_qualification.py",
+      "count": 8
+    },
+    {
+      "path": "src/cluster_profiles/fleet_qualification_campaign_cli.py",
+      "count": 24
+    },
+    {
+      "path": "src/cluster_profiles/glb_validation.py",
+      "count": 19
+    },
+    {
+      "path": "src/cluster_profiles/qualification_fixtures.py",
+      "count": 34
+    },
+    {
+      "path": "src/cluster_profiles/serving_execution.py",
+      "count": 15
     }
   ]
 }

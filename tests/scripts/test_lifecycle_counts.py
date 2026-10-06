@@ -22,7 +22,7 @@ def _module():
 WRITERS = {"writers": [{"count": 2}, {"count": 3}]}
 BLOCKERS = {
     "max_debt": 4,
-    "debt_ceiling": {"total": 10},
+    "debt_ceiling": {"total": 10, "unaudited": 7},
     "operator_waits": [
         # One site, listed once per operation kind: counted once.
         {"path": "a.py", "function": "f", "kind": "k", "sites": 2},
@@ -34,7 +34,7 @@ BLOCKERS = {
         {"sites": [["b.py", "E", "h", "e", 1]]},
     ],
 }
-REAL = {"writers": 5, "operator_waits": 3, "raises": 8, "debt": 14}
+REAL = {"writers": 5, "operator_waits": 3, "raises": 8, "debt": 21}
 
 
 def test_counts_come_from_the_allowlists() -> None:
@@ -67,7 +67,7 @@ def test_a_covered_change_without_a_report_fails_with_the_block_to_paste() -> No
     module = _module()
     messages = module.check("no numbers", REAL, REAL, [module.BLOCKERS])
     assert len(messages) == 2
-    assert "before: writers=5 operator_waits=3 raises=8 debt=14" in messages[0]
+    assert "before: writers=5 operator_waits=3 raises=8 debt=21" in messages[0]
 
 
 def test_a_report_must_match_the_real_counts() -> None:
@@ -105,3 +105,40 @@ def test_a_commit_without_the_writers_allowlist_counts_zero_writers() -> None:
         return blockers
 
     assert module.counts_from(read)["writers"] == 0
+
+
+def test_operation_kind_groups_do_not_overwrite_each_other() -> None:
+    blockers = {
+        **BLOCKERS,
+        "operator_waits": [
+            {
+                "path": "a.rs",
+                "function": "execute",
+                "kind": "rust-result",
+                "sites": 7,
+                "operation_kinds": ["build"],
+            },
+            {
+                "path": "a.rs",
+                "function": "execute",
+                "kind": "rust-result",
+                "sites": 7,
+                "operation_kinds": ["cleanup"],
+            },
+            {
+                "path": "a.rs",
+                "function": "execute",
+                "kind": "rust-result",
+                "sites": 7,
+                "operation_kinds": ["run"],
+            },
+        ],
+    }
+    assert _module().count_documents(WRITERS, blockers)["operator_waits"] == 21
+
+
+def test_incomplete_report_is_a_diagnostic_instead_of_a_key_error() -> None:
+    messages = _module().check(
+        "before: writers=5\nafter: writers=5", REAL, REAL, ["scripts/lifecycle-counts"]
+    )
+    assert len(messages) == 2

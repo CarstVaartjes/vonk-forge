@@ -1,4 +1,4 @@
-"""Ratchet on untyped mapping annotations in ``control/src`` and ``agent_protocol/src``.
+"""Ratchet on untyped mapping annotations in Controller, protocol, CLI and scripts.
 
 The shared Pydantic contracts own every structure we control, to every depth.
 ``Mapping[str, object]``, ``Mapping[str, Any]``, ``dict[str, object]`` and
@@ -18,7 +18,7 @@ Two kinds of annotation are allowed, both in ``tools/untyped-mapping-allowlist.j
   unlisted file fails, and a decrease fails until the list is lowered, so the
   ratchet cannot loosen again.
 
-``python control/tests/untyped_mapping_boundaries.py --update`` rewrites the
+``python -m control.tests.untyped_mapping_boundaries --update`` rewrites the
 ``debt`` counts from the source (and never adds a ``permanent`` entry).
 
 ``object``, ``Any`` and pydantic's ``JsonValue`` anywhere in the value type count,
@@ -41,6 +41,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOTS = (
     REPO_ROOT / "control" / "src",
     REPO_ROOT / "agent_protocol" / "src",
+    REPO_ROOT / "src" / "cluster_profiles",
+    REPO_ROOT / "scripts",
 )
 ALLOWLIST_PATH = REPO_ROOT / "tools" / "untyped-mapping-allowlist.json"
 
@@ -145,7 +147,19 @@ def scan_source(source: str, *, path: str) -> list[Site]:
 def scan_sites(roots: Sequence[Path] = SOURCE_ROOTS) -> list[Site]:
     sites: list[Site] = []
     for root in roots:
-        for module in sorted(root.rglob("*.py")):
+        for module in sorted(root.rglob("*")):
+            if "generated_control" in module.parts:
+                # Generated extension dictionaries are owned by the API generator.
+                continue
+            if not module.is_file() or not (
+                module.suffix == ".py"
+                or (
+                    not module.suffix
+                    and module.read_bytes().startswith(b"#!")
+                    and b"python" in module.read_bytes().splitlines()[0]
+                )
+            ):
+                continue
             relative = module.relative_to(REPO_ROOT).as_posix()
             sites.extend(scan_source(module.read_text(encoding="utf-8"), path=relative))
     return sites

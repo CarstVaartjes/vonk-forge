@@ -36,3 +36,14 @@ def test_a_whole_tree_scan_runs_once_per_tree_version(tmp_path: Path) -> None:
     assert runs == [1]
     (tmp_path / "b.py").write_text("b = 2\n", encoding="utf-8")
     assert memoized_scan("t", [tmp_path], compute) == [2]
+
+
+def test_one_shot_parse_does_not_retain_an_unshared_test_tree(tmp_path):
+    from .parsed_sources import parse_file
+
+    path = tmp_path / "test_once.py"
+    path.write_text("assert result.state == 'succeeded'\n")
+    transient = parse_file(path, cache=False)
+    retained = parse_file(path)
+    assert transient.tree is not retained.tree
+    assert parse_file(path, cache=False).tree is retained.tree

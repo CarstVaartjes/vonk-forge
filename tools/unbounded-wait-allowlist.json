@@ -1,0 +1,1435 @@
+{
+  "schema": 1,
+  "inventory_note": "Initial T1 syntax inventory; all findings are unaudited debt, not approved behavior. Lower counts as owning tracks repair them. New exceptions require a fixed reason and justification.",
+  "debt": [
+    {
+      "path": "control/src/vonk_control/admission_locking.py",
+      "function": "busy_detail",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "EnrollmentRateLimiter.admit",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "_json_string_end",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "_scan_enrollment_grants",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "_sha256_path",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "_skip_json_whitespace",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/artifact_blob_store.py",
+      "function": "ArtifactBlobStore.iter_file",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "function": "build_recipe_image_availability.builder",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "function": "run_availability_scheduler",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "function": "run_availability_scheduler",
+      "kind": "wait-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/cached_file_verification.py",
+      "function": "CachedFileVerifier.verify",
+      "kind": "loop-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/catalog_sync.py",
+      "function": "run_automatic_sync",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/catalog_sync.py",
+      "function": "run_automatic_sync",
+      "kind": "wait-without-timeout",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/contract_graph.py",
+      "function": "_declared_parameters",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/distribution.py",
+      "function": "DistributionService.authorize",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/distribution.py",
+      "function": "DistributionService.locate_object",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/failure_classification.py",
+      "function": "error_code",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._application_is_current_selection",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._repeated_failure",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_stream.py",
+      "function": "FleetStream.events",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "function": "keep_default_key",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "function": "keep_default_key",
+      "kind": "wait-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._append_part",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._check_upstream_revisions",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._download_sequential",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._fill_background_slots",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._sample_transfer",
+      "kind": "wait-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._sample_transfer.sample",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.tick",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache_ranges.py",
+      "function": "download_ranges",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache_streams.py",
+      "function": "StreamGovernor.stream",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/operation_api.py",
+      "function": "admin_openapi_schema",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/pki.py",
+      "function": "_read_regular_secret_file",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/prebuilt_images.py",
+      "function": "PrebuiltImageImporter._renew",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._renew_claim_loop",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService.advance_removals",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "_is_database_busy",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "_recipe_model_identities",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_packages.py",
+      "function": "RecipePackageClient._store_package",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_routes.py",
+      "function": "RecipeRouteService.prepare_withdrawal_in_session",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/runtime_init.py",
+      "function": "_read_runtime_file",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/runtime_init.py",
+      "function": "stage_runtime_file",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/source_policy.py",
+      "function": "_has_heredoc",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/worker.py",
+      "function": "<module>",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/worker.py",
+      "function": "monitor_worker_loop",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/worker_memory.py",
+      "function": "start_worker_memory_sampler.run",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "function": "exact_cancel_stop_waits_for_active_start_then_blocks_late_start",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "function": "exact_cancel_stop_waits_for_active_start_then_blocks_late_start",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "function": "remove_directory_contents",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "function": "require_safe_model_path",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "function": "run_with_timeout",
+      "kind": "rust-wait-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "function": "runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "function": "take_package_custody",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/package_command.rs",
+      "function": "drain",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/package_command.rs",
+      "function": "run_inner",
+      "kind": "rust-wait-without-deadline",
+      "count": 3
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/package_rollback.rs",
+      "function": "command_with_nonce",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/package_rollback.rs",
+      "function": "digest",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/package_rollback.rs",
+      "function": "digest_process",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/agent_upgrade.rs",
+      "function": "download",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/agent_upgrade.rs",
+      "function": "verified_file",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/base_images.rs",
+      "function": "scan_archive",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/base_images.rs",
+      "function": "sha256_file",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "a_refused_result_records_the_controller_validation_digest",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "bounded_body_limit",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "cloned_operation_client_sends_through_replaced_transport",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "content_addressed_distribution_handoff_reuses_objects_across_plan_digests",
+      "kind": "rust-wait-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "controller_rejection_preserves_safe_status_code_and_request_id",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "delayed_upload_client",
+      "kind": "rust-loop-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "direct_distribution_object_resumes_private_partial_atomically",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "direct_distribution_refuses_an_object_whose_custody_is_not_exactly_ours",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "direct_distribution_retries_interrupted_body_from_appended_offset",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "direct_distribution_retries_service_unavailability_but_not_bad_identity",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "distribution_acceptance_rejects_an_unauthorized_destination",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "distribution_acceptance_resumes_partial_object_and_rejects_corruption",
+      "kind": "rust-wait-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "distribution_acceptance_uses_authenticated_ranges_and_replays_without_refetching",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "distribution_consumer_fetches_manifest_and_all_objects_with_ranges",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "distribution_consumer_fetches_manifest_and_all_objects_with_ranges",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "distribution_fixture_server",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "distribution_rejects_partial_replacement_after_stream_hash",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "download_content_addressed_with_progress",
+      "kind": "rust-loop-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "download_recipe_job_input",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "download_trusted_distribution_object_with_progress",
+      "kind": "rust-loop-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "exact_worker_observation_reports_process_without_endpoint_result",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "heartbeat_posts_exact_progress_and_accepts_matching_renewal",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "heartbeat_rejects_legacy_progress_response_shape",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "heartbeat_rejects_mismatched_or_regressing_renewal",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "host_runtime_grant_ttl_fits_inside_renewed_operation_lease",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "job_input_client",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "lease_only_heartbeat_omits_measured_progress",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "ordinary_heartbeat_preserves_active_upload_counters",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "recipe_image_upload_resumes_interruption_and_overrides_ordinary_timeout",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "recipe_job_input_stream_is_exact_and_cleans_interrupted_or_invalid_temps",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "request",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "request_capture_client",
+      "kind": "rust-loop-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "rotation_drains_requests_without_starving_heartbeats",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "rotation_drains_requests_without_starving_heartbeats",
+      "kind": "rust-wait-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "telemetry_accepts_only_204_and_preserves_status_classification",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "telemetry_allows_the_two_second_controller_budget",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/client.rs",
+      "function": "telemetry_posts_current_contract_without_node_identity",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "function": "a_conflicting_result_response_is_not_an_acknowledgement",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "function": "a_conflicting_result_response_is_not_an_acknowledgement",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "function": "a_validation_rejected_result_response_is_typed_for_local_custody",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "function": "a_validation_rejected_result_response_is_typed_for_local_custody",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "function": "collect_job_outputs",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "function": "execute",
+      "kind": "rust-loop-without-deadline",
+      "count": 4
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "function": "finish",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "function": "settle_acl_transition",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "function": "wait_for_cancellation",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "function": "with_disposition",
+      "kind": "rust-loop-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/failure_evidence.rs",
+      "function": "bounded_command",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/failure_evidence.rs",
+      "function": "clamp_tail",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/failure_evidence.rs",
+      "function": "log_tail",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/failure_evidence.rs",
+      "function": "names_credential_value",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/health.rs",
+      "function": "a_lapsed_lease_does_not_end_a_wait_with_an_open_start_budget",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/health.rs",
+      "function": "a_lapsed_lease_does_not_end_a_wait_with_an_open_start_budget",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/health.rs",
+      "function": "readiness_honors_a_controller_renewed_deadline",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/health.rs",
+      "function": "readiness_honors_a_controller_renewed_deadline",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/host_runtime.rs",
+      "function": "helper_message_framing_refusal_names_the_message_contract",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/identity.rs",
+      "function": "prune_retired_generations",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/image_store.rs",
+      "function": "forward",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/image_store.rs",
+      "function": "read_request_head",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/image_store.rs",
+      "function": "serve_while",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/main.rs",
+      "function": "collect_inventory_until_ready",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/main.rs",
+      "function": "rotate_until_settled",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/main.rs",
+      "function": "run_agent",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/main.rs",
+      "function": "run_control_lane",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/main.rs",
+      "function": "run_rotation_lane",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/main.rs",
+      "function": "spawned_rotation_progresses_while_control_thread_blocks",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/main.rs",
+      "function": "spawned_rotation_progresses_while_control_thread_blocks",
+      "kind": "rust-wait-without-deadline",
+      "count": 4
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/main.rs",
+      "function": "supervise_lanes_with_rotation",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/oci.rs",
+      "function": "materialize_compiled_models_with",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/oci.rs",
+      "function": "visit_files",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/process.rs",
+      "function": "capture_diagnostics",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/process.rs",
+      "function": "curl_enforces_the_download_body_limit",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/process.rs",
+      "function": "directory_bytes",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/process.rs",
+      "function": "join_diagnostics",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/process.rs",
+      "function": "run_process_to_file",
+      "kind": "rust-wait-without-deadline",
+      "count": 4
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/process.rs",
+      "function": "system_runner_streams_a_large_artifact_to_a_bounded_preopened_file",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/process.rs",
+      "function": "terminate_process",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/recipe_builder.rs",
+      "function": "sha256_file",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/stream_governor.rs",
+      "function": "acquire",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/compiled_execution_plan.rs",
+      "function": "mount_projection_rejects_over_duplicate_or_unsafe_targets",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/installation_reconciliation.rs",
+      "function": "prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/installation_reconciliation.rs",
+      "function": "prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/installation_reconciliation.rs",
+      "function": "separate_process_lock_contention_is_retryable_after_the_owner_exits",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/protocol_literals.rs",
+      "function": "brace_delta",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/protocol_literals.rs",
+      "function": "production_code",
+      "kind": "rust-loop-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/protocol_literals.rs",
+      "function": "strip_comment",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/recipe_builder.rs",
+      "function": "drop",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/recipe_builder.rs",
+      "function": "start",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/typed_wire.rs",
+      "function": "char_literal_end",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/typed_wire.rs",
+      "function": "identifiers",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/typed_wire.rs",
+      "function": "raw_string",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/typed_wire.rs",
+      "function": "strip_comments_and_strings",
+      "kind": "rust-loop-without-deadline",
+      "count": 3
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/typed_wire.rs",
+      "function": "strip_test_items",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-agent/tests/wait_actions.rs",
+      "function": "wait_reasons_named",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-build-egress/src/main.rs",
+      "function": "copy_bounded",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-build-egress/src/main.rs",
+      "function": "read_header",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-build-egress/src/main.rs",
+      "function": "run",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-build-egress/src/main.rs",
+      "function": "tunnel",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-monitor/src/main.rs",
+      "function": "next_tick_after",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-monitor/src/main.rs",
+      "function": "run",
+      "kind": "rust-loop-without-deadline",
+      "count": 3
+    },
+    {
+      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "function": "confirm",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "function": "generate_es256_jwks",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "function": "install_mode",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "function": "optional_secret",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "function": "required_with_default",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "function": "secret",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-repair-helper-probe/src/main.rs",
+      "function": "hash_reader",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "function": "foreground_sudo_authentication_uses_controlling_terminal",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "function": "run_process",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "function": "run_process",
+      "kind": "rust-wait-without-deadline",
+      "count": 3
+    },
+    {
+      "path": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "function": "terminate_process_group",
+      "kind": "rust-wait-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-wire-codegen/src/main.rs",
+      "function": "equality_types",
+      "kind": "rust-loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/agent-apt-state",
+      "function": "RcloneStore._run",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/agent-apt-state",
+      "function": "_compare_versions",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/agent-apt-state",
+      "function": "_run_aptly",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/agent-apt-state",
+      "function": "_validate_receipt",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/build-agent-deb",
+      "function": "atomic_output",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/build-agent-deb",
+      "function": "read_repair_authority",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/check-python-types",
+      "function": "_diagnostics",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/dev_agent_wire_linux.py",
+      "function": "capture",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/dev_agent_wire_linux.py",
+      "function": "run_commands",
+      "kind": "loop-without-deadline",
+      "count": 2
+    },
+    {
+      "path": "scripts/dev_agent_wire_linux.py",
+      "function": "stream",
+      "kind": "wait-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/generate-agent-wire",
+      "function": "main",
+      "kind": "call-without-timeout",
+      "count": 3
+    },
+    {
+      "path": "scripts/generate-control-clients",
+      "function": "_normalize_generated_text",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/generate-control-clients",
+      "function": "_run",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_acceptance_public_key",
+      "kind": "call-without-timeout",
+      "count": 2
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_rclone_bytes",
+      "kind": "wait-without-timeout",
+      "count": 2
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_rclone_digest",
+      "kind": "wait-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_rclone_object_exists",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_rclone_upload",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_render_bootstrap",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_reuse_existing_acceptance",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_safe_bytes",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_sign",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_signing_public_key",
+      "kind": "call-without-timeout",
+      "count": 2
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_verify_signature",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-release-publication",
+      "function": "_write",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/lifecycle-canary",
+      "function": "Canary.scenario_restart_tolerant_wait",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/lifecycle-counts",
+      "function": "_git",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/materialize-agent-tools",
+      "function": "atomic_install",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/materialize-agent-tools",
+      "function": "download",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/qualify-recipe",
+      "function": "_resolve_models",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/render-accepted-compose-overlay",
+      "function": "main",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/render-install-bootstrap",
+      "function": "_read_regular",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/render-install-bootstrap",
+      "function": "_write_new",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/repair-capsule-publication",
+      "function": "_safe_bytes",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/resolve-publication-producer",
+      "function": "available_artifacts",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/resolve-publication-producer",
+      "function": "resolve",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/retry_dependency_fetch.py",
+      "function": "main",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/spark_lifecycle_contract.py",
+      "function": "recompute_publication_graphs",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/tests/run_agent_wire_contracts.py",
+      "function": "main",
+      "kind": "call-without-timeout",
+      "count": 2
+    },
+    {
+      "path": "scripts/update-global-contracts",
+      "function": "git",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/validate-recipe-library",
+      "function": "_validate_v2_package",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/validate_fabric.py",
+      "function": "Runner.local",
+      "kind": "call-without-timeout",
+      "count": 1
+    },
+    {
+      "path": "scripts/verify-agent-binaries",
+      "function": "read_regular",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "scripts/verify-agent-deb",
+      "function": "_control_members",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/cli.py",
+      "function": "_bare_group",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/cli_artifact_jobs.py",
+      "function": "_digest_regular_file",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/cli_artifact_jobs.py",
+      "function": "_existing_verified_file",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/control_client.py",
+      "function": "ControlClient.download_file",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/control_client.py",
+      "function": "ControlClient.upload_file",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/control_client.py",
+      "function": "_read_token_file",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/control_transport.py",
+      "function": "HTTPSResponse._open.chunks",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/control_transport.py",
+      "function": "HTTPSResponse._read",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/controller_cli.py",
+      "function": "_profile",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/controller_cli.py",
+      "function": "_prompt_option",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/controller_cli.py",
+      "function": "_recipe_rows",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/error_reporting.py",
+      "function": "classify_transport_error",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/glb_validation.py",
+      "function": "_parse",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/glb_validation.py",
+      "function": "_reachable_meshes",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/glb_validation.py",
+      "function": "_reject_nonfinite_json",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/glb_validation.py",
+      "function": "_valid_jpeg",
+      "kind": "loop-without-deadline",
+      "count": 4
+    },
+    {
+      "path": "src/cluster_profiles/glb_validation.py",
+      "function": "_valid_png",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/glb_validation.py",
+      "function": "_valid_webp",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/glb_validation.py",
+      "function": "validate_mesh_glb_bytes",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/qualification_fixtures.py",
+      "function": "_png_metadata",
+      "kind": "loop-without-deadline",
+      "count": 1
+    }
+  ],
+  "exceptions": []
+}
