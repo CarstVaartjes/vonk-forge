@@ -86,6 +86,8 @@ class RecipeOperationResult(LifecycleModel):
     node_evidence: dict[NodeId, LifecycleNodeResult]
     launch_evidence: dict[NodeId, LifecycleNodeResult] | None = None
     recovery_error: str | None = Field(default=None, min_length=1, max_length=512)
+    # Set once the route a recovery Start republished is live, so it is not redone.
+    recovery_route_published: Literal[True] | None = None
 
     @model_validator(mode="after")
     def nodes_are_disjoint(self) -> RecipeOperationResult:

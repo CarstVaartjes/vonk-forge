@@ -33,6 +33,7 @@ class RecipeOperationResult:
             successful_nodes (list[str]):
             launch_evidence (None | RecipeOperationResultLaunchEvidenceType0 | Unset):
             recovery_error (None | str | Unset):
+            recovery_route_published (bool | None | Unset):
      """
 
     failed_nodes: list[str]
@@ -40,6 +41,7 @@ class RecipeOperationResult:
     successful_nodes: list[str]
     launch_evidence: None | RecipeOperationResultLaunchEvidenceType0 | Unset = UNSET
     recovery_error: None | str | Unset = UNSET
+    recovery_route_published: bool | None | Unset = UNSET
 
 
 
@@ -72,6 +74,12 @@ class RecipeOperationResult:
         else:
             recovery_error = self.recovery_error
 
+        recovery_route_published: bool | None | Unset
+        if isinstance(self.recovery_route_published, Unset):
+            recovery_route_published = UNSET
+        else:
+            recovery_route_published = self.recovery_route_published
+
 
         field_dict: dict[str, Any] = {}
 
@@ -84,6 +92,8 @@ class RecipeOperationResult:
             field_dict["launch_evidence"] = launch_evidence
         if recovery_error is not UNSET:
             field_dict["recovery_error"] = recovery_error
+        if recovery_route_published is not UNSET:
+            field_dict["recovery_route_published"] = recovery_route_published
 
         return field_dict
 
@@ -135,12 +145,23 @@ class RecipeOperationResult:
         recovery_error = _parse_recovery_error(d.pop("recovery_error", UNSET))
 
 
+        def _parse_recovery_route_published(data: object) -> bool | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(bool | None | Unset, data)
+
+        recovery_route_published = _parse_recovery_route_published(d.pop("recovery_route_published", UNSET))
+
+
         recipe_operation_result = cls(
             failed_nodes=failed_nodes,
             node_evidence=node_evidence,
             successful_nodes=successful_nodes,
             launch_evidence=launch_evidence,
             recovery_error=recovery_error,
+            recovery_route_published=recovery_route_published,
         )
 
         return recipe_operation_result

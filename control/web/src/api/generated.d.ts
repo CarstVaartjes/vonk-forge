@@ -7452,6 +7452,16 @@ export interface components {
             /** Plan Digest */
             plan_digest: string;
             /**
+             * Prebuilt Claim Owner
+             * @default null
+             */
+            prebuilt_claim_owner: string | null;
+            /**
+             * Prebuilt Claim Until
+             * @default null
+             */
+            prebuilt_claim_until: string | null;
+            /**
              * Prebuilt Image
              * @default null
              */
@@ -8457,6 +8467,11 @@ export interface components {
              * @default null
              */
             recovery_error: string | null;
+            /**
+             * Recovery Route Published
+             * @default null
+             */
+            recovery_route_published: true | null;
             /** Successful Nodes */
             successful_nodes: string[];
         };

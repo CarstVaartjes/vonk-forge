@@ -19667,6 +19667,34 @@
             "title": "Plan Digest",
             "type": "string"
           },
+          "prebuilt_claim_owner": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prebuilt Claim Owner"
+          },
+          "prebuilt_claim_until": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prebuilt Claim Until"
+          },
           "prebuilt_image": {
             "anyOf": [
               {
@@ -22964,6 +22992,19 @@
             ],
             "default": null,
             "title": "Recovery Error"
+          },
+          "recovery_route_published": {
+            "anyOf": [
+              {
+                "const": true,
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recovery Route Published"
           },
           "successful_nodes": {
             "items": {
