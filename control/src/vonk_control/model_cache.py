@@ -28,7 +28,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from io import BufferedReader
 from pathlib import Path
-from typing import cast
+from typing import ClassVar, cast
 from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx2
@@ -37,9 +37,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
     LifecycleState,
     OperationMemberProgress,
+    SecurityRefusalError,
     SecurityRefusalReason,
+    UnknownOutcomeError,
+    WaitReason,
     canonical_message,
     input_state,
 )
@@ -89,6 +94,13 @@ from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
     read_catalog_document,
+)
+from .categorized_faults import (
+    OperationInterrupted,
+    RequestFault,
+    RequestTypeFault,
+    StoredStateDamaged,
+    StoredStateTypeDamaged,
 )
 from .failure_classification import is_security_failure
 from .lifecycle import (
@@ -228,7 +240,157 @@ class ModelCacheStorageError(ModelCacheError):
     pass
 
 
-class _ArtifactWriterBusy(ModelCacheError):
+def _refusal_reason(code: str) -> SecurityRefusalReason | None:
+    """The contract reason a raise names by its code, when the code is one."""
+
+    try:
+        return SecurityRefusalReason(code)
+    except ValueError:
+        return None
+
+
+class _CacheRefusal(SecurityRefusalError, ModelCacheError):
+    """A refusal at a security boundary (credentials, source trust, artifact
+    identity, a destructive-effect guard): fails closed."""
+
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        reason: SecurityRefusalReason | None = None,
+        retry_after_seconds: int | None = None,
+        recovery: str | None = None,
+    ) -> None:
+        ModelCacheError.__init__(
+            self,
+            code,
+            detail,
+            retry_after_seconds=retry_after_seconds,
+            recovery=recovery,
+        )
+        self.typed_reason = reason if reason is not None else _refusal_reason(code)
+
+
+class _CacheInvalid(InvalidRequestError, ModelCacheError):
+    """A malformed, stale or out-of-contract request: rejected before effects."""
+
+    default_reason: ClassVar[InvalidRequestReason] = InvalidRequestReason.MALFORMED
+
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        reason: InvalidRequestReason | None = None,
+        retry_after_seconds: int | None = None,
+        recovery: str | None = None,
+    ) -> None:
+        ModelCacheError.__init__(
+            self,
+            code,
+            detail,
+            retry_after_seconds=retry_after_seconds,
+            recovery=recovery,
+        )
+        self.typed_reason = reason if reason is not None else self.default_reason
+        self.typed_field = None
+
+
+class _CacheUnknown(UnknownOutcomeError, ModelCacheError):
+    """A busy owner, an unavailable source or unconfirmed bookkeeping: the worker
+    observes and retries; it is never a refusal."""
+
+    default_reason: ClassVar[WaitReason | None] = None
+
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        reason: WaitReason | None = None,
+        retry_after_seconds: int | None = None,
+        recovery: str | None = None,
+    ) -> None:
+        ModelCacheError.__init__(
+            self,
+            code,
+            detail,
+            retry_after_seconds=retry_after_seconds,
+            recovery=recovery,
+        )
+        self.typed_reason = reason if reason is not None else self.default_reason
+
+
+class ModelCacheConflictRefused(_CacheRefusal, ModelCacheConflict):
+    pass
+
+
+class ModelCacheConflictInvalid(_CacheInvalid, ModelCacheConflict):
+    default_reason = InvalidRequestReason.CONFLICT
+
+
+class ModelCacheConflictUnknown(_CacheUnknown, ModelCacheConflict):
+    pass
+
+
+class ModelCacheNotFoundRefused(_CacheRefusal, ModelCacheNotFound):
+    pass
+
+
+class ModelCacheNotFoundInvalid(_CacheInvalid, ModelCacheNotFound):
+    default_reason = InvalidRequestReason.NOT_FOUND
+
+
+class ModelCacheResolutionRefused(_CacheRefusal, ModelCacheResolutionError):
+    pass
+
+
+class ModelCacheResolutionInvalid(_CacheInvalid, ModelCacheResolutionError):
+    pass
+
+
+class ModelCacheStorageRefused(_CacheRefusal, ModelCacheStorageError):
+    pass
+
+
+class ModelCacheStorageInvalid(_CacheInvalid, ModelCacheStorageError):
+    pass
+
+
+class ModelCacheStorageUnknown(_CacheUnknown, ModelCacheStorageError):
+    default_reason = WaitReason.OBSERVATION_UNAVAILABLE
+
+
+class ModelCacheRemovalOwnerInvalid(InvalidRequestError, ArtifactLifecycleError):
+    """A removal owner that does not resolve or is not valid for the removal."""
+
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        retryable: bool = False,
+        reason: InvalidRequestReason | None = InvalidRequestReason.NOT_FOUND,
+    ) -> None:
+        ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)
+        self.typed_reason = reason
+        self.typed_field = None
+
+
+class ModelCacheDeletionFenceLost(SecurityRefusalError, ArtifactLifecycleError):
+    """The destructive-effect fence of an artifact was lost: the removal stops."""
+
+    def __init__(self, code: str, detail: str, *, retryable: bool = False) -> None:
+        ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)
+        self.typed_reason = None
+
+
+class ModelCacheCredentialPathUnsafe(SecurityRefusalError, RuntimeSecretError):
+    """A credential path that is not a private regular file: never read."""
+
+
+class _ArtifactWriterBusy(_CacheUnknown):
     """A dependency wait, not a failed transfer or consumed retry."""
 
     def __init__(self, digest: str) -> None:
@@ -447,7 +609,7 @@ class ArtifactSpec:
         try:
             wire = CacheManifestArtifact.model_validate_json(canonical_message(value))
         except ValidationError as error:
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.manifest_invalid", "cache manifest artifact is invalid"
             ) from error
         return cls._from_wire(wire)
@@ -586,7 +748,7 @@ class ArtifactSetManifest:
                 if code == "model_cache.schema_unsupported"
                 else "cache manifest shape is invalid"
             )
-            raise ModelCacheResolutionError(code, detail) from error
+            raise ModelCacheResolutionInvalid(code, detail) from error
         result = cls(
             model_content_sha256=_optional_digest(wire.model_content_sha256),
             recipe_revision_sha256=_optional_digest(wire.recipe_revision_sha256),
@@ -607,7 +769,7 @@ def _reject_non_json_containers(value: object) -> None:
     """Keep Python-only tuple values from being normalized into JSON arrays."""
 
     if isinstance(value, tuple):
-        raise TypeError("manifest JSON must use arrays, not tuples")
+        raise StoredStateTypeDamaged("manifest JSON must use arrays, not tuples")
     if isinstance(value, Mapping):
         for item in value.values():
             _reject_non_json_containers(item)
@@ -655,7 +817,7 @@ def _parse_operation_envelope(
         ) and operation.plan_digest != _model_removal_intent_digest(
             parsed, actor=operation.actor, request_key=operation.request_key
         ):
-            raise ValueError(
+            raise StoredStateDamaged(
                 "persisted model removal intent no longer matches its accepted plan"
             )
         if isinstance(parsed, (ModelCacheDownloadPayload, ModelCacheRepairPayload)):
@@ -664,7 +826,9 @@ def _parse_operation_envelope(
             require_mapping(serialize_json_value(parsed), "cache operation payload")
         )
     except ValidationError as error:
-        raise ValueError("persisted cache operation payload is invalid") from error
+        raise StoredStateDamaged(
+            "persisted cache operation payload is invalid"
+        ) from error
 
 
 def _manifest_of_document(document: object) -> ArtifactSetManifest:
@@ -678,7 +842,7 @@ def _manifest_of_document(document: object) -> ArtifactSetManifest:
     try:
         return ArtifactSetManifest.from_document(document)
     except ModelCacheResolutionError as error:
-        raise ValueError(error.detail) from error
+        raise StoredStateDamaged(error.detail) from error
 
 
 def _default_retry_state() -> dict[str, object]:
@@ -791,9 +955,9 @@ def _read_removal_checkpoint(payload: Mapping[str, object]) -> ModelCacheRemoval
     try:
         parsed = parse_model_cache_payload("remove", payload)
     except ValidationError as error:
-        raise ValueError("model removal payload is invalid") from error
+        raise StoredStateDamaged("model removal payload is invalid") from error
     if not isinstance(parsed, ModelCacheRemovalPayload):
-        raise TypeError("model removal payload is invalid")
+        raise StoredStateTypeDamaged("model removal payload is invalid")
     return parsed
 
 
@@ -809,7 +973,7 @@ def _operation_cancellation(
     try:
         return read_stored_model(ModelCacheCancellation, raw).model_dump(mode="json")
     except (TypeError, ValueError, ValidationError) as error:
-        raise ModelCacheStorageError(
+        raise ModelCacheStorageInvalid(
             "model_cache.payload_invalid",
             "persisted model cancellation intent is invalid",
         ) from error
@@ -842,7 +1006,9 @@ def _read_operation_progress(
             from_json=True,
         )
     except ValidationError as error:
-        raise ValueError("persisted cache operation progress is invalid") from error
+        raise StoredStateDamaged(
+            "persisted cache operation progress is invalid"
+        ) from error
 
 
 def _operation_progress(
@@ -880,7 +1046,7 @@ def _write_operation_payload(
             require_mapping(serialize_json_value(parsed), "cache operation payload")
         )
     except (TypeError, ValueError, ValidationError) as error:
-        raise ModelCacheStorageError(
+        raise ModelCacheStorageInvalid(
             "model_cache.payload_invalid",
             "cache operation payload is invalid",
         ) from error
@@ -1073,17 +1239,17 @@ def _optional_digest(value: object) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or len(value) != _DIGEST_LENGTH:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.digest_invalid", "cache identity digest is invalid"
         )
     try:
         int(value, 16)
     except ValueError as error:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.digest_invalid", "cache identity digest is invalid"
         ) from error
     if value != value.lower():
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.digest_invalid", "cache identity digest is invalid"
         )
     return value
@@ -1127,18 +1293,18 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         or len(set(value.roles)) != len(value.roles)
         or any(not role or len(role) > 64 for role in value.roles)
     ):
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.artifact_invalid", "cache artifact identity is invalid"
         )
     if value.expected_bytes == 0 and any(
         role.lower() in _WEIGHT_ROLES for role in value.roles
     ):
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.artifact_invalid",
             "only verified empty support artifacts may have zero bytes",
         )
     if value.kind != "file" and value.revision is None:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.revision_missing",
             "remote cache artifacts require an immutable revision",
         )
@@ -1159,7 +1325,7 @@ def _validate_parts(value: ArtifactSpec) -> None:
         or value.path in {part.path for part in parts}
         or sum(part.expected_bytes for part in parts) != value.expected_bytes
     ):
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.artifact_invalid", "cache artifact parts are invalid"
         )
     for part in parts:
@@ -1172,7 +1338,7 @@ def _validate_parts(value: ArtifactSpec) -> None:
             or isinstance(part.expected_bytes, bool)
             or part.expected_bytes < 1
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.artifact_invalid", "cache artifact part is invalid"
             )
         _validate_source(part.source)
@@ -1180,12 +1346,12 @@ def _validate_parts(value: ArtifactSpec) -> None:
 
 def _validate_manifest(value: ArtifactSetManifest) -> None:
     if len(value.artifacts) < 1 or len(value.artifacts) > _MAX_ARTIFACTS:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionInvalid(
             "model_cache.artifact_count", "cache artifact set count is invalid"
         )
     keys = [item.key for item in value.artifacts]
     if len(keys) != len(set(keys)):
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionInvalid(
             "model_cache.artifact_duplicate", "cache artifact keys must be unique"
         )
     _unique_artifacts(value.artifacts)
@@ -1193,7 +1359,7 @@ def _validate_manifest(value: ArtifactSetManifest) -> None:
         not isinstance(item, str) or not _is_hex(item)
         for item in value.model_content_digests
     ):
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.model_content_digests_invalid",
             "cache model dependency pins are invalid",
         )
@@ -1201,7 +1367,7 @@ def _validate_manifest(value: ArtifactSetManifest) -> None:
         value.document(), sort_keys=True, separators=(",", ":")
     ).encode()
     if len(encoded) > _MAX_MANIFEST_BYTES:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionInvalid(
             "model_cache.manifest_too_large", "cache manifest exceeds the size limit"
         )
 
@@ -1236,7 +1402,7 @@ def _unique_artifacts(values: Sequence[ArtifactSpec]) -> dict[str, ArtifactSpec]
     for item in values:
         existing = result.get(item.sha256)
         if existing is not None and existing.expected_bytes != item.expected_bytes:
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.digest_size_conflict",
                 "one artifact digest has conflicting sizes",
             )
@@ -1260,7 +1426,7 @@ def _validate_source(source: str) -> None:
         hostname = parsed.hostname
         port = parsed.port
     except (TypeError, ValueError) as error:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.source_invalid", "cache source URL is invalid"
         ) from error
     if parsed.scheme in {"http", "https"}:
@@ -1272,17 +1438,17 @@ def _validate_source(source: str) -> None:
             or parsed.query
             or port is not None
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.source_invalid", "cache source URL is invalid"
             )
         return
     if parsed.scheme == "file":
         if parsed.netloc not in {"", "localhost"} or not parsed.path.startswith("/"):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.source_invalid", "cache file source is invalid"
             )
         return
-    raise ModelCacheResolutionError(
+    raise ModelCacheResolutionRefused(
         "model_cache.source_invalid", "cache source must use HTTPS, HTTP or file"
     )
 
@@ -1295,11 +1461,11 @@ def _source_for_catalog_artifact(
     path = artifact.get("path")
     revision = artifact.get("revision")
     if not isinstance(repository, str) or not repository:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.source_invalid", "catalog artifact repository is invalid"
         )
     if not isinstance(path, str) or not path:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.artifact_invalid", "catalog artifact path is invalid"
         )
     if kind == "huggingface.file":
@@ -1314,7 +1480,7 @@ def _source_for_catalog_artifact(
             hostname = parsed.hostname
             port = parsed.port
         except (TypeError, ValueError) as error:
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.source_invalid",
                 "catalog Hugging Face repository is invalid",
             ) from error
@@ -1330,7 +1496,7 @@ def _source_for_catalog_artifact(
                 or parsed.fragment
                 or not parsed.path.startswith("/")
             ):
-                raise ModelCacheResolutionError(
+                raise ModelCacheResolutionRefused(
                     "model_cache.source_invalid",
                     "catalog Hugging Face repository must use canonical HTTPS",
                 )
@@ -1342,14 +1508,14 @@ def _source_for_catalog_artifact(
             # arbitrary URI repositories still take the guarded path above.
             repository_path = repository
         if not _valid_repository(repository_path):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.source_invalid",
                 "catalog Hugging Face repository is invalid",
             )
         if not isinstance(revision, str) or not re.fullmatch(
             r"[0-9a-f]{40,64}", revision
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.revision_invalid",
                 "catalog artifact revision is not immutable",
             )
@@ -1369,7 +1535,7 @@ def _source_for_catalog_artifact(
             or type(asset_id) is not int
             or asset_id < 1
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.source_invalid",
                 "catalog GitHub release asset identity is invalid",
             )
@@ -1377,7 +1543,7 @@ def _source_for_catalog_artifact(
         revision = f"github-release:{release_id}"
         source = f"https://{_GITHUB_API_HOST}/repos/{owner}/{name}/releases/assets/{asset_id}"
     else:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionInvalid(
             "model_cache.source_unsupported",
             "catalog artifact source cannot be downloaded by the NAS cache",
         )
@@ -1403,12 +1569,12 @@ def _github_repository_parts(repository: str) -> tuple[str, str]:
         GitHubReleaseSource.canonical_github_repository(repository)
         parsed = urlsplit(repository)
     except (TypeError, ValueError, ValidationError) as error:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.source_invalid", "catalog GitHub repository is invalid"
         ) from error
     parts = parsed.path.removeprefix("/").split("/")
     if len(parts) != 2 or parsed.path != f"/{parts[0]}/{parts[1]}":
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.source_invalid", "catalog GitHub repository is invalid"
         )
     return parts[0], parts[1]
@@ -1418,7 +1584,7 @@ def _github_release_asset_binding(spec: ArtifactSpec) -> tuple[int, int, str, st
     """Validate that a persisted GitHub source binds one exact release asset."""
 
     if spec.kind != "github-release.asset" or not isinstance(spec.repository, str):
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.source_invalid", "GitHub release asset identity is invalid"
         )
     owner, name = _github_repository_parts(spec.repository)
@@ -1431,7 +1597,7 @@ def _github_release_asset_binding(spec: ArtifactSpec) -> tuple[int, int, str, st
         parsed = urlsplit(spec.source)
         port = parsed.port
     except (TypeError, ValueError) as error:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.source_invalid", "GitHub release asset URL is invalid"
         ) from error
     expected_prefix = f"/repos/{owner}/{name}/releases/assets/"
@@ -1450,7 +1616,7 @@ def _github_release_asset_binding(spec: ArtifactSpec) -> tuple[int, int, str, st
         or re.fullmatch(r"[1-9][0-9]*", asset_id_text) is None
         or spec.source != f"https://{_GITHUB_API_HOST}{expected_prefix}{asset_id_text}"
     ):
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionRefused(
             "model_cache.source_invalid", "GitHub release asset URL is invalid"
         )
     return int(revision_match.group(1)), int(asset_id_text), owner, name
@@ -1468,7 +1634,7 @@ def _parse_iso(value: str) -> datetime:
     try:
         return _datetime(datetime.fromisoformat(value))
     except (TypeError, ValueError) as error:
-        raise ModelCacheConflict(
+        raise ModelCacheConflictInvalid(
             "model_cache.cursor_invalid", "cache cursor boundary is invalid"
         ) from error
 
@@ -1481,7 +1647,7 @@ def _recipe_definition(
     try:
         return read_recipe(document)
     except (TypeError, ValueError) as error:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionInvalid(
             "model_cache.recipe_invalid", "canonical recipe definition is invalid"
         ) from error
 
@@ -1492,7 +1658,7 @@ def _recipe_model_content_digests(
     recipe = _recipe_definition(document)
     raw_models = recipe.models
     if not raw_models:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionInvalid(
             "model_cache.recipe_model_missing",
             "canonical recipe does not declare model selections",
         )
@@ -1504,13 +1670,13 @@ def _recipe_model_content_digests(
             or not _is_hex(digest)
             or len(digest) != _DIGEST_LENGTH
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.model_pin_invalid", "canonical recipe model pin is invalid"
             )
         if digest not in result:
             result.append(digest)
     if len(result) > _MAX_ARTIFACTS:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionInvalid(
             "model_cache.dependency_count", "recipe model set is too large"
         )
     return result
@@ -1536,9 +1702,9 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[dict[str, o
     try:
         definition = read_catalog_document(row)
         if not isinstance(definition, ModelDefinition):
-            raise TypeError("catalog revision is not a model")
+            raise RequestTypeFault("catalog revision is not a model")
     except (TypeError, ValueError) as error:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionInvalid(
             "model_cache.model_definition_invalid",
             "canonical model definition is invalid",
         ) from error
@@ -1657,32 +1823,36 @@ class ModelCacheService:
         if not root.is_absolute() or any(
             part in {"", ".", ".."} for part in root.parts
         ):
-            raise ValueError("model cache root must be an absolute normalized path")
+            raise RequestFault("model cache root must be an absolute normalized path")
         if root.is_symlink():
-            raise ValueError("model cache root must not be a symlink")
+            raise RequestFault("model cache root must not be a symlink")
         if (
             not isinstance(reserve_bytes, int)
             or isinstance(reserve_bytes, bool)
             or reserve_bytes < 0
         ):
-            raise ValueError("model cache reserve must be a non-negative integer")
+            raise RequestFault("model cache reserve must be a non-negative integer")
         if (
             not isinstance(max_parallel_downloads, int)
             or isinstance(max_parallel_downloads, bool)
             or not 1 <= max_parallel_downloads <= _MAX_PARALLEL_DOWNLOADS
         ):
-            raise ValueError("model cache parallel downloads must be between 1 and 32")
+            raise RequestFault(
+                "model cache parallel downloads must be between 1 and 32"
+            )
         if (
             not isinstance(max_download_streams, int)
             or isinstance(max_download_streams, bool)
             or not 1 <= max_download_streams <= _MAX_PARALLEL_DOWNLOADS
         ):
-            raise ValueError("model cache download streams must be between 1 and 32")
+            raise RequestFault("model cache download streams must be between 1 and 32")
         root.mkdir(parents=True, exist_ok=True, mode=0o750)
         for child in ("objects", "partials", "quarantine", "manifests", "locks"):
             directory = root / child
             if directory.is_symlink():
-                raise ValueError("model cache storage directory must not be a symlink")
+                raise RequestFault(
+                    "model cache storage directory must not be a symlink"
+                )
             directory.mkdir(mode=0o750, exist_ok=True)
         self._sessions = sessions
         self._root = root
@@ -1909,7 +2079,7 @@ class ModelCacheService:
                     recipe_revision_sha256=row.recipe_revision_sha256,
                 )
             except ModelCacheError as error:
-                raise ValueError(error.detail) from error
+                raise StoredStateDamaged(error.detail) from error
             return candidate if candidate.digest == row.artifact_set_sha256 else None
 
         value = read_or_rebuild(
@@ -2015,13 +2185,13 @@ class ModelCacheService:
         model_digest = _optional_digest(model_content_sha256)
         recipe_digest = _optional_digest(recipe_revision_sha256)
         if recipe_digest is not None and recipe_revision_id is not None:
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.recipe_identity_ambiguous",
                 "recipe revision digest and ID cannot both be supplied",
             )
         if artifacts is not None:
             if not self._fixture_sources:
-                raise ModelCacheResolutionError(
+                raise ModelCacheResolutionRefused(
                     "model_cache.fixture_sources_forbidden",
                     "caller-supplied artifact sources are only available to fixture services",
                 )
@@ -2043,7 +2213,7 @@ class ModelCacheService:
             and recipe_digest is None
             and recipe_revision_id is None
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.pin_required",
                 "an exact model definition or recipe revision is required",
             )
@@ -2060,14 +2230,14 @@ class ModelCacheService:
                     recipe_digest is not None
                     and resolved_recipe_digest != recipe_digest
                 ):
-                    raise ModelCacheResolutionError(
+                    raise ModelCacheResolutionInvalid(
                         "model_cache.recipe_revision_missing",
                         "exact recipe revision is not resolved",
                     )
                 recipe_digest = resolved_recipe_digest
                 recipe_model_digests = _recipe_model_content_digests(recipe_document)
                 if not recipe_model_digests:
-                    raise ModelCacheResolutionError(
+                    raise ModelCacheResolutionInvalid(
                         "model_cache.recipe_model_missing",
                         "recipe does not bind an exact model definition",
                     )
@@ -2075,13 +2245,13 @@ class ModelCacheService:
                     model_digest is not None
                     and model_digest not in recipe_model_digests
                 ):
-                    raise ModelCacheConflict(
+                    raise ModelCacheConflictInvalid(
                         "model_cache.pin_mismatch",
                         "recipe and requested model definitions do not match",
                     )
                 model_digest = model_digest or recipe_model_digests[0]
             if model_digest is None:
-                raise ModelCacheResolutionError(
+                raise ModelCacheResolutionInvalid(
                     "model_cache.pin_required",
                     "an exact model definition is required after recipe resolution",
                 )
@@ -2201,10 +2371,10 @@ class ModelCacheService:
         rows = [row for row in rows if _is_digest(row.content_digest)]
         if len(rows) != 1:
             if not rows:
-                raise ModelCacheNotFound(
+                raise ModelCacheNotFoundInvalid(
                     "model_cache.selector_missing", "model selector was not found"
                 )
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.selector_ambiguous",
                 "model selector matches multiple models",
             )
@@ -2240,7 +2410,7 @@ class ModelCacheService:
             not isinstance(recipe_identity, str)
             or not 1 <= len(recipe_identity.strip()) <= 256
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.recipe_identity_invalid", "recipe identity is required"
             )
         identity = recipe_identity.strip().casefold()
@@ -2249,7 +2419,7 @@ class ModelCacheService:
             not isinstance(model_variant, str)
             or not 1 <= len(model_variant.strip()) <= 128
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.model_variant_invalid", "model variant is invalid"
             )
         requested_variant = (
@@ -2293,7 +2463,7 @@ class ModelCacheService:
                     .order_by(CatalogDocumentRevision.revision_number.desc())
                 )
             if seed is None:
-                raise ModelCacheResolutionError(
+                raise ModelCacheResolutionInvalid(
                     "model_cache.recipe_identity_missing",
                     "recipe identity was not found",
                 )
@@ -2307,7 +2477,7 @@ class ModelCacheService:
                     not isinstance(exact_revision_id, str)
                     or not 1 <= len(exact_revision_id.strip()) <= 256
                 ):
-                    raise ModelCacheResolutionError(
+                    raise ModelCacheResolutionInvalid(
                         "model_cache.recipe_revision_invalid",
                         "exact recipe revision is invalid",
                     )
@@ -2318,7 +2488,7 @@ class ModelCacheService:
                     )
                 )
                 if exact is None or exact.document_id != seed.document_id:
-                    raise ModelCacheResolutionError(
+                    raise ModelCacheResolutionInvalid(
                         "model_cache.recipe_revision_missing",
                         "selected recipe revision was not found",
                     )
@@ -2342,13 +2512,13 @@ class ModelCacheService:
                 )
             )
             if not revisions:
-                raise ModelCacheResolutionError(
+                raise ModelCacheResolutionInvalid(
                     "model_cache.recipe_revision_missing",
                     "recipe has no active revision",
                 )
             if exact is not None:
                 if exact.state != "active":
-                    raise ModelCacheResolutionError(
+                    raise ModelCacheResolutionInvalid(
                         "model_cache.recipe_revision_missing",
                         "selected recipe revision is not active",
                     )
@@ -2365,7 +2535,7 @@ class ModelCacheService:
                     # Written under another contract; not usable, not fatal.
                     return "", None
                 if not isinstance(recipe, RecipeDefinition):
-                    raise ModelCacheResolutionError(
+                    raise ModelCacheResolutionInvalid(
                         "model_cache.recipe_invalid", "recipe revision is not canonical"
                     )
                 digests = _recipe_model_content_digests(recipe)
@@ -2436,7 +2606,7 @@ class ModelCacheService:
                     break
             if selected is None:
                 if newest_compatible is None:
-                    raise ModelCacheConflict(
+                    raise ModelCacheConflictInvalid(
                         "model_cache.pin_mismatch",
                         "no active recipe revision matches the requested model variant",
                     )
@@ -2476,7 +2646,7 @@ class ModelCacheService:
                 if manifest is None:
                     return False  # unknown: this set is skipped, not a blocker
                 if manifest.digest != row.artifact_set_sha256:
-                    raise ModelCacheStorageError(
+                    raise ModelCacheStorageRefused(
                         "model_cache.manifest_identity_mismatch",
                         "cached artifact manifest does not match its stored identity",
                     )
@@ -2616,7 +2786,7 @@ class ModelCacheService:
         blockers = refusing_removal_blockers(reviewed)
         if blockers:
             first = blockers[0]
-            raise ModelCacheConflict(
+            raise ModelCacheConflictRefused(
                 first.code,
                 first.detail,
                 recovery="retry" if first.retryable else None,
@@ -2876,7 +3046,7 @@ class ModelCacheService:
                 or not isinstance(gate.removal_fence, str)
                 or not gate.removal_fence
             ):
-                raise ArtifactLifecycleError(
+                raise ModelCacheRemovalOwnerInvalid(
                     "artifact.removal_owner_unresolved",
                     "a selected cache identity has an unreadable removal owner; retry after the owner is reconciled",
                     retryable=True,
@@ -2885,20 +3055,20 @@ class ModelCacheService:
             if cached is None:
                 operation = session.get(ModelCacheOperation, owner_id)
                 if operation is None or operation.kind != "remove":
-                    raise ArtifactLifecycleError(
+                    raise ModelCacheRemovalOwnerInvalid(
                         "artifact.removal_owner_unresolved",
                         "a selected cache identity has no readable removal operation owner",
                         retryable=True,
                     )
                 payload = _operation_payload(operation)
                 if isinstance(payload, Residue):
-                    raise ArtifactLifecycleError(
+                    raise ModelCacheRemovalOwnerInvalid(
                         "artifact.removal_owner_invalid",
                         "a selected cache identity has a malformed removal owner",
                         retryable=True,
                     )
                 if payload.get("removal_fence") != gate.removal_fence:
-                    raise ArtifactLifecycleError(
+                    raise ModelCacheRemovalOwnerInvalid(
                         "artifact.removal_owner_invalid",
                         "a selected cache identity removal fence disagrees with its owner",
                         retryable=True,
@@ -2915,13 +3085,13 @@ class ModelCacheService:
                 not isinstance(expected_target, list)
                 or gate.artifact_sha256 not in expected_target
             ):
-                raise ArtifactLifecycleError(
+                raise ModelCacheRemovalOwnerInvalid(
                     "artifact.removal_owner_invalid",
                     "a selected cache identity is not covered by its stored removal plan",
                     retryable=True,
                 )
             if operation.state not in model_cache_states.LIVE:
-                raise ArtifactLifecycleError(
+                raise ModelCacheRemovalOwnerInvalid(
                     "artifact.removal_owner_unresolved",
                     "a selected cache identity remains fenced by a non-active removal owner",
                     retryable=True,
@@ -2932,7 +3102,7 @@ class ModelCacheService:
                     sha256=gate.artifact_sha256,
                 )
             except ValueError as error:
-                raise ArtifactLifecycleError(
+                raise ModelCacheRemovalOwnerInvalid(
                     "artifact.removal_owner_invalid",
                     "a selected cache identity has an invalid removal gate",
                     retryable=True,
@@ -2992,9 +3162,9 @@ class ModelCacheService:
 
         supplied_sets = tuple(selected_sets)
         if not supplied_sets:
-            raise ValueError("model removal child requires an exact non-empty scope")
+            raise RequestFault("model removal child requires an exact non-empty scope")
         if len(supplied_sets) != len(set(supplied_sets)):
-            raise ValueError("model removal child scope contains duplicate sets")
+            raise RequestFault("model removal child scope contains duplicate sets")
         normalized_sets = tuple(sorted(supplied_sets))
         for digest in normalized_sets:
             ArtifactIdentity("model-set", digest)
@@ -3043,7 +3213,7 @@ class ModelCacheService:
         )
         payload = _operation_payload(operation)
         if isinstance(payload, Residue) or not isinstance(operation.plan_digest, str):
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.removal_plan_invalid",
                 "model removal child has no readable immutable plan",
             )
@@ -3145,7 +3315,7 @@ class ModelCacheService:
                 if manifest is None:
                     # Destructive guard: without a readable manifest the exact
                     # objects of the scope are unknown, so nothing is removed.
-                    raise ModelCacheStorageError(
+                    raise ModelCacheStorageRefused(
                         "model_cache.removal_scope_unavailable",
                         f"selected model set {set_digest} is no longer available",
                     )
@@ -3154,14 +3324,14 @@ class ModelCacheService:
                     digest: spec.expected_bytes for digest, spec in specs.items()
                 }
                 if set(expected) != set(memberships_by_set.get(set_digest, ())):
-                    raise ModelCacheStorageError(
+                    raise ModelCacheStorageRefused(
                         "model_cache.removal_scope_invalid",
                         f"model set {set_digest} membership disagrees with its manifest",
                     )
                 for digest, expected_bytes in expected.items():
                     previous = expected_by_object.setdefault(digest, expected_bytes)
                     if previous != expected_bytes:
-                        raise ModelCacheStorageError(
+                        raise ModelCacheStorageRefused(
                             "model_cache.removal_scope_invalid",
                             f"model object {digest} has inconsistent expected lengths",
                         )
@@ -3271,7 +3441,7 @@ class ModelCacheService:
         for digest in scope.selected_objects:
             expected_bytes = expected_by_object.get(digest)
             if expected_bytes is None:
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.removal_scope_invalid",
                     f"model object {digest} has no validated manifest length",
                 )
@@ -3308,7 +3478,7 @@ class ModelCacheService:
         self, operation: ModelCacheOperation, *, actor: str, selector: str
     ) -> CacheOperationView:
         if operation.kind != "remove" or operation.actor != actor:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.request_key_reused",
                 "request key was already used for another cache operation",
             )
@@ -3316,7 +3486,7 @@ class ModelCacheService:
         # cannot contradict it, so the stored operation is what the caller gets.
         payload = self._payload_or_none(operation)
         if payload is not None and payload.get("selector") != selector:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.request_key_reused",
                 "request key was already used for another model removal intent",
             )
@@ -3358,13 +3528,13 @@ class ModelCacheService:
         else:
             supplied = tuple(selected_sets)
             if len(supplied) != len(set(supplied)):
-                raise ValueError("model removal scope contains duplicate sets")
+                raise RequestFault("model removal scope contains duplicate sets")
             selected = tuple(sorted(supplied))
         # Read and validate exact SQL membership before the ordered gate
         # acquisition, then re-read it after the fences are held.
         scope = self._model_removal_scope_for_sets(session, selected)
         if expected_scope is not None and scope != expected_scope:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictRefused(
                 "artifact.reference_identity_mismatch",
                 "model removal scope changed before parent acceptance",
             )
@@ -3392,7 +3562,7 @@ class ModelCacheService:
         try:
             if gates_reserved:
                 if not removal_fences_match(session, assignments, now=now):
-                    raise ArtifactLifecycleError(
+                    raise ModelCacheDeletionFenceLost(
                         "artifact.deletion_fence_lost",
                         "parent did not reserve every model identity for this child",
                     )
@@ -3407,7 +3577,7 @@ class ModelCacheService:
                 )
             locked_scope = self._model_removal_scope_for_sets(session, selected)
             if locked_scope != scope:
-                raise ModelCacheConflict(
+                raise ModelCacheConflictRefused(
                     "artifact.reference_identity_mismatch",
                     "model-set membership changed while removal ownership was reserved",
                 )
@@ -3415,7 +3585,7 @@ class ModelCacheService:
             # stops new consumers and each destructive step waits until the
             # current owners have released the set.
         except ArtifactLifecycleError as error:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictRefused(
                 error.code,
                 error.detail,
                 recovery="retry" if error.retryable else None,
@@ -3442,7 +3612,7 @@ class ModelCacheService:
             if digest not in external_memberships
         )
         if delete_objects != scope.delete_objects:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictRefused(
                 "artifact.reference_identity_mismatch",
                 "model object sharing changed while removal ownership was reserved",
             )
@@ -3554,7 +3724,7 @@ class ModelCacheService:
             os.close(directory_fd)
         with os.fdopen(descriptor, "a+b") as lock_file:
             if not stat.S_ISREG(os.fstat(lock_file.fileno()).st_mode):
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.lock_unavailable",
                     "managed-cache lock is not a regular file",
                 )
@@ -3593,7 +3763,7 @@ class ModelCacheService:
                 except FileNotFoundError:
                     return 0
                 if not stat.S_ISREG(metadata.st_mode):
-                    raise ModelCacheStorageError(
+                    raise ModelCacheStorageRefused(
                         "model_cache.removal_path_unsafe",
                         "managed model object is not a regular file",
                     )
@@ -3634,7 +3804,7 @@ class ModelCacheService:
                     except FileNotFoundError:
                         continue
                     if not stat.S_ISREG(metadata.st_mode):
-                        raise ModelCacheStorageError(
+                        raise ModelCacheStorageRefused(
                             "model_cache.removal_path_unsafe",
                             "managed model object or receipt is not a regular file",
                         )
@@ -3663,7 +3833,7 @@ class ModelCacheService:
             except FileNotFoundError:
                 return
             if not stat.S_ISDIR(metadata.st_mode):
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.removal_path_unsafe",
                     "managed model partial checkpoint is not a directory",
                 )
@@ -3858,7 +4028,7 @@ class ModelCacheService:
         """Advance bounded durable model removals without holding transfer slots."""
 
         if not 1 <= limit <= 100:
-            raise ValueError("model removal batch limit is invalid")
+            raise RequestFault("model removal batch limit is invalid")
         now = self._clock()
         with self._session() as session:
             operation_ids = tuple(
@@ -4293,16 +4463,16 @@ class ModelCacheService:
             or revision.state != "active"
             or not isinstance(revision.content_digest, str)
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.recipe_revision_missing",
                 "exact recipe revision is not resolved",
             )
         try:
             recipe = read_catalog_document(revision)
             if not isinstance(recipe, RecipeDefinition):
-                raise TypeError("catalog revision is not a recipe")
+                raise RequestTypeFault("catalog revision is not a recipe")
         except (TypeError, ValueError) as error:
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.recipe_invalid", "canonical recipe definition is invalid"
             ) from error
         return recipe, revision.id, revision.content_digest
@@ -4317,19 +4487,19 @@ class ModelCacheService:
         aliases: dict[str, str] | None = None,
     ) -> None:
         if not isinstance(digest, str) or not _is_hex(digest) or len(digest) != 64:
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.model_pin_invalid", "model dependency pin is invalid"
             )
         if digest in rows:
             if visiting is not None and digest in visiting:
-                raise ModelCacheResolutionError(
+                raise ModelCacheResolutionInvalid(
                     "model_cache.model_dependency_cycle",
                     "canonical model dependency graph contains a cycle",
                 )
             return
         active = visiting if visiting is not None else set()
         if digest in active:
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.model_dependency_cycle",
                 "canonical model dependency graph contains a cycle",
             )
@@ -4343,7 +4513,7 @@ class ModelCacheService:
         )
         if row is None:
             active.remove(digest)
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.model_definition_missing",
                 "exact model definition is not resolved",
             )
@@ -4370,7 +4540,7 @@ class ModelCacheService:
         try:
             definition = read_catalog_document(row)
             if not isinstance(definition, ModelDefinition):
-                raise TypeError("catalog revision is not a model")
+                raise RequestTypeFault("catalog revision is not a model")
             rows[digest] = row
             for dependency in definition.dependencies:
                 self._collect_model_definitions(
@@ -4381,7 +4551,7 @@ class ModelCacheService:
                     aliases=aliases,
                 )
         except (TypeError, ValueError) as error:
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.model_definition_invalid",
                 "canonical model definition is invalid",
             ) from error
@@ -4405,7 +4575,7 @@ class ModelCacheService:
             or not isinstance(raw_path, str)
             or not isinstance(raw_kind, str)
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.artifact_invalid",
                 "catalog artifact identity is incomplete",
             )
@@ -4414,7 +4584,7 @@ class ModelCacheService:
             or not isinstance(raw_bytes, int)
             or not isinstance(roles, list)
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.artifact_invalid",
                 "catalog artifact integrity metadata is incomplete",
             )
@@ -4422,7 +4592,7 @@ class ModelCacheService:
             raw_kind not in {"huggingface.file", "github-release.asset"}
             and not self._fixture_sources
         ):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.source_untrusted",
                 "production cache downloads require a trusted catalog artifact reference",
             )
@@ -4459,7 +4629,7 @@ class ModelCacheService:
         if raw_parts is None:
             return None
         if not isinstance(raw_parts, list):
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionRefused(
                 "model_cache.artifact_invalid", "catalog artifact parts are invalid"
             )
         parts: list[ArtifactPart] = []
@@ -4470,7 +4640,7 @@ class ModelCacheService:
                 or not isinstance(raw.get("sha256"), str)
                 or type(raw.get("download_bytes")) is not int
             ):
-                raise ModelCacheResolutionError(
+                raise ModelCacheResolutionRefused(
                     "model_cache.artifact_invalid",
                     "catalog artifact part is incomplete",
                 )
@@ -4524,7 +4694,7 @@ class ModelCacheService:
                 )
             )
         except (KeyError, TypeError, ValueError) as error:
-            raise ModelCacheResolutionError(
+            raise ModelCacheResolutionInvalid(
                 "model_cache.artifact_invalid", "cache artifact input is invalid"
             ) from error
         spec = ArtifactSpec(
@@ -4574,7 +4744,7 @@ class ModelCacheService:
                     return replay
         requested_plan = _optional_digest(plan_digest)
         if requested_plan is None:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictRefused(
                 "model_cache.plan_invalid", "download plan digest is invalid"
             )
         manifest = self._resolve_requested_manifest(
@@ -4602,7 +4772,7 @@ class ModelCacheService:
                 return replay
         preview = self._download_preview_for_manifest(manifest)
         if preview["plan_digest"] != requested_plan:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.stale_plan", "download preview is stale"
             )
         waiting_for = "; ".join(
@@ -4721,7 +4891,7 @@ class ModelCacheService:
         if existing is None:
             return None
         if existing.kind != "download" or existing.actor != actor:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.request_key_reused",
                 "request key was already used for another cache operation",
             )
@@ -4744,7 +4914,7 @@ class ModelCacheService:
                 payload.get("operator_action") == "download-model"
             )
         if not all(matches.values()):
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.request_key_reused",
                 "request key was already used for another cache operation",
             )
@@ -4777,7 +4947,7 @@ class ModelCacheService:
             artifacts=artifacts,
         )
         if requested_set is not None and manifest.digest != requested_set:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.pin_mismatch",
                 "requested artifact-set identity does not match the resolved pins",
             )
@@ -5076,7 +5246,7 @@ class ModelCacheService:
                 # re-derives it: the manifest in hand (same key) replaces it.
                 row.manifest = manifest.document()
             elif stored.digest != manifest.digest:
-                raise ModelCacheConflict(
+                raise ModelCacheConflictRefused(
                     "model_cache.identity_conflict",
                     "artifact-set digest resolves to different immutable content",
                 )
@@ -5172,7 +5342,7 @@ class ModelCacheService:
         try:
             with self._lock:
                 if not self._publication_allowed(operation_id, set_digest):
-                    raise InterruptedError(
+                    raise OperationInterrupted(
                         "model download was removed before publication"
                     )
                 with self._session(write=True) as session:
@@ -5291,7 +5461,7 @@ class ModelCacheService:
             assert operation is not None
             if operation.state == "cancelled" or _operation_cancellation(operation):
                 self._transfer_stop(operation_id).set()
-                raise InterruptedError(
+                raise OperationInterrupted(
                     "model download cancellation was accepted; partial files preserved"
                 )
             is_repair = operation.kind == "repair"
@@ -5300,7 +5470,7 @@ class ModelCacheService:
                 # Unreadable bookkeeping interrupts the attempt; the claim loop
                 # rebuilds or retires the operation, the transfer ledger on disk
                 # (content-addressed) is kept.
-                raise InterruptedError("cache operation document is unreadable")
+                raise OperationInterrupted("cache operation document is unreadable")
             checkpoint = (
                 read_stored_model(
                     ModelCacheRepairCheckpoint, payload["repair_checkpoint"]
@@ -5337,7 +5507,7 @@ class ModelCacheService:
                 assert operation is not None
                 payload = self._payload_or_none(operation)
                 if payload is None:
-                    raise InterruptedError("cache operation document is unreadable")
+                    raise OperationInterrupted("cache operation document is unreadable")
                 checkpoint = read_stored_model(
                     ModelCacheRepairCheckpoint, payload["repair_checkpoint"]
                 )
@@ -5432,16 +5602,16 @@ class ModelCacheService:
                 actual_bytes=0,
                 state="corrupt",
             )
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.digest_mismatch",
                 "assembled artifact failed SHA-256 verification; the bytes were discarded and the download restarts",
                 recovery="resume",
             )
         if self._operation_cancellation_pending(operation_id):
-            raise InterruptedError("model download cancelled during assembly")
+            raise OperationInterrupted("model download cancelled during assembly")
         with self._lock:
             if not self._publication_allowed(operation_id, set_digest, spec.sha256):
-                raise InterruptedError("model download was removed during assembly")
+                raise OperationInterrupted("model download was removed during assembly")
             self._place_object(spec, assembled)
             self._mark_artifact_verified(spec, set_digest)
 
@@ -5452,7 +5622,7 @@ class ModelCacheService:
             while remaining:
                 chunk = retained.read(min(_CHUNK_BYTES, remaining))
                 if not chunk:
-                    raise ModelCacheStorageError(
+                    raise ModelCacheStorageRefused(
                         "model_cache.source_truncated",
                         "retained assembled bytes are shorter than recorded",
                         recovery="resume",
@@ -5474,14 +5644,14 @@ class ModelCacheService:
         """Append one fetched part, verifying its size and digest in the same pass."""
 
         if part.is_symlink() or not part.is_file():
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.source_truncated",
                 "a downloaded part is missing; it is fetched again",
                 recovery="resume",
             )
         if part.stat().st_size != part_spec.expected_bytes:
             part.unlink(missing_ok=True)
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.source_size_mismatch",
                 "a downloaded part does not have its pinned size; it is fetched again",
                 recovery="resume",
@@ -5498,7 +5668,7 @@ class ModelCacheService:
         with part.open("rb") as source, assembled.open("ab") as output:
             while chunk := source.read(_CHUNK_BYTES):
                 if stop.is_set() or self._closed.is_set():
-                    raise InterruptedError(
+                    raise OperationInterrupted(
                         "model download stopped; partial files preserved"
                     )
                 digest.update(chunk)
@@ -5513,7 +5683,7 @@ class ModelCacheService:
                 retained.truncate(boundary)
                 os.fsync(retained.fileno())
             part.unlink(missing_ok=True)
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.digest_mismatch",
                 "downloaded part failed SHA-256 verification; the bytes were discarded and the part restarts",
                 recovery="resume",
@@ -5587,7 +5757,7 @@ class ModelCacheService:
             if errors:
                 raise errors[0]
             if cancel.is_set() or self._closed.is_set():
-                raise InterruptedError(
+                raise OperationInterrupted(
                     "model download stopped; partial files preserved"
                 )
 
@@ -5657,7 +5827,7 @@ class ModelCacheService:
         if offset == spec.expected_bytes and self._verify_file(part, spec):
             with self._lock:
                 if not self._publication_allowed(operation_id, set_digest, spec.sha256):
-                    raise InterruptedError(
+                    raise OperationInterrupted(
                         "model download was removed during verification"
                     )
                 self._publish_object(spec, part)
@@ -5710,7 +5880,9 @@ class ModelCacheService:
 
     def _require_transfer_running(self, operation_id: str) -> None:
         if self._transfer_stop(operation_id).is_set() or self._closed.is_set():
-            raise InterruptedError("model download stopped; partial files preserved")
+            raise OperationInterrupted(
+                "model download stopped; partial files preserved"
+            )
 
     def _stream_gate(self, operation_id: str):
         stop = self._transfer_stop(operation_id)
@@ -5767,7 +5939,7 @@ class ModelCacheService:
                             chunk = bytes(chunk)
                         next_received = received + len(chunk)
                         if next_received > spec.expected_bytes:
-                            raise ModelCacheStorageError(
+                            raise ModelCacheStorageRefused(
                                 "model_cache.source_size_mismatch",
                                 "source returned more bytes than the immutable artifact pin",
                                 recovery="resume",
@@ -5779,7 +5951,7 @@ class ModelCacheService:
                             interrupt_after_bytes is not None
                             and received >= interrupt_after_bytes
                         ):
-                            raise InterruptedError(
+                            raise OperationInterrupted(
                                 "download interrupted at a durable checkpoint"
                             )
                         # Ordinary buffered writes remain independent of progress.
@@ -5811,7 +5983,7 @@ class ModelCacheService:
             if spec.kind == "github-release.asset" and isinstance(
                 error, httpx2.HTTPError
             ):
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageUnknown(
                     "model_cache.source_unavailable",
                     "GitHub release asset transfer failed",
                     recovery="resume",
@@ -5827,7 +5999,7 @@ class ModelCacheService:
                 actual_bytes=received,
                 state="partial",
             )
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.source_truncated",
                 "source ended before the immutable artifact size",
                 recovery="resume",
@@ -5842,7 +6014,9 @@ class ModelCacheService:
         completed_artifacts: int,
     ) -> None:
         if self._transfer_stop(operation_id).is_set() or self._closed.is_set():
-            raise InterruptedError("model download stopped; partial files preserved")
+            raise OperationInterrupted(
+                "model download stopped; partial files preserved"
+            )
         received = spec.expected_bytes
         self._checkpoint_artifact(
             spec,
@@ -5863,7 +6037,7 @@ class ModelCacheService:
                 actual_bytes=0,
                 state="corrupt",
             )
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.digest_mismatch",
                 "downloaded artifact failed SHA-256 verification; the bytes were discarded and the download restarts",
                 recovery="resume",
@@ -5873,13 +6047,15 @@ class ModelCacheService:
             or self._closed.is_set()
             or self._operation_cancellation_pending(operation_id)
         ):
-            raise InterruptedError("model download cancelled during verification")
+            raise OperationInterrupted("model download cancelled during verification")
         # Removal and publication share this process lock.  The durable
         # operation state is checked while holding it, closing the race where
         # a worker verifies an object just as an operator removes its set.
         with self._lock:
             if not self._publication_allowed(operation_id, set_digest, spec.sha256):
-                raise InterruptedError("model download was removed during verification")
+                raise OperationInterrupted(
+                    "model download was removed during verification"
+                )
             self._publish_object(spec, part)
             self._mark_artifact_verified(spec, set_digest)
 
@@ -5926,7 +6102,7 @@ class ModelCacheService:
                 object_digests=object_digests,
             )
         except ArtifactLifecycleError as error:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictRefused(
                 error.code,
                 error.detail,
                 recovery="retry" if error.retryable else None,
@@ -5938,11 +6114,11 @@ class ModelCacheService:
                 _github_release_asset_binding(spec)
                 parsed = urlsplit(spec.source)
             except (ModelCacheResolutionError, TypeError, ValueError) as error:
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.source_invalid", "GitHub release asset URL is invalid"
                 ) from error
             if parsed.scheme != "https" or parsed.hostname != _GITHUB_API_HOST:
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.source_untrusted",
                     "GitHub release downloads must use the canonical GitHub API host",
                 )
@@ -5952,7 +6128,7 @@ class ModelCacheService:
             hostname = parsed.hostname
             port = parsed.port
         except (TypeError, ValueError) as error:
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.source_invalid", "cache source URL is invalid"
             ) from error
         if not self._fixture_sources and (
@@ -5962,7 +6138,7 @@ class ModelCacheService:
             or hostname.lower().rstrip(".") not in self._trusted_source_hosts
             or _is_private_host(hostname)
         ):
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.source_untrusted",
                 "production cache downloads require a trusted HTTPS artifact host",
             )
@@ -5987,7 +6163,7 @@ class ModelCacheService:
             and not self._fixture_sources
             and getattr(self._http, "follow_redirects", False)
         ):
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.redirect_forbidden",
                 "production cache HTTP clients must not follow redirects",
             )
@@ -6070,7 +6246,7 @@ class ModelCacheService:
             if spec.kind == "github-release.asset" and isinstance(
                 error, httpx2.HTTPError
             ):
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageUnknown(
                     "model_cache.source_unavailable",
                     "GitHub release asset transfer failed",
                     recovery="resume",
@@ -6088,25 +6264,25 @@ class ModelCacheService:
         try:
             parsed = urlsplit(spec.source)
         except (TypeError, ValueError) as error:
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.source_invalid", "cache source URL is invalid"
             ) from error
         if parsed.scheme == "file":
             if not self._fixture_sources:
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.source_untrusted",
                     "production cache downloads cannot read file sources",
                 )
             path = Path(unquote(parsed.path))
             if path.is_symlink() or not path.is_file():
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageUnknown(
                     "model_cache.source_unavailable", "cache file source is unavailable"
                 )
             handle = path.open("rb")
             size = path.stat().st_size
             if offset > size:
                 handle.close()
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.source_size_mismatch",
                     "cache file source is shorter than its checkpoint",
                 )
@@ -6122,7 +6298,7 @@ class ModelCacheService:
                 trust_env=False,
             )
         elif not self._fixture_sources and getattr(client, "follow_redirects", False):
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.redirect_forbidden",
                 "production cache HTTP clients must not follow redirects",
             )
@@ -6149,7 +6325,7 @@ class ModelCacheService:
                 response.close()
                 if owns_client:
                     client.close()
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.range_invalid",
                     "cache source returned an invalid byte range",
                 )
@@ -6211,7 +6387,7 @@ class ModelCacheService:
                 and declared_size.isdigit()
                 and int(declared_size) > _MAX_GITHUB_RELEASE_METADATA_BYTES
             ):
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.release_metadata_invalid",
                     "GitHub release metadata exceeds the size limit",
                     recovery="inspect",
@@ -6221,13 +6397,13 @@ class ModelCacheService:
                 for chunk in response.iter_bytes():
                     raw.extend(chunk)
                     if len(raw) > _MAX_GITHUB_RELEASE_METADATA_BYTES:
-                        raise ModelCacheStorageError(
+                        raise ModelCacheStorageRefused(
                             "model_cache.release_metadata_invalid",
                             "GitHub release metadata exceeds the size limit",
                             recovery="inspect",
                         )
             except httpx2.HTTPError as error:
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageUnknown(
                     "model_cache.source_unavailable",
                     "GitHub release metadata transfer failed",
                     recovery="resume",
@@ -6235,20 +6411,20 @@ class ModelCacheService:
             try:
                 release = _GitHubReleaseMetadata.model_validate_json(raw)
             except (TypeError, ValueError, ValidationError) as error:
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.release_metadata_invalid",
                     "GitHub release metadata does not match the required response fields",
                     recovery="inspect",
                 ) from error
             if release.id != release_id:
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.release_metadata_invalid",
                     "GitHub returned metadata for a different or invalid release",
                     recovery="inspect",
                 )
             matches = [asset for asset in release.assets if asset.id == asset_id]
             if len(matches) != 1:
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.release_asset_identity_conflict",
                     "the pinned asset ID is not a unique member of the pinned GitHub release",
                     recovery="inspect",
@@ -6259,7 +6435,7 @@ class ModelCacheService:
                 or asset.size != spec.expected_bytes
                 or asset.state != "uploaded"
             ):
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.release_asset_identity_conflict",
                     "the pinned GitHub release asset name, state, or size does not match the model file",
                     recovery="inspect",
@@ -6270,7 +6446,7 @@ class ModelCacheService:
                 or re.fullmatch(r"sha256:[0-9a-f]{64}", provider_digest) is None
                 or provider_digest.removeprefix("sha256:") != spec.sha256
             ):
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.release_asset_identity_conflict",
                     "the pinned GitHub release asset digest does not match the model file",
                     recovery="inspect",
@@ -6303,7 +6479,7 @@ class ModelCacheService:
                 # least one minute when it supplies no explicit retry hint.
                 retry_after = 60
             response.close()
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.rate_limited",
                 "GitHub rate limited this anonymous release download; it will resume automatically",
                 retry_after_seconds=retry_after,
@@ -6315,18 +6491,18 @@ class ModelCacheService:
             return
         response.close()
         if 300 <= status < 400:
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.redirect_forbidden",
                 "GitHub release request used an unsupported redirect status",
                 recovery="inspect",
             )
         if status in {401, 403}:
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 SecurityRefusalReason.MODEL_CACHE_SOURCE_ACCESS_DENIED.value,
                 "GitHub denied anonymous access to the public release source",
                 recovery="inspect",
             )
-        raise ModelCacheStorageError(
+        raise ModelCacheStorageUnknown(
             "model_cache.source_unavailable",
             f"GitHub release request failed with status {status}",
             recovery="resume",
@@ -6367,7 +6543,7 @@ class ModelCacheService:
                 client, spec.source, request_headers
             )
         except httpx2.HTTPError as error:
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageUnknown(
                 "model_cache.source_unavailable",
                 "GitHub release asset request failed",
                 recovery="resume",
@@ -6378,14 +6554,14 @@ class ModelCacheService:
         location = response.headers.get("location")
         response.close()
         if not location:
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.redirect_forbidden",
                 "GitHub asset redirect did not provide a destination",
                 recovery="inspect",
             )
         redirected_url = urljoin(spec.source, location)
         if not _is_allowed_github_release_redirect(redirected_url):
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.redirect_forbidden",
                 "GitHub asset redirected outside the trusted release CDN",
                 recovery="inspect",
@@ -6401,7 +6577,7 @@ class ModelCacheService:
                 },
             )
         except httpx2.HTTPError as error:
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageUnknown(
                 "model_cache.source_unavailable",
                 "GitHub release asset transfer failed",
                 recovery="resume",
@@ -6409,7 +6585,7 @@ class ModelCacheService:
         self._raise_github_http_status(response, allow_binary=True)
         if 300 <= response.status_code < 400:
             response.close()
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.redirect_forbidden",
                 "GitHub release CDN returned a second redirect",
                 recovery="inspect",
@@ -6440,7 +6616,7 @@ class ModelCacheService:
             with self._lock:
                 cooldown = self._hf_cooldown_until
             if cooldown is not None and cooldown > self._clock():
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.rate_limited",
                     "Hugging Face download cooldown is active",
                     retry_after_seconds=max(
@@ -6488,7 +6664,7 @@ class ModelCacheService:
                     self._streams.throttled(
                         retry_after, "Hugging Face answered 429 (rate limited)"
                     )
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.rate_limited",
                     "artifact provider rate limited this download; it will resume automatically",
                     retry_after_seconds=retry_after,
@@ -6504,13 +6680,13 @@ class ModelCacheService:
                     continue
                 response.close()
                 if authenticated:
-                    raise ModelCacheStorageError(
+                    raise ModelCacheStorageRefused(
                         SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_DENIED.value,
                         "Hugging Face could not authorize this download; verify account access and token scope at "
                         f"{_huggingface_access_url(source)}; the download resumes automatically when the token changes",
                         recovery="access_denied",
                     )
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageRefused(
                     "model_cache.credentials_missing",
                     "Hugging Face access is required; request access at "
                     f"{_huggingface_access_url(source)} and configure HF_TOKEN_FILE; the download resumes automatically when the token changes",
@@ -6520,7 +6696,7 @@ class ModelCacheService:
                 location = response.headers.get("location")
                 response.close()
                 if not location:
-                    raise ModelCacheStorageError(
+                    raise ModelCacheStorageRefused(
                         "model_cache.redirect_forbidden",
                         "cache source redirect did not provide a destination",
                     )
@@ -6528,7 +6704,7 @@ class ModelCacheService:
                 if not source_is_huggingface or not _is_allowed_huggingface_redirect(
                     redirected_url
                 ):
-                    raise ModelCacheStorageError(
+                    raise ModelCacheStorageRefused(
                         "model_cache.redirect_forbidden",
                         "cache source redirected outside the trusted Hugging Face authorities",
                     )
@@ -6545,13 +6721,13 @@ class ModelCacheService:
                     self._streams.throttled(
                         retry_after, f"Hugging Face answered {status_code}"
                     )
-                raise ModelCacheStorageError(
+                raise ModelCacheStorageUnknown(
                     "model_cache.source_unavailable",
                     f"cache source request failed with status {status_code}",
                     retry_after_seconds=retry_after,
                 )
             return response
-        raise ModelCacheStorageError(
+        raise ModelCacheStorageRefused(
             "model_cache.redirect_forbidden",
             "cache source exceeded the trusted Hugging Face redirect limit",
         )
@@ -6638,16 +6814,20 @@ class ModelCacheService:
             return None
         try:
             if path.is_symlink():
-                raise RuntimeSecretError("Hugging Face credential path is unsafe")
+                raise ModelCacheCredentialPathUnsafe(
+                    "Hugging Face credential path is unsafe"
+                )
             if not path.exists():
                 return None
             if not path.is_file():
-                raise RuntimeSecretError("Hugging Face credential path is unsafe")
+                raise ModelCacheCredentialPathUnsafe(
+                    "Hugging Face credential path is unsafe"
+                )
             if path.stat().st_size == 0:
                 return None
             raw = read_runtime_secret(path)
         except (OSError, RuntimeSecretError):
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_INVALID.value,
                 "Hugging Face credential file is unavailable; configure HF_TOKEN_FILE",
                 recovery="credentials_invalid",
@@ -6658,13 +6838,13 @@ class ModelCacheService:
         try:
             token = value.decode("ascii")
         except UnicodeDecodeError:
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_INVALID.value,
                 "Hugging Face credential file must contain one ASCII bearer token",
                 recovery="credentials_invalid",
             ) from None
         if any(character.isspace() for character in token) or "\x00" in token:
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_INVALID.value,
                 "Hugging Face credential file must contain one bearer token",
                 recovery="credentials_invalid",
@@ -6694,7 +6874,7 @@ class ModelCacheService:
     def _publish_object(self, spec: ArtifactSpec, part: Path) -> None:
         if not self._verify_file(part, spec):
             part.unlink(missing_ok=True)
-            raise ModelCacheStorageError(
+            raise ModelCacheStorageRefused(
                 "model_cache.digest_mismatch",
                 "cache artifact failed verification; the bytes were discarded and the download restarts",
                 recovery="resume",
@@ -7219,7 +7399,7 @@ class ModelCacheService:
                 ModelCacheOperation, operation_id, with_for_update=True
             )
             if previous is None:
-                raise ModelCacheNotFound(
+                raise ModelCacheNotFoundInvalid(
                     "model_cache.operation_missing", "cache operation was not found"
                 )
             existing = session.scalar(
@@ -7233,7 +7413,7 @@ class ModelCacheService:
                     or existing.plan_digest != previous.plan_digest
                     or existing.artifact_set_sha256 != previous.artifact_set_sha256
                 ):
-                    raise ModelCacheConflict(
+                    raise ModelCacheConflictInvalid(
                         "model_cache.request_key_reused",
                         "request key was already used for another cache operation",
                     )
@@ -7242,7 +7422,7 @@ class ModelCacheService:
                 previous.kind not in {"download", "repair"}
                 or previous.state != "failed"
             ):
-                raise ModelCacheConflict(
+                raise ModelCacheConflictInvalid(
                     "model_cache.operation_not_retryable",
                     "cache operation is not retryable",
                 )
@@ -7321,14 +7501,14 @@ class ModelCacheService:
                 ModelCacheOperation, operation_id, with_for_update=True
             )
             if previous is None:
-                raise ModelCacheNotFound(
+                raise ModelCacheNotFoundInvalid(
                     "model_cache.operation_missing", "cache operation was not found"
                 )
             if (
                 previous.artifact_set_sha256 != requested_set
                 or previous.plan_digest != requested_plan
             ):
-                raise ModelCacheConflict(
+                raise ModelCacheConflictRefused(
                     "model_cache.identity_mismatch",
                     "access recheck identity does not match the persisted operation",
                 )
@@ -7339,7 +7519,7 @@ class ModelCacheService:
             )
             if existing is not None:
                 if existing.id == previous.id:
-                    raise ModelCacheConflict(
+                    raise ModelCacheConflictInvalid(
                         "model_cache.request_key_reused",
                         "access recheck requires a new operator request key",
                     )
@@ -7349,7 +7529,7 @@ class ModelCacheService:
                     and existing.plan_digest == previous.plan_digest
                 ):
                     return self._operation_view(existing)
-                raise ModelCacheConflict(
+                raise ModelCacheConflictInvalid(
                     "model_cache.request_key_reused",
                     "request key was already used for another cache operation",
                 )
@@ -7360,7 +7540,7 @@ class ModelCacheService:
                 or not isinstance(failure, Mapping)
                 or failure.get("code") not in auth_codes
             ):
-                raise ModelCacheConflict(
+                raise ModelCacheConflictInvalid(
                     "model_cache.access_recheck_unavailable",
                     "the operation does not have a terminal Hugging Face access failure",
                 )
@@ -7420,7 +7600,7 @@ class ModelCacheService:
                     ModelCacheOperation, operation_id, with_for_update=True
                 )
                 if previous is None:
-                    raise ModelCacheNotFound(
+                    raise ModelCacheNotFoundInvalid(
                         "model_cache.operation_missing", "cache operation was not found"
                     )
                 previous.last_error = safe_detail
@@ -7452,7 +7632,7 @@ class ModelCacheService:
                 ModelCacheOperation, operation_id, with_for_update=True
             )
             if previous is None:
-                raise ModelCacheNotFound(
+                raise ModelCacheNotFoundInvalid(
                     "model_cache.operation_missing", "cache operation was not found"
                 )
             payload = self._payload_or_retire(previous, now=now)
@@ -7538,7 +7718,7 @@ class ModelCacheService:
                     by_repository.setdefault(_huggingface_access_url(spec.source), spec)
             specs = list(by_repository.values())
         if not specs:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.access_recheck_unavailable",
                 "the persisted operation has no canonical Hugging Face source to check",
             )
@@ -7784,7 +7964,7 @@ class ModelCacheService:
                 requested_at=_iso(self._clock()) or "",
             )
         except (TypeError, ValueError, ValidationError) as error:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.cancellation_invalid",
                 "cancellation identity, actor, or reason is invalid",
             ) from error
@@ -7817,7 +7997,7 @@ class ModelCacheService:
             ):
                 if preserve_existing_owner:
                     return False
-                raise ModelCacheConflict(
+                raise ModelCacheConflictInvalid(
                     "model_cache.cancellation_key_reused",
                     "operation already has a different cancellation request",
                 )
@@ -7827,7 +8007,7 @@ class ModelCacheService:
             or operation.state not in model_cache_states.LIVE
             or operation.request_key == cancellation.request_key
         ):
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.not_cancellable",
                 "model download is not active or cancellation key conflicts",
             )
@@ -7908,7 +8088,7 @@ class ModelCacheService:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
-                raise ModelCacheNotFound(
+                raise ModelCacheNotFoundInvalid(
                     "model_cache.operation_missing", "cache operation was not found"
                 )
             return self._operation_view(operation)
@@ -7921,18 +8101,18 @@ class ModelCacheService:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
-                raise ModelCacheNotFound(
+                raise ModelCacheNotFoundInvalid(
                     "model_cache.operation_missing", "cache operation was not found"
                 )
             if operation.kind not in {"download", "remove"}:
-                raise ModelCacheResolutionError(
+                raise ModelCacheResolutionInvalid(
                     "model_cache.operation_not_observable",
                     "operation is not a current model operator mutation",
                 )
             payload = self._payload_or_none(operation)
             selector = None if payload is None else payload.get("selector")
             if not isinstance(selector, str) or not selector:
-                raise ModelCacheResolutionError(
+                raise ModelCacheResolutionInvalid(
                     "model_cache.operation_not_observable",
                     "operator operation has no stable model selector",
                 )
@@ -7959,7 +8139,7 @@ class ModelCacheService:
                 or operation.kind not in {"download", "remove"}
                 or (self._payload_of(operation) or {}).get("selector") is None
             ):
-                raise ModelCacheNotFound(
+                raise ModelCacheNotFoundInvalid(
                     "model_cache.operation_missing", "cache operation was not found"
                 )
             operation_id = operation.id
@@ -7967,7 +8147,7 @@ class ModelCacheService:
 
     def list_operations(self, *, limit: int = 100) -> tuple[CacheOperationView, ...]:
         if not 1 <= limit <= 100:
-            raise ValueError("cache operation limit is invalid")
+            raise RequestFault("cache operation limit is invalid")
         with self._session() as session:
             rows = session.scalars(
                 select(ModelCacheOperation)
@@ -7986,7 +8166,7 @@ class ModelCacheService:
     ) -> dict[str, object]:
         """Return a stable created-at/id ordered page and raw next boundary."""
         if not 1 <= limit <= 100:
-            raise ValueError("cache operation limit is invalid")
+            raise RequestFault("cache operation limit is invalid")
         with self._session() as session:
             rows = list(
                 session.scalars(
@@ -8005,7 +8185,7 @@ class ModelCacheService:
                     start = index + 1
                     break
             else:
-                raise ModelCacheConflict(
+                raise ModelCacheConflictInvalid(
                     "model_cache.cursor_invalid", "operation cursor boundary is stale"
                 )
         page = rows[start : start + limit]
@@ -8114,7 +8294,7 @@ class ModelCacheService:
         API restart only discovers outstanding work here.
         """
         if not 1 <= limit <= 100:
-            raise ValueError("cache operation limit is invalid")
+            raise RequestFault("cache operation limit is invalid")
         with self._session() as session:
             count = require_integer(
                 session.scalar(
@@ -8138,7 +8318,7 @@ class ModelCacheService:
         callers and fixture tests.
         """
         if not 1 <= limit <= 16:
-            raise ValueError("cache worker batch limit is invalid")
+            raise RequestFault("cache worker batch limit is invalid")
         self._reconcile_pending_cancellations()
         self._resume_after_credential_change()
         rows = self._claim_operations(limit=limit, respect_backoff=False)
@@ -8166,7 +8346,7 @@ class ModelCacheService:
             return self.run_pending(limit=1)
         requested = self._max_parallel_downloads if limit is None else limit
         if not 1 <= requested <= _MAX_PARALLEL_DOWNLOADS:
-            raise ValueError("cache worker batch limit is invalid")
+            raise RequestFault("cache worker batch limit is invalid")
         self._streams.tick()
         self._reconcile_pending_cancellations()
         self._resume_after_credential_change()
@@ -8707,7 +8887,7 @@ class ModelCacheService:
         assert digest is not None and requested_plan is not None
         preview = self.repair_preview(digest)
         if preview["plan_digest"] != requested_plan:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.stale_plan", "repair preview is stale"
             )
         request_key = _request_key(request_key)
@@ -8719,7 +8899,7 @@ class ModelCacheService:
             )
             if existing is not None:
                 if existing.kind != "repair" or existing.plan_digest != requested_plan:
-                    raise ModelCacheConflict(
+                    raise ModelCacheConflictInvalid(
                         "model_cache.request_key_reused",
                         "request key was already used for another cache operation",
                     )
@@ -8754,7 +8934,7 @@ class ModelCacheService:
             )
             if existing is not None:
                 if existing.kind != "repair" or existing.plan_digest != requested_plan:
-                    raise ModelCacheConflict(
+                    raise ModelCacheConflictInvalid(
                         "model_cache.request_key_reused",
                         "request key was already used for another cache operation",
                     )
@@ -8861,7 +9041,7 @@ class ModelCacheService:
             # read is re-derived from the catalog, else the set is unknown.
             manifest = None if row is None else self._stored_manifest(row)
             if manifest is None:
-                raise ModelCacheNotFound(
+                raise ModelCacheNotFoundInvalid(
                     "model_cache.entry_missing", "cache entry was not found"
                 )
             return manifest
@@ -8955,9 +9135,9 @@ class ModelCacheService:
         from .operation_api import _activity_keyset_filter
 
         if not 1 <= limit <= 101:
-            raise ValueError("operation provider page limit is invalid")
+            raise RequestFault("operation provider page limit is invalid")
         if state is not None and (not isinstance(state, str) or not state.strip()):
-            raise ValueError("operation state filter is invalid")
+            raise RequestFault("operation state filter is invalid")
         if node_id is not None:
             return {"operations": (), "total": 0, "_next_boundary": None}
         # A filter may still name a retired spelling (one release).
@@ -9021,7 +9201,7 @@ class ModelCacheService:
             spec.sha256 for spec in manifest.artifacts
         ):
             self._reverify_set(manifest)
-            raise ModelCacheConflict(
+            raise ModelCacheConflictUnknown(
                 "model_cache.coverage_incomplete",
                 "cache artifact set is not completely verified; it is being "
                 "verified again and the request can be retried",
@@ -9106,7 +9286,7 @@ class ModelCacheService:
             or object_digest is None
             or not _valid_relative_path(artifact_path)
         ):
-            raise ModelCacheNotFound(
+            raise ModelCacheNotFoundRefused(
                 "model_cache.artifact_missing", "verified cache artifact was not found"
             )
         manifest = self._manifest_for_set(set_digest)
@@ -9119,7 +9299,7 @@ class ModelCacheService:
             None,
         )
         if spec is None:
-            raise ModelCacheNotFound(
+            raise ModelCacheNotFoundRefused(
                 "model_cache.artifact_missing", "verified cache artifact was not found"
             )
         # Only this object is served, so only this object is checked. Whole-set
@@ -9133,7 +9313,7 @@ class ModelCacheService:
             or not path.is_file()
         ):
             self._reverify_set(manifest)
-            raise ModelCacheConflict(
+            raise ModelCacheConflictUnknown(
                 "model_cache.artifact_unverified",
                 "cache artifact is no longer verified; it is being verified "
                 "again and the request can be retried",
@@ -9188,11 +9368,11 @@ class ModelCacheService:
         """
         digest = _optional_digest(artifact_set_sha256)
         if digest is None:
-            raise ModelCacheNotFound(
+            raise ModelCacheNotFoundInvalid(
                 "model_cache.entry_missing", "cache entry was not found"
             )
         if manifest is not None and manifest.digest != digest:
-            raise ModelCacheConflict(
+            raise ModelCacheConflictInvalid(
                 "model_cache.identity_conflict",
                 "requested manifest does not name this artifact set",
             )
@@ -9246,7 +9426,7 @@ class ModelCacheService:
             or isinstance(maximum_bytes, bool)
             or not 0 < maximum_bytes <= 8 * 1024 * 1024
         ):
-            raise ValueError("verified artifact read bounds are invalid")
+            raise RequestFault("verified artifact read bounds are invalid")
         path, size, _digest = self.cached_artifact_file(
             artifact_set_sha256, artifact_sha256, artifact_path
         )
@@ -9262,7 +9442,7 @@ class ModelCacheService:
         self.reconcile_storage()
         entry = self._entry(digest)
         if entry is None:
-            raise ModelCacheNotFound(
+            raise ModelCacheNotFoundInvalid(
                 "model_cache.entry_missing", "cache entry was not found"
             )
         return entry
@@ -9344,7 +9524,7 @@ class ModelCacheService:
         boundary: tuple[str, str] | None = None,
     ) -> dict[str, object]:
         if not 1 <= limit <= 100:
-            raise ValueError("cache entry limit is invalid")
+            raise RequestFault("cache entry limit is invalid")
         self.reconcile_storage()
         with self._session() as session:
             rows = list(
@@ -9367,7 +9547,7 @@ class ModelCacheService:
                     start = index + 1
                     break
             else:
-                raise ModelCacheConflict(
+                raise ModelCacheConflictInvalid(
                     "model_cache.cursor_invalid",
                     "cache inventory cursor boundary is stale",
                 )
@@ -9803,7 +9983,7 @@ class ModelCacheService:
         becoming an unbounded response.
         """
         if not 1 <= limit <= 100:
-            raise ValueError("cache update limit is invalid")
+            raise RequestFault("cache update limit is invalid")
         requested_set = _optional_digest(artifact_set_sha256)
         self.reconcile_storage()
         with self._session() as session:
@@ -9826,7 +10006,7 @@ class ModelCacheService:
                         start = index + 1
                         break
                 else:
-                    raise ModelCacheConflict(
+                    raise ModelCacheConflictInvalid(
                         "model_cache.cursor_invalid",
                         "cache update cursor boundary is stale",
                     )
@@ -10136,7 +10316,7 @@ class ModelCacheService:
 
 def _model_selector(value: str) -> str:
     if not isinstance(value, str) or not 1 <= len(value.strip()) <= 256:
-        raise ModelCacheResolutionError(
+        raise ModelCacheResolutionInvalid(
             "model_cache.selector_invalid", "model selector is required"
         )
     return value.strip()
@@ -10146,7 +10326,7 @@ def _request_key(value: str) -> str:
     try:
         return str(uuid.UUID(value))
     except (ValueError, AttributeError, TypeError) as error:
-        raise ModelCacheConflict(
+        raise ModelCacheConflictInvalid(
             "model_cache.request_key_invalid", "request key is invalid"
         ) from error
 
