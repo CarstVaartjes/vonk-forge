@@ -20,6 +20,9 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     InvalidRequestError,
+    RecipeBuildCleanupEvidence,
+    RecipeStartResult,
+    RecipeStopResult,
     SecurityRefusalError,
     UnknownOutcomeError,
     canonical_message,
@@ -37,6 +40,7 @@ from vonk_control.models import (
     RecipeRun,
 )
 from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.recipe_lifecycle_contract import RecipeOperationProgressResult
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
@@ -962,6 +966,21 @@ def test_role_phases_use_exact_stop_identity_without_launch_history() -> None:
         (("worker", worker),),
         (("head", head),),
     )
+
+
+def test_empty_rank_receipts_keep_their_parent_operation_kind() -> None:
+    node_id = "spk_" + "a" * 32
+    for kind, result_type in (
+        ("recipe.start", RecipeStartResult),
+        ("recipe.stop", RecipeStopResult),
+        ("recipe.build.cleanup.v1", RecipeBuildCleanupEvidence),
+    ):
+        loaded = _recorded_result(
+            kind, {"node_evidence": {node_id: {}}}, subject="kind-proof"
+        )
+        assert isinstance(loaded, RecipeOperationProgressResult)
+        assert loaded.node_evidence is not None
+        assert isinstance(loaded.node_evidence[node_id], result_type)
 
 
 # ------------------------------------------------------------------ the guard

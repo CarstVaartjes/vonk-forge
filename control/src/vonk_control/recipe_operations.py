@@ -50,7 +50,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
-from vonk_forge_contracts import read_model, read_recipe
+from vonk_forge_contracts import RecipeDefinition, read_model, read_recipe
 
 from . import agent_operation_states, artifact_job_states, job_states
 from .admission_locking import (
@@ -111,6 +111,7 @@ from .job_documents import (
     RecipeStartParent,
     RecipeStopParent,
     RecipeUninstallParent,
+    RunSwitchJobPayload,
 )
 from .lifecycle import CancelRequested, Effect, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
@@ -124,6 +125,7 @@ from .lifecycle.evidence import (
 )
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .logging import redact_text
+from .mapping_parameters import MappingParameters
 from .models import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
@@ -570,7 +572,7 @@ class _UninstallRecipe:
     id: str
     document_id: str
     content_digest: str
-    document: Mapping[str, object]
+    document: RecipeDefinition | None
 
 
 def _uninstall_recipe(
@@ -584,22 +586,25 @@ def _uninstall_recipe(
     revision = _active_recipe_revision(
         session, installation.recipe_revision_id, for_update=lock
     )
-    if (
-        revision is not None
-        and revision.content_digest is not None
-        and isinstance(revision.document, Mapping)
-    ):
+    if revision is not None and revision.content_digest is not None:
         return _UninstallRecipe(
             revision.id,
             revision.document_id,
             revision.content_digest,
-            revision.document,
+            _catalog_recipe(revision.document),
         )
     row = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
-    plan = installation.plan if isinstance(installation.plan, Mapping) else {}
-    digest = (row.content_digest if row is not None else None) or plan.get(
-        "recipe_content_sha256"
-    )
+    digest = row.content_digest if row is not None else None
+    if digest is None:
+        loaded_plan = read_or_rebuild(
+            kind="recipe.installation-plan",
+            subject=installation.id,
+            read=lambda: parse_stored_installation_plan(
+                installation.plan, for_uninstall=True
+            ),
+        )
+        if not isinstance(loaded_plan, Residue):
+            digest = loaded_plan.recipe_content_sha256
     if not isinstance(digest, str) or not _lower_hex_digest(digest):
         return None
     retire_as_unknown(
@@ -613,7 +618,7 @@ def _uninstall_recipe(
         installation.recipe_revision_id,
         row.document_id if row is not None else installation.recipe_revision_id,
         digest,
-        document if isinstance(document, Mapping) else {},
+        _catalog_recipe(document),
     )
 
 
@@ -1117,7 +1122,7 @@ class RecipeOperationService:
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
         *,
-        parameters: Mapping[str, object],
+        parameters: MappingParameters,
         actor: str,
     ) -> ClusterMappingPlan:
         return self._mappings.preview(recipe_revision_id, node_ids, parameters, actor)
@@ -2434,9 +2439,7 @@ class RecipeOperationService:
             topology = recipe_topology(revision.document)
             distributed_readiness = _canonical_distributed_readiness(revision.document)
             two_phase_start = (
-                world_size > 1
-                and topology.distributed
-                and distributed_readiness is not None
+                world_size > 1 and topology.distributed and distributed_readiness
             )
             start_deadline = (
                 # Persist the accepted loading/JIT budget. Exact rank-loss recovery
@@ -3570,7 +3573,7 @@ class RecipeOperationService:
         self,
         request_id: str,
         *,
-        expected_authority: Mapping[str, object],
+        expected_authority: RunSwitchReconciliationAuthority,
     ) -> bool:
         """Whether the reviewed reconciliation succeeded on every pending rank."""
 
@@ -3993,7 +3996,7 @@ class RecipeOperationService:
         self,
         installation_id: str,
         *,
-        expected_authority: Mapping[str, object],
+        expected_authority: RunSwitchReconciliationAuthority,
         run_switch_plan_digest: str,
         actor: str,
         request_id: str,
@@ -4110,7 +4113,7 @@ class RecipeOperationService:
         self,
         installation_id: str,
         *,
-        expected_authority: Mapping[str, object],
+        expected_authority: RunSwitchReconciliationAuthority,
         run_switch_plan_digest: str,
         actor: str,
         request_id: str,
@@ -7252,14 +7255,13 @@ class RecipeOperationService:
                 "current profile Stop owner is unavailable",
             )
         try:
-            from .run_switch_contract import RunSwitchPlan
-
-            run_switch_plan = read_stored_model(
-                RunSwitchPlan,
-                canonical_message(profile_operation.payload.get("plan")),
+            profile_parent = read_stored_model(
+                RunSwitchJobPayload,
+                canonical_message(profile_operation.payload),
                 strict=True,
                 from_json=True,
             )
+            run_switch_plan = profile_parent.plan
             stop_impacts = [
                 item for item in run_switch_plan.stops if item.run_id == run.id
             ]
@@ -8685,13 +8687,21 @@ def _lower_hex_digest(value: object) -> bool:
     )
 
 
-def _primary_model_identity(document: object) -> tuple[str, str] | None:
-    """The canonical primary model identity, or unknown for unreadable content."""
+def _catalog_recipe(document: object) -> RecipeDefinition | None:
+    if isinstance(document, RecipeDefinition):
+        return document
     try:
-        recipe = read_recipe(document)
+        return RecipeDefinition.model_validate_json(
+            canonical_message(document), extra="ignore"
+        )
     except (TypeError, ValueError):
         return None
-    if not recipe.models:
+
+
+def _primary_model_identity(document: object) -> tuple[str, str] | None:
+    """The canonical primary model identity, or unknown for unreadable content."""
+    recipe = _catalog_recipe(document)
+    if recipe is None or not recipe.models:
         return None
     model = recipe.models[0].model
     return model.content_sha256, f"{model.publisher}/{model.slug}"
@@ -8707,11 +8717,8 @@ def _recipe_model_identities(
     keeps whatever it cannot prove unused.  A model reached twice is one model.
     """
 
-    try:
-        recipe = read_recipe(document)
-    except (TypeError, ValueError):
-        return None
-    if not recipe.models:
+    recipe = _catalog_recipe(document)
+    if recipe is None or not recipe.models:
         return None
     result: list[tuple[str, str]] = []
     pending = [selection.model for selection in recipe.models]
@@ -8748,7 +8755,7 @@ def _recipe_model_identities(
 
 
 def _topology_order(
-    document: Mapping[str, object], key: Literal["start_order", "stop_order"]
+    document: object, key: Literal["start_order", "stop_order"]
 ) -> tuple[str, ...] | None:
     """The recipe's role order, or ``None`` when its topology cannot be read."""
 
@@ -8759,20 +8766,20 @@ def _topology_order(
     return tuple(topology.start_order if key == "start_order" else topology.stop_order)
 
 
-def _canonical_distributed_readiness(
-    document: Mapping[str, object],
-) -> dict[str, object] | None:
-    interfaces = document.get("interfaces")
-    if not isinstance(interfaces, Sequence):
+def _canonical_distributed_readiness(document: object) -> bool:
+    recipe = _catalog_recipe(document)
+    if recipe is None:
         raise RecipeRequestInvalid("distributed readiness interface is invalid")
     try:
         readiness = canonical_distributed_readiness(
-            topology=recipe_topology(document),
-            interfaces=interfaces,
+            topology=recipe.topology,
+            interfaces=tuple(
+                serialize_json_value(interface) for interface in recipe.interfaces
+            ),
         )
     except DistributedLifecycleError as error:
         raise RecipeRequestInvalid(str(error)) from error
-    return readiness
+    return readiness is not None
 
 
 def _start_deadline_failure(job: Job, *, now: datetime) -> str | None:
