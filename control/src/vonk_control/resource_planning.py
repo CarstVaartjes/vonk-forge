@@ -13,8 +13,9 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Literal, Protocol, TypeGuard, get_args, runtime_checkable
+from typing import Literal, TypeGuard, get_args
 
+from pydantic import ValidationError
 from vonk_agent_protocol import (
     ResourceBlockerCode,
     ResourcePlanningCode,
@@ -23,43 +24,28 @@ from vonk_agent_protocol import (
     resource_term_code,
 )
 from vonk_agent_protocol.inventory import MemoryPool
-from vonk_forge_contracts.recipe import RecipeDiskResources, RecipeMemoryResources
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts.recipe import (
+    RecipeDiskResources,
+    RecipeMemoryResources,
+    Scalar,
+)
 
 from .bounded_json import require_integer
-from .run_switch_contract import MemoryKind, RunSwitchChangeEffect
+from .resource_planning_contract import (
+    ResourceRecipeProjection,
+)
+from .run_switch_contract import (
+    EffectiveSettingsSelection,
+    MemoryKind,
+    RunSwitchChangeEffect,
+)
 
 EvidenceState = Literal["declared", "measured", "fresh", "stale", "unknown"]
 Effect = Literal["reuse", "restart", "reprepare", "reinstall", "rebuild"]
 _CHANGE_EFFECTS: frozenset[RunSwitchChangeEffect] = frozenset(
     get_args(RunSwitchChangeEffect)
 )
-
-
-@runtime_checkable
-class _ParallelismProjection(Protocol):
-    """The structural shape of one typed parallelism projection."""
-
-    world_size: int
-    tensor: int
-    pipeline: int
-    data: int
-    backend: str
-
-
-@runtime_checkable
-class _EffectiveSettingsProjection(Protocol):
-    """The structural shape of one typed effective-settings projection."""
-
-    kind: Literal["generation", "embedding", "job"]
-    context_tokens: int | None
-    concurrency: int | None
-    batch_tokens: int | None
-    knobs: Mapping[str, object]
-    change_effects: Mapping[str, str]
-    identity_digest: str
-    parallelism: _ParallelismProjection
-
-
 # The memory the platform keeps free on every Spark beyond a workload's declared
 # peak. A recipe's own ``reserve_bytes`` is informational and is never added.
 PLATFORM_MEMORY_FLOOR_BYTES = 2_000_000_000
@@ -123,8 +109,8 @@ class EffectiveResourceSettings:
     concurrency: int | None
     batch_tokens: int | None
     parallelism: ParallelismSettings
-    knobs: Mapping[str, object] = field(default_factory=dict)
-    change_effects: Mapping[str, str] = field(default_factory=dict)
+    knobs: Mapping[str, Scalar] = field(default_factory=dict)
+    change_effects: Mapping[str, RunSwitchChangeEffect] = field(default_factory=dict)
     identity_digest: str = ""
 
     def identity(self) -> dict[str, object]:
@@ -479,13 +465,35 @@ class PreparationDecision:
     settings_digest: str
 
 
-def resolve_effective_settings(
-    value: Mapping[str, object] | object,
-) -> SettingsResolution:
-    """Resolve one canonical RecipeDefinition or its typed settings projection."""
-
-    raw = _as_mapping(value)
-    if raw is None:
+def resolve_effective_settings(value: object) -> SettingsResolution:
+    """Read canonical settings once, then plan from typed owned fields."""
+    if isinstance(value, EffectiveResourceSettings):
+        return SettingsResolution(value)
+    if isinstance(value, EffectiveSettingsSelection):
+        parallel = value.parallelism
+        return SettingsResolution(
+            EffectiveResourceSettings(
+                value.kind,
+                value.context_tokens,
+                value.concurrency,
+                value.max_batch_tokens,
+                ParallelismSettings(
+                    parallel.world_size,
+                    parallel.tensor,
+                    parallel.pipeline,
+                    parallel.data,
+                    parallel.backend,
+                ),
+                value.knobs,
+                value.change_effects,
+                value.identity_sha256,
+            )
+        )
+    if isinstance(value, RecipeDefinition):
+        raw = value.model_dump(mode="json")
+    elif isinstance(value, Mapping):
+        raw = value
+    else:
         return SettingsResolution(
             None,
             (
@@ -495,173 +503,111 @@ def resolve_effective_settings(
                 ),
             ),
         )
-    source = raw.get("settings", raw)
-    settings = dict(source) if isinstance(source, Mapping) else {}
-    reasons: list[ResourceReason] = []
-
-    def setting(name: str) -> tuple[object, str | None]:
-        value = settings.get(name)
-        if isinstance(value, Mapping) and "value" in value:
-            return value.get("value"), _effect(value.get("change_effect"))
-        return value, None
-
-    kind = settings.get("kind")
-    if kind not in {"generation", "embedding", "job"}:
-        reasons.append(
-            _reason(
-                ResourcePlanningCode.SETTINGS_KIND_UNKNOWN,
-                "Canonical settings kind is missing or unsupported.",
-            )
+    try:
+        recipe = ResourceRecipeProjection.model_validate_json(
+            json.dumps(raw, allow_nan=False), strict=True
         )
-        kind = "job"
-
-    def positive(name: str, optional: bool = True) -> int | None:
-        value, _ = setting(name)
-        if value is None and optional:
-            return None
-        if type(value) is not int or value < 1:
+    except ValidationError as error:
+        reasons = []
+        for detail in error.errors():
+            location = detail["loc"]
+            if "parallelism" in location and "settings" in location:
+                code = ResourcePlanningCode.PARALLELISM_DUPLICATE
+            elif "topology" in location:
+                code = (
+                    ResourcePlanningCode.PARALLELISM_UNKNOWN
+                    if detail["type"] == "missing"
+                    else ResourcePlanningCode.PARALLELISM_TYPE
+                )
+            elif "knobs" in location:
+                code = ResourcePlanningCode.KNOBS_INVALID
+            elif detail["type"] in {"union_tag_invalid", "union_tag_not_found"}:
+                code = ResourcePlanningCode.SETTINGS_KIND_UNKNOWN
+            else:
+                code = ResourcePlanningCode.SETTINGS_TYPE
             reasons.append(
                 _reason(
-                    ResourcePlanningCode.SETTINGS_TYPE,
-                    f"Canonical {name} must be a positive integer.",
+                    code,
+                    "Canonical resource settings are invalid: "
+                    + ".".join(str(part) for part in location),
                 )
             )
-            return None
-        return value
-
-    context = positive("context_tokens", optional=kind != "generation")
-    concurrency = positive("concurrency")
-    batch = positive("max_batch_tokens")
-    knobs: dict[str, object] = {}
-    effects: dict[str, str] = {}
-    raw_knobs = settings.get("knobs", {})
-    if not isinstance(raw_knobs, Mapping):
-        reasons.append(
-            _reason(
-                ResourcePlanningCode.KNOBS_INVALID,
-                "Canonical settings knobs are invalid.",
-            )
-        )
-        raw_knobs = {}
-    for name, raw_value in raw_knobs.items():
-        if isinstance(raw_value, Mapping) and "value" in raw_value:
-            knobs[str(name)] = raw_value.get("value")
-            effect = _effect(raw_value.get("change_effect"))
-        else:
-            knobs[str(name)] = raw_value
-            effect = None
-        if effect is not None:
-            effects[str(name)] = effect
-    for name in ("context_tokens", "concurrency", "max_batch_tokens"):
-        _, effect = setting(name)
-        if effect is not None:
-            effects[name] = effect
-    raw_effects = settings.get("change_effects")
-    if isinstance(raw_effects, Mapping):
-        for name, raw_value in raw_effects.items():
-            effect = _effect(raw_value)
-            if effect is not None:
-                effects[str(name)] = effect
-
-    topology = raw.get("topology")
-    topology_map = topology if isinstance(topology, Mapping) else None
-    parallel = topology_map.get("parallelism") if topology_map else None
-    if not isinstance(parallel, Mapping):
-        reasons.append(
-            _reason(
-                ResourcePlanningCode.PARALLELISM_UNKNOWN,
-                "Canonical topology parallelism is unavailable.",
-            )
-        )
-        parallel = {}
-    if "parallelism" in settings:
-        reasons.append(
-            _reason(
-                ResourcePlanningCode.PARALLELISM_DUPLICATE,
-                "Parallelism is owned by topology and cannot be repeated in settings.",
-            )
-        )
-    dimensions: dict[str, int | None] = {}
-    for name in ("tensor", "pipeline", "data"):
-        value = parallel.get(name)
-        if type(value) is not int or value < 1:
-            reasons.append(
+        return SettingsResolution(None, tuple(dict.fromkeys(reasons)))
+    except (TypeError, ValueError):
+        return SettingsResolution(
+            None,
+            (
                 _reason(
-                    ResourcePlanningCode.PARALLELISM_TYPE,
-                    f"Canonical topology parallelism {name} is invalid.",
-                )
-            )
-            dimensions[name] = None
-        else:
-            dimensions[name] = value
-    node_count = topology_map.get("node_count") if topology_map else None
-    if type(node_count) is not int or node_count < 1:
-        reasons.append(
-            _reason(
-                ResourcePlanningCode.PARALLELISM_TYPE,
-                "Canonical topology node_count is invalid.",
-            )
+                    ResourcePlanningCode.SETTINGS_UNKNOWN,
+                    "Canonical effective settings cannot be read.",
+                ),
+            ),
         )
-        node_count = None
-    # One rank per node: the world size is the node count.
-    world_size = node_count
-    tensor, pipeline, data = (
-        dimensions["tensor"],
-        dimensions["pipeline"],
-        dimensions["data"],
-    )
-    if tensor is not None and pipeline is not None and data is not None:
-        product = tensor * pipeline * data
-        if world_size is not None and product != world_size:
-            reasons.append(
+    settings = recipe.settings
+    parallel = recipe.topology.parallelism
+    if (
+        parallel.tensor * parallel.pipeline * parallel.data
+        != recipe.topology.node_count
+    ):
+        return SettingsResolution(
+            None,
+            (
                 _reason(
                     ResourcePlanningCode.PARALLELISM_INCONSISTENT,
                     "Topology parallelism product does not equal node_count.",
-                )
-            )
-    backend = parallel.get("backend")
-    if not isinstance(backend, str) or not backend:
-        reasons.append(
-            _reason(
-                ResourcePlanningCode.PARALLELISM_TYPE,
-                "Canonical topology parallelism backend is invalid.",
-            )
+                ),
+            ),
         )
-        backend = "unknown"
-    if reasons:
-        return SettingsResolution(None, tuple(reasons))
+    context = settings.context_tokens.value if settings.kind == "generation" else None
+    concurrency = (
+        settings.concurrency.value if settings.concurrency is not None else None
+    )
+    batch = (
+        settings.max_batch_tokens.value
+        if settings.kind != "job" and settings.max_batch_tokens is not None
+        else None
+    )
+    knobs = {name: setting.value for name, setting in settings.knobs.items()}
+    effects: dict[str, RunSwitchChangeEffect] = {
+        name: setting.change_effect for name, setting in settings.knobs.items()
+    }
+    if settings.kind == "generation":
+        effects["context_tokens"] = settings.context_tokens.change_effect
+    if settings.concurrency is not None:
+        effects["concurrency"] = settings.concurrency.change_effect
+    if settings.kind != "job" and settings.max_batch_tokens is not None:
+        effects["max_batch_tokens"] = settings.max_batch_tokens.change_effect
     identity = {
-        "kind": kind,
+        "kind": settings.kind,
         "context_tokens": context,
         "concurrency": concurrency,
         "max_batch_tokens": batch,
         "parallelism": {
-            "world_size": world_size,
-            "tensor": dimensions["tensor"],
-            "pipeline": dimensions["pipeline"],
-            "data": dimensions["data"],
-            "backend": backend,
+            "world_size": recipe.topology.node_count,
+            "tensor": parallel.tensor,
+            "pipeline": parallel.pipeline,
+            "data": parallel.data,
+            "backend": parallel.backend,
         },
         "knobs": _canonical(knobs),
     }
-    canonical_digest = raw.get("identity_sha256")
-    digest = canonical_digest if _is_digest(canonical_digest) else _digest(identity)
-    if world_size is None or tensor is None or pipeline is None or data is None:
-        # Unreachable: an invalid dimension records a blocker reason and returns
-        # above, so the explicit narrowing never discards a valid resolution.
-        return SettingsResolution(None, tuple(reasons))
     return SettingsResolution(
         EffectiveResourceSettings(
-            kind,
+            settings.kind,
             context,
             concurrency,
             batch,
-            ParallelismSettings(world_size, tensor, pipeline, data, backend),
+            ParallelismSettings(
+                recipe.topology.node_count,
+                parallel.tensor,
+                parallel.pipeline,
+                parallel.data,
+                parallel.backend,
+            ),
             knobs,
             effects,
-            digest,
-        ),
-        (),
+            _digest(identity),
+        )
     )
 
 
@@ -672,64 +618,35 @@ def _selected_model_bytes(
 ) -> int | None:
     if not model_documents:
         return None
-    selections = recipe_document.get("models")
-    if not isinstance(selections, Sequence) or isinstance(selections, (str, bytes)):
-        return None
-    total = 0
-    selected_any = False
-    for selection in selections:
-        if not isinstance(selection, Mapping):
-            return None
-        model_ref = selection.get("model")
-        if not isinstance(model_ref, Mapping):
-            return None
-        publisher = model_ref.get("publisher")
-        slug = model_ref.get("slug")
-        content_sha256 = model_ref.get("content_sha256")
-        if (
-            not isinstance(publisher, str)
-            or not publisher
-            or not isinstance(slug, str)
-            or not slug
-            or not isinstance(content_sha256, str)
-            or not content_sha256
-        ):
-            return None
-        model_document = model_documents.get((publisher, slug, content_sha256))
-        if model_document is None:
-            return None
-        files = model_document.get("files")
-        if not isinstance(files, Sequence) or isinstance(files, (str, bytes)):
-            return None
-        by_id = {
-            str(file.get("id")): file
-            for file in files
-            if isinstance(file, Mapping) and isinstance(file.get("id"), str)
-        }
-        raw_files = selection.get("files")
-        if not isinstance(raw_files, Sequence) or isinstance(raw_files, (str, bytes)):
-            return None
-        selected_ids: set[str] = set()
-        for item in raw_files:
-            if not isinstance(item, Mapping):
+    try:
+        recipe = ResourceRecipeProjection.model_validate_json(
+            json.dumps(recipe_document, allow_nan=False), strict=True
+        )
+        total = 0
+        selected_any = False
+        for selection in recipe.models:
+            reference = selection.model
+            raw_model = model_documents.get(
+                (reference.publisher, reference.slug, reference.content_sha256)
+            )
+            if raw_model is None:
                 return None
-            roles = item.get("roles", ())
-            if (
-                isinstance(roles, Sequence)
-                and not isinstance(roles, (str, bytes))
-                and role_name in roles
-            ):
-                file_id = item.get("file_id")
-                if not isinstance(file_id, str) or file_id not in by_id:
+            model = ModelDefinition.model_validate_json(
+                json.dumps(raw_model, allow_nan=False), strict=True
+            )
+            by_id = {file.id: file for file in model.files}
+            selected_ids = {
+                item.file_id for item in selection.files if role_name in item.roles
+            }
+            for file_id in selected_ids:
+                file = by_id.get(file_id)
+                if file is None:
                     return None
-                selected_ids.add(file_id)
-        for file_id in selected_ids:
-            size = by_id[file_id].get("size_bytes")
-            if type(size) is not int or size < 0:
-                return None
-            total += size
-            selected_any = True
-    return total if selected_any else None
+                total += file.size_bytes
+                selected_any = True
+        return total if selected_any else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _resource_evidence(
@@ -737,16 +654,18 @@ def _resource_evidence(
     role_name: str,
     model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
     declared_total_bytes: int,
-    settings: object | None,
+    settings: EffectiveResourceSettings | None,
 ) -> ResourceEvidence:
     model_bytes = _selected_model_bytes(recipe_document, model_documents, role_name)
     return ResourceEvidence(
         weights_bytes=model_bytes,
         runtime_overhead_bytes=None,
         declared_total_bytes=declared_total_bytes if model_bytes is not None else None,
-        baseline_context_tokens=getattr(settings, "context_tokens", None),
-        baseline_concurrency=getattr(settings, "concurrency", None),
-        baseline_batch_tokens=getattr(settings, "batch_tokens", None),
+        baseline_context_tokens=settings.context_tokens
+        if settings is not None
+        else None,
+        baseline_concurrency=settings.concurrency if settings is not None else None,
+        baseline_batch_tokens=settings.batch_tokens if settings is not None else None,
         evidence_state="declared" if model_bytes is not None else "unknown",
     )
 
@@ -1286,7 +1205,7 @@ def classify_preparation_effects(
     previous: EffectiveResourceSettings | object | None,
     current: EffectiveResourceSettings | object,
     *,
-    parameter_effects: Mapping[str, str] | None = None,
+    parameter_effects: Mapping[str, RunSwitchChangeEffect] | None = None,
 ) -> PreparationDecision:
     current_resolution = (
         current
@@ -1430,43 +1349,6 @@ def _term(
             ),
         )
     return max(0, value - baseline) * coefficient, ()
-
-
-def _as_mapping(value: object) -> Mapping[str, object] | None:
-    if isinstance(value, Mapping):
-        return value
-    model_dump = getattr(value, "model_dump", None)
-    if callable(model_dump):
-        dumped = model_dump(mode="python")
-        return dumped if isinstance(dumped, Mapping) else None
-    if isinstance(value, _EffectiveSettingsProjection):
-        parallel = value.parallelism
-        return {
-            "settings": {
-                "kind": value.kind,
-                "context_tokens": value.context_tokens,
-                "concurrency": value.concurrency,
-                "max_batch_tokens": value.batch_tokens,
-                "knobs": dict(value.knobs),
-                "change_effects": dict(value.change_effects),
-            },
-            "topology": {
-                "node_count": parallel.world_size,
-                "parallelism": {
-                    "tensor": parallel.tensor,
-                    "pipeline": parallel.pipeline,
-                    "data": parallel.data,
-                    "backend": parallel.backend,
-                },
-            },
-            "identity_sha256": value.identity_digest,
-        }
-    return None
-
-
-def _effect(value: object) -> RunSwitchChangeEffect | None:
-    candidate = getattr(value, "value", value)
-    return candidate if candidate in _CHANGE_EFFECTS else None
 
 
 def _same_memory_kind(left: str, right: str) -> bool:
