@@ -52,23 +52,14 @@
   },
   "max_debt": 9,
   "debt_ceiling": {
-    "total": 196,
-    "unaudited": 603,
+    "total": 187,
+    "unaudited": 439,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
     "note": "Raises in a lifecycle or operation path that predate the rule that they use SecurityRefusalError, InvalidRequestError or UnknownOutcomeError. A module's count and the ceiling only fall: convert a raise to a categorized type, then lower the count.",
-    "ceiling": 1528,
+    "ceiling": 1029,
     "grandfathered": {
-      "control/src/vonk_control/agent_jobs.py": 69,
-      "control/src/vonk_control/agent_upgrades.py": 41,
-      "control/src/vonk_control/availability_production.py": 46,
-      "control/src/vonk_control/distributed_lifecycle.py": 3,
-      "control/src/vonk_control/distributed_recovery.py": 92,
-      "control/src/vonk_control/fleet_profiles.py": 149,
-      "control/src/vonk_control/host_runtime_plan_authority.py": 43,
-      "control/src/vonk_control/install_admission.py": 30,
-      "control/src/vonk_control/jobs.py": 16,
       "control/src/vonk_control/lifecycle/recipe_operation.py": 1,
       "control/src/vonk_control/model_cache.py": 239,
       "control/src/vonk_control/profile_stop_authority.py": 3,
@@ -77,7 +68,7 @@
       "control/src/vonk_control/recipe_image_availability.py": 117,
       "control/src/vonk_control/recipe_operation_phases.py": 5,
       "control/src/vonk_control/recipe_operation_worker.py": 1,
-      "control/src/vonk_control/recipe_operations.py": 279,
+      "control/src/vonk_control/recipe_operations.py": 269,
       "control/src/vonk_control/recipe_start_payloads.py": 3,
       "control/src/vonk_control/recipe_stop_payloads.py": 23,
       "control/src/vonk_control/recipe_update_batches.py": 19,
@@ -283,25 +274,6 @@
   ],
   "fail_closed": [
     {
-      "family": "agent.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, fence authority, or a destructive-effect owner guard. Audit notes: Authenticated attempt fence, lease and certificate checks: a stale or foreign attempt must not mutate state.",
-      "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService._active", "agent-operation-lease-certificate-or-fence-is-stale", 7],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService._fence_token", "agent-operation-lease-certificate-or-fence-is-stale", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService._finish", "agent-operation-lacks-its-parent-job", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService._finish", "superseded-operation-has-no-completion-authority", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService.heartbeat", "superseded-cancellation-authority-expired", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService.heartbeat", "superseded-cancellation-authority-is-invalid", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService.record_late_result", "agent-certificate-is-no-longer-active", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService.record_late_result", "agent-operation-attempt-is-not-expired", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService.record_late_result", "agent-operation-authority-is-stale", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService.record_late_result", "agent-operation-authority-or-expired-attempt-is-stale", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService.record_late_result", "agent-operation-lease-certificate-or-fence-is-stale", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentAttempt", "AgentJobService.record_late_result", "expired-attempt-evidence-changed", 1]
-      ]
-    },
-    {
       "family": "agent.input-validation",
       "category": "input-validation",
       "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led). Audit notes: Operator retire request refused because live attempts or leases still hold the work; the operator's request is the thing refused.",
@@ -320,46 +292,7 @@
       "category": "already-retried",
       "reason": "Admission or capacity busy and provider-transient errors that carry a retry; the owner retries them.",
       "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "InstallAdmissionBusy", "AgentJobService.enqueue_in_session", "install.capacity_busy", 1],
-        ["control/src/vonk_control/agent_jobs.py", "RunAdmissionBusy", "AgentJobService.enqueue_in_session", "run-capacity-writer-is-busy", 1]
-      ]
-    },
-    {
-      "family": "upgrade.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, fence authority, or a destructive-effect owner guard. Audit notes: Signed release manifest, package descriptor and rollback-source identity (binary digest) checks.",
-      "sites": [
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService._enqueue_node", "rollback-source-no-longer-matches-installed-agent", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService._enqueue_node", "stored-rollback-sources-are-invalid", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService._repair_manifest", "agent-repair-manifest-does-not-match-its-package-descriptor", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService._repair_manifest", "agent-repair-manifest-is-invalid", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService._repair_manifest", "agent-repair-package-url-is-not-canonical", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService.current_package", "agent-release-document-is-too-large", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService.current_package", "agent-release-manifest-is-invalid", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService.current_package", "agent-release-manifest-is-too-large", 1]
-      ]
-    },
-    {
-      "family": "upgrade.input-validation",
-      "category": "input-validation",
-      "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led). Audit notes: Malformed or replayed upgrade request.",
-      "sites": [
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService._check_replayed_request", "agent-upgrade-request-key-was-already-used", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService._check_replayed_request", "agent-upgrade-request-key-was-already-used-differently", 2],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService.current_package", "the-current", 1]
-      ]
-    },
-    {
-      "family": "upgrade.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping uncertainty (missing receipt, stale stored plan, persisted state, changed scope) that rule 5 of the lifecycle core turns into unknown-then-reconcile. Debt: the ceiling only falls.",
-      "sites": [
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService._enqueue_node", "stored-agent-upgrade-package-is-invalid", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService._package", "agent-upgrade-package-is-invalid", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService.current_package", "current-agent-release-is-inconsistent", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService.preview", "agent-repair-requires-exactly-its-explicit-spark", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "AgentUpgradeService.preview", "agent-upgrade-targets-are-invalid", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeConflict", "_request_intent", "agent-upgrade-request-intent-is-invalid", 4]
+        ["control/src/vonk_control/agent_jobs.py", "InstallAdmissionBusy", "AgentJobService.enqueue_in_session", "install.capacity_busy", 1]
       ]
     },
     {
@@ -1015,35 +948,6 @@
       ]
     },
     {
-      "family": "availability_production.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
-      "sites": [
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "_build_dependency", "recipe_image.build_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "_cached_build_receipt", "recipe_image.build_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "_compile_consistent_runtime", "recipe_image.runtime_invalid", 3],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "_observe_build", "message", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "_observe_build", "recipe_image.build_cancelled", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "_observe_build", "recipe_image.build_invalid", 5],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "_observe_build", "recipe_image.build_wait", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.authority", "message", 2],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.authority", "recipe_image.recipe_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.authority", "recipe_image.recipe_unavailable", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.authority", "recipe_image.runtime_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.builder", "message", 4],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.builder", "recipe_image.build_capacity_wait", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.builder", "recipe_image.build_input_missing", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.builder", "recipe_image.build_invalid", 2],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.builder", "recipe_image.build_unavailable", 2],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.builder", "recipe_image.identity_conflict", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.builder", "recipe_image.operation_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.builder.admission_guard", "recipe_image.build_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.recover_build", "recipe_image.build_invalid", 5],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.recover_build", "recipe_image.identity_conflict", 1],
-        ["control/src/vonk_control/availability_production.py", "RecipeImageAvailabilityError", "build_recipe_image_availability.recover_build", "recipe_image.operation_invalid", 1]
-      ]
-    },
-    {
       "family": "bounded_json.input-validation",
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class BoundedJSONError validates a contract or request.",
@@ -1275,105 +1179,6 @@
         ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "require_wire_exports", "agent-route-models-absent-from-wire-export", 1],
         ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "require_wire_exports", "agent-wire-model-definition-is-absent", 1],
         ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "require_wire_exports", "agent-wire-model-ownership-differs-from-route", 1]
-      ]
-    },
-    {
-      "family": "distributed_lifecycle.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: operation bookkeeping by default.",
-      "sites": [
-        ["control/src/vonk_control/distributed_lifecycle.py", "DistributedLifecycleError", "canonical_distributed_readiness", "distributed-endpoint-topology-is-invalid", 1],
-        ["control/src/vonk_control/distributed_lifecycle.py", "DistributedLifecycleError", "canonical_distributed_readiness", "distributed-readiness-interface-is-invalid", 1],
-        ["control/src/vonk_control/distributed_lifecycle.py", "DistributedLifecycleError", "canonical_distributed_readiness", "distributed-readiness-path-is-invalid", 1]
-      ]
-    },
-    {
-      "family": "distributed_recovery.already-retried",
-      "category": "already-retried",
-      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: message says the work is busy, waiting or superseded.",
-      "sites": [
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_enqueue_recovery_stop", "distributed-recovery-start-authority-was-superseded", 1]
-      ]
-    },
-    {
-      "family": "distributed_recovery.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
-      "sites": [
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "DistributedRecoveryCoordinator.tick", "accepted-run-has-no-automatic-recovery-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "DistributedRecoveryCoordinator.tick", "singleton-recovery-authority-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "DistributedRecoveryCoordinator.tick", "singleton-recovery-stop-owner-is-unavailable", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority", "multi-node-recovery-observation-time-is-unavailable", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority", "singleton-recovery-lacks-current-generation-start-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority", "singleton-recovery-lacks-exact-accepted-start-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority", "singleton-recovery-lacks-exact-current-start-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-child-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-deadline-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-operation-identity-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-payload-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-payload-is-not-singleton", 2],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-phase-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-phase-item-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-rank-phase-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-readiness-differs-from-its-rank-launch", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-readiness-phase-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-target-set-is-incomplete", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-target-set-is-invalid", 2],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_child", "accepted-start-child-identity-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_child", "accepted-start-payload-binding-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_aware", "distributed-recovery-clock-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_decode_phases", "distributed-recovery-phases-are-invalid", 4],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_enqueue_recovery_stop", "distributed-recovery-authority-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_enqueue_recovery_stop", "distributed-recovery-is-already-queued", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_original_start_authority", "distributed-recovery-lacks-its-start-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_original_start_authority", "distributed-recovery-start-authority-is-invalid", 2],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-authority-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-endpoint-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-lacks-exact-prior-start-stop-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-order-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-plan-is-invalid", 4],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-prior-start-generation-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-rank-set-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-rendezvous-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-run-authority-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-start-payload-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "accepted-start-image-authority-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "accepted-start-payload-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "accepted-start-plan-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-installation-authority-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-mapping-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-placement-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-plan-authority-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-plan-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-rank-set-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-requires-exact-stop-and-observation-suppo", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-resources-are-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-start-authority-was-cancelled", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-start-payload-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_distributed_recovery_start_origin", "distributed-recovery-start-differs-from-its-exact-stop-conti", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_distributed_recovery_start_origin", "distributed-recovery-start-marker-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_distributed_recovery_start_origin", "distributed-recovery-stop-continuation-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_distributed_recovery_start_origin", "distributed-recovery-stop-continuation-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_distributed_recovery_start_origin", "distributed-recovery-stop-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-child-differs-from-stored-execution-plan", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-deadline-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-fabric-address-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-owner-endpoint-is-invalid", 3],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-owner-endpoint-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-plan-cannot-be-rebound", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-plan-identity-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-plan-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-rendezvous-plan-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-start-differs-from-its-exact-stop-continu", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-start-lacks-its-exact-completed-stop", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-start-marker-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-stop-continuation-differs-from-its-start", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-stop-did-not-complete-under-its-recovery", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-stop-has-stale-exact-run-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "enforce_recovery_deadline", "distributed-recovery-authority-is-invalid", 4],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "enforce_recovery_deadline", "distributed-recovery-deadline-elapsed", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "recovery_start_plan", "distributed-recovery-authority-is-invalid", 1]
       ]
     },
     {
@@ -1732,54 +1537,6 @@
       ]
     },
     {
-      "family": "host_runtime_plan_authority.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
-      "sites": [
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_check_operation_target", "lifecycle-plan-node-identity-differs", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_job_run_authority", "artifact-jobrun-identity-is-stale", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_job_run_authority", "artifact-jobrun-owner-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_load_run_authority", "recipe-run-authority-is-stale", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_load_run_authority", "recipe-run-is-unavailable", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_load_run_authority", "recipe-run-plan-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_parse_job_run", "durable-jobrun-plan-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_parse_start", "durable-start-plan-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_parse_stop", "durable-stop-plan-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_service_run_authority", "service-run-plan-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_service_run_authority", "service-start-identity-is-stale", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_service_run_authority", "service-start-owner-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_service_stop_authority", "durable-prior-start-authority-is-unavailable", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_service_stop_authority", "recovery-stop-generation-is-stale", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_service_stop_authority", "service-stop-differs-from-exact-prior-start", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_service_stop_authority", "service-stop-generation-is-stale", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_service_stop_authority", "service-stop-identity-is-stale", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_service_stop_authority", "service-stop-owner-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_child_record", "lifecycle-operation-manifest-differs", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_child_record", "lifecycle-operation-manifest-is-missing", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_child_record", "lifecycle-operation-record-is-inconsistent", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_recovery_start_generation", "distributed-recovery-stop-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_recovery_start_generation", "recovery-readiness-placement-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_recovery_start_generation", "recovery-start-generation-is-unavailable", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_recovery_start_generation", "recovery-start-placement-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_recovery_start_generation", "recovery-start-plan-is-invalid", 2],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_recovery_start_generation", "recovery-start-target-set-is-invalid", 2],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_recovery_start_generation", "recovery-stop-actor-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_recovery_start_generation", "recovery-stop-owner-is-stale", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_recovery_start_generation", "singleton-recovery-start-placement-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_validate_recovery_start_generation", "singleton-recovery-stop-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "derive_runtime_plan_binding", "lifecycle-plan-owner-does-not-match-action", 1]
-      ]
-    },
-    {
-      "family": "host_runtime_plan_authority.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
-      "sites": [
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_job_run_authority", "artifact-jobrun-start-is-no-longer-authorized", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityError", "_service_run_authority", "service-start-is-no-longer-authorized", 1]
-      ]
-    },
-    {
       "family": "image_store_collection.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record.",
@@ -1794,31 +1551,7 @@
       "sites": [
         ["control/src/vonk_control/install_admission.py", "InstallAdmissionBusy", "InstallAdmissionService._accept_install_in_session", "install-target-membership-changed-during-admission", 1],
         ["control/src/vonk_control/install_admission.py", "InstallAdmissionBusy", "InstallAdmissionService.accept_install_in_session", "install.capacity_busy", 2],
-        ["control/src/vonk_control/install_admission.py", "InstallAdmissionBusy", "require_admissible", "install-is-waiting-for-inventory-or-capacity", 1],
-        ["control/src/vonk_control/install_admission.py", "InstallPreflightExpired", "require_admissible", "message", 1]
-      ]
-    },
-    {
-      "family": "install_admission.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
-      "sites": [
-        ["control/src/vonk_control/install_admission.py", "InstallPlanConflict", "_primary_model_sha256", "install.model_identity_unavailable", 1]
-      ]
-    },
-    {
-      "family": "install_admission.input-validation",
-      "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InstallPlanConflict validates a contract or request.",
-      "sites": [
-        ["control/src/vonk_control/install_admission.py", "InstallPlanConflict", "InstallAdmissionService._accept_install_in_session", "disk-capacity-changed-while-reserving", 1],
-        ["control/src/vonk_control/install_admission.py", "InstallPlanConflict", "InstallAdmissionService._accept_install_in_session", "install.dependencies_stale", 2],
-        ["control/src/vonk_control/install_admission.py", "InstallPlanConflict", "InstallAdmissionService._accept_install_in_session", "install.plan_invalid", 1],
-        ["control/src/vonk_control/install_admission.py", "InstallPlanConflict", "InstallAdmissionService._accept_install_in_session", "install.plan_stale", 1],
-        ["control/src/vonk_control/install_admission.py", "InstallPlanConflict", "InstallAdmissionService._accept_install_in_session", "installation-exceeds-its-reviewed-disk-claim", 1],
-        ["control/src/vonk_control/install_admission.py", "InstallPlanConflict", "InstallAdmissionService._accept_install_in_session", "installation-node-disappeared", 1],
-        ["control/src/vonk_control/install_admission.py", "InstallPlanConflict", "InstallAdmissionService._accept_install_in_session", "mapping-or-build-changed-while-reserving", 1],
-        ["control/src/vonk_control/install_admission.py", "InstallPlanConflict", "require_admissible", "install.plan_invalid", 1]
+        ["control/src/vonk_control/install_admission.py", "InstallAdmissionBusy", "require_admissible", "install-is-waiting-for-inventory-or-capacity", 1]
       ]
     },
     {
@@ -2786,8 +2519,6 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, fence authority, or a destructive-effect owner guard. Audit notes: Authorization guard: a profile may not stop or remove a workload the owner did not review.",
       "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._intended_profile", "persisted-application-intent-digest-is-inconsistent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._intended_profile", "persisted-application-review-digest-is-inconsistent", 1],
         ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileRecoveryBindingConflict", "_require_recovery_preparation", "profile.recovery_cache_pending", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "current-profile-stop-plan-is-invalid", 2]
       ]
@@ -2797,46 +2528,10 @@
       "category": "input-validation",
       "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led). Audit notes: User request is stale, replayed, superseded or names an unknown recipe/profile.",
       "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._intended_profile", "persisted-application-plan-exceeds-its-reviewed-intent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._intended_profile", "persisted-application-review-source-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._matching_application", "fleet-profile-request-key-was-reused-for-another-plan", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "application-has-been-superseded-by-another-application", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "application-has-been-superseded-by-another-workload-intent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "persisted-application-review-source-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "profile-application-was-superseded-by-a-later-intent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "selected-profile-differs-from-its-accepted-snapshot", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "selected-profile-retry-lost-its-current-selection", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "selected-profile-revision-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._recipe_identity", "recipe-selector-is-not-an-exact-unique-active-recipe", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._recipe_identity", "recipe-selector-must-use-canonical-publisher-slug-form", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._reviewed_profile_plan", "persisted-application-review-source-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._selected_profile_snapshot", "persisted-selected-fleet-profile-is-invalid", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._start_step", "fleet-profile-step-kind-is-unsupported", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.cancel", "profile-application-already-has-a-different-cancellation-req", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.cancel", "profile-application-is-not-cancellable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.cancel", "profile-application-scope-changed-during-cancellation", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.cancel", "profile-cancellation-authority-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.cancel", "profile-cancellation-request-key-is-invalid", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.create", "a-fleet-profile-with-this-name-already-exists", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.endpoint_intent", "selected-profile-application-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.preview", "recovery-review-owner-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.retry", "retry-request-key-was-reused-for-another-application", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.update", "a-fleet-profile-with-this-name-already-exists", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.update", "profile-revision-conflict-expected", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.update_number", "profile-revision-conflict-profile-has-not-been-created", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "RunSwitchFleetProfileAdapter._adopt_child", "profile-child-request-key-belongs-to-another-operation", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "RunSwitchFleetProfileAdapter._plan_queue", "profile-workload-effects-can-no-longer-be-represented-safely", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "RunSwitchFleetProfileAdapter._save_state", "profile-cancellation-prevents-child-state-creation", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-changed-its-reviewed-stop-target-scope", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-exceeds-its-reviewed-spark-scope", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-would-remove-an-unreviewed-installation-revie", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-would-stop-an-unreviewed-workload-review-agai", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "RunSwitchFleetProfileAdapter.start", "profile-cancellation-prevents-dispatch-of-another-child", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "RunSwitchFleetProfileAdapter.start", "profile-switch-scope-must-be-the-complete-sorted-node-bounda", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "_application_order_key", "persisted-application-review-source-is-inconsistent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "_application_order_key", "persisted-application-review-source-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "_application_order_key", "persisted-retry-receipt-cannot-be-its-own-reviewed-intent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "_set_selected_profile", "selected-fleet-profile-generation-is-invalid", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "_validate_remaining_effects", "recovery-would-remove-an-unreviewed-installation-review-and", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "_validate_remaining_effects", "recovery-would-stop-an-unreviewed-workload-review-and-load", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._create_pending_application", "fleet-profile-changed-before-its-admission-intent-was-persis", 1],
@@ -2851,7 +2546,6 @@
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._validate_draft_review_identity", "profile-recipe-head-changed-during-admission-review-again", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "_replace_selected_profile_application", "selected-profile-changed-before-its-retry-was-admitted", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "_replace_selected_profile_roster", "selected-profile-or-fleet-membership-changed-during-reconcil", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "RunSwitchOperationConflict", "RunSwitchFleetProfileAdapter._start_child", "profile-child-plan-blocked", 1],
         ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._prepare_pending_admission", "a-later-accepted-profile-intent-owns-the-workload-scope", 1],
         ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._prepare_pending_admission", "pending-profile-intent-was-superseded-by-a-later-accepted-re", 1],
         ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._prepare_pending_admission", "pending-profile-workload-intent-was-superseded-before-recove", 1],
@@ -2876,46 +2570,11 @@
       ]
     },
     {
-      "family": "profile.security-blocker",
-      "category": "security-edge",
-      "reason": "A load whose preview carries a security-boundary blocker (is_security_failure: authentication, authorization, signature or digest) is refused, never parked or retried: only non-security blockers wait for current conditions (_profile_preview_is_waitable). Apply refuses at submit; the recovery path refuses the same blockers.",
-      "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.apply", "fleet-profile-intent-contains-a-security-or-contract-blocker", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.retry", "current-fleet-state-blocks-application-recovery", 1]
-      ]
-    },
-    {
       "family": "profile.exact-identity",
       "category": "security-edge",
       "reason": "Exact artifact identity fence: a recovery must not silently replace the model or runtime image bound in the accepted plan (docs/engineering-principles: exact identity fails closed; an alternative must be an explicit new load). The recovery caller parks the receipt with the shown reason (profile.recovery_artifact_changed) and the identity is never re-hashed here.",
       "sites": [
         ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileRecoveryBindingConflict", "_require_recovery_preparation", "profile.recovery_artifact_changed", 1]
-      ]
-    },
-    {
-      "family": "profile.artifact-removal-fence",
-      "category": "security-edge",
-      "reason": "Destructive-effect owner guard: a new durable selector reference to an artifact whose exact removal is in flight is serialized with that removal by the artifact lifecycle owner (ArtifactLifecycleError: gate busy, fenced for deletion, or not safely inspectable), and the save relays that fence (the same security-edge the artifact-lifecycle family carries). Nothing is stored; the save succeeds once the removal completed.",
-      "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._reserve_saved_profile_references", "message", 1]
-      ]
-    },
-    {
-      "family": "profile.retry-target",
-      "category": "input-validation",
-      "reason": "The caller addressed a receipt that cannot be retried (it is not failed or waiting, or it is not a current profile load): a malformed retry request refused at submit time with a defined 409, nothing is stored or issued. Every bookkeeping mismatch of an eligible receipt is parked or noted instead (see _decline_retry).",
-      "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "only-failed-or-waiting-applications-can-be-retried", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.retry", "only-current-profile-loads-can-be-recovered", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService.retry", "only-failed-or-waiting-applications-can-be-retried", 1]
-      ]
-    },
-    {
-      "family": "profile.save-recipe",
-      "category": "input-validation",
-      "reason": "A profile save names a recipe that has no active catalog revision: a malformed request refused at submit time (HTTP 409 on the save). A saved profile that already names such a recipe is read, shown as needing attention and planned as profile.recipe_unavailable (waiting for the catalog sync), never refused.",
-      "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._validated_assignments", "recipe-has-no-active-catalog-revision", 1]
       ]
     },
     {
@@ -3181,6 +2840,495 @@
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ArtifactJobUnavailableError is of the already-retried error type.",
       "sites": [
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "ArtifactJobService.submit", "installed-job-execution-plan-is-unreadable", 1]
+      ]
+    },
+    {
+      "family": "agent_jobs.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class AgentRunAdmissionBusy is of the already-retried error type; class BookkeepingUnknown is of the already-retried error type; class StaleAgentLease is of the already-retried error type; class UnsettledOutcome is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/agent_jobs.py", "AgentRunAdmissionBusy", "AgentJobService.enqueue_in_session", "run-capacity-writer-is-busy", 1],
+        ["control/src/vonk_control/agent_jobs.py", "BookkeepingUnknown", "AgentJobService._claim_has_authority", "agent-operation-lacks-its-parent-job", 1],
+        ["control/src/vonk_control/agent_jobs.py", "BookkeepingUnknown", "AgentJobService._record_contact", "agent-contact-timestamp-is-unavailable", 1],
+        ["control/src/vonk_control/agent_jobs.py", "BookkeepingUnknown", "AgentJobService.assess_superseded_agent_effects_in_session", "superseded-agent-effect-identity-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs.py", "BookkeepingUnknown", "AgentJobService.request_superseded_workload_cancellation_in_session", "superseded-workload-order-identity-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService._finish", "agent-operation-lacks-its-parent-job", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService._finish", "superseded-operation-has-no-completion-authority", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-expired", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs.py", "UnsettledOutcome", "AgentJobService._consume_contact", "agent-contact-consumer-is-not-configured", 1]
+      ]
+    },
+    {
+      "family": "agent_jobs.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class AgentConfigurationConflict is of the input-validation error type; class InvalidType is of the input-validation error type; class InvalidValue is of the input-validation error type; class MissingRecord is of the input-validation error type; class StaleAgentRequest is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_contact_consumer", "agent-contact-consumer-is-already-configured", 1],
+        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_contact_consumer", "agent-job-service-has-already-started", 1],
+        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_result_consumer", "agent-job-service-has-already-started", 1],
+        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_result_consumer", "agent-result-consumer-is-already-configured", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.__init__", "agent-contact-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.__init__", "agent-result-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.set_contact_consumer", "agent-contact-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.set_result_consumer", "agent-result-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._finish", "agent-result-does-not-match-requested-completion", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._finish", "operation-failure-evidence-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._reason", "failure-reason-is-required", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._runtime_identity", "agent-runtime-identity-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._runtime_identity", "agent-runtime-identity-is-required", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.assess_superseded_agent_effects_in_session", "workload-observation-scope-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.claim", "node-and-certificate-are-required", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-authority-revision-must-match-its-parent", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-is-not-supported-by-the-control-plane", 2],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-node-must-be-a-parent-target", 2],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-node-must-be-active", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-parent-target-scope-changed", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-workload-intent-was-superseded", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "cannot-enqueue-an-agent-operation-beneath-a-terminal-parent", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "workload-operation-requires-a-bound-intent", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.heartbeat", "lease-must-be-positive", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.heartbeat", "operation-progress-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.record_boundary_refusal", "agent-boundary-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.request_superseded_workload_cancellation_in_session", "workload-cancellation-scope-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "authorize_operator_resume_in_session", "job-has-no-current-authorized-resume-action", 1],
+        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "authorize_operator_resume_in_session", "job-is-not-waiting-for-operator", 1],
+        ["control/src/vonk_control/agent_jobs.py", "MissingRecord", "AgentJobService._aggregate_parent_state", "not-found", 1],
+        ["control/src/vonk_control/agent_jobs.py", "MissingRecord", "AgentJobService.enqueue_in_session", "not-found", 3],
+        ["control/src/vonk_control/agent_jobs.py", "MissingRecord", "retire_exhausted_operations_in_session", "not-found", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentRequest", "AgentJobService.record_late_result", "agent-operation-attempt-is-not-expired", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentRequest", "AgentJobService.record_late_result", "expired-attempt-evidence-changed", 1]
+      ]
+    },
+    {
+      "family": "agent_jobs.security-edge",
+      "category": "security-edge",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class AgentContactIdentityMismatch is of the security-edge error type; class StaleAgentFence is of the security-edge error type.",
+      "sites": [
+        ["control/src/vonk_control/agent_jobs.py", "AgentContactIdentityMismatch", "AgentJobService._consume_contact", "agent-contact-source-does-not-match-its-locked-identity", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService._active", "agent-operation-lease-certificate-or-fence-is-stale", 7],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService._fence_token", "agent-operation-lease-certificate-or-fence-is-stale", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-certificate-is-no-longer-active", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-operation-authority-is-stale", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-operation-authority-or-expired-attempt-is-stale", 1],
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-operation-lease-certificate-or-fence-is-stale", 1]
+      ]
+    },
+    {
+      "family": "agent_upgrades.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class AgentUpgradeUnavailable is of the already-retried error type; class BookkeepingUnknown is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeUnavailable", "AgentUpgradeService._enqueue_node", "rollback-source-no-longer-matches-installed-agent", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeUnavailable", "AgentUpgradeService._enqueue_node", "stored-agent-upgrade-package-is-invalid", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeUnavailable", "AgentUpgradeService._enqueue_node", "stored-rollback-sources-are-invalid", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeUnavailable", "AgentUpgradeService.current_package", "agent-release-document-is-too-large", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeUnavailable", "AgentUpgradeService.current_package", "agent-release-manifest-is-invalid", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeUnavailable", "AgentUpgradeService.current_package", "agent-release-manifest-is-too-large", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeUnavailable", "AgentUpgradeService.current_package", "the-current", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "BookkeepingUnknown", "AgentUpgradeService.resume", "agent-upgrade-worker-dispatch-audit-is-invalid", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "BookkeepingUnknown", "AgentUpgradeService.resume", "failed-agent-upgrade-dispatch-audit-is-invalid", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "BookkeepingUnknown", "AgentUpgradeService.resume", "stored-agent-upgrade-attempt-is-invalid", 3],
+        ["control/src/vonk_control/agent_upgrades.py", "BookkeepingUnknown", "AgentUpgradeService.resume", "stored-agent-upgrade-operation-is-invalid", 2],
+        ["control/src/vonk_control/agent_upgrades.py", "BookkeepingUnknown", "AgentUpgradeService.resume", "stored-agent-upgrade-plan-is-invalid", 5],
+        ["control/src/vonk_control/agent_upgrades.py", "BookkeepingUnknown", "AgentUpgradeService.resume", "stored-rollback-sources-are-invalid", 1]
+      ]
+    },
+    {
+      "family": "agent_upgrades.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class AgentUpgradeInvalid is of the input-validation error type; class InvalidType is of the input-validation error type; class InvalidValue is of the input-validation error type; class MissingRecord is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService._check_replayed_request", "agent-upgrade-request-key-was-already-used", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService._check_replayed_request", "agent-upgrade-request-key-was-already-used-differently", 2],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService._package", "agent-upgrade-package-is-invalid", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService._repair_manifest", "agent-repair-manifest-does-not-match-its-package-descriptor", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService._repair_manifest", "agent-repair-manifest-is-invalid", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService._repair_manifest", "agent-repair-package-url-is-not-canonical", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService.preview", "agent-repair-requires-exactly-its-explicit-spark", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService.preview", "agent-upgrade-targets-are-invalid", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "_request_intent", "agent-upgrade-request-intent-is-invalid", 4],
+        ["control/src/vonk_control/agent_upgrades.py", "InvalidType", "AgentUpgradeService.current_package", "agent-release-artifact-record-is-not-an-object", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "InvalidValue", "AgentUpgradeService.__init__", "agent-upgrade-channel-is-invalid", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "InvalidValue", "AgentUpgradeService.resume", "agent-upgrade-worker-dispatch-is-not-stale", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "InvalidValue", "AgentUpgradeService.resume", "agent-upgrade-worker-dispatch-is-still-active", 1],
+        ["control/src/vonk_control/agent_upgrades.py", "InvalidValue", "AgentUpgradeService.resume", "job-is-not-a-resumable-agent-upgrade", 2],
+        ["control/src/vonk_control/agent_upgrades.py", "MissingRecord", "AgentUpgradeService.resume", "not-found", 1]
+      ]
+    },
+    {
+      "family": "agent_upgrades.security-edge",
+      "category": "security-edge",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class AgentUpgradeRefused is of the security-edge error type.",
+      "sites": [
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeRefused", "AgentUpgradeService.current_package", "current-agent-release-is-inconsistent", 1]
+      ]
+    },
+    {
+      "family": "availability_production.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class AvailabilityUnsettled is of the already-retried error type; class _BuildDependencyFailure is of the already-retried error type; class _BuildPlanningFailure is of the already-retried error type; class _CapacityWait is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_build_dependency", "recipe_image.build_invalid", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_cached_build_receipt", "recipe_image.build_invalid", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "recipe_image.build_cancelled", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "recipe_image.build_invalid", 5],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "recipe_image.build_wait", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "report-uncertain", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.authority", "observation-unavailable", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "observation-unavailable", 2],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_capacity_wait", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_input_missing", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_invalid", 2],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_unavailable", 2],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.identity_conflict", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.operation_invalid", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "scope-changed", 2],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder.admission_guard", "recipe_image.build_invalid", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.recover_build", "recipe_image.build_invalid", 5],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.recover_build", "recipe_image.identity_conflict", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.recover_build", "recipe_image.operation_invalid", 1],
+        ["control/src/vonk_control/availability_production.py", "_BuildDependencyFailure", "build_recipe_image_availability.recover_build", "message", 1],
+        ["control/src/vonk_control/availability_production.py", "_BuildPlanningFailure", "build_recipe_image_availability.builder", "message", 2],
+        ["control/src/vonk_control/availability_production.py", "_CapacityWait", "build_recipe_image_availability.builder", "message", 2]
+      ]
+    },
+    {
+      "family": "availability_production.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class AvailabilityInvalid is of the input-validation error type; class InvalidValue is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "_compile_consistent_runtime", "recipe_image.runtime_invalid", 3],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "recipe_image.recipe_invalid", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "recipe_image.recipe_unavailable", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "recipe_image.runtime_invalid", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "unsupported", 1],
+        ["control/src/vonk_control/availability_production.py", "InvalidValue", "RecipeImageAvailabilityScheduler.__init__", "availability-scheduler-parallelism-is-invalid", 1],
+        ["control/src/vonk_control/availability_production.py", "InvalidValue", "build_recipe_image_availability", "recipe-image-artifact-root-is-required", 1],
+        ["control/src/vonk_control/availability_production.py", "InvalidValue", "run_availability_scheduler", "availability-scheduler-interval-must-be-positive", 1]
+      ]
+    },
+    {
+      "family": "distributed_lifecycle.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class DistributedRecoveryInvalid is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/distributed_lifecycle.py", "DistributedRecoveryInvalid", "canonical_distributed_readiness", "distributed-endpoint-topology-is-invalid", 1],
+        ["control/src/vonk_control/distributed_lifecycle.py", "DistributedRecoveryInvalid", "canonical_distributed_readiness", "distributed-readiness-interface-is-invalid", 1],
+        ["control/src/vonk_control/distributed_lifecycle.py", "DistributedRecoveryInvalid", "canonical_distributed_readiness", "distributed-readiness-path-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "distributed_recovery.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class DistributedRecoveryUnsettled is of the already-retried error type; class _RecoveryDependencyPending is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "DistributedRecoveryCoordinator.tick", "accepted-run-has-no-automatic-recovery-authority", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "DistributedRecoveryCoordinator.tick", "singleton-recovery-stop-owner-is-unavailable", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_accepted_start_authority", "singleton-recovery-lacks-current-generation-start-authority", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_accepted_start_authority", "singleton-recovery-lacks-exact-accepted-start-authority", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_accepted_start_authority", "singleton-recovery-lacks-exact-current-start-authority", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_accepted_start_authority_payload", "accepted-start-readiness-differs-from-its-rank-launch", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_original_start_authority", "distributed-recovery-lacks-its-start-authority", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_recovery_authority", "distributed-recovery-authority-is-missing", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_recovery_authority", "distributed-recovery-lacks-exact-prior-start-stop-authority", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_recovery_authority", "distributed-recovery-run-authority-is-stale", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_singleton_recovery_authority", "accepted-start-image-authority-is-stale", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_singleton_recovery_authority", "singleton-recovery", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_singleton_recovery_authority", "singleton-recovery-installation-authority-is-missing", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_singleton_recovery_authority", "singleton-recovery-mapping-is-stale", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_singleton_recovery_authority", "singleton-recovery-plan-authority-is-stale", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_singleton_recovery_authority", "singleton-recovery-requires-exact-stop-and-observation-suppo", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_singleton_recovery_authority", "singleton-recovery-start-authority-was-cancelled", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_validate_distributed_recovery_start_origin", "distributed-recovery-start-differs-from-its-exact-stop-conti", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_validate_distributed_recovery_start_origin", "distributed-recovery-stop-continuation-is-missing", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_validate_distributed_recovery_start_origin", "distributed-recovery-stop-is-stale", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_validate_multi_start_payload", "accepted-start-child-differs-from-stored-execution-plan", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_validate_multi_start_payload", "accepted-start-plan-cannot-be-rebound", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_validate_multi_start_payload", "accepted-start-plan-identity-is-stale", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_validate_singleton_recovery_start_origin", "singleton-recovery-start-differs-from-its-exact-stop-continu", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_validate_singleton_recovery_start_origin", "singleton-recovery-start-lacks-its-exact-completed-stop", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_validate_singleton_recovery_start_origin", "singleton-recovery-stop-continuation-differs-from-its-start", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_validate_singleton_recovery_start_origin", "singleton-recovery-stop-did-not-complete-under-its-recovery", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryUnsettled", "_validate_singleton_recovery_start_origin", "singleton-recovery-stop-has-stale-exact-run-authority", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "_RecoveryDependencyPending", "_accepted_start_authority", "multi-node-recovery-observation-time-is-unavailable", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "_RecoveryDependencyPending", "_recovery_authority", "distributed-recovery-waits-for-a-fresh-controller-observed-s", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "_RecoveryDependencyPending", "_singleton_recovery_authority", "singleton-recovery-waits-for-a-fresh-controller-observed-spa", 1]
+      ]
+    },
+    {
+      "family": "distributed_recovery.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class DistributedRecoveryInvalid is of the input-validation error type; class InvalidValue is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "DistributedRecoveryCoordinator.tick", "singleton-recovery-authority-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_authority_payload", "accepted-start-child-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_authority_payload", "accepted-start-deadline-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_authority_payload", "accepted-start-operation-identity-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_authority_payload", "accepted-start-payload-is-missing", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_authority_payload", "accepted-start-payload-is-not-singleton", 2],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_authority_payload", "accepted-start-phase-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_authority_payload", "accepted-start-phase-item-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_authority_payload", "accepted-start-rank-phase-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_authority_payload", "accepted-start-readiness-phase-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_authority_payload", "accepted-start-target-set-is-incomplete", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_authority_payload", "accepted-start-target-set-is-invalid", 2],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_child", "accepted-start-child-identity-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_accepted_start_child", "accepted-start-payload-binding-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_aware", "distributed-recovery-clock-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_decode_phases", "distributed-recovery-phases-are-invalid", 4],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_enqueue_recovery_stop", "distributed-recovery-authority-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_enqueue_recovery_stop", "distributed-recovery-is-already-queued", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_enqueue_recovery_stop", "distributed-recovery-start-authority-was-superseded", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_original_start_authority", "distributed-recovery-start-authority-is-invalid", 2],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_recovery_authority", "distributed-recovery-endpoint-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_recovery_authority", "distributed-recovery-order-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_recovery_authority", "distributed-recovery-plan-is-invalid", 4],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_recovery_authority", "distributed-recovery-prior-start-generation-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_recovery_authority", "distributed-recovery-rank-set-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_recovery_authority", "distributed-recovery-rendezvous-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_recovery_authority", "distributed-recovery-start-payload-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_singleton_recovery_authority", "accepted-start-payload-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_singleton_recovery_authority", "accepted-start-plan-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_singleton_recovery_authority", "singleton-recovery-placement-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_singleton_recovery_authority", "singleton-recovery-plan-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_singleton_recovery_authority", "singleton-recovery-rank-set-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_singleton_recovery_authority", "singleton-recovery-resources-are-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_singleton_recovery_authority", "singleton-recovery-start-payload-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_validate_distributed_recovery_start_origin", "distributed-recovery-start-marker-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_validate_distributed_recovery_start_origin", "distributed-recovery-stop-continuation-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_validate_multi_start_payload", "accepted-start-deadline-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_validate_multi_start_payload", "accepted-start-fabric-address-is-missing", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_validate_multi_start_payload", "accepted-start-owner-endpoint-is-invalid", 3],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_validate_multi_start_payload", "accepted-start-owner-endpoint-is-missing", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_validate_multi_start_payload", "accepted-start-plan-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_validate_multi_start_payload", "accepted-start-rendezvous-plan-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_validate_singleton_recovery_start_origin", "singleton-recovery-start-marker-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "enforce_recovery_deadline", "distributed-recovery-authority-is-invalid", 4],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "enforce_recovery_deadline", "distributed-recovery-deadline-elapsed", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "recovery_start_plan", "distributed-recovery-authority-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "InvalidValue", "_original_start_authority", "startup-budget-must-be-whole-seconds", 1]
+      ]
+    },
+    {
+      "family": "fleet_profiles.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class BookkeepingUnknown is of the already-retried error type; class FleetProfileChildPlanBlocked is of the already-retried error type; class FleetProfileUnavailable is of the already-retried error type; class UnsettledOutcome is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/fleet_profiles.py", "BookkeepingUnknown", "FleetProfileService._selected_profile_snapshot", "selected-profile-application-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "BookkeepingUnknown", "FleetProfileService._selected_profile_snapshot", "selected-profile-generation-is-inconsistent", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "BookkeepingUnknown", "FleetProfileService._selected_profile_snapshot", "selected-profile-snapshot-is-inconsistent", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "BookkeepingUnknown", "_persisted_profile_plan.read", "stored-plan-identity-differs-from-its-row", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "BookkeepingUnknown", "_persisted_profile_result.read", "a-succeeded-application-has-no-result", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "BookkeepingUnknown", "_without_values.run", "observation-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileChildPlanBlocked", "RunSwitchFleetProfileAdapter._start_child", "profile-child-plan-blocked", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._intended_profile", "persisted-application-intent-digest-is-inconsistent", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._intended_profile", "persisted-application-review-digest-is-inconsistent", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._intended_profile", "persisted-application-review-source-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._queue_application", "persisted-application-review-source-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._queue_application", "selected-profile-differs-from-its-accepted-snapshot", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._queue_application", "selected-profile-revision-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._reserve_saved_profile_references", "message", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._selected_profile_snapshot", "persisted-selected-fleet-profile-is-invalid", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService.cancel", "profile-cancellation-authority-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService.endpoint_intent", "selected-profile-application-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "_application_order_key", "persisted-application-review-source-is-inconsistent", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "_application_order_key", "persisted-application-review-source-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "_application_order_key", "persisted-retry-receipt-cannot-be-its-own-reviewed-intent", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "_set_selected_profile", "selected-fleet-profile-generation-is-invalid", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "UnsettledOutcome", "RunSwitchFleetProfileAdapter._advance_in_session", "run-switch-child-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "UnsettledOutcome", "RunSwitchFleetProfileAdapter.get", "run-switch-child-is-unavailable", 1]
+      ]
+    },
+    {
+      "family": "fleet_profiles.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class FleetProfileInvalid is of the input-validation error type; class FleetProfileUnsupportedStore is of the input-validation error type; class InvalidType is of the input-validation error type; class InvalidValue is of the input-validation error type; class MissingRecord is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._intended_profile", "persisted-application-plan-exceeds-its-reviewed-intent", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._matching_application", "fleet-profile-request-key-was-reused-for-another-plan", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "application-has-been-superseded-by-another-application", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "application-has-been-superseded-by-another-workload-intent", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "only-failed-or-waiting-applications-can-be-retried", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "profile-application-was-superseded-by-a-later-intent", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "selected-profile-retry-lost-its-current-selection", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._recipe_identity", "recipe-selector-is-not-an-exact-unique-active-recipe", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._recipe_identity", "recipe-selector-must-use-canonical-publisher-slug-form", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._start_step", "fleet-profile-step-kind-is-unsupported", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._validated_assignments", "recipe-has-no-active-catalog-revision", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.apply", "fleet-profile-intent-contains-a-security-or-contract-blocker", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "malformed", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-application-already-has-a-different-cancellation-req", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-application-is-not-cancellable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-application-scope-changed-during-cancellation", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-cancellation-request-key-is-invalid", 2],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.create", "a-fleet-profile-with-this-name-already-exists", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.preview", "recovery-review-owner-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.retry", "current-fleet-state-blocks-application-recovery", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.retry", "only-current-profile-loads-can-be-recovered", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.retry", "only-failed-or-waiting-applications-can-be-retried", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.retry", "retry-request-key-was-reused-for-another-application", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.update", "a-fleet-profile-with-this-name-already-exists", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.update", "profile-revision-conflict-expected", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.update_number", "profile-revision-conflict-profile-has-not-been-created", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter._adopt_child", "profile-child-request-key-belongs-to-another-operation", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter._plan_queue", "profile-workload-effects-can-no-longer-be-represented-safely", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter._save_state", "profile-cancellation-prevents-child-state-creation", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter.start", "profile-cancellation-prevents-dispatch-of-another-child", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter.start", "profile-switch-scope-must-be-the-complete-sorted-node-bounda", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnsupportedStore", "_set_selected_profile", "fleet-profile-selection-requires-postgresql-or-sqlite", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "InvalidType", "FleetProfileService._observe_pending_admissions", "profile-admission-retry-cutoff-is-not-a-string", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "InvalidType", "FleetProfileService._selected_profile_snapshot", "selected-profile-evidence-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "InvalidType", "FleetProfileService.preview", "malformed", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "InvalidValue", "FleetProfileService.preview", "the-planner-assessment-does-not-cover-the-exact-assignment-s", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "InvalidValue", "RunSwitchFleetProfileAdapter.assess", "profile-assignment-nodes-changed-during-preparation-projecti", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._application_assignments", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._create_pending_application", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._decline_retry_application", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._defer_pending_application", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._prepare_pending_admission", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._queue_application", "not-found", 3],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.application", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.application_by_request_key", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.application_cancellation_by_request", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.cancel", "not-found", 3],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.definition_number", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.endpoint_intent", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.get", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.get_number", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.load", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.operation_provider.get_operation", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.preview", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.progress_number", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.retry", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.update", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.update_number", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter._advance_in_session", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter._child_review", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter._save_state", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter._start_child", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter.advance", "not-found", 4],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter.get", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter.request_cancellation", "not-found", 1]
+      ]
+    },
+    {
+      "family": "host_runtime_plan_authority.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class BookkeepingUnknown is of the already-retried error type; class RuntimePlanEvidenceUnavailable is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "recovery-start-identity-is-inconsistent", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "recovery-start-phase-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "recovery-start-target-is-duplicated", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "BookkeepingUnknown", "_validate_recovery_start_generation", "singleton-recovery-target-is-duplicated", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_load_run_authority", "recipe-run-is-unavailable", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_load_run_authority", "recipe-run-plan-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_parse_job_run", "durable-jobrun-plan-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_parse_start", "durable-start-plan-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_parse_stop", "durable-stop-plan-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_service_run_authority", "service-run-plan-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_service_stop_authority", "durable-prior-start-authority-is-unavailable", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_child_record", "lifecycle-operation-manifest-is-missing", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-readiness-placement-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-generation-is-unavailable", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-placement-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-plan-is-invalid", 2],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "recovery-start-target-set-is-invalid", 2],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanEvidenceUnavailable", "_validate_recovery_start_generation", "singleton-recovery-start-placement-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "host_runtime_plan_authority.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InvalidType is of the input-validation error type; class RuntimePlanAuthorityStale is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "InvalidType", "_parse_job_run", "jobrun-payload-is-not-an-object", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "InvalidType", "_parse_start", "start-payload-is-not-an-object", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "InvalidType", "_parse_stop", "stop-payload-is-not-an-object", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityStale", "_job_run_authority", "artifact-jobrun-identity-is-stale", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityStale", "_job_run_authority", "artifact-jobrun-start-is-no-longer-authorized", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityStale", "_load_run_authority", "recipe-run-authority-is-stale", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityStale", "_service_run_authority", "service-start-identity-is-stale", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityStale", "_service_run_authority", "service-start-is-no-longer-authorized", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityStale", "_service_stop_authority", "recovery-stop-generation-is-stale", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityStale", "_service_stop_authority", "service-stop-generation-is-stale", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityStale", "_service_stop_authority", "service-stop-identity-is-stale", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityStale", "_validate_recovery_start_generation", "recovery-stop-owner-is-stale", 1]
+      ]
+    },
+    {
+      "family": "host_runtime_plan_authority.security-edge",
+      "category": "security-edge",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class RuntimePlanAuthorityRefused is of the security-edge error type.",
+      "sites": [
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_check_operation_target", "lifecycle-plan-node-identity-differs", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_job_run_authority", "artifact-jobrun-owner-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_service_run_authority", "service-start-owner-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_service_stop_authority", "service-stop-differs-from-exact-prior-start", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_service_stop_authority", "service-stop-owner-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_validate_child_record", "lifecycle-operation-manifest-differs", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_validate_child_record", "lifecycle-operation-record-is-inconsistent", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_validate_recovery_start_generation", "distributed-recovery-stop-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_validate_recovery_start_generation", "recovery-stop-actor-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_validate_recovery_start_generation", "singleton-recovery-stop-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "derive_runtime_plan_binding", "lifecycle-plan-owner-does-not-match-action", 1]
+      ]
+    },
+    {
+      "family": "install_admission.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class BookkeepingUnknown is of the already-retried error type; class InstallEvidenceChanged is of the already-retried error type; class InstallPreflightExpired is of the already-retried error type; class StoredInstallIdentityDamaged is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/install_admission.py", "BookkeepingUnknown", "InstallAdmissionService.plan_install", "exact-model-license-authority-is-unavailable", 1],
+        ["control/src/vonk_control/install_admission.py", "BookkeepingUnknown", "InstallAdmissionService.plan_install", "exact-recipe-dependencies-are-unavailable", 1],
+        ["control/src/vonk_control/install_admission.py", "InstallEvidenceChanged", "InstallAdmissionService._accept_install_in_session", "disk-capacity-changed-while-reserving", 1],
+        ["control/src/vonk_control/install_admission.py", "InstallEvidenceChanged", "InstallAdmissionService._accept_install_in_session", "installation-node-disappeared", 1],
+        ["control/src/vonk_control/install_admission.py", "InstallEvidenceChanged", "_primary_model_sha256", "install.model_identity_unavailable", 1],
+        ["control/src/vonk_control/install_admission.py", "InstallPreflightExpired", "require_admissible", "stale-plan", 1],
+        ["control/src/vonk_control/install_admission.py", "StoredInstallIdentityDamaged", "_node_digest_document", "stored-installation-node-identity-is-incomplete", 1],
+        ["control/src/vonk_control/install_admission.py", "StoredInstallIdentityDamaged", "installation_plan_digest_from_stored_document", "stored-compiled-plans-do-not-match-installation-nodes", 1],
+        ["control/src/vonk_control/install_admission.py", "StoredInstallIdentityDamaged", "installation_plan_digest_from_stored_document", "stored-installation-identity-is-invalid", 2],
+        ["control/src/vonk_control/install_admission.py", "StoredInstallIdentityDamaged", "installation_plan_digest_from_stored_document", "stored-installation-node-identities-are-duplicated", 1],
+        ["control/src/vonk_control/install_admission.py", "StoredInstallIdentityDamaged", "installation_plan_digest_from_stored_document", "stored-installation-node-identity-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "install_admission.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InstallPlanStale is of the input-validation error type; class InvalidType is of the input-validation error type; class InvalidValue is of the input-validation error type; class MissingRecord is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "install.dependencies_stale", 2],
+        ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "install.plan_invalid", 1],
+        ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "install.plan_stale", 1],
+        ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "installation-exceeds-its-reviewed-disk-claim", 1],
+        ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "mapping-or-build-changed-while-reserving", 1],
+        ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "require_admissible", "install.plan_invalid", 1],
+        ["control/src/vonk_control/install_admission.py", "InvalidType", "InstallAdmissionService.plan_install", "compiled-execution-plan-mapping-is-invalid", 1],
+        ["control/src/vonk_control/install_admission.py", "InvalidType", "InstallAdmissionService.plan_install", "mapping-role-is-absent-from-recipe-topology", 1],
+        ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "cluster-mapping-is-not-ready", 1],
+        ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "recipe-revision-is-not-resolved", 1],
+        ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "successful-recipe-build-does-not-match-the-mapping", 1],
+        ["control/src/vonk_control/install_admission.py", "MissingRecord", "InstallAdmissionService.plan_install", "not-found", 2]
+      ]
+    },
+    {
+      "family": "jobs.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InvalidType is of the input-validation error type; class InvalidValue is of the input-validation error type; class MissingRecord is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/jobs.py", "InvalidType", "JobService.enqueue_guarded", "job-enqueue-authority-check-is-invalid", 1],
+        ["control/src/vonk_control/jobs.py", "InvalidType", "_canonical_payload.inspect", "job-payload-keys-must-be-strings", 1],
+        ["control/src/vonk_control/jobs.py", "InvalidValue", "JobService.claim", "worker-and-positive-lease-are-required", 1],
+        ["control/src/vonk_control/jobs.py", "InvalidValue", "JobService.enqueue", "job-kind-actor-and-authority-revision-are-required", 1],
+        ["control/src/vonk_control/jobs.py", "InvalidValue", "JobService.enqueue", "request-key-was-already-used-differently", 2],
+        ["control/src/vonk_control/jobs.py", "InvalidValue", "JobService.enqueue_guarded", "fleet-acceptance-evidence-is-stale", 2],
+        ["control/src/vonk_control/jobs.py", "InvalidValue", "JobService.enqueue_guarded", "job-kind-actor-and-authority-revision-are-required", 1],
+        ["control/src/vonk_control/jobs.py", "InvalidValue", "JobService.enqueue_guarded", "request-key-was-already-used-differently", 2],
+        ["control/src/vonk_control/jobs.py", "InvalidValue", "JobService.heartbeat", "lease-must-be-positive", 1],
+        ["control/src/vonk_control/jobs.py", "InvalidValue", "_canonical_payload", "job-payload-is-too-large", 1],
+        ["control/src/vonk_control/jobs.py", "InvalidValue", "_canonical_payload.inspect", "job-payload-contains-a-sensitive-field", 1],
+        ["control/src/vonk_control/jobs.py", "InvalidValue", "_canonical_targets", "job-targets-must-be-a-json-array-of-strings", 1],
+        ["control/src/vonk_control/jobs.py", "MissingRecord", "JobService.get", "not-found", 1]
       ]
     }
   ]

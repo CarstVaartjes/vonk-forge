@@ -541,6 +541,15 @@ class StaleAgentAttempt(RuntimeError):
     """
 
 
+class AgentRunAdmissionBusy(UnknownOutcomeError, RunAdmissionBusy):
+    """The run capacity writer is busy: the enqueue is retried by its owner."""
+
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        reason = kwargs.pop("reason", WaitReason.OBSERVATION_UNAVAILABLE)
+        super().__init__(message, **kwargs)
+        self.typed_reason = reason
+
+
 class StaleAgentFence(SecurityRefusalError, StaleAgentAttempt):
     """The lease, certificate or fence presented is not the operation's own."""
 
@@ -1721,7 +1730,7 @@ class AgentJobService:
             if protocol_operation.value == AgentOperation.RECIPE_INSTALL.value:
                 raise InstallAdmissionBusy("install.capacity_busy") from error
             if uses_workload_admission:
-                raise RunAdmissionBusy("run capacity writer is busy") from error
+                raise AgentRunAdmissionBusy("run capacity writer is busy") from error
             raise
         if not scopes_locked:
             raise InvalidValue(
