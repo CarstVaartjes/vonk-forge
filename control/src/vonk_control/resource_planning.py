@@ -57,8 +57,13 @@ class _EffectiveSettingsProjection(Protocol):
 # peak. A recipe's own ``reserve_bytes`` is informational and is never added.
 PLATFORM_MEMORY_FLOOR_BYTES = 2_000_000_000
 
-# A recipe whose declared peak plus reserve exceeds a Spark's physical memory.
+# Informational: a recipe's declared peak plus the platform floor exceeds a
+# Spark's physical memory. Never a refusal; the declared envelope is an estimate.
 ENVELOPE_EXCEEDS_CAPACITY = "resource.envelope_exceeds_capacity"
+
+# Warning: admitted although the declared envelope does not fit, because no Vonk
+# claim holds memory on the Spark. The run's real outcome is the evidence.
+ENVELOPE_UNVERIFIED = "resource.envelope_unverified"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1064,35 +1069,6 @@ def plan_capacity(
         current_without_unknown = available - occupied - unmaterialized - total_bytes
         current = current_without_unknown - unknown_upper_bytes
         budget_after = available - reserved - total_bytes - memory_floor_bytes
-        if available - total_bytes - memory_floor_bytes < 0:
-            # The declared envelope alone exceeds the Spark's physical memory,
-            # with no claim or running workload counted. Stopping or waiting
-            # can never free it, so this is a typed, terminal refusal rather
-            # than a capacity wait.
-            node_reasons.append(
-                _reason(
-                    ENVELOPE_EXCEEDS_CAPACITY,
-                    f"The recipe's declared memory envelope ({total_bytes} bytes peak plus "
-                    f"{memory_floor_bytes} bytes reserve = {total_bytes + memory_floor_bytes} bytes) "
-                    f"exceeds this Spark's {available}-byte memory capacity by "
-                    f"{total_bytes + memory_floor_bytes - available} bytes; it can never be admitted "
-                    "here until the recipe declares a smaller envelope.",
-                    node_id=node_id,
-                )
-            )
-            nodes.append(
-                NodeCapacityPlan(
-                    node_id,
-                    demand.total_bytes,
-                    current,
-                    current,
-                    current,
-                    False,
-                    False,
-                    tuple(node_reasons),
-                )
-            )
-            continue
         release = releases.get((node_id, capacity.memory_kind), 0)
         if not release:
             release = max(
@@ -1104,6 +1080,59 @@ def plan_capacity(
                 ),
                 default=0,
             )
+        idle = reserved == 0 and unmaterialized == 0 and not unknown_residuals
+        declared_shortfall = (
+            available - total_bytes - memory_floor_bytes < 0
+            or current < memory_floor_bytes
+            or budget_after < 0
+        )
+        if (
+            idle
+            and not release
+            and declared_shortfall
+            and available - occupied >= memory_floor_bytes
+        ):
+            # No Vonk claim holds memory on this Spark, so the only thing the
+            # declared envelope can displace is nothing of ours. The envelope is
+            # an estimate and hardware is the truth: admit the attempt, typed as
+            # an unverified fit, and let the run's real outcome be the evidence.
+            node_reasons.append(
+                _reason(
+                    ENVELOPE_UNVERIFIED,
+                    f"The recipe's declared memory envelope ({total_bytes} bytes peak plus the "
+                    f"{memory_floor_bytes}-byte platform floor) does not fit this Spark's "
+                    f"{available - occupied} bytes of free memory, but no Vonk workload or claim "
+                    "holds memory here. The declared envelope is an estimate, so the attempt is "
+                    "admitted as an unverified fit; the run's own outcome is the evidence.",
+                    severity="warning",
+                    node_id=node_id,
+                )
+            )
+            if available - total_bytes - memory_floor_bytes < 0:
+                node_reasons.append(
+                    _reason(
+                        ENVELOPE_EXCEEDS_CAPACITY,
+                        f"The declared envelope ({total_bytes + memory_floor_bytes} bytes) "
+                        f"exceeds this Spark's {available}-byte memory capacity by "
+                        f"{total_bytes + memory_floor_bytes - available} bytes. Informational: "
+                        "the declared envelope is an estimate.",
+                        severity="warning",
+                        node_id=node_id,
+                    )
+                )
+            nodes.append(
+                NodeCapacityPlan(
+                    node_id,
+                    demand.total_bytes,
+                    current,
+                    current,
+                    current,
+                    False,
+                    not any(reason.severity == "blocker" for reason in node_reasons),
+                    tuple(node_reasons),
+                )
+            )
+            continue
         after_stop = current + release
         budget_after_stop = budget_after + release
         current_fit = current >= memory_floor_bytes and budget_after >= 0

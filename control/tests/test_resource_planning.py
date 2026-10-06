@@ -1,4 +1,6 @@
 from vonk_control.resource_planning import (
+    ENVELOPE_EXCEEDS_CAPACITY,
+    ENVELOPE_UNVERIFIED,
     CapacitySnapshot,
     EffectiveResourceSettings,
     MemoryReservationTotals,
@@ -335,8 +337,84 @@ def _declared_demand(total: int):
     )
 
 
-def test_envelope_larger_than_the_spark_is_a_typed_terminal_refusal() -> None:
-    # Peak plus reserve (105) exceeds the 100-byte Spark with nothing claimed.
+def _idle_capacity(total: int, free: int, *, claimed: int = 0):
+    return memory_capacity_snapshot(
+        "rank-0",
+        "unified",
+        host=(total, free),
+        accelerator=(total, free),
+        reservations=MemoryReservationTotals(
+            {"unified-memory": claimed} if claimed else {}, {}, {}
+        ),
+        memory_pool="shared",
+        evidence_state="fresh",
+    )
+
+
+def test_envelope_larger_than_an_idle_spark_is_admitted_as_an_unverified_fit() -> None:
+    # Peak plus floor (105) exceeds the 100-byte Spark, but no Vonk claim holds
+    # memory: the declared envelope is an estimate, so the attempt is admitted.
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(100)},
+        [_idle_capacity(100, 96)],
+        memory_floor_bytes=5,
+    )
+    assert plan.allowed
+    assert plan.nodes[0].allowed
+    assert not any(reason.severity == "blocker" for reason in plan.reasons)
+    by_code = {reason.code: reason for reason in plan.nodes[0].reasons}
+    assert by_code[ENVELOPE_UNVERIFIED].severity == "warning"
+    exceeds = by_code[ENVELOPE_EXCEEDS_CAPACITY]
+    assert exceeds.severity == "warning"
+    assert "105 bytes" in exceeds.detail and "100-byte" in exceeds.detail
+    assert not plan.nodes[0].stop_required
+
+
+def test_envelope_larger_than_the_spark_with_a_vonk_claim_stays_a_capacity_wait() -> (
+    None
+):
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(100)},
+        [_idle_capacity(100, 90, claimed=10)],
+        memory_floor_bytes=5,
+    )
+    assert not plan.allowed
+    codes = {reason.code for reason in plan.nodes[0].reasons}
+    assert ENVELOPE_UNVERIFIED not in codes
+    assert ENVELOPE_EXCEEDS_CAPACITY not in codes
+    assert "resource.insufficient_reservation_budget" in codes
+
+
+def test_envelope_that_misses_free_memory_on_an_idle_spark_is_admitted_unverified() -> (
+    None
+):
+    # 95 + 4 fits the 100-byte Spark; the OS leaves 96 free, no claim holds
+    # memory. The shortfall is only the declared estimate, so it is admitted.
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(95)},
+        [_idle_capacity(100, 96)],
+        memory_floor_bytes=4,
+    )
+    assert plan.allowed
+    codes = {reason.code for reason in plan.nodes[0].reasons}
+    assert ENVELOPE_UNVERIFIED in codes
+    assert ENVELOPE_EXCEEDS_CAPACITY not in codes
+    assert "resource.insufficient_capacity" not in codes
+
+
+def test_idle_spark_with_less_free_memory_than_the_floor_alone_still_refuses() -> None:
+    # Observed free memory is below the platform floor regardless of any
+    # declared envelope: that is a measurement, not an estimate.
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(50)},
+        [_idle_capacity(100, 3)],
+        memory_floor_bytes=5,
+    )
+    assert not plan.allowed
+    assert ENVELOPE_UNVERIFIED not in {reason.code for reason in plan.nodes[0].reasons}
+
+
+def test_unknown_capacity_evidence_still_blocks_an_idle_unverified_fit() -> None:
     capacity = memory_capacity_snapshot(
         "rank-0",
         "unified",
@@ -344,52 +422,12 @@ def test_envelope_larger_than_the_spark_is_a_typed_terminal_refusal() -> None:
         accelerator=(100, 96),
         reservations=MemoryReservationTotals({}, {}, {}),
         memory_pool="shared",
-        evidence_state="fresh",
+        evidence_state="unknown",
     )
     plan = plan_capacity(
         {"rank-0": _declared_demand(100)}, [capacity], memory_floor_bytes=5
     )
     assert not plan.allowed
-    codes = {reason.code for reason in plan.nodes[0].reasons}
-    assert "resource.envelope_exceeds_capacity" in codes
-    assert not codes & {
-        "resource.insufficient_capacity",
-        "resource.insufficient_reservation_budget",
-    }
-    detail = next(
-        reason.detail
-        for reason in plan.nodes[0].reasons
-        if reason.code == "resource.envelope_exceeds_capacity"
-    )
-    assert "105 bytes" in detail and "100-byte" in detail
-    assert not plan.nodes[0].stop_required
-
-
-def test_envelope_that_fits_the_spark_but_not_its_free_memory_stays_waitable() -> None:
-    # 95 + 4 fits the 100-byte Spark; the OS leaves only 96 free and no claim
-    # holds memory, so this is the ordinary capacity refusal, not the terminal one.
-    capacity = memory_capacity_snapshot(
-        "rank-0",
-        "unified",
-        host=(100, 96),
-        accelerator=(100, 96),
-        reservations=MemoryReservationTotals({}, {}, {}),
-        memory_pool="shared",
-        evidence_state="fresh",
-    )
-    plan = plan_capacity(
-        {"rank-0": _declared_demand(95)}, [capacity], memory_floor_bytes=4
-    )
-    assert not plan.allowed
-    codes = {reason.code for reason in plan.nodes[0].reasons}
-    assert "resource.envelope_exceeds_capacity" not in codes
-    assert "resource.insufficient_capacity" in codes
-    detail = next(
-        reason.detail
-        for reason in plan.nodes[0].reasons
-        if reason.code == "resource.insufficient_capacity"
-    )
-    assert "No Vonk claim holds memory" in detail
 
 
 def test_uncertain_bound_still_refuses_actual_free_floor_and_budget_exhaustion() -> (

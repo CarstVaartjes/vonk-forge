@@ -154,8 +154,21 @@ reservation. A role is admitted when its declared peak is at most the observed
 available memory minus the platform floor (`PLATFORM_MEMORY_FLOOR_BYTES`, 2 GB);
 the recipe's `reserve_bytes` is informational and is never added to the peak.
 `memory_floor_bytes` is that platform floor, and job invocations may increase it
-but cannot lower the installed floor. A peak above the Spark's physical memory is
-refused with `resource.envelope_exceeds_capacity`.
+but cannot lower the installed floor.
+
+A declared envelope is an estimate and hardware is the truth, so it never
+refuses work on a Spark where no Vonk claim holds memory (nothing of ours is
+running or reserved there). Review, plan_capacity, run admission, run-switch,
+dual/multi-node placement and fleet profile review all admit such an attempt
+with the warning `resource.envelope_unverified`; a peak above the Spark's
+physical memory additionally carries the informational warning
+`resource.envelope_exceeds_capacity`. The run's real outcome (success, OOM,
+`runtime_process_exited`) is the evidence. Only observed facts still refuse: stale
+or missing inventory, and free memory below the platform floor on its own. When
+other Vonk claims are on the target Spark the declared envelope still decides
+co-location, so a shortfall there stays the retryable wait or the existing
+eviction policy; never overlap or evict someone else's running workload on a
+guess.
 Keep the estimate's source and uncertainty in planning warnings. Reconcile
 capacity shortages through the existing wait/recovery path; do not permanently
 invalidate a recipe because a forecast or an attempt was wrong.
