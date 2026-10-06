@@ -64,6 +64,7 @@ from vonk_agent_protocol import (
     InstallationState,
     LifecycleState,
     RunState,
+    UnknownOutcomeError,
 )
 
 from . import job_states
@@ -295,10 +296,13 @@ class AttemptResidueReconciler:
         self._abandon = abandon_never_installed
         self._removal = removal
         self._clock = clock
+        self._retry_at: dict[str, datetime] = {}
 
     def tick(self) -> bool:
         """Release every current residue; True when anything was released."""
 
+        now = self._clock()
+        self._retry_at = {key: due for key, due in self._retry_at.items() if now < due}
         released = self._never_installed_plans()
         released = self._incomplete_installations() or released
         released = self._dead_owner_claims() or released
@@ -345,10 +349,15 @@ class AttemptResidueReconciler:
                 candidates.append(installation_id)
         released = False
         for installation_id in candidates:
+            if self._clock() < self._retry_at.get(installation_id, self._clock()):
+                continue
             try:
                 # The lifecycle re-derives "never reached a node" under the
                 # installation row lock, so a concurrent install refuses this.
                 self._abandon(installation_id)
+            except UnknownOutcomeError as error:
+                self._defer(installation_id, error)
+                continue
             except (
                 KeyError,
                 RuntimeError,
@@ -440,6 +449,8 @@ class AttemptResidueReconciler:
             return False
         queued = False
         for installation_id, why in self._leftover_candidates():
+            if self._clock() < self._retry_at.get(installation_id, self._clock()):
+                continue
             try:
                 plan = self._removal.preview_uninstall(installation_id)
                 if not plan.allowed:
@@ -472,6 +483,9 @@ class AttemptResidueReconciler:
                     request_id=str(uuid.uuid4()),
                     unattended_guard=still_unowned,
                 )
+            except UnknownOutcomeError as error:
+                self._defer(installation_id, error)
+                continue
             except (
                 KeyError,
                 RuntimeError,
@@ -486,6 +500,17 @@ class AttemptResidueReconciler:
             )
             queued = True
         return queued
+
+    def _defer(self, installation_id: str, error: UnknownOutcomeError) -> None:
+        due = self._clock() + timedelta(seconds=5)
+        self._retry_at[installation_id] = due
+        self._log(
+            "installation",
+            installation_id,
+            "deferred",
+            error,
+            next_attempt_at=due.isoformat(),
+        )
 
     @staticmethod
     def _quiet_since(session: Session, nodes: set[str], since: datetime) -> bool:

@@ -20,6 +20,33 @@ def _service(tmp_path):
     )
 
 
+def test_shutdown_retries_unknown_closer_and_continues_other_services(
+    tmp_path, monkeypatch
+):
+    """Catches abandoning remaining executors after one checkpoint is busy."""
+    from vonk_agent_protocol import UnknownOutcomeError, WaitReason
+    from vonk_control import worker as module
+
+    calls = []
+
+    def busy():
+        calls.append("busy")
+        raise UnknownOutcomeError(
+            "checkpoint unavailable", reason=WaitReason.OBSERVATION_UNAVAILABLE
+        )
+
+    monkeypatch.setattr(module, "bounded_attempts", lambda: iter(range(3)))
+    worker = Worker(
+        _service(tmp_path),
+        "worker",
+        {},
+        background_closers=(busy, lambda: calls.append("closed")),
+    )
+    worker.close()
+    worker.close()
+    assert calls == ["busy", "busy", "busy", "closed"]
+
+
 def test_worker_dispatches_registered_handler_and_persists_result(tmp_path) -> None:
     jobs = _service(tmp_path)
     job = jobs.enqueue("probe", "admin", "abc", ["node"], {"value": 4})
