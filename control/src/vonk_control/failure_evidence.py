@@ -166,7 +166,7 @@ def safe_text(value: str) -> str:
             lines.append(
                 _OPAQUE_SECRET.sub("[redacted opaque value]", redact_text(line))
             )
-    return "\n".join(lines)
+    return "\n".join(lines) + ("\n" if value.endswith("\n") else "")
 
 
 def _keep_end(text: str, limit: int) -> tuple[str, int]:
