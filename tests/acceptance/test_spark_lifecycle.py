@@ -1842,6 +1842,8 @@ class SparkLifecycle:
             json.dumps(
                 {
                     "event": "exact-start-replayed-after-journal-loss",
+                    "source_sha": self.arguments.source_sha,
+                    "generation": self.arguments.generation,
                     "operation_id": proof.operation_id,
                     "run_id": proof.run_id,
                     "payload_digest": proof.payload_digest,
@@ -2908,13 +2910,17 @@ class SparkLifecycle:
                 response_digest = self._run_canonical_inference(
                     inference, fixture.serving_check, fixture.slug
                 )
-            self._exercise_corrupt_agent_journal(
-                node_id=node_id,
-                run_id=run_id,
-                fixture=fixture,
-                inference=inference,
-                response_digest=response_digest,
-            )
+            if carry is None:
+                # PR carry CI exercises already promoted binaries. The fresh
+                # publication lane installs this exact candidate and must
+                # prove its new journal repair and Start replay behavior.
+                self._exercise_corrupt_agent_journal(
+                    node_id=node_id,
+                    run_id=run_id,
+                    fixture=fixture,
+                    inference=inference,
+                    response_digest=response_digest,
+                )
             cleanup_payload = {
                 "name": "Acceptance synthetic canary",
                 "description": "Disposable whole-fleet lifecycle canary cleanup",
