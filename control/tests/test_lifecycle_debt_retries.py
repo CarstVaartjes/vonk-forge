@@ -426,6 +426,17 @@ def test_recipe_unknown_after_commit_replays_without_duplicate_effects(
         result = original(*args, **kwargs)
         if len(calls) == 1:
             committed.append((result, effects()))
+
+            def admission_unavailable(*_args, **_kwargs):
+                raise AssertionError("committed replay must adopt before admission")
+
+            monkeypatch.setattr(
+                service._install_admission
+                if method == "install"
+                else service._run_admission,
+                "plan_install" if method == "install" else "plan_run",
+                admission_unavailable,
+            )
             raise UnknownOutcomeError(
                 "response lost after committed workload admission",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,

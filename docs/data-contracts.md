@@ -225,8 +225,10 @@ module defines its own.
 | `control/src/vonk_control/recipe_packages.py` | declared | 2 | Schema-2 recipe package reader for the Controller catalog sync. |
 | `control/src/vonk_control/recipe_update_contract.py` | controller-contract | 8 | One current contract for durable recipe-update intent and observation. |
 | `control/src/vonk_control/recipe_update_notice.py` | declared | 1 | One owner for "a newer revision of this recipe exists" (never restarts anything). |
+| `control/src/vonk_control/resource_planning_contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
 | `control/src/vonk_control/route_bundle_contract.py` | controller-contract | 6 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
 | `control/src/vonk_control/run_switch_contract.py` | controller-contract | 66 | Strict, transport-neutral contracts for high-level Run and Switch work. |
+| `control/src/vonk_control/run_switch_observation_contract.py` | controller-contract | 7 | Typed observed progress, retained lifecycle identity, artifact guards and build receipts. |
 | `control/src/vonk_control/runtime_image_preparation.py` | declared | 2 | Controller-owned preparation of exact runtime image archives. |
 | `control/src/vonk_control/runtime_spec_contract.py` | controller-contract | 18 | The compiled runtime specification the recipe compiler produces and the launch plan projects. |
 | `control/src/vonk_control/step_ca.py` | declared | 8 | step-ca provisioning documents the Controller reads and writes. |

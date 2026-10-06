@@ -1635,6 +1635,7 @@
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "installation-exceeds-its-reviewed-disk-claim", 1],
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "mapping-or-build-changed-while-reserving", 1],
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "require_admissible", "install.plan_invalid", 1],
+        ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "require_same_execution", "install.plan_stale", 1],
         ["control/src/vonk_control/install_admission.py", "InvalidType", "InstallAdmissionService.plan_install", "mapping-role-is-absent-from-recipe-topology", 1],
         ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "cluster-mapping-is-not-ready", 1],
         ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "recipe-revision-is-not-resolved", 1],
@@ -2247,7 +2248,8 @@
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.dependencies_stale", 1],
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.plan_invalid", 1],
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.plan_stale", 1],
-        ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "require_admissible", "run.plan_invalid", 1]
+        ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "require_admissible", "run.plan_invalid", 1],
+        ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "require_same_execution", "run.plan_stale", 1]
       ]
     },
     {
@@ -3223,7 +3225,10 @@
         ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService._start_once.start_payload", "recipe-start-endpoint-address-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.get", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.run_status", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._record_node_result_once", "node-is-not-part-of-operation-group", 1]
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._install_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._record_node_result_once", "node-is-not-part-of-operation-group", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1]
       ]
     },
     {

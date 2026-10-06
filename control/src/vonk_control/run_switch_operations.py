@@ -2357,7 +2357,11 @@ class RecipeLifecyclePhaseExecutor:
                         else None
                     ),
                     "model_artifact_set_bytes": (
-                        identity.model_artifact_bytes if identity is not None else None
+                        sum(
+                            artifact.size_bytes for artifact in first_compiled.artifacts
+                        )
+                        if first_compiled is not None
+                        else None
                     ),
                     "compiled_plan_persisted": True,
                 }
@@ -2626,11 +2630,8 @@ class RecipeLifecyclePhaseExecutor:
         """Resolve an artifact child first, then an existing recipe child."""
 
         if self._artifact_executor is not None:
-            getter = getattr(self._artifact_executor, "get", None)
-            if not callable(getter):
-                getter = None
             try:
-                child = getter(operation_id) if getter is not None else None
+                child = self._artifact_executor.get(operation_id)
             except KeyError:
                 child = None
             if child is not None:
@@ -9787,12 +9788,13 @@ def _EstablishedEffect(child: RecipeOperationView, run_id: str) -> RecipeOperati
 
 
 def _established_start_effect(
-    lifecycle: RecipeOperationService,
+    lifecycle: RecipeOperationService | None,
     phase: RunSwitchPhase,
     child: object,
 ) -> str | None:
     if (
-        phase.kind != "start"
+        lifecycle is None
+        or phase.kind != "start"
         or not isinstance(child, RecipeOperationView)
         or child.state not in job_states.words(LifecycleState.NEEDS_OPERATOR)
     ):
@@ -9805,12 +9807,13 @@ def _established_start_effect(
 
 
 def _start_still_progressing(
-    lifecycle: RecipeOperationService,
+    lifecycle: RecipeOperationService | None,
     phase: RunSwitchPhase,
     child: object,
 ) -> bool:
     if (
-        phase.kind != "start"
+        lifecycle is None
+        or phase.kind != "start"
         or not isinstance(child, RecipeOperationView)
         or child.state not in job_states.words(LifecycleState.NEEDS_OPERATOR)
     ):

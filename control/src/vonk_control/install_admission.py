@@ -269,6 +269,37 @@ def _active_recipe_revision(
     return session.scalar(statement)
 
 
+def require_same_execution(reviewed: InstallPlan, current: InstallPlan) -> None:
+    """Re-observe storage while keeping the reviewed artifacts and target effects."""
+
+    def identity(plan: InstallPlan) -> tuple[object, ...]:
+        return (
+            plan.mapping_id,
+            plan.mapping_generation,
+            plan.recipe_build_id,
+            plan.image_digest,
+            plan.recipe_revision_id,
+            plan.recipe_content_sha256,
+            plan.compiled_execution_plans,
+            tuple(
+                (
+                    node.node_id,
+                    node.rank,
+                    node.role,
+                    node.required_bytes,
+                    node.required_payload_bytes,
+                    node.disk_floor_bytes,
+                )
+                for node in plan.nodes
+            ),
+        )
+
+    if identity(reviewed) != identity(current):
+        raise InstallPlanStale(
+            InstallAdmissionCode.PLAN_STALE, reason=InvalidRequestReason.SUPERSEDED
+        )
+
+
 class InstallAdmissionService:
     def __init__(
         self,
@@ -773,6 +804,7 @@ class InstallAdmissionService:
         workload_intent_ordinal: int | None = None,
     ) -> str:
         try:
+            reviewed = plan
             plan = self.plan_install(
                 plan.mapping_id,
                 plan.recipe_build_id,
@@ -782,6 +814,7 @@ class InstallAdmissionService:
                 profile_application_id=profile_application_id,
             )
             require_admissible(plan)
+            require_same_execution(reviewed, plan)
             acquire_admission_keys(
                 session,
                 tuple(node_admission_key(node.node_id) for node in plan.nodes),
@@ -924,6 +957,7 @@ class InstallAdmissionService:
             profile_application_id=profile_application_id,
         )
         require_admissible(fresh)
+        require_same_execution(plan, fresh)
         if {node.node_id for node in fresh.nodes} != set(node_ids):
             raise InstallAdmissionBusy(
                 "install target membership changed during admission",
