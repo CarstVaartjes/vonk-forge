@@ -53,8 +53,9 @@ from typing import Any
 from sqlalchemy import update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LEGACY_WAIT_STATE
+from vonk_agent_protocol import LifecycleState
 
+from .. import job_states
 from ..agent_operation_facts import aware
 from ..logging import redact_text
 from ..models import Job, JobAttempt
@@ -78,7 +79,7 @@ from .types import (
 )
 
 KIND = "job"
-WAITING = LEGACY_WAIT_STATE
+WAITING = LifecycleState.NEEDS_OPERATOR.value
 _MAX_REASON = 1024
 _STORED = {
     State.QUEUED: "queued",
@@ -89,14 +90,6 @@ _STORED = {
     State.SUCCEEDED: "succeeded",
     State.FAILED: "failed",
     State.CANCELLED: "cancelled",
-}
-_STATES = {
-    "queued": State.QUEUED,
-    "running": State.RUNNING,
-    WAITING: State.NEEDS_OPERATOR,
-    "succeeded": State.SUCCEEDED,
-    "failed": State.FAILED,
-    "cancelled": State.CANCELLED,
 }
 
 
@@ -138,7 +131,7 @@ class JobAdapter:
         first decision (rule 3: nothing is irreversible, so it is retried).
         """
 
-        state = _STATES.get(job.state, State.NEEDS_OPERATOR)
+        state = job_states.core(job.state) or State.NEEDS_OPERATOR
         live = attempt is not None and state is State.RUNNING
         if state is State.SUCCEEDED:
             effect = Effect.ESTABLISHED
@@ -296,7 +289,7 @@ class JobAdapter:
         if claimed.state is not State.RUNNING or claimed.attempt != row.attempt + 1:
             return None
         if previous is not None:
-            previous.state = "expired"
+            job_states.lapse(previous)
         job.current_attempt = claimed.attempt
         job.state = _STORED[State.RUNNING]
         job.updated_at = now
@@ -354,7 +347,7 @@ class JobAdapter:
     # --------------------------------------------------------------- operator
 
     def resume(self, session: Session, job: Job, now: datetime) -> bool:
-        """``resume`` of a legacy ``waiting-for-operator`` job; ``False`` if it lost.
+        """``resume`` of a job that waits for an operator; ``False`` if it lost.
 
         The row advertises ``resume`` only while it is waiting; the state is a
         compare-and-set so a concurrent owner write wins.
@@ -365,7 +358,11 @@ class JobAdapter:
             job,
             OperatorAction("resume"),
             now,
-            guard=WAITING,
+            # Compare-and-set on the word the row carries (an old row says
+            # ``waiting-for-operator``), so a concurrent owner write wins.
+            guard=job.state
+            if job_states.means(job.state, State.NEEDS_OPERATOR)
+            else WAITING,
             reason="",
         )
         return not settled.stale and settled.changed > 0 and job.state == "queued"

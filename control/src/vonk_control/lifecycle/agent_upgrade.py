@@ -30,8 +30,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from vonk_agent_protocol import LEGACY_WAIT_STATE
-
+from .. import job_states
 from ..agent_operation_facts import aware
 from ..models import Job, JobAttempt
 from .adapter import Dispatch
@@ -52,10 +51,9 @@ from .types import (
 )
 
 KIND = "agent-upgrade"
-WAITING = LEGACY_WAIT_STATE
 _MAX_REASON = 512
 #: Stored states a rollout can still advance from.
-LIVE_STATES = ("queued", "running", WAITING)
+LIVE_STATES = job_states.words(State.QUEUED, State.RUNNING, State.NEEDS_OPERATOR)
 _STORED = {
     State.QUEUED: "queued",
     State.RUNNING: "running",
@@ -248,7 +246,7 @@ class AgentUpgradeAdapter:
     def expire_worker_attempt(self, attempt: JobAttempt) -> None:
         """A legacy worker dispatch whose lease lapsed: record it as expired."""
 
-        attempt.state = "expired"
+        job_states.lapse(attempt)
 
     @staticmethod
     def new_rollout(*, allowed: bool, **fields: Any) -> Job:

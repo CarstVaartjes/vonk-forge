@@ -503,9 +503,7 @@ class AgentUpgradeService:
                     raise ValueError("failed agent upgrade dispatch audit is invalid")
                 if stale_dispatch and (
                     worker_attempt is None
-                    or not job_states.attempt_means(
-                        worker_attempt.state, LifecycleState.OBSERVING
-                    )
+                    or not job_states.attempt_lapsed(worker_attempt)
                 ):
                     raise ValueError("agent upgrade worker dispatch is not stale")
             package = parent.payload.get("package")

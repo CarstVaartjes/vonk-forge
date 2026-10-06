@@ -14,12 +14,15 @@ retired word.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
+    ObservationCause,
     adopt_state,
     is_state,
+    legacy_observation_cause,
     stored_words,
 )
 
@@ -80,3 +83,37 @@ def attempt_words(*states: LifecycleState) -> tuple[str, ...]:
 
 def attempt_means(stored: str | None, *states: LifecycleState) -> bool:
     return is_state(ATTEMPT, stored, *states)
+
+
+# -- the attempt of a job --------------------------------------------------------
+#
+# An attempt records one try.  It ends ``succeeded``, ``failed``, ``cancelled`` or
+# ``observing`` (no definite answer), and ``observation_cause`` says why: the
+# executor ``reported-unknown`` or its ``lease-lapsed`` (the old ``waiting-for-
+# operator`` and ``expired`` words said it in the state itself).
+
+OBSERVING = LifecycleState.OBSERVING.value
+
+
+def attempt_cause(attempt: Any) -> ObservationCause | None:
+    """Why an observed attempt has no answer: the typed field, or the old word."""
+
+    if not attempt_means(attempt.state, LifecycleState.OBSERVING):
+        return None
+    recorded = getattr(attempt, "observation_cause", None)
+    if recorded:
+        return ObservationCause(recorded)
+    return legacy_observation_cause(attempt.state)
+
+
+def attempt_lapsed(attempt: Any) -> bool:
+    """The attempt's lease ran out without a report."""
+
+    return attempt_cause(attempt) is ObservationCause.LEASE_LAPSED
+
+
+def lapse(attempt: Any) -> None:
+    """The attempt can no longer report: it is observed, because its lease lapsed."""
+
+    attempt.state = OBSERVING
+    attempt.observation_cause = ObservationCause.LEASE_LAPSED.value

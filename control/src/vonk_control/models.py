@@ -161,6 +161,8 @@ class JobAttempt(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
     state: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: Why an ``observing`` attempt has no definite answer (``ObservationCause``).
+    observation_cause: Mapped[str | None] = mapped_column(String(24))
 
 
 class ControlProcessHeartbeat(Base):
