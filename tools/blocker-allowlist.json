@@ -52,20 +52,16 @@
   },
   "max_debt": 9,
   "debt_ceiling": {
-    "total": 198,
+    "total": 196,
     "unaudited": 603,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
     "note": "Raises in a lifecycle or operation path that predate the rule that they use SecurityRefusalError, InvalidRequestError or UnknownOutcomeError. A module's count and the ceiling only fall: convert a raise to a categorized type, then lower the count.",
-    "ceiling": 1720,
+    "ceiling": 1528,
     "grandfathered": {
       "control/src/vonk_control/agent_jobs.py": 69,
       "control/src/vonk_control/agent_upgrades.py": 41,
-      "control/src/vonk_control/artifact_blob_store.py": 24,
-      "control/src/vonk_control/artifact_jobs.py": 130,
-      "control/src/vonk_control/artifact_lifecycle.py": 10,
-      "control/src/vonk_control/artifact_reference_scan.py": 28,
       "control/src/vonk_control/availability_production.py": 46,
       "control/src/vonk_control/distributed_lifecycle.py": 3,
       "control/src/vonk_control/distributed_recovery.py": 92,
@@ -367,45 +363,11 @@
       ]
     },
     {
-      "family": "artifact-blob.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, fence authority, or a destructive-effect owner guard. Audit notes: Blob store path and content-address safety.",
-      "sites": [
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._digest", "artifact-digest-is-invalid", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_bytes", "artifact-upload-sha-256-does-not-match", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-sha-256-does-not-match", 2],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._prepare_root", "artifact-storage-root-is-unsafe", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._prepare_root", "artifact-storage-metadata-path-is-unsafe", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.delete", "artifact-storage-key-is-invalid", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.delete", "artifact-storage-path-is-unsafe", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.resolve", "artifact-storage-key-is-invalid", 1]
-      ]
-    },
-    {
-      "family": "artifact-blob.input-validation",
-      "category": "input-validation",
-      "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led).",
-      "sites": [
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_bytes", "artifact-bytes-exceed-the-limit", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-size-is-outside-its-bound", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-chunk-is-invalid", 2],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-exceeds-its-declared-size", 2],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore.put_stream", "artifact-upload-size-does-not-match", 2],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._commit", "artifact-storage-quota-is-exhausted", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._reserve", "artifact-storage-quota-is-exhausted", 1]
-      ]
-    },
-    {
       "family": "artifact-job.security-edge",
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, fence authority, or a destructive-effect owner guard. Audit notes: Agent authorization and content-addressed input/output integrity of one-shot artifact jobs.",
       "sites": [
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._authorized_agent_job", "agent-is-not-authorized-for-this-artifact-job", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobTransferClosedError", "ArtifactJobService._authorized_agent_job", "artifact-job-transfer-is-closed", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._put_blob_in_session", "content-addressed-artifact-collision", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.create", "artifact-job-request-key-collision", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.input_blob", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.result_blob", "message", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobTransferClosedError", "ArtifactJobService._validate_output_upload", "artifact-job-transfer-is-closed", 1],
         ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobTransferClosedError", "ArtifactJobService._attach_output", "artifact-job-transfer-is-closed", 1]
       ]
@@ -415,76 +377,7 @@
       "category": "input-validation",
       "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led). Audit notes: User job submission validated against the recipe artifact contract.",
       "sites": [
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._attach_input", "artifact-input-changed", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._attach_input", "artifact-input-does-not-match-its-declaration", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._attach_input", "artifact-job-inputs-are-immutable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._attach_output", "artifact-output-bytes-exceed-the-limit", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._attach_output", "artifact-output-changed", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._attach_output", "artifact-output-file-count-exceeds-the-limit", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._attach_output", "artifact-output-media-type-is-not-allowed", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._attach_output", "stored-artifact-output-does-not-match-declaration", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._create_in_session", "artifact-job-timeout-exceeds-the-recipe-contract", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._create_in_session", "recipe-run-is-not-accepting-jobs", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._create_in_session", "request-key-was-already-used-differently", 4],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._file_mapping", "artifact-input-slot-is-unavailable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._validate_output_upload", "artifact-output-bytes-exceed-the-limit", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._validate_output_upload", "artifact-output-file-count-exceeds-the-limit", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._validate_output_upload", "artifact-output-media-type-is-not-allowed", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.cancel", "artifact-job-is-not-cancellable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.cancel", "cancellation-request-key-was-already-used-differently", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.create", "artifact-input-names-must-be-unique", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.create", "artifact-job-has-too-many-input-files", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.create", "artifact-job-input-bytes-exceed-the-limit", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.create", "artifact-job-parameters-must-be-an-object", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.create", "artifact-job-timeout-is-invalid", 2],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.finalize", "artifact-job-inputs-are-incomplete", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.input_blob", "stored-artifact-input-is-inconsistent", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.input_upload_size", "artifact-input-does-not-match-its-declaration", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.input_upload_size", "artifact-job-inputs-are-immutable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.list_for_run", "artifact-job-list-limit-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_input_stream", "artifact-input-content-length-does-not-match", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "artifact-job-is-not-ready", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "artifact-job-submission-owner-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "recipe-run-is-not-accepting-jobs", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "stored-artifact-job-parameters-are-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_artifact_submission_in_session", "artifact-job-submission-owner-is-invalid", 4],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_artifact_submission_in_session", "artifact-job-submission-request-identity-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_canonical_declared_parameters", "artifact-job-parameters-are-not-canonical-json", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_canonical_declared_parameters", "artifact-job-parameters-must-be-a-json-object", 3],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_effective_output_limits", "artifact-output-limits-are-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_effective_output_limits", "artifact-output-limits-cannot-satisfy-the-recipe-contract", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_effective_output_limits", "artifact-output-limits-exceed-the-recipe-contract", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_effective_parameters", "artifact-job-contains-undeclared-parameters", 2],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_effective_parameters", "artifact-job-parameter", 6],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_effective_parameters", "artifact-parameter-contract-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_effective_parameters", "artifact-parameter-pattern-is-invalid", 2],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_input_manifest", "stored-artifact-input-manifest-identity-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_input_manifest", "stored-artifact-input-manifest-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_inputs_against_contract", "artifact-input", 3],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_inputs_against_contract", "artifact-input-slot", 3],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_inputs_against_contract", "artifact-job-input-bytes-exceed-the-recipe-contract", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_inputs_against_contract", "recipe-does-not-accept-artifact-input-files", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_outputs_against_contract", "artifact-output", 3],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_outputs_against_contract", "artifact-output-bytes-exceed-the-recipe-contract", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_outputs_against_contract", "artifact-output-slot", 2],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_validate_parameter_definition", "artifact-parameter-contract-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_recipe_interface", "recipe-interface-is-unavailable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_compile_contract", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "_canonical_contract", "compiled-artifact-contract-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._create_in_session", "recipe-revision-is-unavailable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._create_in_session", "artifact-job-interface-does-not-match-the-run", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_input", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_input_stream", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_output", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.put_output_stream", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.finalize", "artifact-job-cannot-be-finalized", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "artifact-job-was-submitted-under-another-request-identity", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "another-artifact-job-already-owns-this-run-reservation", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "ArtifactJobService.submit", "artifact-job-contract-is-unavailable", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.result_blob", "artifact-job-result-is-not-available", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService._job_node_in_session", "artifact-job-endpoint-owner-is-not-running", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.cancel", "message", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "recipe-job-workload-identity-is-unavailable", 1]
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "ArtifactJobService.submit", "artifact-job-contract-is-unavailable", 1]
       ]
     },
     {
@@ -492,42 +385,7 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping uncertainty (missing receipt, stale stored plan, persisted state, changed scope) that rule 5 of the lifecycle core turns into unknown-then-reconcile. Debt: the ceiling only falls. Audit notes: Stored artifact-job evidence/plan consistency.",
       "sites": [
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "installed-job-execution-plan-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "ArtifactJobService.submit", "installed-job-execution-plan-is-invalid", 1],
-        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobError", "ArtifactJobService.submit", "installed-job-execution-plan-is-unavailable", 1]
-      ]
-    },
-    {
-      "family": "artifact-lifecycle.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, fence authority, or a destructive-effect owner guard. Audit notes: Deletion guard: when ownership or references are unknown the object is kept (fail closed for destructive effects only).",
-      "sites": [
-        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactLifecycleError", "clear_removal", "artifact.deletion_fence_lost", 1],
-        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactLifecycleError", "lock_reference_gates", "artifact.reference_busy", 1],
-        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactLifecycleError", "lock_reference_gates", "artifact.reference_unavailable", 1],
-        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactLifecycleError", "require_reference_open", "artifact.deletion_in_progress", 1],
-        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactLifecycleError", "reserve_removal_owners", "artifact.deletion_busy", 1]
-      ]
-    },
-    {
-      "family": "artifact-reference-scan.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, fence authority, or a destructive-effect owner guard. Audit notes: Deletion guard: when ownership or references are unknown the object is kept (fail closed for destructive effects only).",
-      "sites": [
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "_profile_plan", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "_run_switch_plan", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "_run_switch_runtime_image_intent", "artifact.reference_scan_failed", 2],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "model_set_objects", "artifact.reference_scan_failed", 3],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "model_set_reference_findings", "artifact.reference_scan_failed", 3],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "model_set_reference_findings", "artifact.reference_scan_limited", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "model_set_reference_findings.account", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "model_set_reference_findings.account", "artifact.reference_scan_limited", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "require_model_sets_open", "artifact.deletion_in_progress", 2],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "require_model_sets_open", "artifact.reference_identity_mismatch", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "runtime_image_reference_findings", "artifact.reference_scan_failed", 6],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "runtime_image_reference_findings", "artifact.reference_scan_limited", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "runtime_image_reference_findings.account", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactLifecycleError", "runtime_image_reference_findings.account", "artifact.reference_scan_limited", 1]
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "ArtifactJobService.submit", "installed-job-execution-plan-is-invalid", 1]
       ]
     },
     {
@@ -1122,14 +980,6 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "message", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "RunSwitchOperationService.retry", "run-switch-retry-runtime-image-reference-is-invalid", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchOperationConflict", "_reserve_run_switch_assets", "message", 1]
-      ]
-    },
-    {
-      "family": "artifact-blob.already-retried",
-      "category": "already-retried",
-      "reason": "The bounded nonblocking claim of the shared reference fence (a kernel file lock shared with other Controller processes) ran out its 30 second budget while another process reconciles. The caller's own operation (an idempotent upload or attachment, or the reconcile sweep) is retried by its requester; nothing in flight is ended by it and no state is recorded wrong.",
-      "sites": [
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobStoreError", "ArtifactBlobStore._claim_reference_lock", "artifact-storage-references-are-being-reconciled", 1]
       ]
     },
     {
@@ -3100,6 +2950,237 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InvalidValue is of the input-validation error type.",
       "sites": [
         ["control/src/vonk_control/lifecycle/artifact_job.py", "InvalidValue", "ArtifactJobAdapter.__init__", "bind-the-adapter-to-a-session-or-to-a-session-factory", 1]
+      ]
+    },
+    {
+      "family": "artifact_blob_store.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ArtifactBlobBusy is of the already-retried error type; class ArtifactBlobUnavailable is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobBusy", "ArtifactBlobStore._claim_reference_lock", "artifact-storage-references-are-being-reconciled", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnavailable", "ArtifactBlobStore.resolve", "stored-artifact-is-unavailable", 1]
+      ]
+    },
+    {
+      "family": "artifact_blob_store.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class ArtifactBlobInvalid is of the input-validation error type; class ArtifactBlobQuotaExhausted is of the input-validation error type; class InvalidValue is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobInvalid", "ArtifactBlobStore._digest", "artifact-digest-is-invalid", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobInvalid", "ArtifactBlobStore.put_bytes", "artifact-bytes-exceed-the-limit", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobInvalid", "ArtifactBlobStore.put_stream", "artifact-upload-chunk-is-invalid", 2],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobInvalid", "ArtifactBlobStore.put_stream", "artifact-upload-exceeds-its-declared-size", 2],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobInvalid", "ArtifactBlobStore.put_stream", "artifact-upload-size-does-not-match", 2],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobInvalid", "ArtifactBlobStore.put_stream", "artifact-upload-size-is-outside-its-bound", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobQuotaExhausted", "ArtifactBlobStore._commit", "artifact-storage-quota-is-exhausted", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobQuotaExhausted", "ArtifactBlobStore._reserve", "artifact-storage-quota-is-exhausted", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "InvalidValue", "ArtifactBlobStore.__init__", "artifact-blob-store-configuration-is-invalid", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "InvalidValue", "ArtifactBlobStore.reconcile", "artifact-reconciliation-batch-limit-is-invalid", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "InvalidValue", "ArtifactBlobStore.reconcile", "artifact-reconciliation-orphan-grace-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "artifact_blob_store.security-edge",
+      "category": "security-edge",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class ArtifactBlobDigestMismatch is of the security-edge error type; class ArtifactBlobUnsafePath is of the security-edge error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobDigestMismatch", "ArtifactBlobStore.put_bytes", "artifact-upload-sha-256-does-not-match", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobDigestMismatch", "ArtifactBlobStore.put_stream", "artifact-upload-sha-256-does-not-match", 2],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnsafePath", "ArtifactBlobStore._prepare_root", "artifact-storage-metadata-path-is-unsafe", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnsafePath", "ArtifactBlobStore._prepare_root", "artifact-storage-root-is-unsafe", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnsafePath", "ArtifactBlobStore.delete", "artifact-storage-key-is-invalid", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnsafePath", "ArtifactBlobStore.delete", "artifact-storage-path-is-unsafe", 1],
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnsafePath", "ArtifactBlobStore.resolve", "artifact-storage-key-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "artifact_jobs.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ArtifactJobUnavailableError is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "ArtifactJobService._file_mapping", "artifact-input-slot-is-unavailable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "ArtifactJobService._job_node_in_session", "artifact-job-endpoint-owner-is-not-running", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "ArtifactJobService.submit", "artifact-job-submission-owner-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "ArtifactJobService.submit", "installed-job-execution-plan-is-unavailable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "ArtifactJobService.submit", "stored-artifact-job-parameters-are-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "_artifact_submission_in_session", "artifact-job-submission-owner-is-invalid", 4],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "_artifact_submission_in_session", "artifact-job-submission-request-identity-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "_canonical_contract", "compiled-artifact-contract-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "_compile_contract", "observation-unavailable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "_input_manifest", "stored-artifact-input-manifest-identity-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "_input_manifest", "stored-artifact-input-manifest-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "_recipe_interface", "recipe-interface-is-unavailable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "_translate_blob_error", "message", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "_validate_parameter_definition", "artifact-parameter-contract-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "artifact_jobs.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class ArtifactJobInvalid is of the input-validation error type; class ArtifactResultInvalid is of the input-validation error type; class InvalidValue is of the input-validation error type; class MissingRecord is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_input", "artifact-input-changed", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_input", "artifact-input-does-not-match-its-declaration", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_input", "artifact-job-inputs-are-immutable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_output", "artifact-output-bytes-exceed-the-limit", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_output", "artifact-output-changed", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_output", "artifact-output-file-count-exceeds-the-limit", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_output", "artifact-output-media-type-is-not-allowed", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_output", "stored-artifact-output-does-not-match-declaration", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._create_in_session", "artifact-job-interface-does-not-match-the-run", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._create_in_session", "artifact-job-timeout-exceeds-the-recipe-contract", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._create_in_session", "recipe-revision-is-unavailable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._create_in_session", "recipe-run-is-not-accepting-jobs", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._create_in_session", "request-key-was-already-used-differently", 4],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._validate_output_upload", "artifact-output-bytes-exceed-the-limit", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._validate_output_upload", "artifact-output-file-count-exceeds-the-limit", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService._validate_output_upload", "artifact-output-media-type-is-not-allowed", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.cancel", "artifact-job-is-not-cancellable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.cancel", "cancellation-request-key-was-already-used-differently", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.cancel", "conflict", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-input-names-must-be-unique", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-has-too-many-input-files", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-input-bytes-exceed-the-limit", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-parameters-must-be-an-object", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-request-key-collision", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-timeout-is-invalid", 2],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.finalize", "artifact-job-cannot-be-finalized", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.finalize", "artifact-job-inputs-are-incomplete", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.input_upload_size", "artifact-input-does-not-match-its-declaration", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.input_upload_size", "artifact-job-inputs-are-immutable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.list_for_run", "artifact-job-list-limit-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.put_input_stream", "artifact-input-content-length-does-not-match", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.result_blob", "artifact-job-result-is-not-available", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "another-artifact-job-already-owns-this-run-reservation", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "artifact-job-is-not-ready", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "artifact-job-was-submitted-under-another-request-identity", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "recipe-job-workload-identity-is-unavailable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "recipe-run-is-not-accepting-jobs", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_canonical_declared_parameters", "artifact-job-parameters-are-not-canonical-json", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_canonical_declared_parameters", "artifact-job-parameters-must-be-a-json-object", 3],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_output_limits", "artifact-output-limits-are-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_output_limits", "artifact-output-limits-cannot-satisfy-the-recipe-contract", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_output_limits", "artifact-output-limits-exceed-the-recipe-contract", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_parameters", "artifact-job-contains-undeclared-parameters", 2],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_parameters", "artifact-job-parameter", 6],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_parameters", "artifact-parameter-contract-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_effective_parameters", "artifact-parameter-pattern-is-invalid", 2],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_translate_blob_error", "message", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_validate_inputs_against_contract", "artifact-input", 3],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_validate_inputs_against_contract", "artifact-input-slot", 3],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_validate_inputs_against_contract", "artifact-job-input-bytes-exceed-the-recipe-contract", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_validate_inputs_against_contract", "recipe-does-not-accept-artifact-input-files", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_validate_outputs_against_contract", "artifact-output", 3],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_validate_outputs_against_contract", "artifact-output-bytes-exceed-the-recipe-contract", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobInvalid", "_validate_outputs_against_contract", "artifact-output-slot", 2],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "artifact-job-contract-is-unreadable", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "artifact-result-does-not-match-uploaded-outputs", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "artifact-result-exceeds-output-limits", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "artifact-result-media-type-is-not-allowed", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "artifact-result-state-and-exit-code-disagree", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "cancelled-artifact-result-cannot-retain-uploaded-outputs", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "waiting-artifact-result-identity-or-output-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "InvalidValue", "ArtifactJobResponse.response_is_consistent", "a-waiting-artifact-job-must-advertise-its-stop-action", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "InvalidValue", "ArtifactJobResponse.response_is_consistent", "artifact-submission-operation-and-request-identity-must-be-p", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "InvalidValue", "ArtifactJobResponse.response_is_consistent", "failed-or-waiting-artifact-job-requires-a-status-reason", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "InvalidValue", "ArtifactJobResponse.response_is_consistent", "malformed", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "InvalidValue", "ArtifactJobResponse.response_is_consistent", "successful-artifact-job-cannot-retain-a-failure-reason", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "InvalidValue", "ArtifactJobResponse.response_is_consistent", "successful-artifact-job-requires-output-manifest-and-result", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "InvalidValue", "ArtifactJobService.__init__", "artifact-job-retention-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "InvalidValue", "ArtifactJobService.reconcile_storage", "artifact-reconciliation-batch-limit-is-invalid", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService._attach_input", "not-found", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService._authorized_agent_job", "not-found", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService._view_in_session", "not-found", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService.cancel", "not-found", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService.finalize", "not-found", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService.get", "not-found", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService.get_by_request_id", "not-found", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService.input_blob", "not-found", 3],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService.input_upload_size", "not-found", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService.list_for_run", "not-found", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService.result_blob", "not-found", 3],
+        ["control/src/vonk_control/artifact_jobs.py", "MissingRecord", "ArtifactJobService.submit", "not-found", 1]
+      ]
+    },
+    {
+      "family": "artifact_jobs.security-edge",
+      "category": "security-edge",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class ArtifactJobRefused is of the security-edge error type; class ArtifactResultRefused is of the security-edge error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobRefused", "ArtifactJobService._authorized_agent_job", "agent-is-not-authorized-for-this-artifact-job", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobRefused", "ArtifactJobService._put_blob_in_session", "content-addressed-artifact-collision", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobRefused", "_translate_blob_error", "message", 1],
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactResultRefused", "ArtifactJobService.consume_agent_result", "artifact-result-identity-does-not-match", 1]
+      ]
+    },
+    {
+      "family": "artifact_lifecycle.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ArtifactReferenceUnsettled is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactReferenceUnsettled", "lock_reference_gates", "artifact.reference_busy", 1],
+        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactReferenceUnsettled", "lock_reference_gates", "artifact.reference_unavailable", 1],
+        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactReferenceUnsettled", "require_reference_open", "artifact.deletion_in_progress", 1],
+        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactReferenceUnsettled", "reserve_removal_owners", "artifact.deletion_busy", 1]
+      ]
+    },
+    {
+      "family": "artifact_lifecycle.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InvalidValue is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_lifecycle.py", "InvalidValue", "ArtifactIdentity.__post_init__", "artifact-lifecycle-digest-is-invalid", 1],
+        ["control/src/vonk_control/artifact_lifecycle.py", "InvalidValue", "ArtifactIdentity.__post_init__", "artifact-lifecycle-kind-is-invalid", 1],
+        ["control/src/vonk_control/artifact_lifecycle.py", "InvalidValue", "reserve_removal_owners", "artifact-removal-owner-identity-is-incomplete", 1],
+        ["control/src/vonk_control/artifact_lifecycle.py", "InvalidValue", "reserve_removal_owners", "artifact-removal-owner-kind-is-invalid", 1],
+        ["control/src/vonk_control/artifact_lifecycle.py", "InvalidValue", "reserve_removal_owners", "one-artifact-identity-has-multiple-removal-owners", 1]
+      ]
+    },
+    {
+      "family": "artifact_lifecycle.security-edge",
+      "category": "security-edge",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class ArtifactRemovalFenceLost is of the security-edge error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactRemovalFenceLost", "clear_removal", "artifact.deletion_fence_lost", 1]
+      ]
+    },
+    {
+      "family": "artifact_reference_scan.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ArtifactReferenceUnsettled is of the already-retried error type; class BookkeepingUnknown is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_profile_plan", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_run_switch_plan", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_run_switch_runtime_image_intent", "artifact.reference_scan_failed", 2],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_objects", "artifact.reference_scan_failed", 3],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings", "artifact.reference_scan_failed", 3],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings", "artifact.reference_scan_limited", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings.account", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings.account", "artifact.reference_scan_limited", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "require_model_sets_open", "artifact.deletion_in_progress", 2],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings", "artifact.reference_scan_failed", 6],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings", "artifact.reference_scan_limited", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings.account", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings.account", "artifact.reference_scan_limited", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "BookkeepingUnknown", "model_set_reference_findings", "stored-recipe-selector-is-invalid", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "BookkeepingUnknown", "runtime_image_reference_findings", "stored-recipe-selector-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "artifact_reference_scan.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class ArtifactReferenceIdentityStale is of the input-validation error type; class InvalidValue is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceIdentityStale", "require_model_sets_open", "artifact.reference_identity_mismatch", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "InvalidValue", "require_model_sets_open", "explicit-model-object-identities-require-exactly-one-model-s", 1]
+      ]
+    },
+    {
+      "family": "artifact_jobs.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ArtifactJobUnavailableError is of the already-retried error type.",
+      "sites": [
+        ["control/src/vonk_control/artifact_jobs.py", "ArtifactJobUnavailableError", "ArtifactJobService.submit", "installed-job-execution-plan-is-unreadable", 1]
       ]
     }
   ]
