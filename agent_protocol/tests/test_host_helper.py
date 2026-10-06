@@ -53,7 +53,10 @@ def stop_plan() -> RecipeStopPayload:
             "recipe_revision_id": start.recipe_revision_id,
             "mapping_id": start.mapping_id,
             "plan_digest": start.plan_digest,
-            "compiled_execution_plan": start.compiled_execution_plan,
+            "rank": start.compiled_execution_plan.runtime.placement.rank,
+            "role": start.compiled_execution_plan.runtime.placement.role,
+            "recipe_content_sha256": start.compiled_execution_plan.identity.recipe_revision_sha256,
+            "stop_timeout_seconds": start.compiled_execution_plan.lifecycle.stop_timeout_seconds,
             "cancel_pending_start": False,
         }
     )

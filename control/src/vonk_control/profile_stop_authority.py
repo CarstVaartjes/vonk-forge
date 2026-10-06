@@ -492,8 +492,7 @@ def validate_profile_jobrun_stop_target(
         or source_job.kind != "recipe.job.run.v1"
         or source_job.payload.get("owner_kind") != "artifact-job"
         or source_job.payload.get("owner_id") != artifact.id
-        or source_job.authority_revision
-        != stop.compiled_execution_plan.identity.recipe_revision_sha256
+        or source_job.authority_revision != stop.recipe_content_sha256
         or source_job.payload_digest
         != hashlib.sha256(canonical_message(source_job.payload)).hexdigest()
         or source_operation.parent_job_id != source_job.id

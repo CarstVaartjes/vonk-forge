@@ -1324,16 +1324,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
                                 .ok()
                                 .is_some_and(|encoded| hex_sha256(&encoded) == digest)
                     })
-                    || (plan.compiled_execution_plan.job.is_none()
-                        && plan.target_runtime_id != plan.run_id)
                 {
                     return Err(OperationError::InvalidOperation);
                 }
-                let stop_timeout_seconds =
-                    u16::try_from(plan.compiled_execution_plan.lifecycle.stop_timeout_seconds)
-                        .ok()
-                        .filter(|seconds| (1..=600).contains(seconds))
-                        .ok_or(OperationError::InvalidOperation)?;
+                let stop_timeout_seconds = u16::try_from(plan.stop_timeout_seconds)
+                    .ok()
+                    .filter(|seconds| (1..=600).contains(seconds))
+                    .ok_or(OperationError::InvalidOperation)?;
                 Ok(Some(AuthorizedRuntimeEffect::Stop {
                     identity: RuntimeEffectIdentity {
                         runtime_id: plan.target_runtime_id,
@@ -3916,22 +3913,12 @@ fn validate_runtime_job_plan(plan: &RecipeJobRunRequest) -> Result<(), Operation
 }
 
 fn validate_runtime_stop_plan(plan: &RecipeStopPayload) -> Result<(), OperationError> {
-    let encoded_plan = canonical_json(&plan.compiled_execution_plan)
-        .map_err(|_| OperationError::InvalidOperation)?;
     let encoded_claim = canonical_json(plan).map_err(|_| OperationError::InvalidOperation)?;
-    let compiled = &plan.compiled_execution_plan;
-    compiled
-        .validate_storage()
-        .map_err(|_| OperationError::InvalidOperation)?;
-    let placement = &compiled.runtime.placement;
     if plan.run_generation == 0
         || plan.run_generation > i32::MAX as u32
-        || placement.world_size == 0
-        || placement.rank >= placement.world_size
         || !lower_hex(&plan.plan_digest, 64)
-        || (compiled.job.is_none() && plan.target_runtime_id != plan.run_id)
-        || !(1..=600).contains(&compiled.lifecycle.stop_timeout_seconds)
-        || encoded_plan.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+        || !lower_hex(&plan.recipe_content_sha256, 64)
+        || !(1..=600).contains(&plan.stop_timeout_seconds)
         || encoded_claim.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
     {
         return Err(OperationError::InvalidOperation);
@@ -5278,7 +5265,10 @@ mod tests {
     fn recipe_start_plan_for_authority(run_generation: u32) -> RecipeStartPayload {
         let compiled = compiled_plan_for_runtime_authority();
         RecipeStartPayload {
-            compiled_execution_plan: compiled.clone(),
+            rank: compiled.runtime.placement.rank,
+            role: compiled.runtime.placement.role.clone(),
+            recipe_content_sha256: compiled.identity.recipe_revision_sha256.clone(),
+            stop_timeout_seconds: compiled.lifecycle.stop_timeout_seconds,
             installation_id: runtime_effect_identity(run_generation).installation_id,
             mapping_id: uuid::Uuid::parse_str("70000000-0000-4000-8000-000000000007").unwrap(),
             phase: None,
@@ -5298,7 +5288,10 @@ mod tests {
         let compiled = compiled_plan_for_runtime_authority();
         RecipeStopPayload {
             cancel_pending_start,
-            compiled_execution_plan: compiled.clone(),
+            rank: compiled.runtime.placement.rank,
+            role: compiled.runtime.placement.role.clone(),
+            recipe_content_sha256: compiled.identity.recipe_revision_sha256.clone(),
+            stop_timeout_seconds: compiled.lifecycle.stop_timeout_seconds,
             installation_id: runtime_effect_identity(run_generation).installation_id,
             mapping_id: uuid::Uuid::parse_str("70000000-0000-4000-8000-000000000007").unwrap(),
             plan_digest: "c".repeat(64),
@@ -5471,6 +5464,23 @@ mod tests {
                 && installation_id == stop_plan.installation_id
                 && logical_run_id == stop_plan.run_id
         ));
+
+        // Every identity and the cleanup timeout remain covered by the signed
+        // Stop hash even though cleanup does not require launch history.
+        let mutations: [fn(&mut RecipeStopPayload); 4] = [
+            |plan: &mut RecipeStopPayload| plan.rank += 1,
+            |plan: &mut RecipeStopPayload| plan.role = "other".to_owned(),
+            |plan: &mut RecipeStopPayload| plan.recipe_content_sha256 = "d".repeat(64),
+            |plan: &mut RecipeStopPayload| plan.stop_timeout_seconds += 1,
+        ];
+        for mutate in mutations {
+            let mut changed = request.clone();
+            mutate(changed.stop_plan.as_mut().unwrap());
+            assert!(matches!(
+                executor.authorize_runtime_effect(&changed, grant),
+                Err(OperationError::InvalidOperation)
+            ));
+        }
 
         let mut empty_argv = request.clone();
         empty_argv.arguments.push("ignored-argv".to_owned());

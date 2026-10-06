@@ -38,7 +38,6 @@ from .litellm import (
 )
 from .logging import log_event
 from .models import (
-    AgentPresence,
     CatalogDocumentRevision,
     ClusterMapping,
     Job,
@@ -76,7 +75,6 @@ _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
 # A serving route is kept while its Sparks keep talking to the Controller,
 # even when their rank reports are missing; a Spark silent this long is gone.
-SPARK_SILENT_WITHDRAWAL_SECONDS = 300
 _LOGGER = logging.getLogger(__name__)
 _WITHDRAWAL_ATTEMPTS = 5
 _WITHDRAWAL_BACKOFF_SECONDS = 0.05
@@ -118,6 +116,10 @@ class RecipeRouteError(RuntimeError):
     def __init__(self, message: str, *, run_id: str | None = None) -> None:
         super().__init__(message)
         self.run_id = run_id
+
+
+class RecipeRankStopped(RecipeRouteError):
+    """A durable rank reports a stopped or failed workload, requiring recovery."""
 
 
 class RecipeRouteNotReady(RecipeRouteError):
@@ -1183,6 +1185,12 @@ class RecipeRouteService:
         except RecipeRouteError as error:
             if error.run_id is None:
                 raise
+            if not isinstance(error, RecipeRankStopped):
+                # Failure to reconstruct a candidate is not evidence that an
+                # already accepted endpoint stopped serving. Initial route
+                # publication still validates every candidate field.
+                self._note_retained(error.run_id, [str(error)])
+                return False
             published_ids = frozenset(run.id for run in published)
             recovery_error = f"{_HEALTH_RECOVERY_ERROR}: {error}"[:512]
             log_event(
@@ -1420,8 +1428,12 @@ class RecipeRouteService:
                     "recipe run alias is invalid or duplicated", run_id=run.id
                 )
             upstream_model = _primary_model_alias(session, run)
+            if any(node.state in {RunState.STOPPED, RunState.FAILED} for node in nodes):
+                raise RecipeRankStopped(
+                    "recipe rank reports a stopped or failed workload", run_id=run.id
+                )
             if not nodes or any(node.state != RunState.RUNNING for node in nodes):
-                raise RecipeRouteError(
+                raise RecipeRouteNotReady(
                     "every recipe rank must be running", run_id=run.id
                 )
             if tuple(node.rank for node in nodes) != tuple(range(len(nodes))):
@@ -1521,24 +1533,6 @@ class RecipeRouteService:
                             "recipe rank readiness evidence is stale", run_id=run.id
                         )
                     age = int((now.astimezone(UTC) - observed).total_seconds())
-                    # A Spark that stopped talking to the Controller at all is
-                    # evidence, not bookkeeping: its endpoint is gone too.
-                    presence = session.get(AgentPresence, node.node_id)
-                    silent = (
-                        None
-                        if presence is None
-                        else int(
-                            (
-                                now.astimezone(UTC) - _aware(presence.observed_at)
-                            ).total_seconds()
-                        )
-                    )
-                    if silent is not None and silent >= SPARK_SILENT_WITHDRAWAL_SECONDS:
-                        raise RecipeRouteError(
-                            f"Spark {node.node_id} has not reached the Controller "
-                            f"for {silent}s",
-                            run_id=run.id,
-                        )
                     retained.append(f"rank {node.rank} evidence is {age}s old")
             self._note_retained(run.id, retained)
             try:

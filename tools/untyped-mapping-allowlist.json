@@ -437,7 +437,7 @@
     },
     {
       "path": "control/src/vonk_control/recipe_stop_payloads.py",
-      "count": 3
+      "count": 2
     },
     {
       "path": "control/src/vonk_control/recipe_update_notice.py",

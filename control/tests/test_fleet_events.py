@@ -935,7 +935,10 @@ def test_durable_operation_projection_resume_records_waiting_then_queued(
             recipe_revision_id="00000000-0000-4000-8000-000000000003",
             mapping_id="00000000-0000-4000-8000-000000000004",
             plan_digest="a" * 64,
-            compiled_execution_plan=compiled_plan,
+            rank=compiled_plan["runtime"]["placement"]["rank"],
+            role=compiled_plan["runtime"]["placement"]["role"],
+            recipe_content_sha256=compiled_plan["identity"]["recipe_revision_sha256"],
+            stop_timeout_seconds=compiled_plan["lifecycle"]["stop_timeout_seconds"],
             cancel_pending_start=False,
         ).model_dump(mode="json")
         operation.payload_digest = hashlib.sha256(

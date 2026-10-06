@@ -43,7 +43,6 @@ from vonk_control.operation_api import durable_operation_services
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import (
-    SPARK_SILENT_WITHDRAWAL_SECONDS,
     AtomicRecipeRoutePublisher,
     RecipeRouteError,
     RecipeRouteNotReady,
@@ -1583,8 +1582,10 @@ def _agents_reached_the_controller(service, at: datetime) -> None:
             presence.observed_at = at
 
 
-def test_a_route_is_withdrawn_when_its_spark_goes_silent(tmp_path: Path) -> None:
-    """A Spark that stopped reaching the Controller is gone, not late."""
+def test_control_channel_silence_does_not_withdraw_a_serving_route(
+    tmp_path: Path,
+) -> None:
+    """Control channel absence is not proof the inference endpoint stopped."""
 
     clock = MutableClock(NOW)
     base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
@@ -1592,14 +1593,13 @@ def test_a_route_is_withdrawn_when_its_spark_goes_silent(tmp_path: Path) -> None
     service.publish_run(run_id)
     _agents_reached_the_controller(service, NOW)
 
-    clock.now = NOW + timedelta(seconds=SPARK_SILENT_WITHDRAWAL_SECONDS + 1)
+    clock.now = NOW + timedelta(seconds=301)
     RecipeOperationWorker(service.sessions, service, clock=clock).tick()
 
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
-        assert run.route_state == "withdrawn"
-        assert run.route_error is not None
-        assert "has not reached the Controller for" in run.route_error
+        assert run.route_state == "published"
+        assert run.state == "running"
 
 
 def test_worker_keeps_every_serving_route_while_reports_are_missing(
@@ -1887,3 +1887,33 @@ def test_one_run_with_an_invalid_endpoint_does_not_expire_the_other_routes(
     with service.sessions() as session:
         assert _recipe_run(session, healthy_run).route_state == "published"
         assert _recipe_run(session, broken_run).route_state == "withdrawn"
+
+
+@pytest.mark.parametrize("damage", ["plan", "alias", "ranks", "mapping", "endpoint"])
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_bookkeeping_damage_retains_the_accepted_serving_route(
+    tmp_path: Path, damage: str
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    service.publish_run(run_id)
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert node is not None
+        if damage == "plan":
+            run.plan = {"unreadable": True}
+        elif damage == "alias":
+            run.alias = "invalid alias"
+        elif damage == "ranks":
+            node.rank = 2
+        elif damage == "mapping":
+            run.mapping_generation += 1
+        else:
+            node.endpoint = {"url": "not an endpoint"}
+    RecipeOperationWorker(service.sessions, service, clock=clock).tick()
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.state == "running"
+        assert run.route_state == "published"
