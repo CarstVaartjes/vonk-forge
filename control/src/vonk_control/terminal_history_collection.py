@@ -16,7 +16,17 @@ from datetime import datetime
 from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import DistributionAssignmentState, RunState
+from vonk_agent_protocol import (
+    ControllerErrorCode,
+    DistributionAssignmentState,
+    InstallationState,
+    LifecycleState,
+    ModelFileState,
+    ReservationState,
+    RoutePublicationState,
+    RunState,
+    StateAlias,
+)
 
 from .catalog_revision_collection import GRACE, INTERVAL, live_tokens, tokens
 from .lifecycle.evidence import Residue
@@ -47,7 +57,12 @@ from .run_history_retention import run_absence_reconciled
 from .stored_json import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
-_TERMINAL = ("succeeded", "failed", "cancelled", "superseded")
+_TERMINAL = (
+    LifecycleState.SUCCEEDED.value,
+    LifecycleState.FAILED.value,
+    LifecycleState.CANCELLED.value,
+    LifecycleState.SUPERSEDED.value,
+)
 
 
 class TerminalHistoryCollector:
@@ -129,14 +144,15 @@ class TerminalHistoryCollector:
             (
                 ResourceReservation,
                 ResourceReservation.released_at,
-                ResourceReservation.state == "released",
+                ResourceReservation.state == ReservationState.RELEASED.value,
             ),
             # Inventory history is removed only after an authenticated inventory
             # said missing and there are no remaining consumers; never infer absence.
             (
                 NodeArtifact,
                 NodeArtifact.updated_at,
-                (NodeArtifact.state == "missing") & (NodeArtifact.ref_count == 0),
+                (NodeArtifact.state == ModelFileState.MISSING.value)
+                & (NodeArtifact.ref_count == 0),
             ),
             (
                 RecipeRun,
@@ -287,7 +303,7 @@ class TerminalHistoryCollector:
             select(
                 exists().where(
                     ResourceReservation.owner_id == identity,
-                    ResourceReservation.state != "released",
+                    ResourceReservation.state != ReservationState.RELEASED.value,
                 )
             )
         ):
@@ -336,7 +352,7 @@ class TerminalHistoryCollector:
                     exists().where(
                         ResourceReservation.owner_kind == "run",
                         ResourceReservation.owner_id == identity,
-                        ResourceReservation.state != "released",
+                        ResourceReservation.state != ReservationState.RELEASED.value,
                     )
                 )
             ):
@@ -371,7 +387,7 @@ class TerminalHistoryCollector:
             .join(RecipeRouteAuthority)
             .where(
                 RecipeRouteAuthority.updated_at <= cutoff,
-                RoutePublication.state == "completed",
+                RoutePublication.state == RoutePublicationState.COMPLETED.value,
                 ~exists().where(
                     RoutePublicationOwner.authority_id == RoutePublication.authority_id
                 ),
@@ -408,7 +424,8 @@ def _protected_tokens(session: Session, now: datetime) -> frozenset[str] | None:
             service="control-worker",
             table=FleetProfileApplication.__tablename__,
             row_id=selected,
-            code="selected-application-missing",
+            code=ControllerErrorCode.UNAVAILABLE.value,
+            detail="selected application is missing",
         )
         return None
     specs = (
@@ -443,11 +460,15 @@ def _protected_tokens(session: Session, now: datetime) -> frozenset[str] | None:
             "compiled_contract",
             or_(
                 ArtifactJob.state.is_(None),
-                ArtifactJob.state.not_in((*_TERMINAL, "expired")),
+                ArtifactJob.state.not_in((*_TERMINAL, StateAlias.EXPIRED.value)),
                 ArtifactJob.updated_at >= cutoff,
             ),
         ),
-        (RecipeInstallation, "plan", RecipeInstallation.state != "uninstalled"),
+        (
+            RecipeInstallation,
+            "plan",
+            RecipeInstallation.state != InstallationState.UNINSTALLED.value,
+        ),
         (
             RecipeRun,
             "plan",

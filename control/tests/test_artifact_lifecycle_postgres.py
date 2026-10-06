@@ -276,7 +276,7 @@ def test_dead_removal_gate_reconciles_before_fresh_reference_admission(
             (identity,),
             owner_kind="recipe-image-job",
             owner_id=owner_id,
-            fence="fence",
+            fence="8f19e31a-7155-45da-9f1b-c7da400180b9",
             now=now,
         )
     with artifact_sessions() as session:
@@ -295,7 +295,7 @@ def test_dead_removal_gate_reconciles_before_fresh_reference_admission(
             identity,
             owner_kind="recipe-image-job",
             owner_id=owner_id,
-            fence="fence",
+            fence="8f19e31a-7155-45da-9f1b-c7da400180b9",
         )
 
 
@@ -333,7 +333,7 @@ def test_reaper_rechecks_owner_and_does_not_clear_a_restarted_removal(
             (identity,),
             owner_kind="recipe-image-job",
             owner_id=owner_id,
-            fence="fence",
+            fence="8f19e31a-7155-45da-9f1b-c7da400180b9",
             now=now,
         )
     with artifact_sessions() as session:
@@ -353,5 +353,5 @@ def test_reaper_rechecks_owner_and_does_not_clear_a_restarted_removal(
             identity,
             owner_kind="recipe-image-job",
             owner_id=owner_id,
-            fence="fence",
+            fence="8f19e31a-7155-45da-9f1b-c7da400180b9",
         )
