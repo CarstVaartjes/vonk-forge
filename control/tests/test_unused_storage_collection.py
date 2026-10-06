@@ -2201,7 +2201,9 @@ def test_failed_removal_releases_gate_and_fresh_download_reuses_model(
                 {"artifact_kind": "model-set", "artifact_sha256": set_digest},
             )
             assert gate is not None and gate.removal_owner_id == removal.id
-    service.reconcile_removal_gates()
+    # A complete bounded inventory cycle revisits the previously busy gate.
+    for _ in range(3):
+        service.reconcile_removal_gates()
     downloaded = _download(
         service,
         [_artifact(tmp_path, b"weights", model_content_sha256=A_MODEL)],

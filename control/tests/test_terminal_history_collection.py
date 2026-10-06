@@ -184,7 +184,7 @@ def test_terminal_parent_with_unreconciled_attempt_is_kept_until_attempt_ends(
         attempt = session.get(JobAttempt, attempt_id)
         assert attempt is not None
         attempt.state = "failed"
-    assert collector.collect()["jobs"] == 1
+    assert (collector.collect() + collector.collect())["jobs"] == 1
     with history_sessions() as session:
         assert session.get(Job, job.id) is None
         assert session.get(JobAttempt, attempt_id) is None

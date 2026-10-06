@@ -147,6 +147,14 @@
     },
     {
       "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.reconcile_removal_gates",
+      "catches": [
+        "_ArtifactWriterBusy"
+      ],
+      "reason": "The removal reconciliation pass retains a busy gate and continues its bounded inventory; the worker's advance_removals callback repeats the inventory after cursor wrap, then takes the same exact storage lock before rechecking the owner."
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
       "function": "ModelCacheService._advance_model_removal_step",
       "catches": [
         "_ArtifactWriterBusy"
@@ -1161,7 +1169,6 @@
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.create_draft", "catalog.document_exists", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.resolve", "catalog.not_candidate", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.resolve", "catalog.stale_revision", 1],
-        ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.revise", "catalog.candidate_exists", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.revise", "catalog.stale_revision", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogRevisionContractError", "_rederive_projection", "catalog-revision", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService._bind_recipe_models", "catalog.model_reference_invalid", 2],
