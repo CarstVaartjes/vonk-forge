@@ -503,7 +503,10 @@ class FailureEvidenceService:
             if (
                 job is not None
                 and job.state in FAILED_ATTEMPT_STATES
-                and job.current_attempt == attempt
+                # Activity numbers a Job's first attempt 1 although the row
+                # counts from 0; the download answers to the number it was
+                # advertised under as well as to the stored one.
+                and attempt in {job.current_attempt, max(1, job.current_attempt)}
             ):
                 return self._item(
                     job,
@@ -512,7 +515,7 @@ class FailureEvidenceService:
                     node_ids=job.targets,
                     source="controller",
                     progress=None,
-                    result=job.result,
+                    result=self._job_result(session, job),
                 )
             cache = session.get(ModelCacheOperation, operation_id)
             if (
@@ -537,11 +540,80 @@ class FailureEvidenceService:
                 if item["attempt"] != attempt:
                     return None
                 item["source"] = "controller"
-                # The Controller owns this record: no Spark operation ran, so
-                # there are no agent observations to be missing.
+                # The Controller owns this record, but its children ran on
+                # Sparks: their captured evidence is this application's too.
                 item["agent_operation"] = False
-                item["result"] = item["result"] or item["failure"]
+                result = dict(mapping(item["result"]) or mapping(item["failure"]) or {})
+                if "diagnostics" not in result:
+                    child = self._application_child_diagnostics(session, application)
+                    if child is not None:
+                        result["diagnostics"] = child
+                item["result"] = result
                 return item
+        return None
+
+    @staticmethod
+    def _child_diagnostics(session, job_id: str) -> dict[str, object] | None:
+        """The Spark-side diagnostics of the newest failed child of a Job.
+
+        A Controller-owned parent fails because a child operation failed on a
+        Spark, and that child's receipt holds the container's exit facts and
+        log tails.  Reporting only the parent's reason text was how a workload
+        that exited left empty stdout/stderr and category ``unknown``.
+        """
+        rows = session.execute(
+            select(AgentOperationAttempt.result)
+            .join(
+                AgentOperation,
+                AgentOperationAttempt.operation_id == AgentOperation.id,
+            )
+            .where(
+                AgentOperation.parent_job_id == job_id,
+                failed_attempt_condition(AgentOperation, AgentOperationAttempt),
+            )
+            .order_by(
+                AgentOperation.updated_at.desc(),
+                AgentOperationAttempt.attempt.desc(),
+            )
+            .limit(8)
+        ).scalars()
+        for result in rows:
+            diagnostics = mapping((mapping(result) or {}).get("diagnostics"))
+            if diagnostics is not None:
+                return {str(key): value for key, value in diagnostics.items()}
+        return None
+
+    @classmethod
+    def _job_result(cls, session, job) -> dict[str, object]:
+        """A failed Job's result with its reason and its child's diagnostics."""
+        result = dict(mapping(job.result) or {})
+        if not (result.get("reason") or result.get("summary")) and job.status_reason:
+            result["reason"] = job.status_reason
+        if "diagnostics" not in result:
+            child = cls._child_diagnostics(session, job.id)
+            if child is not None:
+                result["diagnostics"] = child
+        return result
+
+    @classmethod
+    def _application_child_diagnostics(cls, session, application):
+        """Diagnostics of the newest failed run-switch child of an application."""
+        jobs = session.execute(
+            select(Job)
+            .where(
+                Job.kind.like("recipe.run-switch%"),
+                Job.state.in_(FAILED_ATTEMPT_STATES),
+            )
+            .order_by(Job.updated_at.desc())
+            .limit(200)
+        ).scalars()
+        for job in jobs:
+            if (mapping(job.result) or {}).get(
+                "profile_application_id"
+            ) == application.id:
+                found = cls._child_diagnostics(session, job.id)
+                if found is not None:
+                    return found
         return None
 
     @staticmethod

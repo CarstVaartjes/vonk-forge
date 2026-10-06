@@ -2719,10 +2719,19 @@ fn runtime_observation_failure(error: &crate::host_runtime::HostRuntimeError) ->
         Some(detail) if !detail.is_empty() => format!("{lead}: {error}: {detail}"),
         _ => format!("{lead}: {error}"),
     };
+    // A process-exit failure always says what it knows: its logs, or the
+    // typed reason there are none.
+    let diagnostic = match (exited, error.diagnostic(), error.process_logs()) {
+        (true, None, None) => Some("exit_state_unavailable=\"helper reported no detail\" logs_unavailable=\"not captured\"".to_owned()),
+        (_, detail, _) => detail.map(|detail| detail.chars().take(480).collect::<String>()),
+    };
     let mut failure = Failure::new(reason).process_logs(crate::failure_evidence::diagnostic_logs(
         error.process_logs(),
-        error.diagnostic(),
+        diagnostic.as_deref(),
     ));
+    if let Some(diagnostic) = &diagnostic {
+        failure = failure.diagnostic(diagnostic.clone());
+    }
     if let crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } = error {
         failure = failure.helper(*code, None);
     }
@@ -4771,6 +4780,63 @@ mod tests {
         assert!(logs.stdout.text.contains("listening on 8888"));
         assert!(logs.stderr.text.contains("ModuleNotFoundError"));
     }
+    #[test]
+    fn an_exited_workload_failure_always_has_logs_or_a_typed_reason_and_the_exit_facts() {
+        // The class guard: a process exit is never reported as a bare code.
+        // Wrong implementation this catches: a helper that returned neither
+        // logs nor a diagnostic left the evidence with empty tails and category
+        // `unknown`, the exact shape that made a silent crash undiagnosable.
+        let cases = [
+            (None, None),
+            (
+                Some("exit_code=137 oom_killed=true exit_cause=oom_killed no_output=true"),
+                None,
+            ),
+            (
+                Some("exit_code=1 exit_cause=bad_arguments"),
+                Some(crate::failure_evidence::FailureProcessLogs {
+                    stdout: crate::failure_evidence::log_tail(b""),
+                    stderr: crate::failure_evidence::log_tail(b"error: unknown argument\n"),
+                }),
+            ),
+        ];
+        for (diagnostic, logs) in cases {
+            let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+                code: HelperErrorCode::RuntimeProcessExited,
+                diagnostic: diagnostic.map(str::to_owned),
+                process_logs: logs.map(Box::new),
+            };
+            let result = runtime_observation_failure(&error);
+            let failure = result.failure().expect("a failure");
+            assert!(
+                failure.process_logs.is_some() || failure.diagnostic.is_some(),
+                "{diagnostic:?}"
+            );
+            let evidence = crate::failure_evidence::from_failure(
+                &vonk_agent_protocol::generated::AgentOperation::RecipeStart,
+                failure,
+            );
+            if diagnostic.is_some_and(|text| text.contains("oom_killed")) {
+                assert!(
+                    evidence
+                        .preflight
+                        .iter()
+                        .any(|p| p.name == "exit_cause" && p.value == "oom_killed")
+                );
+                assert!(
+                    evidence
+                        .preflight
+                        .iter()
+                        .any(|p| p.name == "exit_code" && p.value == "137")
+                );
+                assert_eq!(
+                    evidence.category,
+                    crate::failure_evidence::FailureCategory::Capacity
+                );
+            }
+        }
+    }
+
     #[tokio::test]
     async fn collective_readiness_exits_when_the_controller_cancels() {
         let (sender, cancellation) = tokio::sync::watch::channel(false);

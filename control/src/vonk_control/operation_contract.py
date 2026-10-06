@@ -284,6 +284,7 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
     result = clean(value)
     if not isinstance(result, dict):
         raise TypeError("failure evidence must be an object")
+    full = result
     encoded = json.dumps(result, sort_keys=True, separators=(",", ":")).encode()
     if len(encoded) > _MAX_FAILURE_EVIDENCE_BYTES:
         # Keep enough context to identify and recover the failure while placing
@@ -303,6 +304,16 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
             if key in result
         }
         result["detail"] = "failure evidence truncated"
+        # The container's own exit facts and log tails are the evidence that
+        # explains the failure; the size guard may shed the surrounding
+        # properties but never them.
+        diagnostics = full.get("diagnostics") if isinstance(full, dict) else None
+        if isinstance(diagnostics, dict):
+            kept = dict(diagnostics)
+            if len(json.dumps(kept).encode()) > _MAX_FAILURE_EVIDENCE_BYTES - 1024:
+                for field in ("versions", "sandbox", "storage"):
+                    kept[field] = []
+            result["diagnostics"] = kept
     return result
 
 

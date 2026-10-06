@@ -110,6 +110,9 @@ pub enum OperationError {
         /// log could not be read; the reason is then reported instead.
         logs: Option<Box<HostHelperProcessLogs>>,
         capture_error: Option<&'static str>,
+        /// How the runtime says it ended (exit code, OOM flag, cause token).
+        /// Never empty: see `runtime_logs::exit_summary`.
+        exit_summary: String,
     },
     #[error("exact runtime container is absent")]
     RuntimeRunMissing,
@@ -426,6 +429,39 @@ impl CommandRunner for ProcessCommandRunner {
             stderr: Vec::new(),
             exit_code: status.code(),
         })
+    }
+}
+
+/// The one place a process-exit failure is built.  Whatever could not be read
+/// is named in the failure, so it can never read as a container with nothing to
+/// say: it carries its logs, or a typed reason they are missing, and an exit
+/// summary.
+pub(crate) fn process_exited(
+    logs: Result<CommandOutput, String>,
+    exit: Result<crate::runtime_logs::ContainerExit, &'static str>,
+) -> OperationError {
+    let (logs, capture_error) = match logs {
+        // An unread log is reported as unread; it never becomes an empty tail
+        // that reads like a container with nothing to say.
+        Ok(logs) if logs.success => (
+            Some(Box::new(crate::runtime_logs::retain_container(
+                &logs.stdout,
+                &logs.stderr,
+            ))),
+            None,
+        ),
+        Ok(_) => (None, Some("the container log command failed")),
+        Err(_) => (None, Some("the container log command did not run")),
+    };
+    let exit_summary = crate::runtime_logs::exit_summary(
+        exit.as_ref().map_err(|e| *e),
+        logs.as_deref(),
+        capture_error,
+    );
+    OperationError::RuntimeProcessExited {
+        logs,
+        capture_error,
+        exit_summary,
     }
 }
 
@@ -2672,25 +2708,27 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 ],
                 Duration::from_secs(30),
             );
-            return Err(match logs {
-                Ok(logs) if logs.success => OperationError::RuntimeProcessExited {
-                    logs: Some(Box::new(crate::runtime_logs::retain_container(
-                        &logs.stdout,
-                        &logs.stderr,
-                    ))),
-                    capture_error: None,
-                },
-                // An unread log is reported as unread; it never becomes an
-                // empty tail that reads like a container with nothing to say.
-                Ok(_) => OperationError::RuntimeProcessExited {
-                    logs: None,
-                    capture_error: Some("the container log command failed"),
-                },
-                Err(_) => OperationError::RuntimeProcessExited {
-                    logs: None,
-                    capture_error: Some("the container log command did not run"),
-                },
-            });
+            // The exit state is read from the same exact container id, before
+            // the agent removes it. A silent crash leaves no output at all; the
+            // exit code, the OOM flag and the runtime's own error are then the
+            // only evidence there will ever be.
+            let exit = match self.runner.run_with_timeout(
+                Path::new("/usr/bin/docker"),
+                &[
+                    "container".into(),
+                    "inspect".into(),
+                    "--format".into(),
+                    crate::runtime_logs::EXIT_FORMAT.into(),
+                    (*container_id).into(),
+                ],
+                Duration::from_secs(30),
+            ) {
+                Ok(output) if output.success => crate::runtime_logs::parse_exit(&output.stdout)
+                    .ok_or("the container exit state was not readable"),
+                Ok(_) => Err("the container exit inspection failed"),
+                Err(_) => Err("the container exit inspection did not run"),
+            };
+            return Err(process_exited(logs, exit));
         }
         Ok(false)
     }
@@ -4749,6 +4787,49 @@ mod tests {
     use vonk_agent_protocol::{RecipeReconciliationIdentity, canonical_json};
 
     const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
+
+    #[test]
+    fn a_process_exit_always_carries_logs_or_a_typed_reason_none_were_read() {
+        // The class guard: every way the exit can be observed yields a failure
+        // with its logs, or the reason they are missing, plus the exit account.
+        let output = |success: bool, stdout: &str, stderr: &str| CommandOutput {
+            success,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+            exit_code: None,
+        };
+        let state = crate::runtime_logs::ContainerExit {
+            exit_code: Some(137),
+            oom_killed: Some(true),
+            error: String::new(),
+        };
+        let logs: Vec<Result<CommandOutput, String>> = vec![
+            Ok(output(true, "", "")),
+            Ok(output(true, "a\n", "b\n")),
+            Ok(output(false, "", "")),
+            Err("spawn failed".to_owned()),
+        ];
+        for log in logs {
+            for exit in [
+                Ok(state.clone()),
+                Err("the container exit inspection failed"),
+            ] {
+                let OperationError::RuntimeProcessExited {
+                    logs,
+                    capture_error,
+                    exit_summary,
+                } = super::process_exited(log.clone(), exit)
+                else {
+                    panic!("a process exit must stay a process exit");
+                };
+                assert!(
+                    logs.is_some() || capture_error.is_some(),
+                    "no logs and no reason: {exit_summary}"
+                );
+                assert!(exit_summary.contains("exit_cause="), "{exit_summary}");
+            }
+        }
+    }
 
     #[derive(Clone, Copy)]
     struct MissingContainerRunner;

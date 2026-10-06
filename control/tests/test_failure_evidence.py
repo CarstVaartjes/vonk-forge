@@ -669,3 +669,112 @@ def test_download_is_named_only_for_a_stored_failed_attempt(service):
     }
     assert "evidence_download" not in service.decorate({**value, "attempt": 2})
     assert "evidence_download" not in service.decorate({**value, "state": "running"})
+
+
+def _child_diagnostics_document(stderr: str) -> dict[str, object]:
+    empty = {"text": "", "truncated": False, "dropped_bytes": 0, "dropped_lines": 0}
+    return {
+        "schema_version": 1,
+        "collected_at": NOW.isoformat(),
+        "phase": "start",
+        "category": "capacity",
+        "stdout": empty,
+        "stderr": {**empty, "text": stderr},
+        "versions": [],
+        "sandbox": [],
+        "storage": [],
+        "preflight": [{"name": "exit_cause", "value": "oom_killed"}],
+        "collector_errors": [],
+    }
+
+
+def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(service):
+    """A Controller-owned parent shows what its Spark-side child captured.
+
+    Wrong implementation caught: the download rendered the parent's own result,
+    which holds progress and no logs, so a workload that exited printed an empty
+    stdout/stderr and category ``unknown`` while the child's receipt held the
+    exit cause.  The same Job is also reachable under attempt 1, the number
+    Activity advertises for its first attempt (the row stores 0).
+    """
+
+    job_id = str(uuid4())
+    child_id = str(uuid4())
+    with service.sessions.begin() as session:
+        session.add(
+            Job(
+                id=job_id,
+                request_id=str(uuid4()),
+                kind="recipe.run-switch.v2",
+                state="failed",
+                actor="test",
+                authority_revision="a" * 64,
+                targets=[NODE_A],
+                payload_digest="b" * 64,
+                payload={},
+                result={"phase_index": 3},
+                status_reason="run-switch phase operation failed: the workload process exited",
+                current_attempt=0,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            AgentOperation(
+                id=child_id,
+                parent_job_id=job_id,
+                node_id=NODE_A,
+                kind=ProtocolAgentOperation.RECIPE_START.value,
+                payload_digest="b" * 64,
+                payload={},
+                authority_revision=COMMIT,
+                state="failed",
+                status_reason="failed",
+                current_attempt=1,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            AgentOperationAttempt(
+                id=str(uuid4()),
+                operation_id=child_id,
+                attempt=1,
+                fence=str(uuid4()),
+                lease_deadline=NOW,
+                agent_certificate_serial="test-serial",
+                state="failed",
+                progress=None,
+                result={
+                    "error_code": "recipe_start_failed",
+                    "diagnostics": _child_diagnostics_document("Killed\n"),
+                },
+            )
+        )
+    for attempt in (0, 1):
+        bundle = service.read(job_id, attempt)
+        assert bundle.diagnostics.stderr.text == "Killed"
+        assert bundle.diagnostics.preflight[0].value == "oom_killed"
+        assert "run-switch phase operation failed" in bundle.summary
+        assert (
+            "agent-observations-unavailable" not in bundle.diagnostics.collector_errors
+        )
+
+
+def test_oversized_failure_evidence_keeps_the_container_diagnostics():
+    from vonk_control.operation_contract import sanitize_failure_evidence
+
+    document = _child_diagnostics_document("segfault\n")
+    document["versions"] = [{"name": f"v{i}", "value": "x" * 256} for i in range(8)]
+    document["sandbox"] = [{"name": f"s{i}", "value": "x" * 256} for i in range(12)]
+    kept = sanitize_failure_evidence(
+        {
+            "error_code": "recipe_start_failed",
+            "padding": ["y" * 1000 for _ in range(10)],
+            "diagnostics": document,
+        }
+    )
+    assert kept["detail"] == "failure evidence truncated"
+    diagnostics = kept["diagnostics"]
+    assert isinstance(diagnostics, dict)
+    assert diagnostics["stderr"]["text"] == "segfault\n"

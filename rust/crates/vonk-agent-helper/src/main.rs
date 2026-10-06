@@ -113,7 +113,21 @@ impl HelperRejection {
             OperationError::RuntimeProcessExited {
                 logs,
                 capture_error,
-            } => (capture_error.map(str::to_owned), logs.clone()),
+                exit_summary,
+            } => (
+                // Always present: the exit code, OOM flag and cause token, and
+                // when the output could not be read, why.
+                Some(
+                    match capture_error {
+                        Some(reason) => format!("{exit_summary}; {reason}"),
+                        None => exit_summary.clone(),
+                    }
+                    .chars()
+                    .take(480)
+                    .collect(),
+                ),
+                logs.clone(),
+            ),
             // The firewall's refusal names the argument and rule, so it travels
             // as the diagnostic instead of collapsing to the stable code.
             OperationError::RuntimeFabricFirewallRejected { reason }
@@ -716,6 +730,7 @@ mod tests {
                     &b"startup failed\n".repeat(2000),
                 ))),
                 capture_error: None,
+                exit_summary: "exit_code=1 exit_cause=unclassified".to_owned(),
             },
         );
         super::reject(&mut server, &rejection);
@@ -726,7 +741,10 @@ mod tests {
         assert!(logs.stderr.text.contains("startup failed"));
         assert!(logs.stderr.truncated);
         assert!(logs.stderr.text.chars().count() <= 2048);
-        assert!(response.diagnostic.is_none());
+        assert_eq!(
+            response.diagnostic.as_deref(),
+            Some("exit_code=1 exit_cause=unclassified")
+        );
         assert_eq!(rejection.detail, "runtime process exited");
     }
 
