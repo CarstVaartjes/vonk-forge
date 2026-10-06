@@ -7347,6 +7347,56 @@
         "title": "FleetProfileAdmissionDecision",
         "type": "object"
       },
+      "FleetProfileAdoptedApplicationEffect": {
+        "additionalProperties": false,
+        "description": "An exact continuing executor authorized by the newer reviewed snapshot.",
+        "properties": {
+          "application_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Application Id",
+            "type": "string"
+          },
+          "assignment_ids": {
+            "items": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Assignment Ids",
+            "type": "array"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "workload_intent_ordinal": {
+            "minimum": 1.0,
+            "title": "Workload Intent Ordinal",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "application_id",
+          "plan_digest",
+          "workload_intent_ordinal",
+          "node_ids",
+          "assignment_ids"
+        ],
+        "title": "FleetProfileAdoptedApplicationEffect",
+        "type": "object"
+      },
       "FleetProfileApplicationCancelRequest": {
         "additionalProperties": false,
         "properties": {
@@ -8334,7 +8384,8 @@
             "items": {
               "enum": [
                 "switch",
-                "keep"
+                "keep",
+                "adopt"
               ],
               "type": "string"
             },
@@ -8792,6 +8843,14 @@
         "additionalProperties": false,
         "description": "Identified live effects, including complete distributed membership.",
         "properties": {
+          "adopted": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileAdoptedApplicationEffect"
+            },
+            "maxItems": 64,
+            "title": "Adopted",
+            "type": "array"
+          },
           "installations": {
             "items": {
               "$ref": "#/components/schemas/FleetProfileInstallationEffect"

@@ -6963,8 +6963,32 @@ class FleetProfileService:
                     .with_for_update(nowait=True)
                 ):
                     if prior_application.id in adopted_application_ids:
-                        # The newer accepted snapshot owns continuing exact scopes.
-                        # Changed sibling effects were independently fenced above.
+                        # Unconsumed profile promises on changed siblings lose
+                        # their fence in this same transaction. Materialized
+                        # installation/run claims already changed owner under
+                        # the consumer's atomic handoff and remain until exact
+                        # effect reconciliation. Continuing promises stay owned
+                        # by the original application and are never duplicated.
+                        for claim in session.scalars(
+                            select(ResourceReservation)
+                            .where(
+                                ResourceReservation.owner_kind == "fleet-profile",
+                                ResourceReservation.owner_id == prior_application.id,
+                                ResourceReservation.node_id.in_(fenced_nodes),
+                                ResourceReservation.state.in_(
+                                    (ReservationState.ACTIVE, ReservationState.PROMISED)
+                                ),
+                            )
+                            .order_by(
+                                ResourceReservation.node_id, ResourceReservation.id
+                            )
+                            .with_for_update(nowait=True)
+                        ):
+                            claim.state = ReservationState.RELEASED
+                            claim.released_at = now
+                        # Flush replaced promises before a successor inserts the
+                        # same unique promised port; this is not capacity freed.
+                        session.flush()
                         continue
                     prior_plan = _persisted_profile_plan(prior_application)
                     if isinstance(prior_plan, Residue):
