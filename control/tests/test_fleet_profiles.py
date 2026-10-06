@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     DesiredAssignmentState,
     LifecycleState,
     SupersedeCode,
+    canonical_message,
 )
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -74,6 +75,7 @@ from vonk_control.preparation_contract import (
 from vonk_control.recipe_execution_contract import installation_plan_document
 from vonk_control.run_switch_contract import (
     RunSwitchAssessment,
+    RunSwitchOperationResult,
     RunSwitchReason,
     SparkFit,
     SparkFitNode,
@@ -2339,7 +2341,11 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
         assert job is not None
         job.state = "succeeded"
         job.status_reason = None
-        job.result = _persisted_result(_transfer_result(nodes))
+        job.result = _persisted_result(
+            RunSwitchOperationResult.model_validate_json(
+                canonical_message(_transfer_result(nodes))
+            )
+        )
         job.updated_at = lifecycle._clock()
 
     assert service.tick() is True
@@ -2471,7 +2477,11 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
         assert job is not None
         job.state = "succeeded"
         job.status_reason = None
-        job.result = _persisted_result(_transfer_result(nodes))
+        job.result = _persisted_result(
+            RunSwitchOperationResult.model_validate_json(
+                canonical_message(_transfer_result(nodes))
+            )
+        )
         job.updated_at = lifecycle._clock()
 
     assert service.tick() is True
