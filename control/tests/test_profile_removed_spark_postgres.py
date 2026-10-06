@@ -6,6 +6,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy import select
+from vonk_agent_protocol import DesiredAssignmentState
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
@@ -184,13 +185,13 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                     recipe_selector=selector,
                     spark_ids=list(nodes),
                     assignment_name="dual-model",
-                    desired_state="running",
+                    desired_state=DesiredAssignmentState.RUNNING,
                 ),
                 FleetProfileAssignmentInput(
                     recipe_selector=selector,
                     spark_ids=list(unrelated_nodes),
                     assignment_name="unrelated-install",
-                    desired_state="installed",
+                    desired_state=DesiredAssignmentState.INSTALLED,
                 ),
             ],
         ),

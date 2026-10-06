@@ -21,7 +21,12 @@ everything older. Which items exist:
    the Sparks, queued through the same lifecycle as ``vonkctl recipe
    uninstall``; its model files go with it unless another installation on that
    Spark still needs them. Installations that share one model are removed
-   together or not at all, since only the last one frees the shared bytes.
+   together or not at all, and each is told which others go with it so the
+   Spark reclaims the shared files with the last. Model files are hard-linked
+   between installations (and between models that share a file), so what an
+   eviction frees is counted by file: a shared file is freed only when the last
+   group linking it goes, and a group whose files a staying one still links
+   frees nothing and is not offered.
 2. **Runtime image receipts** in the NAS ``image-cache``; the image store then
    reclaims the blobs nothing else names.
 3. **Model files** in the NAS model cache, through the model cache's durable,
@@ -44,6 +49,9 @@ a while. If everything that may go would still not cover a refused request,
 nothing is removed and the waiting load says so
 (``storage.insufficient_after_eviction``).
 
+A load waiting to be admitted has issued nothing, so its plan does not keep the
+installations on its Sparks (the space it waits for is theirs to give).
+
 Every removal is re-proven while the Sparks (or artifact gates) are locked, so
 a load that starts after the pass looked is never raced: the uninstall takes
 no new workload intent (it supersedes nothing and leaves recovery of a running
@@ -60,8 +68,8 @@ import shutil
 import time
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Collection, Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
@@ -71,7 +79,9 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    InstallationState,
     LifecycleState,
+    RunState,
     RunSwitchCode,
     canonical_message,
 )
@@ -137,6 +147,7 @@ from .storage_demands import (
     NAS_IMAGES,
     NAS_MODELS,
     STORAGE_EVICTING,
+    STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
     StorageDemand,
     StorageDemands,
@@ -152,9 +163,14 @@ SWEEP_BUDGET_SECONDS = 30.0
 # A Spark's inventory older than this proves nothing about its free space.
 INVENTORY_MAX_AGE = timedelta(seconds=300)
 # A failed run holds nothing; any other state but stopped may still be on a Spark.
-_DEAD_RUNS = ("stopped", "failed")
+_DEAD_RUNS = (RunState.STOPPED, RunState.FAILED)
 # Installations that may hold files on their Sparks (a plan holds none).
-_HOLDING_STATES = ("installed", "installing", "partial", "failed")
+_HOLDING_STATES = (
+    InstallationState.INSTALLED,
+    InstallationState.INSTALLING,
+    InstallationState.PARTIAL,
+    InstallationState.FAILED,
+)
 _FINISHED_JOBS = job_states.words(
     LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
 )
@@ -182,7 +198,9 @@ class UnusedModelRemoval(Protocol):
 class InstallationRemoval(Protocol):
     """The recipe lifecycle's uninstall, as the collector uses it."""
 
-    def preview_uninstall(self, installation_id: str) -> UninstallPlan: ...
+    def preview_uninstall(
+        self, installation_id: str, *, also_removing: Collection[str] = ()
+    ) -> UninstallPlan: ...
 
     def uninstall(
         self,
@@ -192,6 +210,7 @@ class InstallationRemoval(Protocol):
         actor: str,
         request_id: str,
         unattended_guard: Callable[[Session], None] | None = None,
+        also_removing: Collection[str] = (),
     ) -> object: ...
 
 
@@ -225,6 +244,7 @@ _STORAGE_WAIT_CODES = frozenset(
         RunSwitchCode.INSUFFICIENT_DISK,
         RunSwitchCode.DISK_EVICTION_PLANNED,
         STORAGE_EVICTING,
+        STORAGE_EVICTION_TIMED_OUT,
         STORAGE_INSUFFICIENT,
     }
 )
@@ -271,6 +291,85 @@ def _eviction_order(items: Iterable[_Item]) -> list[_Item]:
             item.key,
         ),
     )
+
+
+def _freeable_in_order(
+    candidates: list[_Item],
+    holders: Mapping[str, set[str]],
+    kept: Counter[str],
+    kept_bytes: Counter[str] | None,
+) -> list[_Item]:
+    """Give each item the bytes its removal really frees, in eviction order.
+
+    Installations link shared model objects instead of copying them, so a
+    shared object is freed only when the last group that links it goes. An item
+    whose objects a group that stays still links, and that holds nothing of its
+    own, frees nothing ever and is not offered. The others carry the bytes they
+    free after everything ahead of them (an object two removable groups share
+    counts for the later one), so the sum is what removing them all frees.
+    """
+
+    removable = {item.key for item in candidates}
+    useful = []
+    for item in candidates:
+        reachable = item.private + sum(
+            size for digest, size in item.objects if holders[digest] <= removable
+        )
+        if reachable <= 0:
+            kept["installation: shares its files with one that stays"] += len(
+                item.members
+            )
+            if kept_bytes is not None:
+                kept_bytes["installations that stay share its model files"] += (
+                    item.freeable
+                )
+            continue
+        useful.append(item)
+    remaining = {digest: set(keys) for digest, keys in holders.items()}
+    ordered: list[_Item] = []
+    for item in _eviction_order(useful):
+        freed = item.private
+        for digest, size in item.objects:
+            remaining[digest].discard(item.key)
+            if not remaining[digest]:
+                freed += size
+        ordered.append(replace(item, freeable=freed))
+    return ordered
+
+
+def _model_objects(
+    session: Session, model_digests: Collection[str]
+) -> dict[str, dict[str, int]]:
+    """The model files (file digest and bytes) each model is made of, from the
+    model cache's recorded manifests. A model with no manifest is absent: all
+    of its installed bytes are then treated as the installation's own."""
+
+    found: dict[str, dict[str, int]] = {}
+    if not model_digests:
+        return found
+    for model, manifest in session.execute(
+        select(ModelCacheSet.model_content_sha256, ModelCacheSet.manifest).where(
+            ModelCacheSet.model_content_sha256.in_(tuple(model_digests))
+        )
+    ):
+        artifacts = manifest.get("artifacts") if isinstance(manifest, dict) else None
+        if model is None or not isinstance(artifacts, list):
+            continue
+        objects = found.setdefault(model, {})
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            digest, size = artifact.get("sha256"), artifact.get("download_bytes")
+            owner = artifact.get("model_content_sha256")
+            if (
+                isinstance(digest, str)
+                and isinstance(size, int)
+                and not isinstance(size, bool)
+                and size >= 0
+                and owner in (None, model)
+            ):
+                objects[digest] = size
+    return found
 
 
 def _eviction_sentence(items: Iterable[_Item], shortfall: int) -> str:
@@ -322,22 +421,24 @@ def spark_eviction_capacity(
 
 
 def _waits_for_storage(application: FleetProfileApplication) -> bool:
-    """A load that issued nothing and waits for disk is the one asking for it.
+    """A load that issued nothing and waits to be admitted holds nothing.
 
-    It must not keep the installations on its own Sparks: that would make the
-    space it waits for impossible to free. Anything it already issued (a
-    current operation) keeps them as before.
+    It must not keep the installations on its own Sparks: its admission waits
+    for disk that only those installations can free, so keeping them would
+    make the space it waits for impossible to free for ever. The selected
+    profile's own installations stay kept by the loaded profile. Anything it
+    already issued (a current operation) keeps them as before.
     """
 
+    if application.current_operation_id is not None:
+        return False
     progress = application.progress if isinstance(application.progress, dict) else {}
+    if progress.get("admission_pending") is True:
+        return True
     blockers = progress.get("blockers")
-    return (
-        application.current_operation_id is None
-        and isinstance(blockers, list)
-        and any(
-            isinstance(item, dict) and item.get("code") in _STORAGE_WAIT_CODES
-            for item in blockers
-        )
+    return isinstance(blockers, list) and any(
+        isinstance(item, dict) and item.get("code") in _STORAGE_WAIT_CODES
+        for item in blockers
     )
 
 
@@ -543,6 +644,12 @@ class _Item:
     freeable: int
     #: Saved profiles pointing at it: evicted after everything no profile points to.
     profiles: tuple[str, ...] = ()
+    #: The shared model objects (file digest, bytes) its installations link, and
+    #: the bytes only they hold (runtime files, private copies). ``freeable`` is
+    #: what removing it frees *after the items ahead of it in eviction order*: a
+    #: shared object frees only with the last installation that links it.
+    objects: tuple[tuple[str, int], ...] = ()
+    private: int = 0
 
 
 @dataclass(slots=True)
@@ -776,7 +883,9 @@ class UnusedStorageCollector:
                 + _kept_sentence(kept_bytes)
                 + "Stop or remove something on this Spark to make room."
             )
-        return StorageRelief(code, shortfall, freeable, detail)
+        return StorageRelief(
+            code, shortfall, freeable, detail, paused=paused is not None
+        )
 
     # -- pressure ---------------------------------------------------------------
 
@@ -981,7 +1090,7 @@ class UnusedStorageCollector:
         for member in item.members:
             try:
                 if item.kind == "installation":
-                    self._uninstall(member)
+                    self._uninstall(member, item.members)
                 elif item.kind == "image":
                     assert self._image_cache is not None
                     self._remove_receipt(
@@ -1072,12 +1181,21 @@ class UnusedStorageCollector:
             groups[model or f"installation:{installation_id}"].append(
                 (installation_id, state, installed)
             )
-        items: list[_Item] = []
+        objects = _model_objects(
+            session, [key for key in groups if not key.startswith("installation:")]
+        )
+        # Which groups link each shared object, kept groups included: an object
+        # a group that stays still links is not freed by removing the others.
+        holders: dict[str, set[str]] = defaultdict(set)
+        for key in groups:
+            for digest in objects.get(key, {}):
+                holders[digest].add(key)
+        candidates: list[_Item] = []
         for key, members in sorted(groups.items()):
             reasons = {
                 installation_id: (
                     _installation_kept(session, installation_id, evidence)
-                    if state == "installed"
+                    if state == InstallationState.INSTALLED
                     else "not installed"
                 )
                 for installation_id, state, _installed in members
@@ -1095,10 +1213,11 @@ class UnusedStorageCollector:
                         installed for _id, _state, installed in members
                     )
                 continue
-            freeable = max(installed for _id, _state, installed in members)
-            if freeable <= 0:
+            installed = max(installed for _id, _state, installed in members)
+            if installed <= 0:
                 kept["installation: holds no bytes"] += len(members)
                 continue
+            shared = objects.get(key, {})
             last_used = max(
                 _installation_last_used(session, installation_id)
                 for installation_id, _state, _installed in members
@@ -1112,21 +1231,29 @@ class UnusedStorageCollector:
                     )
                 }
             )
-            items.append(
+            candidates.append(
                 _Item(
                     "installation",
                     key,
                     tuple(sorted(installation_id for installation_id, *_ in members)),
                     last_used,
                     last_used > evidence.cutoff,
-                    freeable,
+                    installed,
                     tuple(profiles),
+                    tuple(sorted(shared.items())),
+                    # What is not a model object (runtime files, private copies)
+                    # goes with the installation alone.
+                    max(0, installed - sum(shared.values())),
                 )
             )
-        return items
+        return _freeable_in_order(candidates, holders, kept, kept_bytes)
 
-    def _uninstall(self, installation_id: str) -> None:
-        plan = self._lifecycle.preview_uninstall(installation_id)
+    def _uninstall(self, installation_id: str, group: Collection[str] = ()) -> None:
+        # The installations of one model go together: none of them keeps the
+        # shared files, so the uninstall asks the Spark to reclaim them (it
+        # removes only what no other installation still links).
+        others = tuple(item for item in group if item != installation_id)
+        plan = self._lifecycle.preview_uninstall(installation_id, also_removing=others)
         if not plan.allowed:
             code = plan.blockers[0].code if plan.blockers else "not allowed"
             raise _Kept(f"uninstall blocked ({code})")
@@ -1146,6 +1273,7 @@ class UnusedStorageCollector:
             actor=ACTOR,
             request_id=str(uuid.uuid4()),
             unattended_guard=still_unused,
+            also_removing=others,
         )
 
     # -- NAS: runtime image receipts and model files ----------------------------
@@ -1326,7 +1454,7 @@ def _installation_kept(
     """Why an installation stays, or ``None`` when nothing uses it."""
 
     installation = session.get(RecipeInstallation, installation_id)
-    if installation is None or installation.state != "installed":
+    if installation is None or installation.state != InstallationState.INSTALLED:
         return "not installed"
     revision = session.execute(
         select(

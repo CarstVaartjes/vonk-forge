@@ -14,8 +14,12 @@ from typing import Literal, Protocol
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    InstallationState,
     InvalidRequestReason,
     RecipeStartPayload,
+    ReservationState,
+    RouteState,
+    RunState,
     WaitReason,
     canonical_message,
 )
@@ -196,7 +200,7 @@ class DistributedRecoveryCoordinator:
                 session.scalars(
                     select(RecipeRun)
                     .where(
-                        RecipeRun.state == "running",
+                        RecipeRun.state == RunState.RUNNING,
                         or_(
                             RecipeRun.route_next_attempt_at.is_(None),
                             RecipeRun.route_next_attempt_at <= now,
@@ -210,7 +214,9 @@ class DistributedRecoveryCoordinator:
                 failed = tuple(
                     session.scalars(
                         select(RunNode)
-                        .where(RunNode.run_id == run.id, RunNode.state == "failed")
+                        .where(
+                            RunNode.run_id == run.id, RunNode.state == RunState.FAILED
+                        )
                         .order_by(RunNode.rank)
                     )
                 )
@@ -447,7 +453,7 @@ class DistributedRecoveryCoordinator:
                     _settle_unrecoverable(run, str(error), now)
                     worked = True
                     continue
-                run.route_state = "withdrawn"
+                run.route_state = RouteState.WITHDRAWN
                 run.route_error = f"distributed recovery queued: {job.id}"
                 _advance_recovery_check(run, now)
                 run.updated_at = now
@@ -469,7 +475,7 @@ class DistributedRecoveryCoordinator:
                 *session.scalars(
                     select(RecipeRun.id)
                     .where(
-                        RecipeRun.state == "running",
+                        RecipeRun.state == RunState.RUNNING,
                         or_(
                             RecipeRun.route_next_attempt_at.is_(None),
                             RecipeRun.route_next_attempt_at <= now,
@@ -477,7 +483,7 @@ class DistributedRecoveryCoordinator:
                         select(RunNode.run_id)
                         .where(
                             RunNode.run_id == RecipeRun.id,
-                            RunNode.state == "failed",
+                            RunNode.state == RunState.FAILED,
                         )
                         .exists(),
                     )
@@ -730,8 +736,8 @@ def _superseded(session: Session, run: RecipeRun, run_nodes: Sequence[RunNode]) 
 def _settle_unrecoverable(run: RecipeRun, reason: str, now: datetime) -> None:
     """Record why a run is not recovered; the ownership rule frees its claims."""
 
-    run.state = "failed"
-    run.route_state = "withdrawn"
+    run.state = RunState.FAILED
+    run.route_state = RouteState.WITHDRAWN
     run.route_error = reason[:512]
     run.route_next_attempt_at = None
     run.updated_at = now
@@ -753,13 +759,13 @@ def release_inactive_run_claims_in_session(session: Session, now: datetime) -> b
         .outerjoin(RecipeRun, RecipeRun.id == ResourceReservation.owner_id)
         .where(
             ResourceReservation.owner_kind == "run",
-            ResourceReservation.state == "active",
+            ResourceReservation.state == ReservationState.ACTIVE,
             or_(RecipeRun.id.is_(None), RecipeRun.state.not_in(STOPPABLE_RUN_STATES)),
         )
         .with_for_update(of=ResourceReservation)
     ).all()
     for claim in claims:
-        claim.state = "released"
+        claim.state = ReservationState.RELEASED
         claim.released_at = now
     return bool(claims)
 
@@ -783,7 +789,7 @@ def settle_observed_absent_runs_in_session(session: Session, now: datetime) -> b
             RecipeRun.id.in_(
                 select(ResourceReservation.owner_id).where(
                     ResourceReservation.owner_kind == "run",
-                    ResourceReservation.state == "active",
+                    ResourceReservation.state == ReservationState.ACTIVE,
                 )
             ),
         )
@@ -820,10 +826,10 @@ def settle_absent_run_in_session(
     """Record a run its Sparks report gone as stopped and release its claims."""
 
     for node in run_nodes:
-        node.state = "stopped"
+        node.state = RunState.STOPPED
         node.updated_at = now
-    run.state = "stopped"
-    run.route_state = "withdrawn"
+    run.state = RunState.STOPPED
+    run.route_state = RouteState.WITHDRAWN
     run.route_error = None
     run.route_next_attempt_at = None
     run.stopped_at = now
@@ -882,7 +888,7 @@ def _singleton_recovery_authority(
     )
     if (
         installation is None
-        or installation.state != "installed"
+        or installation.state != InstallationState.INSTALLED
         or installation.image_digest is None
         or resolved is None
     ):

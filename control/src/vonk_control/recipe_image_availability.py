@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session, aliased, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
+    AssetAvailability,
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
@@ -74,7 +75,6 @@ from .artifact_reference_scan import (
 from .bounded_json import mapping, require_mapping, require_sequence
 from .cache_removal_review import (
     ArtifactKind,
-    AssetAvailability,
     AssetDisposition,
     CacheRemovalAsset,
     CacheRemovalBlocker,
@@ -1507,16 +1507,16 @@ class RecipeImageAvailabilityService:
         assets: list[CacheRemovalAsset] = []
         blockers: list[CacheRemovalBlocker] = []
         for archive, expected_bytes in selection.image_expected_bytes:
-            availability: AssetAvailability = "unknown"
+            availability: AssetAvailability = AssetAvailability.UNKNOWN
             available_bytes: int | None = None
             try:
                 with self._storage.publication_lock(archive):
                     observed_bytes = self._storage.published_archive_bytes(archive)
                     if observed_bytes == 0:
-                        availability = "missing"
+                        availability = AssetAvailability.MISSING
                         available_bytes = 0
                     elif observed_bytes < expected_bytes:
-                        availability = "partial"
+                        availability = AssetAvailability.PARTIAL
                         available_bytes = observed_bytes
                     elif observed_bytes > expected_bytes:
                         blockers.append(
@@ -1541,7 +1541,7 @@ class RecipeImageAvailabilityService:
                             # Managed publication records only verified bytes;
                             # the exact receipt plus regular-file size is the
                             # cheap readiness check for this operator review.
-                            availability = "verified"
+                            availability = AssetAvailability.VERIFIED
                             available_bytes = expected_bytes
                         else:
                             blockers.append(
@@ -1667,7 +1667,7 @@ class RecipeImageAvailabilityService:
                         kind=identity[0],
                         sha256=identity[1],
                         expected_bytes=expected_bytes,
-                        availability="unknown",
+                        availability=AssetAvailability.UNKNOWN,
                         available_bytes=None,
                         disposition=disposition,
                     )
@@ -1682,7 +1682,7 @@ class RecipeImageAvailabilityService:
                             kind=identity[0],
                             sha256=identity[1],
                             expected_bytes=expected_bytes,
-                            availability="unknown",
+                            availability=AssetAvailability.UNKNOWN,
                             available_bytes=None,
                             disposition=disposition,
                         )
@@ -1716,7 +1716,7 @@ class RecipeImageAvailabilityService:
                 recovery_actions=["retry"],
             )
             for asset in assets
-            if asset.availability == "unknown"
+            if asset.availability == AssetAvailability.UNKNOWN
             and asset.sha256 not in known_asset_blockers
         ]
         blockers_by_identity = {

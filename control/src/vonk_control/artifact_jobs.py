@@ -36,6 +36,7 @@ from vonk_agent_protocol import (
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,
+    RunState,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
@@ -1139,7 +1140,7 @@ class ArtifactJobService:
                 reason=InvalidRequestReason.CONFLICT,
             )
         run = session.get(RecipeRun, run_id)
-        if run is None or existing is None and run.state != "running":
+        if run is None or existing is None and run.state != RunState.RUNNING:
             raise ArtifactJobInvalid(
                 "recipe run is not accepting jobs",
                 reason=InvalidRequestReason.NOT_READY,
@@ -1413,7 +1414,7 @@ class ArtifactJobService:
                     "artifact job is not ready", reason=InvalidRequestReason.NOT_READY
                 )
             run = session.get(RecipeRun, artifact_job.run_id, with_for_update=True)
-            if run is None or run.state != "running":
+            if run is None or run.state != RunState.RUNNING:
                 raise ArtifactJobInvalid(
                     "recipe run is not accepting jobs",
                     reason=InvalidRequestReason.NOT_READY,

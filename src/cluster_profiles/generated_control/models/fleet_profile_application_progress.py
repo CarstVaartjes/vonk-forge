@@ -51,6 +51,7 @@ class FleetProfileApplicationProgress:
             retry_due_at (datetime.datetime | None | Unset):
             retry_of_application_id (None | str | Unset):
             step_results (FleetProfileApplicationProgressStepResults | Unset):
+            storage_wait_since (datetime.datetime | None | Unset):
             supersede_code (None | SupersedeCode | Unset):
             superseded_by (None | str | Unset):
             switch_adapter (FleetProfileSwitchAdapterState | None | Unset):
@@ -73,6 +74,7 @@ class FleetProfileApplicationProgress:
     retry_due_at: datetime.datetime | None | Unset = UNSET
     retry_of_application_id: None | str | Unset = UNSET
     step_results: FleetProfileApplicationProgressStepResults | Unset = UNSET
+    storage_wait_since: datetime.datetime | None | Unset = UNSET
     supersede_code: None | SupersedeCode | Unset = UNSET
     superseded_by: None | str | Unset = UNSET
     switch_adapter: FleetProfileSwitchAdapterState | None | Unset = UNSET
@@ -175,6 +177,14 @@ class FleetProfileApplicationProgress:
         if not isinstance(self.step_results, Unset):
             step_results = self.step_results.to_dict()
 
+        storage_wait_since: None | str | Unset
+        if isinstance(self.storage_wait_since, Unset):
+            storage_wait_since = UNSET
+        elif isinstance(self.storage_wait_since, datetime.datetime):
+            storage_wait_since = self.storage_wait_since.isoformat()
+        else:
+            storage_wait_since = self.storage_wait_since
+
         supersede_code: None | str | Unset
         if isinstance(self.supersede_code, Unset):
             supersede_code = UNSET
@@ -240,6 +250,8 @@ class FleetProfileApplicationProgress:
             field_dict["retry_of_application_id"] = retry_of_application_id
         if step_results is not UNSET:
             field_dict["step_results"] = step_results
+        if storage_wait_since is not UNSET:
+            field_dict["storage_wait_since"] = storage_wait_since
         if supersede_code is not UNSET:
             field_dict["supersede_code"] = supersede_code
         if superseded_by is not UNSET:
@@ -442,6 +454,26 @@ class FleetProfileApplicationProgress:
 
 
 
+        def _parse_storage_wait_since(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                storage_wait_since_type_0 = datetime.datetime.fromisoformat(data)
+
+
+
+                return storage_wait_since_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        storage_wait_since = _parse_storage_wait_since(d.pop("storage_wait_since", UNSET))
+
+
         def _parse_supersede_code(data: object) -> None | SupersedeCode | Unset:
             if data is None:
                 return data
@@ -520,6 +552,7 @@ class FleetProfileApplicationProgress:
             retry_due_at=retry_due_at,
             retry_of_application_id=retry_of_application_id,
             step_results=step_results,
+            storage_wait_since=storage_wait_since,
             supersede_code=supersede_code,
             superseded_by=superseded_by,
             switch_adapter=switch_adapter,

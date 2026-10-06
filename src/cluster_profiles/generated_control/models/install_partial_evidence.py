@@ -10,10 +10,8 @@ from ..types import UNSET, Unset
 
 from ..models.install_degraded_reason import check_install_degraded_reason
 from ..models.install_degraded_reason import InstallDegradedReason
-from ..models.install_partial_evidence_group_state import check_install_partial_evidence_group_state
-from ..models.install_partial_evidence_group_state import InstallPartialEvidenceGroupState
-from ..models.install_partial_evidence_rank_state import check_install_partial_evidence_rank_state
-from ..models.install_partial_evidence_rank_state import InstallPartialEvidenceRankState
+from ..models.installation_state import check_installation_state
+from ..models.installation_state import InstallationState
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -33,11 +31,11 @@ class InstallPartialEvidence:
         Attributes:
             affected_ranks (list[int]):
             expected_rank_count (int):
-            group_state (InstallPartialEvidenceGroupState):
+            group_state (InstallationState): The condition of a recipe installation across its Sparks.
             installation_id (str):
             present_ranks (list[int]):
             rank (int):
-            rank_state (InstallPartialEvidenceRankState):
+            rank_state (InstallationState): The condition of a recipe installation across its Sparks.
             reason (InstallDegradedReason): Why an installation is shown partial in the fleet projection.
             recipe_id (str):
             recipe_revision_id (str):
@@ -48,11 +46,11 @@ class InstallPartialEvidence:
 
     affected_ranks: list[int]
     expected_rank_count: int
-    group_state: InstallPartialEvidenceGroupState
+    group_state: InstallationState
     installation_id: str
     present_ranks: list[int]
     rank: int
-    rank_state: InstallPartialEvidenceRankState
+    rank_state: InstallationState
     reason: InstallDegradedReason
     recipe_id: str
     recipe_revision_id: str
@@ -136,7 +134,7 @@ class InstallPartialEvidence:
 
         expected_rank_count = d.pop("expected_rank_count")
 
-        group_state = check_install_partial_evidence_group_state(d.pop("group_state"))
+        group_state = check_installation_state(d.pop("group_state"))
 
 
 
@@ -148,7 +146,7 @@ class InstallPartialEvidence:
 
         rank = d.pop("rank")
 
-        rank_state = check_install_partial_evidence_rank_state(d.pop("rank_state"))
+        rank_state = check_installation_state(d.pop("rank_state"))
 
 
 

@@ -288,6 +288,162 @@ export const ResourceBlockerCode = {
 } as const;
 export type ResourceBlockerCode = (typeof ResourceBlockerCode)[keyof typeof ResourceBlockerCode];
 
+export const InstallationState = {
+  PLANNED: "planned",
+  INSTALLING: "installing",
+  INSTALLED: "installed",
+  PARTIAL: "partial",
+  FAILED: "failed",
+  UNINSTALLED: "uninstalled",
+} as const;
+export type InstallationState = (typeof InstallationState)[keyof typeof InstallationState];
+
+export const InstallationNodeState = {
+  PLANNED: "planned",
+  INSTALLED: "installed",
+  FAILED: "failed",
+  UNINSTALLED: "uninstalled",
+} as const;
+export type InstallationNodeState = (typeof InstallationNodeState)[keyof typeof InstallationNodeState];
+
+export const DistributionAssignmentState = {
+  ACTIVE: "active",
+  REVOKED: "revoked",
+  EXPIRED: "expired",
+} as const;
+export type DistributionAssignmentState = (typeof DistributionAssignmentState)[keyof typeof DistributionAssignmentState];
+
+export const RunState = {
+  PLANNED: "planned",
+  STARTING: "starting",
+  RUNNING: "running",
+  STOPPING: "stopping",
+  STOPPED: "stopped",
+  FAILED: "failed",
+  LOST: "lost",
+} as const;
+export type RunState = (typeof RunState)[keyof typeof RunState];
+
+export const RouteState = {
+  WITHDRAWN: "withdrawn",
+  PENDING: "pending",
+  PUBLISHED: "published",
+  FAILED: "failed",
+} as const;
+export type RouteState = (typeof RouteState)[keyof typeof RouteState];
+
+export const RoutePublicationState = {
+  WITHDRAWAL_PENDING: "withdrawal-pending",
+  ROUTES_WITHDRAWN: "routes-withdrawn",
+  PUBLICATION_PENDING: "publication-pending",
+  COMPLETED: "completed",
+  FAILED: "failed",
+} as const;
+export type RoutePublicationState = (typeof RoutePublicationState)[keyof typeof RoutePublicationState];
+
+export const CertificateState = {
+  VALID: "valid",
+  MISSING: "missing",
+  NOT_YET_VALID: "not-yet-valid",
+  EXPIRED: "expired",
+  REVOKED: "revoked",
+  INACTIVE: "inactive",
+} as const;
+export type CertificateState = (typeof CertificateState)[keyof typeof CertificateState];
+
+export const EnrollmentGrantState = {
+  PENDING: "pending",
+  EXPIRED: "expired",
+  CONSUMED: "consumed",
+  REVOKED: "revoked",
+} as const;
+export type EnrollmentGrantState = (typeof EnrollmentGrantState)[keyof typeof EnrollmentGrantState];
+
+export const ModelFileState = {
+  PARTIAL: "partial",
+  VERIFIED: "verified",
+  MISSING: "missing",
+  CORRUPT: "corrupt",
+} as const;
+export type ModelFileState = (typeof ModelFileState)[keyof typeof ModelFileState];
+
+export const CatalogSyncState = {
+  SYNCING: "syncing",
+  CURRENT: "current",
+  PARTIAL: "partial",
+  FAILED: "failed",
+} as const;
+export type CatalogSyncState = (typeof CatalogSyncState)[keyof typeof CatalogSyncState];
+
+export const ReservationState = {
+  ACTIVE: "active",
+  PROMISED: "promised",
+  RELEASED: "released",
+  EXPIRED: "expired",
+} as const;
+export type ReservationState = (typeof ReservationState)[keyof typeof ReservationState];
+
+export const GatewayRouteState = {
+  PUBLISHED: "published",
+  MAINTENANCE: "maintenance",
+  UNAVAILABLE: "unavailable",
+} as const;
+export type GatewayRouteState = (typeof GatewayRouteState)[keyof typeof GatewayRouteState];
+
+export const DesiredAssignmentState = {
+  INSTALLED: "installed",
+  RUNNING: "running",
+} as const;
+export type DesiredAssignmentState = (typeof DesiredAssignmentState)[keyof typeof DesiredAssignmentState];
+
+export const EndpointState = {
+  INSTALLED_ONLY: "installed-only",
+  NOT_PUBLISHED_YET: "not-published-yet",
+  PUBLISHED: "published",
+  EXPIRED: "expired",
+  WITHDRAWN: "withdrawn",
+  UNAVAILABLE: "unavailable",
+} as const;
+export type EndpointState = (typeof EndpointState)[keyof typeof EndpointState];
+
+export const ObservedAssignmentState = {
+  NOT_PLACED: "not-placed",
+  PLACED: "placed",
+  INSTALLING: "installing",
+  INSTALLED: "installed",
+  RUNNING: "running",
+  DEGRADED: "degraded",
+} as const;
+export type ObservedAssignmentState = (typeof ObservedAssignmentState)[keyof typeof ObservedAssignmentState];
+
+export const AssetAvailability = {
+  VERIFIED: "verified",
+  PARTIAL: "partial",
+  MISSING: "missing",
+  UNKNOWN: "unknown",
+} as const;
+export type AssetAvailability = (typeof AssetAvailability)[keyof typeof AssetAvailability];
+
+export const PlacementInstallState = {
+  COMPLETE: "complete",
+  PARTIAL: "partial",
+  NOT_PRESENT: "not_present",
+  UNKNOWN: "unknown",
+} as const;
+export type PlacementInstallState = (typeof PlacementInstallState)[keyof typeof PlacementInstallState];
+
+export const PlacementLoadState = {
+  LOADED: "loaded",
+  NOT_LOADED: "not_loaded",
+  UNKNOWN: "unknown",
+} as const;
+export type PlacementLoadState = (typeof PlacementLoadState)[keyof typeof PlacementLoadState];
+
+export const ModelCacheOperatorStatus = {
+  ACCEPTED: "accepted",
+} as const;
+export type ModelCacheOperatorStatus = (typeof ModelCacheOperatorStatus)[keyof typeof ModelCacheOperatorStatus];
+
 export const AdmissionCode = {
   CAPACITY_BUSY: "admission.capacity_busy",
 } as const;
@@ -1187,6 +1343,7 @@ export type StopPlanCode = (typeof StopPlanCode)[keyof typeof StopPlanCode];
 export const StorageDemandCode = {
   EVICTING: "storage.evicting",
   INSUFFICIENT_AFTER_EVICTION: "storage.insufficient_after_eviction",
+  EVICTION_TIMED_OUT: "storage.eviction_timed_out",
 } as const;
 export type StorageDemandCode = (typeof StorageDemandCode)[keyof typeof StorageDemandCode];
 

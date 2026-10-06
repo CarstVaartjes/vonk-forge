@@ -28,15 +28,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
+    InstallationNodeState,
+    InstallationState,
     InstallDegradedReason,
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
+    ModelFileState,
     OperationProgress,
     ProfileReasonCode,
+    ReservationState,
     ResourceBlockerCode,
     ResourcePlanningCode,
+    RouteState,
     RunAdmissionCode,
+    RunState,
     RunSwitchCode,
     SecurityRefusalError,
     SecurityRefusalReason,
@@ -1047,7 +1053,7 @@ class DatabaseRunSwitchArtifactInspector:
                 row = by_digest.get(digest)
                 if (
                     row is not None
-                    and row.state == "verified"
+                    and row.state == ModelFileState.VERIFIED
                     and row.size_bytes == size
                 ):
                     reused += size
@@ -1058,7 +1064,7 @@ class DatabaseRunSwitchArtifactInspector:
                 for row in rows:
                     if (
                         row.digest in expected_by_digest
-                        and row.state == "verified"
+                        and row.state == ModelFileState.VERIFIED
                         and row.ref_count == 0
                     ):
                         reclaimable += row.size_bytes
@@ -1243,7 +1249,7 @@ class RecipeLifecyclePhaseExecutor:
                         RunSwitchCode.STOPPED_RUN_MEMBERSHIP_CHANGED,
                         reason=WaitReason.SCOPE_CHANGED,
                     )
-                if run.state != "stopped" or run.stopped_at is None:
+                if run.state != RunState.STOPPED or run.stopped_at is None:
                     raise RunSwitchPostStopEvidencePending(
                         f"Stop receipt for {stop.run_id} is not complete"
                     )
@@ -1572,7 +1578,7 @@ class RecipeLifecyclePhaseExecutor:
                     ordinal,
                     profile_target_node_ids=profile_target_node_ids,
                 )
-            if target.state in {"starting", "stopping"}:
+            if target.state in {RunState.STARTING, RunState.STOPPING}:
                 # A newer explicit Stop can cancel an older same-run command
                 # under the current node ordinal.  Re-preview this exact run
                 # because its prior Start/Stop may have changed state after
@@ -1582,7 +1588,10 @@ class RecipeLifecyclePhaseExecutor:
                     run = session.get(RecipeRun, target.run_id)
                     if run is None:
                         raise RunSwitchRetryLater(RunSwitchCode.STOP_TARGET_DISAPPEARED)
-                    if run.state == "stopped" and run.route_state == "withdrawn":
+                    if (
+                        run.state == RunState.STOPPED
+                        and run.route_state == RouteState.WITHDRAWN
+                    ):
                         return PhaseExecution(result={"run_id": target.run_id})
                 fresh = self._lifecycle.preview_stop(
                     target.run_id,
@@ -1692,10 +1701,10 @@ class RecipeLifecyclePhaseExecutor:
                             install_plan_digest,
                         )
                         if installation.state not in {
-                            "planned",
-                            "installing",
-                            "partial",
-                            "installed",
+                            InstallationState.PLANNED,
+                            InstallationState.INSTALLING,
+                            InstallationState.PARTIAL,
+                            InstallationState.INSTALLED,
                         }:
                             raise RunSwitchRetryLater(
                                 RunSwitchCode.INSTALLATION_HANDOFF_UNAVAILABLE,
@@ -2048,10 +2057,10 @@ class RecipeLifecyclePhaseExecutor:
                 scope = plan.profile_stop_scope
                 if scope is not None:
                     reachable_stopped = (
-                        status.state == "lost"
-                        and status.route_state == "withdrawn"
+                        status.state == RunState.LOST
+                        and status.route_state == RouteState.WITHDRAWN
                         and all(
-                            rank.state == "stopped"
+                            rank.state == RunState.STOPPED
                             for rank in status.ranks
                             if rank.node_id in scope.target_node_ids
                         )
@@ -2073,15 +2082,15 @@ class RecipeLifecyclePhaseExecutor:
                             )
                         )
                 verified = (
-                    status.state == "stopped"
-                    and status.route_state == "withdrawn"
-                    and all(rank.state == "stopped" for rank in status.ranks)
+                    status.state == RunState.STOPPED
+                    and status.route_state == RouteState.WITHDRAWN
+                    and all(rank.state == RunState.STOPPED for rank in status.ranks)
                 )
                 waiting = (
                     status.state in STOPPABLE_RUN_STATES
                     or status.route_state
                     in {
-                        "pending",
+                        RouteState.PENDING,
                     }
                 )
                 status_reason = (
@@ -2089,7 +2098,7 @@ class RecipeLifecyclePhaseExecutor:
                     f"{status.state}, route is {status.route_state}"
                 )
             else:
-                verified = status.healthy and status.route_state == "published"
+                verified = status.healthy and status.route_state == RouteState.PUBLISHED
                 waiting = False
                 status_reason = None
                 route_error = (
@@ -2098,19 +2107,23 @@ class RecipeLifecyclePhaseExecutor:
                     else None
                 )
                 if not verified:
-                    if status.state in {"failed", "lost", "stopped"}:
+                    if status.state in {
+                        RunState.FAILED,
+                        RunState.LOST,
+                        RunState.STOPPED,
+                    }:
                         detail = route_error or "run owner reached a terminal state"
                         raise RunSwitchRetryLater(
                             f"{RunSwitchCode.RUN_OWNER_TERMINAL}: {status.state}; {detail}"
                         )
-                    if status.route_state == "failed":
+                    if status.route_state == RouteState.FAILED:
                         detail = route_error or "route owner reported terminal failure"
                         raise RunSwitchRetryLater(
                             f"{RunSwitchCode.ROUTE_OWNER_FAILED}: {detail}"
                         )
                     waiting = True
                     route_cause = f"route is {status.route_state}"
-                    if status.route_state == "pending":
+                    if status.route_state == RouteState.PENDING:
                         if status.route_next_attempt_at is not None:
                             route_cause = (
                                 "route publication is pending; route owner next "
@@ -2127,7 +2140,7 @@ class RecipeLifecyclePhaseExecutor:
                                 "route publication is pending; route owner next "
                                 "attempt is not scheduled"
                             )
-                    elif status.route_state == "withdrawn":
+                    elif status.route_state == RouteState.WITHDRAWN:
                         route_cause = (
                             f"route is withdrawn; cause {route_error or 'unknown'}"
                         )
@@ -2146,17 +2159,17 @@ class RecipeLifecyclePhaseExecutor:
                             f"reconciling run {run_id} generation {status.run_generation}; "
                             f"{route_cause}"
                         )
-                    elif status.state in {"starting", "stopping"}:
+                    elif status.state in {RunState.STARTING, RunState.STOPPING}:
                         status_reason = (
                             f"{RunSwitchCode.RUN_OWNER_ACTIVE}: run {run_id} generation "
                             f"{status.run_generation} is {status.state}; {route_cause}"
                         )
-                    elif status.route_state == "pending":
+                    elif status.route_state == RouteState.PENDING:
                         status_reason = (
                             f"{RunSwitchCode.ROUTE_PUBLICATION_PENDING}: run {run_id} "
                             f"generation {status.run_generation}; {route_cause}"
                         )
-                    elif status.route_state == "withdrawn":
+                    elif status.route_state == RouteState.WITHDRAWN:
                         cause = route_error or "no terminal route-owner cause recorded"
                         status_reason = (
                             f"{RunSwitchCode.ROUTE_WITHDRAWN_OWNER_UNKNOWN}: run {run_id} "
@@ -2309,10 +2322,14 @@ class RecipeLifecyclePhaseExecutor:
                 )
             )
             active_runs = sum(run.state in STOPPABLE_RUN_STATES for run in runs)
-            unwithdrawn_routes = sum(run.route_state != "withdrawn" for run in runs)
+            unwithdrawn_routes = sum(
+                run.route_state != RouteState.WITHDRAWN for run in runs
+            )
             verified = (
-                installation.state == "installed"
-                and all(node.state == "installed" for node in members)
+                installation.state == InstallationState.INSTALLED
+                and all(
+                    node.state == InstallationNodeState.INSTALLED for node in members
+                )
                 and not active_runs
                 and not unwithdrawn_routes
             )
@@ -2334,7 +2351,10 @@ class RecipeLifecyclePhaseExecutor:
             }
             if verified:
                 return PhaseExecution(result=evidence)
-            if installation.state in {"planned", "installing"}:
+            if installation.state in {
+                InstallationState.PLANNED,
+                InstallationState.INSTALLING,
+            }:
                 return PhaseExecution(result=evidence, waiting=True)
         raise RunSwitchRetryLater(RunSwitchCode.INSTALLATION_VERIFICATION_FAILED)
 
@@ -2390,7 +2410,8 @@ class RecipeLifecyclePhaseExecutor:
                 )
             )
             active_runs = sum(
-                run.state != "stopped" or run.route_state != "withdrawn" for run in runs
+                run.state != RunState.STOPPED or run.route_state != RouteState.WITHDRAWN
+                for run in runs
             )
         if plan.cleanup_mode == "reconcile":
             expected_members = {
@@ -2401,9 +2422,11 @@ class RecipeLifecyclePhaseExecutor:
             } == expected_members
             removed = (
                 installation is not None
-                and installation.state == "uninstalled"
+                and installation.state == InstallationState.UNINSTALLED
                 and exact_members
-                and all(node.state == "uninstalled" for node in members)
+                and all(
+                    node.state == InstallationNodeState.UNINSTALLED for node in members
+                )
                 and reconciliation_complete
             )
             if not reconciliation_complete:
@@ -2412,15 +2435,20 @@ class RecipeLifecyclePhaseExecutor:
                 )
             if (
                 installation is None
-                or installation.state != "uninstalled"
+                or installation.state != InstallationState.UNINSTALLED
                 or not exact_members
-                or any(node.state != "uninstalled" for node in members)
+                or any(
+                    node.state != InstallationNodeState.UNINSTALLED for node in members
+                )
             ):
                 raise RunSwitchRetryLater(
                     RunSwitchCode.RECONCILIATION_STATE_VERIFICATION_FAILED
                 )
         else:
-            removed = installation is None or installation.state == "uninstalled"
+            removed = (
+                installation is None
+                or installation.state == InstallationState.UNINSTALLED
+            )
         evidence = {
             "installation_id": installation_id,
             "installation_state": (
@@ -4044,7 +4072,7 @@ class RunSwitchOperationService:
             restoring_installation = (
                 expected_image is not None
                 and installation is not None
-                and installation.state == "installed"
+                and installation.state == InstallationState.INSTALLED
                 and build is None
                 and build_candidate is not None
                 and build_candidate.state in {"planned", "building"}
@@ -4175,7 +4203,7 @@ class RunSwitchOperationService:
                     )
             elif (
                 request.action != "install"
-                and installation.state == "installed"
+                and installation.state == InstallationState.INSTALLED
                 and self._lifecycle is not None
             ):
                 # The runs this plan stops release their reservations in the
@@ -4613,7 +4641,11 @@ class RunSwitchOperationService:
                     RecipeInstallation.mapping_generation == mapping.generation,
                     RecipeInstallation.model_content_sha256 == model_digest,
                     RecipeInstallation.state.in_(
-                        ("installed", "installing", "partial")
+                        (
+                            InstallationState.INSTALLED,
+                            InstallationState.INSTALLING,
+                            InstallationState.PARTIAL,
+                        )
                     ),
                 )
                 .order_by(
@@ -4633,7 +4665,7 @@ class RunSwitchOperationService:
                         InstallationNode.installation_id == installation.id
                     )
                 )
-                if node.state == "installed"
+                if node.state == InstallationNodeState.INSTALLED
             }
             if installed == desired:
                 return installation
@@ -5063,7 +5095,7 @@ class RunSwitchOperationService:
                 if (
                     artifact is not None
                     and artifact.kind == "image"
-                    and artifact.state == "verified"
+                    and artifact.state == ModelFileState.VERIFIED
                     and artifact.size_bytes >= image_bytes
                 ):
                     runtime_reused += image_bytes
@@ -5073,7 +5105,7 @@ class RunSwitchOperationService:
                 runtime_missing_by_node.setdefault(node.node_id, 0)
                 if (
                     artifact is not None
-                    and artifact.state == "verified"
+                    and artifact.state == ModelFileState.VERIFIED
                     and artifact.ref_count == 0
                 ):
                     runtime_reclaimable += artifact.size_bytes
@@ -6271,7 +6303,7 @@ class RunSwitchOperationService:
                 select(ResourceReservation).where(
                     ResourceReservation.node_id == node_id,
                     ResourceReservation.kind == kind,
-                    ResourceReservation.state == "active",
+                    ResourceReservation.state == ReservationState.ACTIVE,
                     reservation_visible(excluded_profile_application_ids),
                 )
             )
@@ -6554,7 +6586,9 @@ class RunSwitchOperationService:
                 and runtime_storage.oci_layout_sha256 is None
             )
         )
-        needs_prepare = installation_id is None or installation_state != "installed"
+        needs_prepare = (
+            installation_id is None or installation_state != InstallationState.INSTALLED
+        )
         needs_cleanup = retention == "reclaim-unreferenced" and (
             inspection.reclaimable_bytes > 0
             or (runtime_storage is not None and runtime_storage.reclaimable_bytes > 0)
@@ -6723,7 +6757,7 @@ class RunSwitchOperationService:
         ).where(
             ResourceReservation.owner_kind == "run",
             ResourceReservation.owner_id == run_id,
-            ResourceReservation.state == "active",
+            ResourceReservation.state == ReservationState.ACTIVE,
         )
         if node_ids is not None:
             statement = statement.where(ResourceReservation.node_id.in_(node_ids))
@@ -8067,8 +8101,8 @@ class RunSwitchOperationService:
                             if isinstance(run_id, str)
                             else None
                         )
-                        if run is not None and run.state == "running":
-                            run.route_state = "withdrawn"
+                        if run is not None and run.state == RunState.RUNNING:
+                            run.route_state = RouteState.WITHDRAWN
                             run.route_error = (
                                 "final verification exceeded its 15 minute bound; "
                                 "exact workload recovery is inspecting this run"
@@ -8084,7 +8118,7 @@ class RunSwitchOperationService:
                                 # This marks the accepted run degraded, not absent.
                                 # The recovery coordinator must obtain fresh exact
                                 # signed evidence and reconcile Stop before Start.
-                                failed_node.state = "failed"
+                                failed_node.state = RunState.FAILED
                                 failed_node.updated_at = now
                             run.updated_at = now
                         reason = (
@@ -9685,7 +9719,8 @@ def _start_still_progressing(
     except (KeyError, RuntimeError, TypeError, ValueError):
         return False
     return status.state in ACTIVE_RUN_STATES and any(
-        rank.fresh and rank.state in {"planned", "starting", "running"}
+        rank.fresh
+        and rank.state in {RunState.PLANNED, RunState.STARTING, RunState.RUNNING}
         for rank in status.ranks
     )
 

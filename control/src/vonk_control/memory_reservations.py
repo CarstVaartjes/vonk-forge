@@ -1,3 +1,5 @@
+from vonk_agent_protocol import ReservationState, RunState
+
 """One ledger projection for all consumers of physical memory."""
 
 from collections.abc import Sequence
@@ -37,7 +39,9 @@ def memory_reserve_floor(
         select(ResourceReservation).where(
             ResourceReservation.node_id == node_id,
             ResourceReservation.kind.in_(memory_reservation_kinds(kind, memory_pool)),
-            ResourceReservation.state.in_(("active", "promised")),
+            ResourceReservation.state.in_(
+                (ReservationState.ACTIVE, ReservationState.PROMISED)
+            ),
         )
     ):
         if claim.owner_kind == "fleet-profile":
@@ -70,7 +74,7 @@ def reviewed_run_memory_reservations(
                 ResourceReservation.owner_kind == "run",
                 ResourceReservation.owner_id == stop.run_id,
                 ResourceReservation.kind.in_(MEMORY_RESERVATION_KINDS),
-                ResourceReservation.state == "active",
+                ResourceReservation.state == ReservationState.ACTIVE,
                 ResourceReservation.plan_digest == stop.run_plan_digest,
                 RecipeRun.plan_digest == stop.run_plan_digest,
             )
@@ -101,7 +105,9 @@ def memory_reservations(
             .where(
                 ResourceReservation.node_id == node_id,
                 ResourceReservation.kind.in_(MEMORY_RESERVATION_KINDS),
-                ResourceReservation.state.in_(("active", "promised")),
+                ResourceReservation.state.in_(
+                    (ReservationState.ACTIVE, ReservationState.PROMISED)
+                ),
                 reservation_visible(
                     excluded_profile_application_ids, excluded_run_ids=excluded_run_ids
                 ),
@@ -139,10 +145,10 @@ def memory_reservations(
             {kind: value for kind, value in unknown.items() if value},
             released,
         )
-    active = [claim for claim in claims if claim.state == "active"]
+    active = [claim for claim in claims if claim.state == ReservationState.ACTIVE]
     future: dict[str, list[ResourceReservation]] = {}
     for claim in claims:
-        if claim.state == "promised":
+        if claim.state == ReservationState.PROMISED:
             future.setdefault(claim.owner_id, []).append(claim)
     # A future replacement and the exact runs it will stop occupy successive
     # phases. Account for the larger reservation envelope, retaining the live
@@ -245,11 +251,11 @@ def _released_since_observation(
             ResourceReservation.node_id == node_id,
             ResourceReservation.owner_kind == "run",
             ResourceReservation.kind.in_(MEMORY_RESERVATION_KINDS),
-            ResourceReservation.state == "released",
+            ResourceReservation.state == ReservationState.RELEASED,
             ResourceReservation.released_at.is_not(None),
             # A run that failed or was retired without a Stop receipt may still
             # hold its memory; only a stopped (or stopping) run is credited.
-            RecipeRun.state.in_(("stopped", "stopping")),
+            RecipeRun.state.in_((RunState.STOPPED, RunState.STOPPING)),
         )
     ):
         released_at = claim.released_at

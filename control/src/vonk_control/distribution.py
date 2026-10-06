@@ -25,8 +25,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    DistributionAssignmentState,
     DistributionCode,
     DistributionObject,
+    ModelFileState,
     SecurityRefusalReason,
     canonical_message,
 )
@@ -749,7 +751,7 @@ class DistributionService:
                     oci_image_digest=assignment.oci_image_digest,
                     oci_image_config_digest=assignment.oci_image_config_digest,
                     oci_archive_sha256=assignment.oci_archive_sha256,
-                    state="active",
+                    state=DistributionAssignmentState.ACTIVE,
                     created_at=now,
                     updated_at=now,
                 )
@@ -889,7 +891,7 @@ class DistributionService:
                         .with_for_update()
                     )
                     if row is not None:
-                        row.state = "expired"
+                        row.state = DistributionAssignmentState.EXPIRED
                         row.updated_at = now
             raise DistributionError(DistributionCode.EXPIRED, "assignment has expired")
         return assignment
@@ -1007,7 +1009,7 @@ def record_distributed_runtime_image(
                 digest=digest,
                 source=f"oci-layout:{assignment.oci_archive_sha256}",
                 size_bytes=build.image_bytes,
-                state="verified",
+                state=ModelFileState.VERIFIED,
                 ref_count=0,
                 verified_at=now,
                 updated_at=now,
@@ -1016,7 +1018,7 @@ def record_distributed_runtime_image(
         return
     artifact.kind = "image"
     artifact.size_bytes = build.image_bytes
-    artifact.state = "verified"
+    artifact.state = ModelFileState.VERIFIED
     artifact.verified_at = now
     artifact.updated_at = now
 

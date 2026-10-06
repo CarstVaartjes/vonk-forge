@@ -94,8 +94,9 @@ class FakeLifecycle:
         self._refuse = refuse
         self._apply = apply
         self.removed: list[str] = []
+        self.also_removing: dict[str, tuple[str, ...]] = {}
 
-    def preview_uninstall(self, installation_id: str):
+    def preview_uninstall(self, installation_id: str, *, also_removing=()):
         # The sweep has judged the installation unused; a load can still
         # arrive before the removal is queued.
         if self._between is not None:
@@ -110,8 +111,10 @@ class FakeLifecycle:
         actor: str,
         request_id: str,
         unattended_guard: Callable[[Session], None] | None = None,
+        also_removing=(),
     ) -> None:
         assert actor == ACTOR and unattended_guard is not None
+        self.also_removing[installation_id] = tuple(sorted(also_removing))
         if installation_id in self._refuse:
             raise RecipeOperationConflict("refused")
         with self._sessions.begin() as session:
@@ -618,6 +621,232 @@ def test_installations_of_one_model_go_together_or_not_at_all(world: Catalog) ->
     result = _collector(world, other).collect()
     assert other.removed == []
     assert _kept(result, "model shared with one in use") == 1
+
+
+def _model_objects(world: Catalog, model: str, objects: dict[str, int]) -> None:
+    """The model files the cache recorded for a model: file digest -> bytes."""
+
+    with world.sessions.begin() as session:
+        session.add(
+            ModelCacheSet(
+                artifact_set_sha256=uuid.uuid4().hex + uuid.uuid4().hex,
+                schema_version=2,
+                model_content_sha256=model,
+                manifest={
+                    "schema_version": 2,
+                    "artifacts": [
+                        {
+                            "key": digest[:8],
+                            "sha256": digest,
+                            "download_bytes": size,
+                            "model_content_sha256": model,
+                        }
+                        for digest, size in sorted(objects.items())
+                    ],
+                },
+                expected_bytes=sum(objects.values()),
+                verified_bytes=sum(objects.values()),
+                state="cached",
+                created_at=OLD,
+                updated_at=OLD,
+                last_accessed_at=OLD,
+            )
+        )
+
+
+def _hard_linked_models(world: Catalog) -> tuple[list[str], list[str]]:
+    """Five installations of model M1 and three of M2, which share one file.
+
+    M1 = A (40) + B (60) and M2 = B (60) + C (30); each installation holds 10
+    bytes of its own besides the linked files. All idle, M1 used less recently.
+    """
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    m1, m2 = "1" * 64, "2" * 64
+    _model_objects(world, m1, {"a" * 64: 40 * GIB, "b" * 64: 60 * GIB})
+    _model_objects(world, m2, {"b" * 64: 60 * GIB, "c" * 64: 30 * GIB})
+    first: list[str] = []
+    second: list[str] = []
+    for model, installed, found, age in (
+        (m1, 110 * GIB, first, timedelta(days=9)),
+        (m1, 110 * GIB, first, timedelta(days=9)),
+        (m1, 110 * GIB, first, timedelta(days=9)),
+        (m1, 110 * GIB, first, timedelta(days=9)),
+        (m1, 110 * GIB, first, timedelta(days=9)),
+        (m2, 100 * GIB, second, timedelta(days=5)),
+        (m2, 100 * GIB, second, timedelta(days=5)),
+        (m2, 100 * GIB, second, timedelta(days=5)),
+    ):
+        installation, _ = world.workload(old, run="stopped", touched=NOW - age)
+        _size(world, installation, installed, model=model)
+        found.append(installation)
+    return first, second
+
+
+def test_shared_model_files_free_only_with_the_last_installation_that_links_them(
+    world: Catalog,
+) -> None:
+    """Catches counting a hard-linked file once per installation (or per model):
+    removing both models frees A + B + C and each model's own bytes, not the sum
+    of the installations' sizes."""
+
+    _hard_linked_models(world)
+    _collector(world, free=400 * GIB)
+
+    with world.sessions() as session:
+        capacity = spark_eviction_capacity(session, NODE, world.now)
+
+    # 40 + 60 + 30 for the files and 10 for each model's own bytes. Counting a
+    # model's installed size per model gives 110 + 100 = 210 (850 per
+    # installation): B would be freed twice.
+    assert capacity.freeable == 150 * GIB
+    # B is shared by M1 and M2: the first model out frees only what no other
+    # model links, the second takes B with it.
+    first, second = capacity.items
+    assert len(first.members) == 5 and first.freeable == 10 * GIB + 40 * GIB
+    assert (
+        len(second.members) == 3 and second.freeable == 10 * GIB + 60 * GIB + 30 * GIB
+    )
+
+
+def test_a_shared_file_a_staying_installation_links_is_not_counted_as_freed(
+    world: Catalog,
+) -> None:
+    """M2 is running, so B stays: removing M1 frees A and its own bytes only."""
+
+    _first, second = _hard_linked_models(world)
+    with world.sessions.begin() as session:
+        run = session.scalar(
+            select(RecipeRun).where(RecipeRun.installation_id == second[0])
+        )
+        assert run is not None
+        run.state = "running"
+    demands = StorageDemands(lambda: world.now)
+    lifecycle = FakeLifecycle(world.sessions)
+    collector = _collector(world, lifecycle, free=400 * GIB, demands=demands)
+
+    with world.sessions() as session:
+        capacity = spark_eviction_capacity(session, NODE, world.now)
+    assert capacity.freeable == 50 * GIB
+    assert [len(item.members) for item in capacity.items] == [5]
+
+    # A load needing 100 GiB more than free cannot be met by the 50 GiB that
+    # removing M1 really frees (the naive estimate promised 550): nothing is
+    # removed for it, and it is told how much could be freed.
+    relief = collector.relief_for_spark(
+        NODE, 500 * GIB, source="profile-load", subject="p", reason="x"
+    )
+    result = collector.collect()
+    assert relief is not None and relief.code == STORAGE_INSUFFICIENT
+    assert relief.freeable_bytes == 50 * GIB
+    assert "stay because its workload is running" in relief.detail
+    assert lifecycle.removed == []
+    assert _scope(result, spark_scope(NODE))["outcome"] == "insufficient_after_eviction"
+
+
+def test_a_model_that_only_shares_files_with_one_that_stays_is_not_offered(
+    world: Catalog,
+) -> None:
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    kept, _ = world.workload(old, run="running")
+    other, _ = world.workload(old, run="stopped")
+    _model_objects(world, "1" * 64, {"a" * 64: 50 * GIB})
+    _model_objects(world, "2" * 64, {"a" * 64: 50 * GIB})
+    _size(world, kept, 50 * GIB, model="1" * 64)
+    _size(world, other, 50 * GIB, model="2" * 64)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    result = _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == []
+    assert _kept(result, "shares its files with one that stays") == 1
+
+
+def test_admission_relief_removes_the_installations_of_a_model_together_and_frees_real_bytes(
+    world: Catalog,
+) -> None:
+    """The pass asked for 140 GiB more than is free removes M1 (50) then M2
+    (100 more), every installation of a model together, each told which others
+    go with it so the Spark reclaims the files the last one holds."""
+
+    first, second = _hard_linked_models(world)
+    demands = StorageDemands(lambda: world.now)
+    lifecycle = FakeLifecycle(world.sessions)
+    collector = _collector(world, lifecycle, free=400 * GIB, demands=demands)
+    demands.request(
+        spark_scope(NODE),
+        540 * GIB,
+        source="profile-load",
+        subject="p",
+        reason="run-switch.insufficient-disk",
+    )
+
+    result = collector.collect()
+
+    assert sorted(lifecycle.removed) == sorted([*first, *second])
+    assert _scope(result, spark_scope(NODE))["estimated_freed_bytes"] == 150 * GIB
+    for group in (first, second):
+        for installation in group:
+            assert lifecycle.also_removing[installation] == tuple(
+                sorted(item for item in group if item != installation)
+            )
+
+
+def test_a_load_waiting_to_be_admitted_does_not_keep_what_it_waits_for_space_from(
+    world: Catalog,
+) -> None:
+    """Catches the deadlock a parked load made of itself: its plan names both
+    Sparks, so every installation there counted as a live operation, nothing was
+    evictable and the load waited for ever for the space it kept."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    installation, _ = world.workload(old, run="stopped")
+    _size(world, installation, 80 * GIB)
+    _application(
+        world,
+        {"steps": [{"node_ids": [NODE]}]},
+        state="queued",
+        progress={
+            "admission_pending": True,
+            "admission_attempt": 86,
+            "blockers": [
+                {
+                    "code": "profile.admission_busy",
+                    "detail": "Profile resource admission is waiting for capacity",
+                    "severity": "warning",
+                    "node_ids": [],
+                }
+            ],
+        },
+    )
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == [installation]
+
+
+def test_a_load_that_issued_something_still_keeps_the_installations_it_uses(
+    world: Catalog,
+) -> None:
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    world.workload(old, run="stopped")
+    _application(
+        world,
+        {"steps": [{"node_ids": [NODE]}]},
+        state="running",
+        progress={"admission_pending": False, "blockers": []},
+    )
+    lifecycle = FakeLifecycle(world.sessions)
+
+    result = _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == []
+    assert _kept(result, "live operation") == 1
 
 
 def test_installation_a_live_operation_names_is_kept(world: Catalog) -> None:

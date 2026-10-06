@@ -741,7 +741,10 @@ def test_projection_schema_is_finite_for_states_items_and_task3_numbers() -> Non
         "title": "Agent State",
         "type": "string",
     }
-    assert definitions["RecipePresence"]["properties"]["group_state"]["enum"] == [
+    assert definitions["RecipePresence"]["properties"]["group_state"] == {
+        "$ref": "#/$defs/InstallationState"
+    }
+    assert definitions["InstallationState"]["enum"] == [
         "planned",
         "installing",
         "installed",
@@ -749,7 +752,10 @@ def test_projection_schema_is_finite_for_states_items_and_task3_numbers() -> Non
         "failed",
         "uninstalled",
     ]
-    assert definitions["RunPresence"]["properties"]["run_state"]["enum"] == [
+    assert definitions["RunPresence"]["properties"]["run_state"] == {
+        "$ref": "#/$defs/RunState"
+    }
+    assert definitions["RunState"]["enum"] == [
         "planned",
         "starting",
         "running",

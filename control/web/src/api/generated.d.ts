@@ -1508,6 +1508,12 @@ export interface components {
              */
             uncertain: boolean;
         };
+        /**
+         * AssetAvailability
+         * @description What is known about a model asset on a Spark's disk.
+         * @enum {string}
+         */
+        AssetAvailability: "verified" | "partial" | "missing" | "unknown";
         /** AuthSession */
         AuthSession: {
             /**
@@ -1645,11 +1651,7 @@ export interface components {
          * @description One exact cache identity and its owner-reported storage condition.
          */
         CacheRemovalAsset: {
-            /**
-             * Availability
-             * @enum {string}
-             */
-            availability: "verified" | "partial" | "missing" | "unknown";
+            availability: components["schemas"]["AssetAvailability"];
             /** Available Bytes */
             available_bytes?: number | null;
             /**
@@ -1787,6 +1789,18 @@ export interface components {
          */
         CatalogSyncCode: "catalog.sync_actor_invalid" | "catalog.sync_commit_invalid" | "catalog.sync_failed" | "catalog.sync_identity_changed" | "catalog.sync_in_progress" | "catalog.sync_item_failed" | "catalog.sync_lease_expired" | "catalog.sync_model_failed" | "catalog.sync_not_found" | "catalog.sync_prebuilt_images_failed" | "catalog.sync_preview_changed" | "catalog.sync_repository_changed" | "catalog.sync_request_invalid" | "catalog.sync_request_reused" | "catalog.sync_result_unreadable" | "catalog.sync_revision_changed" | "catalog.sync_state_invalid" | "catalog.sync_trigger_invalid" | "recipe.topology_changed";
         /**
+         * CatalogSyncState
+         * @description The outcome of a catalog synchronization, as the catalog shows it.
+         * @enum {string}
+         */
+        CatalogSyncState: "syncing" | "current" | "partial" | "failed";
+        /**
+         * CertificateState
+         * @description The standing of a node's client certificate, as the fleet projection shows it.
+         * @enum {string}
+         */
+        CertificateState: "valid" | "missing" | "not-yet-valid" | "expired" | "revoked" | "inactive";
+        /**
          * ClusterMappingCode
          * @description Refusals of a cluster mapping (recipe-to-Spark assignment) request.
          * @enum {string}
@@ -1916,6 +1930,18 @@ export interface components {
          */
         ControllerErrorCode: "controller.conflict" | "controller.fleet.revocation_uncertain" | "controller.fleet.upgrade_conflict" | "controller.http_" | "controller.internal_error" | "controller.invalid_request" | "controller.not_found" | "controller.request_too_large" | "controller.unavailable";
         /**
+         * DesiredAssignmentState
+         * @description What a fleet-profile assignment is asked to become on its Sparks.
+         * @enum {string}
+         */
+        DesiredAssignmentState: "installed" | "running";
+        /**
+         * DistributionAssignmentState
+         * @description Whether a node may still fetch the artifacts of a distribution assignment.
+         * @enum {string}
+         */
+        DistributionAssignmentState: "active" | "revoked" | "expired";
+        /**
          * DistributionCode
          * @description Why a distribution assignment object cannot be served to a Spark.
          * @enum {string}
@@ -2005,6 +2031,12 @@ export interface components {
             /** Plan Digest */
             plan_digest: string;
         };
+        /**
+         * EndpointState
+         * @description Whether the endpoint of a fleet-profile assignment can be reached.
+         * @enum {string}
+         */
+        EndpointState: "installed-only" | "not-published-yet" | "published" | "expired" | "withdrawn" | "unavailable";
         /** EnrollmentGrantResponse */
         EnrollmentGrantResponse: {
             /** Ca Fingerprint */
@@ -2034,6 +2066,12 @@ export interface components {
             /** Token */
             token: string;
         };
+        /**
+         * EnrollmentGrantState
+         * @description The standing of an enrollment grant.
+         * @enum {string}
+         */
+        EnrollmentGrantState: "pending" | "expired" | "consumed" | "revoked";
         /** EnrollmentGrantStatus */
         EnrollmentGrantStatus: {
             /** Consumed At */
@@ -2056,11 +2094,7 @@ export interface components {
             purpose: "new-node" | "re-enroll";
             /** Revoked At */
             revoked_at: string | null;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "pending" | "expired" | "consumed" | "revoked";
+            state: components["schemas"]["EnrollmentGrantState"];
         };
         /** EnumParameter */
         EnumParameter: {
@@ -2552,6 +2586,8 @@ export interface components {
             step_results?: {
                 [key: string]: components["schemas"]["FleetProfileStepResult"];
             };
+            /** Storage Wait Since */
+            storage_wait_since?: string | null;
             supersede_code?: components["schemas"]["SupersedeCode"] | null;
             /** Superseded By */
             superseded_by?: string | null;
@@ -2631,11 +2667,7 @@ export interface components {
         FleetProfileAssignment: {
             /** Alias */
             alias?: string | null;
-            /**
-             * Desired State
-             * @enum {string}
-             */
-            desired_state: "installed" | "running";
+            desired_state: components["schemas"]["DesiredAssignmentState"];
             /** Id */
             id: string;
             /** Model Title */
@@ -2687,12 +2719,8 @@ export interface components {
         FleetProfileAssignmentInput: {
             /** Assignment Name */
             assignment_name?: string | null;
-            /**
-             * Desired State
-             * @default running
-             * @enum {string}
-             */
-            desired_state: "installed" | "running";
+            /** @default running */
+            desired_state: components["schemas"]["DesiredAssignmentState"];
             /** Model Variant */
             model_variant?: string | null;
             /** Option Choices */
@@ -2716,16 +2744,8 @@ export interface components {
             actions: ("switch" | "keep")[];
             /** Assignment Id */
             assignment_id: string;
-            /**
-             * Current State
-             * @enum {string}
-             */
-            current_state: "not-placed" | "placed" | "installing" | "installed" | "running" | "degraded";
-            /**
-             * Desired State
-             * @enum {string}
-             */
-            desired_state: "installed" | "running";
+            current_state: components["schemas"]["ObservedAssignmentState"];
+            desired_state: components["schemas"]["DesiredAssignmentState"];
             /** Node Ids */
             node_ids: string[];
             /** Option Choices */
@@ -2884,19 +2904,11 @@ export interface components {
             alias?: string | null;
             /** Assignment Id */
             assignment_id: string;
-            /**
-             * Desired State
-             * @enum {string}
-             */
-            desired_state: "installed" | "running";
+            desired_state: components["schemas"]["DesiredAssignmentState"];
             endpoint?: components["schemas"]["EndpointResponse"] | null;
             /** Recipe Title */
             recipe_title: string;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "installed-only" | "not-published-yet" | "published" | "expired" | "withdrawn" | "unavailable";
+            state: components["schemas"]["EndpointState"];
         };
         /**
          * FleetProfileEndpointProjectionIssue
@@ -3583,6 +3595,15 @@ export interface components {
             name: string;
         };
         /**
+         * GatewayRouteState
+         * @description What the inference gateway currently serves: published routes, or maintenance.
+         *
+         *     ``unavailable`` is the Controller's own word for a gateway whose marker it
+         *     cannot read; the gateway never writes it.
+         * @enum {string}
+         */
+        GatewayRouteState: "published" | "maintenance" | "unavailable";
+        /**
          * GitHubReleaseAsset
          * @description One GitHub release asset selected for an existing model file.
          */
@@ -3636,11 +3657,7 @@ export interface components {
             affected_ranks: number[];
             /** Expected Rank Count */
             expected_rank_count: number;
-            /**
-             * Group State
-             * @enum {string}
-             */
-            group_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
+            group_state: components["schemas"]["InstallationState"];
             /** Installation Id */
             installation_id: string;
             /** Installed Bytes */
@@ -3649,11 +3666,7 @@ export interface components {
             present_ranks: number[];
             /** Rank */
             rank: number;
-            /**
-             * Rank State
-             * @enum {string}
-             */
-            rank_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
+            rank_state: components["schemas"]["InstallationState"];
             reason: components["schemas"]["InstallDegradedReason"];
             /** Recipe Id */
             recipe_id: string;
@@ -3707,6 +3720,12 @@ export interface components {
             state: string;
         };
         /**
+         * InstallationNodeState
+         * @description The condition of one rank of an installation on its Spark.
+         * @enum {string}
+         */
+        InstallationNodeState: "planned" | "installed" | "failed" | "uninstalled";
+        /**
          * InstallationReconcileRequest
          * @description Reconcile the reviewed plan, or use the Controller's one-step decision.
          */
@@ -3716,6 +3735,12 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /**
+         * InstallationState
+         * @description The condition of a recipe installation across its Sparks.
+         * @enum {string}
+         */
+        InstallationState: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
         /** IntegerParameter */
         IntegerParameter: {
             /** Allowed Values */
@@ -4263,20 +4288,39 @@ export interface components {
         LifecycleVocabulary: {
             agent_result_state: components["schemas"]["AgentResultState"];
             artifact_preparation: components["schemas"]["ArtifactPreparation"];
+            asset_availability: components["schemas"]["AssetAvailability"];
             blocker_category: components["schemas"]["BlockerCategory"];
+            catalog_sync_state: components["schemas"]["CatalogSyncState"];
+            certificate_state: components["schemas"]["CertificateState"];
+            desired_assignment_state: components["schemas"]["DesiredAssignmentState"];
+            distribution_assignment_state: components["schemas"]["DistributionAssignmentState"];
             effect: components["schemas"]["LifecycleEffect"];
+            endpoint_state: components["schemas"]["EndpointState"];
+            enrollment_grant_state: components["schemas"]["EnrollmentGrantState"];
             error_category: components["schemas"]["ErrorCategory"];
             event_kind: components["schemas"]["LifecycleEventKind"];
             failure_code: components["schemas"]["FailureCode"];
+            gateway_route_state: components["schemas"]["GatewayRouteState"];
+            installation_node_state: components["schemas"]["InstallationNodeState"];
+            installation_state: components["schemas"]["InstallationState"];
             invalid_request_reason: components["schemas"]["InvalidRequestReason"];
             lifecycle_subject: components["schemas"]["LifecycleSubject"];
             migration_step: components["schemas"]["MigrationStep"];
+            model_cache_operator_status: components["schemas"]["ModelCacheOperatorStatus"];
+            model_file_state: components["schemas"]["ModelFileState"];
             observation_cause: components["schemas"]["ObservationCause"];
+            observed_assignment_state: components["schemas"]["ObservedAssignmentState"];
             operator_action: components["schemas"]["OperatorActionName"];
             operator_surface: components["schemas"]["OperatorSurface"];
             outcome_kind: components["schemas"]["OutcomeKind"];
+            placement_install_state: components["schemas"]["PlacementInstallState"];
+            placement_load_state: components["schemas"]["PlacementLoadState"];
+            reservation_state: components["schemas"]["ReservationState"];
             resource_blocker_code: components["schemas"]["ResourceBlockerCode"];
+            route_publication_state: components["schemas"]["RoutePublicationState"];
+            route_state: components["schemas"]["RouteState"];
             run_admission_code: components["schemas"]["RunAdmissionCode"];
+            run_state: components["schemas"]["RunState"];
             security_refusal_reason: components["schemas"]["SecurityRefusalReason"];
             state: components["schemas"]["LifecycleState"];
             state_alias: components["schemas"]["StateAlias"];
@@ -4361,11 +4405,7 @@ export interface components {
             skipped_count: number;
             /** Stale Recipes */
             stale_recipes: components["schemas"]["ManagedCatalogStaleRecipe"][];
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "syncing" | "current" | "partial" | "failed";
+            state: components["schemas"]["CatalogSyncState"];
             /** Sync Id */
             sync_id: string;
             /** Total Count */
@@ -4593,6 +4633,16 @@ export interface components {
             transferred_bytes: number;
         };
         /**
+         * ModelCacheOperatorStatus
+         * @description The operator-facing word of a model-cache operation that is not a stored state.
+         *
+         *     ``accepted``: the request is recorded and not yet picked up.  Every other state
+         *     an operator sees is a :class:`~vonk_agent_protocol.LifecycleState` (a cancel
+         *     under way is ``observing`` with its cancellation intent).
+         * @enum {string}
+         */
+        ModelCacheOperatorStatus: "accepted";
+        /**
          * ModelCacheRemovalRequest
          * @description Request key for removing the named model against current state.
          */
@@ -4717,6 +4767,12 @@ export interface components {
             /** Size Bytes */
             size_bytes: number;
         };
+        /**
+         * ModelFileState
+         * @description The condition of one model file a node holds.
+         * @enum {string}
+         */
+        ModelFileState: "partial" | "verified" | "missing" | "corrupt";
         /** ModelFormat */
         ModelFormat: {
             /** Precision */
@@ -4835,11 +4891,7 @@ export interface components {
              * @enum {string}
              */
             agent_state: "unregistered" | "pending" | "active" | "retired" | "revoked";
-            /**
-             * Certificate State
-             * @enum {string}
-             */
-            certificate_state: "valid" | "missing" | "not-yet-valid" | "expired" | "revoked" | "inactive";
+            certificate_state: components["schemas"]["CertificateState"];
             /** Last Seen Age Seconds */
             last_seen_age_seconds: number | null;
             /** Last Seen At */
@@ -4931,6 +4983,12 @@ export interface components {
          * @enum {string}
          */
         ObservationCause: "reported-unknown" | "lease-lapsed";
+        /**
+         * ObservedAssignmentState
+         * @description Where a fleet-profile assignment stands on the Sparks, as observed.
+         * @enum {string}
+         */
+        ObservedAssignmentState: "not-placed" | "placed" | "installing" | "installed" | "running" | "degraded";
         /**
          * OperationBlocker
          * @description One reason an operation is waiting or blocked, with the Sparks it concerns.
@@ -5236,6 +5294,18 @@ export interface components {
         };
         ParameterDefinition: components["schemas"]["StringParameter"] | components["schemas"]["IntegerParameter"] | components["schemas"]["FloatParameter"] | components["schemas"]["BooleanParameter"] | components["schemas"]["EnumParameter"];
         ParameterScalar: boolean | number | string;
+        /**
+         * PlacementInstallState
+         * @description How much of a placement's installation is already on its Sparks.
+         * @enum {string}
+         */
+        PlacementInstallState: "complete" | "partial" | "not_present" | "unknown";
+        /**
+         * PlacementLoadState
+         * @description Whether a placement's recipe is loaded on its Sparks.
+         * @enum {string}
+         */
+        PlacementLoadState: "loaded" | "not_loaded" | "unknown";
         /**
          * PrebuiltImageCode
          * @description Why a prebuilt runtime image is, or is not, used.
@@ -6055,11 +6125,7 @@ export interface components {
             degraded_reason?: components["schemas"]["InstallDegradedReason"] | null;
             /** Expected Rank Count */
             expected_rank_count: number;
-            /**
-             * Group State
-             * @enum {string}
-             */
-            group_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
+            group_state: components["schemas"]["InstallationState"];
             /** Installation Id */
             installation_id: string;
             /** Installed Bytes */
@@ -6070,11 +6136,7 @@ export interface components {
             present_ranks: number[];
             /** Rank */
             rank: number;
-            /**
-             * Rank State
-             * @enum {string}
-             */
-            rank_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
+            rank_state: components["schemas"]["InstallationState"];
             /** Recipe Id */
             recipe_id: string;
             /** Recipe Revision Id */
@@ -6540,6 +6602,12 @@ export interface components {
             issues: components["schemas"]["RequestValidationIssue"][];
         };
         /**
+         * ReservationState
+         * @description The standing of a resource reservation.
+         * @enum {string}
+         */
+        ReservationState: "active" | "promised" | "released" | "expired";
+        /**
          * ResourceBlockerCode
          * @description The capacity-fit codes the resource planner gives a node that cannot fit.
          *
@@ -6618,6 +6686,18 @@ export interface components {
             /** Targets Ready */
             targets_ready: boolean;
         };
+        /**
+         * RoutePublicationState
+         * @description The phases of one atomic route publication.
+         * @enum {string}
+         */
+        RoutePublicationState: "withdrawal-pending" | "routes-withdrawn" | "publication-pending" | "completed" | "failed";
+        /**
+         * RouteState
+         * @description Whether a run's inference route is published to the gateway.
+         * @enum {string}
+         */
+        RouteState: "withdrawn" | "pending" | "published" | "failed";
         /**
          * RunAdmissionCode
          * @description The typed codes a run admission names for a refusal, blocker or wait.
@@ -6730,11 +6810,7 @@ export interface components {
             rank_age_seconds: number;
             /** Rank Fresh */
             rank_fresh: boolean;
-            /**
-             * Rank State
-             * @enum {string}
-             */
-            rank_state: "planned" | "starting" | "running" | "stopping" | "stopped" | "failed" | "lost";
+            rank_state: components["schemas"]["RunState"];
             /** Recipe Id */
             recipe_id: string;
             /** Recipe Revision Id */
@@ -6744,21 +6820,19 @@ export interface components {
             role: string;
             /** Route Reason */
             route_reason?: string | null;
-            /**
-             * Route State
-             * @enum {string}
-             */
-            route_state: "withdrawn" | "pending" | "published" | "failed";
+            route_state: components["schemas"]["RouteState"];
             /** Run Id */
             run_id: string;
-            /**
-             * Run State
-             * @enum {string}
-             */
-            run_state: "planned" | "starting" | "running" | "stopping" | "stopped" | "failed" | "lost";
+            run_state: components["schemas"]["RunState"];
             /** Title */
             title: string;
         };
+        /**
+         * RunState
+         * @description The condition of a recipe run (and of each of its ranks).
+         * @enum {string}
+         */
+        RunState: "planned" | "starting" | "running" | "stopping" | "stopped" | "failed" | "lost";
         /**
          * RunSwitchAssessment
          * @description Planner-owned admission and observations shared by operator reviews.
@@ -8151,7 +8225,7 @@ export interface components {
          * @description Storage demand outcomes of an admission.
          * @enum {string}
          */
-        StorageDemandCode: "storage.evicting" | "storage.insufficient_after_eviction";
+        StorageDemandCode: "storage.evicting" | "storage.insufficient_after_eviction" | "storage.eviction_timed_out";
         /** StringParameter */
         StringParameter: {
             /** Allowed Values */

@@ -8,10 +8,10 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.fleet_profile_endpoint_assignment_view_desired_state import check_fleet_profile_endpoint_assignment_view_desired_state
-from ..models.fleet_profile_endpoint_assignment_view_desired_state import FleetProfileEndpointAssignmentViewDesiredState
-from ..models.fleet_profile_endpoint_assignment_view_state import check_fleet_profile_endpoint_assignment_view_state
-from ..models.fleet_profile_endpoint_assignment_view_state import FleetProfileEndpointAssignmentViewState
+from ..models.desired_assignment_state import check_desired_assignment_state
+from ..models.desired_assignment_state import DesiredAssignmentState
+from ..models.endpoint_state import check_endpoint_state
+from ..models.endpoint_state import EndpointState
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -31,17 +31,17 @@ class FleetProfileEndpointAssignmentView:
     """
         Attributes:
             assignment_id (str):
-            desired_state (FleetProfileEndpointAssignmentViewDesiredState):
+            desired_state (DesiredAssignmentState): What a fleet-profile assignment is asked to become on its Sparks.
             recipe_title (str):
-            state (FleetProfileEndpointAssignmentViewState):
+            state (EndpointState): Whether the endpoint of a fleet-profile assignment can be reached.
             alias (None | str | Unset):
             endpoint (EndpointResponse | None | Unset):
      """
 
     assignment_id: str
-    desired_state: FleetProfileEndpointAssignmentViewDesiredState
+    desired_state: DesiredAssignmentState
     recipe_title: str
-    state: FleetProfileEndpointAssignmentViewState
+    state: EndpointState
     alias: None | str | Unset = UNSET
     endpoint: EndpointResponse | None | Unset = UNSET
 
@@ -97,14 +97,14 @@ class FleetProfileEndpointAssignmentView:
         d = dict(src_dict)
         assignment_id = d.pop("assignment_id")
 
-        desired_state = check_fleet_profile_endpoint_assignment_view_desired_state(d.pop("desired_state"))
+        desired_state = check_desired_assignment_state(d.pop("desired_state"))
 
 
 
 
         recipe_title = d.pop("recipe_title")
 
-        state = check_fleet_profile_endpoint_assignment_view_state(d.pop("state"))
+        state = check_endpoint_state(d.pop("state"))
 
 
 

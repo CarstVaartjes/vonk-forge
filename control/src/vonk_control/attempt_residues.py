@@ -59,11 +59,17 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import (
+    InstallationNodeState,
+    InstallationState,
+    LifecycleState,
+    RunState,
+)
 
 from . import job_states
 from .fleet_projection import _installation_payload_expectations
 from .logging import log_event
+from .machine_states import DISTRIBUTION_HELD
 from .models import (
     ArtifactDistributionAssignment,
     CatalogDocumentRevision,
@@ -131,7 +137,9 @@ def unowned_never_installed(
     those Sparks would adopt.
     """
 
-    statement = select(RecipeInstallation).where(RecipeInstallation.state == "planned")
+    statement = select(RecipeInstallation).where(
+        RecipeInstallation.state == InstallationState.PLANNED
+    )
     if recipe_revision_id is not None:
         statement = statement.where(
             RecipeInstallation.recipe_revision_id == recipe_revision_id
@@ -153,7 +161,8 @@ def unowned_never_installed(
             and not owned.intersection(member_nodes)
             and (wanted is None or member_nodes == wanted)
             and all(
-                member.state == "planned" and not member.installed_bytes
+                member.state == InstallationNodeState.PLANNED
+                and not member.installed_bytes
                 for member in members
             )
         ):
@@ -198,7 +207,7 @@ def superseded_plan_ids(
             select(RecipeInstallation).where(
                 RecipeInstallation.recipe_revision_id.in_(same_recipe),
                 RecipeInstallation.id != installation_id,
-                RecipeInstallation.state != "uninstalled",
+                RecipeInstallation.state != InstallationState.UNINSTALLED,
                 RecipeInstallation.created_at > installation.created_at,
             )
         )
@@ -242,15 +251,21 @@ def incomplete_installation_ids(session: Session) -> tuple[str, ...]:
     found: list[str] = []
     for installation in session.scalars(
         select(RecipeInstallation).where(
-            RecipeInstallation.state.in_(("installed", "partial", "failed"))
+            RecipeInstallation.state.in_(
+                (
+                    InstallationState.INSTALLED,
+                    InstallationState.PARTIAL,
+                    InstallationState.FAILED,
+                )
+            )
         )
     ):
-        if installation.state != "installed":
+        if installation.state != InstallationState.INSTALLED:
             found.append(installation.id)
             continue
         expectations = _installation_payload_expectations(installation.plan)
         if any(
-            node.state != "installed"
+            node.state != InstallationNodeState.INSTALLED
             or (
                 node.node_id in expectations
                 and node.installed_bytes < expectations[node.node_id]
@@ -377,7 +392,7 @@ class AttemptResidueReconciler:
                     select(RecipeRun.id)
                     .where(
                         RecipeRun.installation_id == installation_id,
-                        RecipeRun.state != "stopped",
+                        RecipeRun.state != RunState.STOPPED,
                     )
                     .limit(1)
                 ):
@@ -523,7 +538,7 @@ class AttemptResidueReconciler:
             _nodes, owned_plans = self._owned_scope(session)
             for grant in session.scalars(
                 select(ArtifactDistributionAssignment).where(
-                    ArtifactDistributionAssignment.state.in_(("active", "expired"))
+                    ArtifactDistributionAssignment.state.in_(DISTRIBUTION_HELD)
                 )
             ):
                 if grant.plan_digest in owned_plans:

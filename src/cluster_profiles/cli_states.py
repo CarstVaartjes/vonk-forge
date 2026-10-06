@@ -79,3 +79,14 @@ FAILED_JOB_STATES = frozenset({"failed", "expired"})
 #: An accepted cancel: still being driven (``observing``, or the old
 #: ``cancelling``) or already ended.
 CANCEL_ACCEPTED_STATES = frozenset({"observing", LEGACY_CANCELLING, "cancelled"})
+
+#: The word of a route (and of an endpoint) that is published to the gateway.  The
+#: CLI compares it with what the Controller sends; the contract's ``RouteState`` and
+#: ``EndpointState`` spell it, and a test keeps this copy equal to them.
+PUBLISHED = "published"
+#: The two endpoint words the CLI explains (see the contract's ``EndpointState``).
+ENDPOINT_INSTALLED_ONLY = "installed-only"
+ENDPOINT_NOT_PUBLISHED_YET = "not-published-yet"
+ENDPOINT_EXPIRED = "expired"
+ENDPOINT_WITHDRAWN = "withdrawn"
+ENDPOINT_UNAVAILABLE = "unavailable"

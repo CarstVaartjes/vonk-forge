@@ -123,6 +123,7 @@ def test_lowering_the_baseline_never_raises_a_count(tmp_path: Path) -> None:
         "distinctive": {REL: 3},
         "stored_state": {REL: 1},
         "legacy_state": {},
+        "machine_state": {},
     }
     counts = _python(tmp_path, 'X = "waiting-for-operator"\nY = "needs-operator"\n')
     counts[("stored_state", REL)] = 5
@@ -133,6 +134,7 @@ def test_lowering_the_baseline_never_raises_a_count(tmp_path: Path) -> None:
         "distinctive": {REL: 2},
         "stored_state": {REL: 1},
         "legacy_state": {},
+        "machine_state": {},
     }
 
 
@@ -218,9 +220,63 @@ def test_only_the_alias_table_may_spell_the_retired_words(tmp_path: Path) -> Non
     assert _python(tmp_path, 'STORED_STATE = "waiting"\n')
 
 
-@pytest.mark.slow(30)
-def test_the_non_lifecycle_floors_match_the_repository() -> None:
-    assert scan.floor_problems(scan.scan_python()) == []
+def test_no_exception_list_remains() -> None:
+    """The ratchet is flat: every state machine speaks the contract, no site is exempt."""
+
+    assert not hasattr(scan, "NON_LIFECYCLE_STATE_SITES")
+    assert not hasattr(scan, "floor_problems")
+
+
+def test_the_machine_words_come_from_the_contract() -> None:
+    from vonk_agent_protocol import (
+        DistributionAssignmentState,
+        InstallationState,
+        RoutePublicationState,
+    )
+
+    assert {state.value for state in RoutePublicationState if "-" in state.value} <= (
+        scan.DISTINCTIVE_WORDS
+    )
+    assert InstallationState.UNINSTALLED.value in scan.MACHINE_WORDS
+    assert DistributionAssignmentState.REVOKED.value in scan.MACHINE_WORDS
+    # A word that is plain prose elsewhere is not scanned.
+    for word in ("active", "pending", "current", "valid", "planned"):
+        assert word not in scan.MACHINE_STATE_WORDS
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'if installation.state == "installed":\n    pass\n',
+        'RECIPE_STATES = ("uninstalled", "failed")\n',
+        'x = Run(route_state="withdrawn")\n',
+        'ok = assignment.state in {"published", "stopped"}\n',
+    ],
+)
+def test_a_machine_state_spelling_is_found_where_a_statement_names_a_state(
+    tmp_path: Path, source: str
+) -> None:
+    assert _python(tmp_path, source)[("machine_state", REL)] >= 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'label = "installed"\n',
+        'result = {"stopped": True, "state": 1}\n',
+        'def f(state):\n    """installed"""\n    return 1\n',
+    ],
+)
+def test_the_same_words_elsewhere_are_prose_or_flags(
+    tmp_path: Path, source: str
+) -> None:
+    assert ("machine_state", REL) not in _python(tmp_path, source)
+
+
+def test_the_contract_module_of_the_machines_may_spell_them(tmp_path: Path) -> None:
+    contract = "agent_protocol/src/vonk_agent_protocol/state_machines.py"
+    assert not _python(tmp_path, 'STATE = "uninstalled"\n', contract)
+    assert _python(tmp_path, 'state = "uninstalled"\n')
 
 
 def test_the_cli_copy_of_the_wait_words_equals_the_contract() -> None:
@@ -237,11 +293,7 @@ def test_the_cli_copy_of_the_wait_words_equals_the_contract() -> None:
 
 
 def test_no_lifecycle_code_spells_a_retired_state_word() -> None:
-    """The migration is finished: the old words live in the contract's alias table.
-
-    What remains in ``NON_LIFECYCLE_STATE_SITES`` belongs to other state machines
-    (a certificate, an installation, a distribution assignment, an endpoint).
-    """
+    """The migration is finished: the old words live in the contract's alias table."""
 
     assert scan.load_baseline()["legacy_state"] == {}
 
@@ -445,3 +497,29 @@ def test_the_cli_spells_only_contract_codes() -> None:
             ):
                 unknown.add(node.value)
     assert not unknown, f"the CLI spells codes the contract does not own: {unknown}"
+
+
+def test_the_cli_copy_of_the_endpoint_words_equals_the_contract() -> None:
+    from vonk_agent_protocol import EndpointState, RouteState
+
+    from cluster_profiles import cli_states
+
+    assert cli_states.PUBLISHED == RouteState.PUBLISHED.value
+    assert cli_states.PUBLISHED == EndpointState.PUBLISHED.value
+    assert cli_states.ENDPOINT_INSTALLED_ONLY == EndpointState.INSTALLED_ONLY.value
+    assert (
+        cli_states.ENDPOINT_NOT_PUBLISHED_YET == EndpointState.NOT_PUBLISHED_YET.value
+    )
+    assert cli_states.ENDPOINT_EXPIRED == EndpointState.EXPIRED.value
+    assert cli_states.ENDPOINT_WITHDRAWN == EndpointState.WITHDRAWN.value
+    assert cli_states.ENDPOINT_UNAVAILABLE == EndpointState.UNAVAILABLE.value
+
+
+def test_the_standalone_route_activation_words_equal_the_gateway_contract() -> None:
+    from typing import get_args
+
+    from vonk_agent_protocol import GatewayRouteState
+    from vonk_agent_protocol.route_activation import ActivationMarker
+
+    words = set(get_args(ActivationMarker.model_fields["state"].annotation))
+    assert words == {GatewayRouteState.MAINTENANCE, GatewayRouteState.PUBLISHED}

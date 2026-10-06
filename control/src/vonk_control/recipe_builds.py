@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     InvalidRequestError,
     InvalidRequestReason,
     RecipeBuildCode,
+    ReservationState,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
@@ -1681,7 +1682,7 @@ class RecipeBuildService:
                     amount_bytes=disk_bytes,
                     owner_kind="recipe-build",
                     owner_id=plan.build_id,
-                    state="active",
+                    state=ReservationState.ACTIVE,
                     plan_digest=plan.build_input_sha256,
                     created_at=now,
                 ),
@@ -1692,7 +1693,7 @@ class RecipeBuildService:
                     amount_bytes=memory_bytes,
                     owner_kind="recipe-build",
                     owner_id=plan.build_id,
-                    state="active",
+                    state=ReservationState.ACTIVE,
                     plan_digest=plan.build_input_sha256,
                     created_at=now,
                 ),
@@ -1760,7 +1761,9 @@ def _available_build_memory(
             select(ResourceReservation)
             .where(
                 ResourceReservation.node_id == snapshot.node_id,
-                ResourceReservation.state.in_(("active", "promised")),
+                ResourceReservation.state.in_(
+                    (ReservationState.ACTIVE, ReservationState.PROMISED)
+                ),
             )
             .order_by(ResourceReservation.id)
             .with_for_update(nowait=True)

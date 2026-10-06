@@ -1031,6 +1031,7 @@ class StorageDemandCode(WireEnum):
 
     EVICTING = "storage.evicting"
     INSUFFICIENT_AFTER_EVICTION = "storage.insufficient_after_eviction"
+    EVICTION_TIMED_OUT = "storage.eviction_timed_out"
 
 
 class SupersedeCode(WireEnum):
