@@ -1628,8 +1628,10 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     assert snapshot.nodes[0].loaded[0].run_id == run_id
     assert snapshot.nodes[0].installed[0].complete is None
     assert snapshot.nodes[0].loaded[0].healthy is None
-    assert "unknown" in snapshot.nodes[0].installed[0].projection_issue
-    assert "unknown" in snapshot.nodes[0].loaded[0].projection_issue
+    installation_issue = snapshot.nodes[0].installed[0].projection_issue
+    run_issue = snapshot.nodes[0].loaded[0].projection_issue
+    assert installation_issue is not None and "unknown" in installation_issue
+    assert run_issue is not None and "unknown" in run_issue
     with sessions.begin() as session:
         session.execute(
             update(CatalogDocumentRevision)
