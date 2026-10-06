@@ -43,6 +43,7 @@ from .models import (
     RoutePublicationOwner,
     RunNode,
 )
+from .run_history_retention import run_absence_reconciled
 from .stored_json import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
@@ -315,14 +316,14 @@ class TerminalHistoryCollector:
             return False
         if isinstance(row, RecipeRun):
             # A terminal SQL state alone never proves the process stopped.
-            if session.scalar(
-                select(
-                    exists().where(
-                        RunNode.run_id == identity,
-                        RunNode.observation_process_running.is_not(False),
-                    )
+            if not run_absence_reconciled(session, row):
+                log_event(
+                    _LOGGER,
+                    "history.run_absence_unavailable",
+                    service="control-worker",
+                    row_id=identity,
+                    run_generation=row.run_generation,
                 )
-            ):
                 return False
             if session.scalar(select(exists().where(ArtifactJob.run_id == identity))):
                 return False

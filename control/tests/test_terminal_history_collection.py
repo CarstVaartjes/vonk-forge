@@ -7,7 +7,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control.models import Base, Job, JobAttempt
+from vonk_control.models import Base, Job, JobAttempt, RecipeRun, RunNode
+from vonk_control.recipe_execution_contract import StoredRunNodePlan, StoredRunPlan
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 
@@ -41,6 +42,96 @@ def _job(
         created_at=now,
         updated_at=now,
     )
+
+
+def test_run_history_requires_complete_current_generation_absence() -> None:
+    now = datetime.now(UTC)
+    old = now - timedelta(days=2)
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    node_id = "spk_" + "0" * 32
+    installation_id, mapping_id, revision_id = (str(uuid.uuid4()) for _ in range(3))
+    plan = StoredRunPlan(
+        schema_version=1,
+        observation_schema_version=2,
+        run_generation=2,
+        installation_id=installation_id,
+        alias="demo",
+        mapping_id=mapping_id,
+        mapping_generation=1,
+        recipe_revision_id=revision_id,
+        plan_digest="a" * 64,
+        nodes=[
+            StoredRunNodePlan(
+                node_id=node_id,
+                rank=0,
+                role="entrypoint",
+                endpoint_owner=True,
+                port=8000,
+                allowed=True,
+                inventory_observed_at=None,
+                memory_kind="unified",
+                memory_pool="shared",
+                required_memory_bytes=1,
+                available_memory_bytes=None,
+                active_reserved_bytes=0,
+                free_after_bytes=None,
+                memory_floor_bytes=0,
+                fabric_address=None,
+                fabric_bandwidth_mbps=None,
+                rendezvous_port=None,
+                blockers=[],
+                warnings=[],
+            )
+        ],
+    )
+    run = RecipeRun(
+        id=str(uuid.uuid4()),
+        installation_id=installation_id,
+        mapping_id=mapping_id,
+        mapping_generation=1,
+        run_generation=2,
+        alias="demo",
+        plan_digest="a" * 64,
+        plan=plan.model_dump(mode="json"),
+        state="stopped",
+        actor="operator",
+        created_at=old,
+        updated_at=old,
+    )
+    collector = TerminalHistoryCollector(sessions, clock=lambda: now)
+    try:
+        with sessions.begin() as session:
+            session.add(run)
+        assert not collector.collect()  # Missing planned node proves no absence.
+        node = RunNode(
+            run_id=run.id,
+            node_id=node_id,
+            rank=0,
+            role="entrypoint",
+            state="stopped",
+            port=8000,
+            reserved_memory_bytes=1,
+            observed_run_generation=1,
+            observation_process_running=False,
+            observation_observed_at=old,
+            updated_at=old,
+        )
+        with sessions.begin() as session:
+            session.add(node)
+        assert not (collector.collect() + collector.collect())  # Old generation.
+        with sessions.begin() as session:
+            stored = session.get(RunNode, node.id)
+            assert stored is not None
+            stored.observed_run_generation = 2
+        # A cursor pass can first exhaust its observed inventory before revisiting.
+        counts = collector.collect() + collector.collect()
+        assert counts["recipe_runs"] == 1
+        with sessions() as session:
+            assert session.get(RecipeRun, run.id) is None
+    finally:
+        engine.dispose()
 
 
 def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_references(
