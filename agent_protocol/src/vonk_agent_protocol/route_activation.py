@@ -50,7 +50,9 @@ class SupervisorAcknowledgement(BaseModel):
         ).encode()
 
 
-class ActivationMarker(BaseModel):
+class ActivationManifest(BaseModel):
+    """The facts one route generation's ``manifest.json`` records."""
+
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
     schema_version: Literal[2]
@@ -61,8 +63,6 @@ class ActivationMarker(BaseModel):
     evidence_set_digest: Digest
     routes_sha256: Digest
     litellm_sha256: Digest
-    directory: Annotated[str, Field(pattern=r"^[0-9]{8}-[0-9a-f]{64}$")]
-    manifest_sha256: Digest
 
     @field_validator("schema_version", mode="before")
     @classmethod
@@ -87,5 +87,12 @@ class ActivationMarker(BaseModel):
     def digest(self) -> str:
         return hashlib.sha256(self.canonical_bytes()).hexdigest()
 
-    def manifest_document(self) -> dict[str, object]:
-        return self.model_dump(exclude={"directory", "manifest_sha256"})
+
+class ActivationMarker(ActivationManifest):
+    directory: Annotated[str, Field(pattern=r"^[0-9]{8}-[0-9a-f]{64}$")]
+    manifest_sha256: Digest
+
+    def manifest_document(self) -> ActivationManifest:
+        return ActivationManifest.model_validate(
+            self.model_dump(exclude={"directory", "manifest_sha256"})
+        )

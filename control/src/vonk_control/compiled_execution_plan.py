@@ -813,7 +813,7 @@ def validate_compiled_launch_payload(value: object) -> dict[str, object]:
     try:
         # This calls CompiledExecutionPlan.model_validate, including all nested
         # schema, identity, path, mount, runtime and security validators.
-        return validate_compiled_execution_plan(payload)
+        return validate_compiled_execution_plan(payload).to_mapping()
     except ValueError as error:
         raise CompiledExecutionPlanError(str(error)) from error
 

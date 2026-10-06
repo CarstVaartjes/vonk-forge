@@ -1,0 +1,538 @@
+{
+  "schema": 1,
+  "permanent": [
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/compiled_execution_plan.py",
+      "function": "CompiledExecutionPlan.to_mapping",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed wire model; the model is the contract and callers that need typed access hold the model."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/contracts.py",
+      "function": "_ProtocolEnvelopeModel.model_json_schema",
+      "annotation": "dict[str, Any]",
+      "count": 1,
+      "reason": "A JSON Schema document is the external JSON Schema format, not our data."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/contracts.py",
+      "function": "_add_protocol_schema_constraints",
+      "annotation": "dict[str, Any]",
+      "count": 1,
+      "reason": "A JSON Schema document is the external JSON Schema format, not our data."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/contracts.py",
+      "function": "_fields",
+      "annotation": "Mapping[str, Any]",
+      "count": 1,
+      "reason": "Pre-validation guard over untrusted decoded JSON before a typed model exists; it is the ingress check, not a data structure."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/contracts.py",
+      "function": "_mapping",
+      "annotation": "Mapping[str, Any]",
+      "count": 1,
+      "reason": "Pre-validation guard over untrusted decoded JSON before a typed model exists; it is the ingress check, not a data structure."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/contracts.py",
+      "function": "_model_to_wire",
+      "annotation": "Mapping[str, Any]",
+      "count": 1,
+      "reason": "Canonical wire serializer: walks a pydantic model_dump of any contract model, so the document type is generic by construction."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/contracts.py",
+      "function": "_model_to_wire",
+      "annotation": "dict[str, Any]",
+      "count": 1,
+      "reason": "Canonical wire serializer: walks a pydantic model_dump of any contract model, so the document type is generic by construction."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/distribution.py",
+      "function": "DistributionAssignment.to_mapping",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/distribution.py",
+      "function": "DistributionObject.to_mapping",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/host_helper.py",
+      "function": "HostHelperGrantClaims.to_mapping",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/host_helper.py",
+      "function": "SignedHostHelperGrant.to_mapping",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/host_helper.py",
+      "function": "_HostOperation.to_mapping",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/recipe_jobs.py",
+      "function": "RecipeJobRunResult.to_mapping",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/recipe_jobs.py",
+      "function": "_RecipeJobModel.to_mapping",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/recipe_jobs.py",
+      "function": "manifest_document",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed input or output manifest model, used to build wire documents."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/telemetry.py",
+      "function": "TelemetryRequest.document",
+      "annotation": "dict[str, Any]",
+      "count": 1,
+      "reason": "JSON serialization of the typed telemetry model for the wire."
+    },
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/wire_model.py",
+      "function": "WireModel",
+      "annotation": "Mapping[str, Any]",
+      "count": 1,
+      "reason": "WireModel is a read-only Mapping view over its own fields for legacy subscripting; the Mapping ABC needs a value type."
+    }
+  ],
+  "debt": [
+    {
+      "path": "agent_protocol/src/vonk_agent_protocol/wire_model.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/admission_locking.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "count": 21
+    },
+    {
+      "path": "control/src/vonk_control/agent_upgrade_status.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_upgrades.py",
+      "count": 25
+    },
+    {
+      "path": "control/src/vonk_control/api.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/artifact_blob_store.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/artifact_job_api.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/artifact_jobs.py",
+      "count": 35
+    },
+    {
+      "path": "control/src/vonk_control/artifact_maintenance.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/artifact_reference_scan.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/auth.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "count": 12
+    },
+    {
+      "path": "control/src/vonk_control/bounded_json.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/cache_removal_review.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/catalog_api.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/catalog_entities.py",
+      "count": 9
+    },
+    {
+      "path": "control/src/vonk_control/catalog_revision_contract.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/catalog_service.py",
+      "count": 10
+    },
+    {
+      "path": "control/src/vonk_control/catalog_sync.py",
+      "count": 10
+    },
+    {
+      "path": "control/src/vonk_control/cluster_mappings.py",
+      "count": 15
+    },
+    {
+      "path": "control/src/vonk_control/compiled_artifact_contract.py",
+      "count": 8
+    },
+    {
+      "path": "control/src/vonk_control/compiled_execution_plan.py",
+      "count": 14
+    },
+    {
+      "path": "control/src/vonk_control/contract_graph.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/distributed_lifecycle.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery.py",
+      "count": 20
+    },
+    {
+      "path": "control/src/vonk_control/distribution.py",
+      "count": 8
+    },
+    {
+      "path": "control/src/vonk_control/distribution_executor.py",
+      "count": 25
+    },
+    {
+      "path": "control/src/vonk_control/download_contract.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/enrollment.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/execution_plan_service.py",
+      "count": 22
+    },
+    {
+      "path": "control/src/vonk_control/failure_evidence.py",
+      "count": 8
+    },
+    {
+      "path": "control/src/vonk_control/fleet_event_contract.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_events.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_contract.py",
+      "count": 5
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "count": 36
+    },
+    {
+      "path": "control/src/vonk_control/fleet_stream.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "count": 7
+    },
+    {
+      "path": "control/src/vonk_control/harnesses/canonical.py",
+      "count": 8
+    },
+    {
+      "path": "control/src/vonk_control/host_helper_authority.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/install_admission.py",
+      "count": 15
+    },
+    {
+      "path": "control/src/vonk_control/interface_adapters.py",
+      "count": 6
+    },
+    {
+      "path": "control/src/vonk_control/jobs.py",
+      "count": 8
+    },
+    {
+      "path": "control/src/vonk_control/legal_admission.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/library_projection.py",
+      "count": 13
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/artifact_job.py",
+      "count": 6
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/fleet_profile.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/image_availability.py",
+      "count": 10
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/job.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/model_cache.py",
+      "count": 10
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/run_switch.py",
+      "count": 17
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle_preflight.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/litellm.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "count": 89
+    },
+    {
+      "path": "control/src/vonk_control/model_cache_api.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/model_cache_progress.py",
+      "count": 10
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "count": 31
+    },
+    {
+      "path": "control/src/vonk_control/operation_api.py",
+      "count": 37
+    },
+    {
+      "path": "control/src/vonk_control/operation_blockers.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/operation_contract.py",
+      "count": 6
+    },
+    {
+      "path": "control/src/vonk_control/operation_progress.py",
+      "count": 6
+    },
+    {
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "count": 11
+    },
+    {
+      "path": "control/src/vonk_control/platform_ports.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/prebuilt_images.py",
+      "count": 8
+    },
+    {
+      "path": "control/src/vonk_control/profile_stop_authority.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_action_plans.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/recipe_build_cancellation.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "count": 26
+    },
+    {
+      "path": "control/src/vonk_control/recipe_execution_contract.py",
+      "count": 6
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "count": 53
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability_api.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_library_types.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/recipe_lifecycle_contract.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operation_phases.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "count": 54
+    },
+    {
+      "path": "control/src/vonk_control/recipe_packages.py",
+      "count": 16
+    },
+    {
+      "path": "control/src/vonk_control/recipe_release.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_routes.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/recipe_runtime_specs.py",
+      "count": 19
+    },
+    {
+      "path": "control/src/vonk_control/recipe_start_payloads.py",
+      "count": 5
+    },
+    {
+      "path": "control/src/vonk_control/recipe_stop_payloads.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/recipe_update_batches.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/recipe_update_notice.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recovery_policy.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/resource_planning.py",
+      "count": 13
+    },
+    {
+      "path": "control/src/vonk_control/route_runtime.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/run_admission.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_contract.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "count": 64
+    },
+    {
+      "path": "control/src/vonk_control/runtime.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/runtime_image_preparation.py",
+      "count": 16
+    },
+    {
+      "path": "control/src/vonk_control/runtime_preflight.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/runtime_writable_paths.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/serializers.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/source_policy.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/step_ca.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/strict_json.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/telemetry.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/topology.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/worker.py",
+      "count": 4
+    }
+  ]
+}
