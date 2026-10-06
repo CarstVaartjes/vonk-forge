@@ -1489,6 +1489,15 @@
       ]
     },
     {
+      "family": "fleet_profiles.adoption-authority",
+      "category": "security-edge",
+      "reason": "Preserves the current selected whole-fleet authority: stale executor cancellation cannot revoke newer adopted intent, and a reviewed stop child cannot broaden beyond its complete currently authorized assignment scope. These are authorization boundaries before effects, not recoverable observation failures.",
+      "sites": [
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "this-application-s-continuing-effects-now-belong-to-selected", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-stop-exceeds-its-current-authorized-scope", 1]
+      ]
+    },
+    {
       "family": "fleet_profiles.input-validation",
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: the accepted review no longer matches.",
@@ -2023,6 +2032,7 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
       "sites": [
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-exceeds-its-adopted-assignment-scope", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "profile-stop-target-is-not-authorized", 1]
       ]
     },

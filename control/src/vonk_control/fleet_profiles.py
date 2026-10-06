@@ -5795,7 +5795,11 @@ class FleetProfileService:
             select(FleetProfileApplication)
             .where(
                 FleetProfileApplication.state.in_(
-                    ("queued", "running", "waiting-for-operator")
+                    job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.NEEDS_OPERATOR,
+                    )
                 )
             )
             .order_by(FleetProfileApplication.created_at, FleetProfileApplication.id)
@@ -7161,6 +7165,7 @@ class FleetProfileService:
                             )
                             .with_for_update(nowait=True)
                         ):
+                            claim: ResourceReservation
                             claim.state = ReservationState.RELEASED
                             claim.released_at = now
                         # Flush replaced promises before a successor inserts the
@@ -9113,7 +9118,11 @@ class FleetProfileService:
                             session=session,
                         )
                         return True
-                    if owner.state in {"failed", "cancelled", "superseded"}:
+                    if owner.state in job_states.words(
+                        LifecycleState.FAILED,
+                        LifecycleState.CANCELLED,
+                        LifecycleState.SUPERSEDED,
+                    ):
                         self._lifecycle.fail(
                             row,
                             owner.status_reason
@@ -9131,12 +9140,17 @@ class FleetProfileService:
                         for item in plan.resolved_assignments
                         if item.id in effect.assignment_ids
                     ]
-                    waiting_for_adopted |= owner.state != "succeeded" or any(
-                        self._assignment_state(
-                            session, item, expected_image=expected_images.get(item.id)
-                        ).current_state
-                        != item.desired_state
-                        for item in assignments
+                    waiting_for_adopted |= (
+                        owner.state != LifecycleState.SUCCEEDED
+                        or any(
+                            self._assignment_state(
+                                session,
+                                item,
+                                expected_image=expected_images.get(item.id),
+                            ).current_state
+                            != item.desired_state
+                            for item in assignments
+                        )
                     )
                 if waiting_for_adopted:
                     row.status_reason = "Waiting for exact continuing assignments to finish under the selected profile"

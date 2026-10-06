@@ -74,6 +74,7 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
                 last_seen_at=NOW,
             )
         )
+        session.flush()  # Materialize the node before its certificate FK.
         for index in (1, 2):
             session.add(
                 AgentCertificate(
