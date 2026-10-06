@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
@@ -274,29 +274,76 @@ class RunPlanConflict(RuntimeError):
 
 
 class RunAdmissionBusy(RunPlanConflict):
-    """A competing capacity writer requires rescheduling this same admission."""
+    """A competing capacity writer or retryable plan blocker holds this admission.
+
+    The class code ``run.capacity_busy`` names lock contention only.  Any other
+    reason the same admission must be retried carries its own typed code (and
+    the blocker list it was derived from), so the waiting operation can show the
+    real cause instead of a generic busy writer.
+    """
 
     code = "run.capacity_busy"
 
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        blockers: Sequence[AdmissionReason] = (),
+    ) -> None:
+        super().__init__(message)
+        if code is not None:
+            self.code = code
+        self.blockers = tuple(blockers)
 
-_RETRYABLE_PLAN_BLOCKERS = {
-    "run.inventory_missing",
-    "run.stale_inventory",
-    "run.insufficient_memory",
-    "run.port_occupied",
-    "run.rendezvous_port_occupied",
-    "resource.insufficient",
-}
+    @property
+    def detail(self) -> str | None:
+        """The underlying cause for a wait; ``None`` for plain lock contention."""
+
+        if self.blockers:
+            return _blocker_text(self.blockers)
+        return str(self) if self.code != RunAdmissionBusy.code else None
+
+
+def _blocker_text(blockers: Iterable[AdmissionReason]) -> str:
+    return "; ".join(f"{item.code}: {item.detail}" for item in blockers)
+
+
+#: Typed non-contention waits a run admission can name besides plan blockers.
+RUN_ADMISSION_WAIT_CODES = (
+    "run.target_membership_changed",
+    "run.mapping_not_ready",
+)
+
+RETRYABLE_PLAN_BLOCKERS = frozenset(
+    {
+        "run.inventory_missing",
+        "run.stale_inventory",
+        "run.insufficient_memory",
+        "run.port_occupied",
+        "run.rendezvous_port_occupied",
+        "resource.insufficient",
+    }
+)
 
 
 def require_admissible(plan: RunPlan) -> None:
     if plan.allowed:
         return
-    codes = {reason.code for item in plan.nodes for reason in item.blockers}
-    if codes and codes <= _RETRYABLE_PLAN_BLOCKERS:
-        raise RunAdmissionBusy("run is waiting for current inventory or capacity")
+    blockers = tuple(reason for item in plan.nodes for reason in item.blockers)
+    codes = {reason.code for reason in blockers}
+    if codes and codes <= RETRYABLE_PLAN_BLOCKERS:
+        # Keep the first blocker's own typed code and every detail: this is a
+        # wait on named evidence (memory, port, inventory), not a busy writer.
+        first = min(blockers, key=lambda reason: reason.code)
+        raise RunAdmissionBusy(
+            f"run is waiting for current inventory or capacity: {_blocker_text(blockers)}",
+            code=first.code,
+            blockers=blockers,
+        )
     raise RunPlanConflict(
         "run.plan_invalid: run plan is blocked by current admission evidence"
+        + (f" ({_blocker_text(blockers)})" if blockers else "")
     )
 
 
@@ -844,10 +891,16 @@ class RunAdmissionService:
         )
         require_admissible(fresh)
         if {node.node_id for node in fresh.nodes} != set(node_ids):
-            raise RunAdmissionBusy("run target membership changed during admission")
+            raise RunAdmissionBusy(
+                "run target membership changed during admission",
+                code="run.target_membership_changed",
+            )
         plan = fresh
         if mapping is None or mapping.state != "ready":
-            raise RunAdmissionBusy("run mapping is waiting to become ready")
+            raise RunAdmissionBusy(
+                "run mapping is waiting to become ready",
+                code="run.mapping_not_ready",
+            )
         if (
             installation is None
             or installation.mapping_id != plan.mapping_id

@@ -32,7 +32,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .admission_locking import AdmissionLockBusy
+from .admission_locking import AdmissionLockBusy, busy_detail, patient_admission
 from .agent_jobs import AgentJobService
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -191,6 +191,8 @@ from .resource_planning import (
 )
 from .run_admission import (
     PORT_ADMISSION_CODES,
+    RETRYABLE_PLAN_BLOCKERS,
+    RUN_ADMISSION_WAIT_CODES,
     RunAdmissionBusy,
     allocate_service_port,
     run_port_blockers,
@@ -263,6 +265,7 @@ from .strict_json import (
     read_stored_model,
     warn_unreadable_once,
 )
+from .unused_storage_collection import spark_eviction_capacity
 
 # Persisted progress and catalog documents arrive as decoded JSON, so the
 # contract's closed value sets are read back through the declared alias instead
@@ -567,6 +570,20 @@ _PHASES: tuple[RunSwitchPhaseKind, ...] = (
     "start",
     "final_verify",
 )
+
+
+def _refused_retries(progress: Mapping[str, object]) -> int:
+    """How many times in a row admission was refused for capacity (0 if not)."""
+
+    reason = progress.get("retry_reason")
+    attempt = progress.get("retry_attempt")
+    if (
+        isinstance(reason, str)
+        and reason.endswith(".capacity_busy")
+        and type(attempt) is int
+    ):
+        return attempt
+    return 0
 
 
 def _now(clock: Any) -> datetime:
@@ -5990,15 +6007,44 @@ class RunSwitchOperationService:
                         disk_free_after = disk_free - reserved_disk - required_disk
                         if disk_free_after < 0:
                             holders = describe_disk_charges(session, charges)
-                            node_blockers.append(
-                                _as_reason(
-                                    "run-switch.insufficient-disk",
-                                    f"The operation needs {required_disk} bytes and would leave {disk_free_after} bytes."
-                                    + (f" Disk is {holders}." if holders else ""),
-                                    scope="node",
-                                    node_ids=(item.node_id,),
-                                )
+                            # Cleanup is space-driven: unused installations the
+                            # collector may remove cover a shortfall, so the
+                            # review plans that eviction (the load waits for it)
+                            # and refuses only for what nothing can free.
+                            capacity = spark_eviction_capacity(
+                                session, item.node_id, now
                             )
+                            evictable, kept_sentence = (
+                                capacity.freeable,
+                                capacity.kept,
+                            )
+                            if evictable >= -disk_free_after:
+                                node_warnings.append(
+                                    _as_reason(
+                                        "run-switch.disk-eviction-planned",
+                                        f"The operation needs {required_disk} bytes and "
+                                        f"{-disk_free_after} more must be freed on "
+                                        "this Spark: "
+                                        + capacity.plan(-disk_free_after)
+                                        + ", least recently used first. Models stay "
+                                        "on the NAS, so a later load reinstalls.",
+                                        scope="node",
+                                        node_ids=(item.node_id,),
+                                        severity="warning",
+                                    )
+                                )
+                            else:
+                                node_blockers.append(
+                                    _as_reason(
+                                        "run-switch.insufficient-disk",
+                                        f"The operation needs {required_disk} bytes and would leave {disk_free_after} bytes."
+                                        + (f" Disk is {holders}." if holders else "")
+                                        + f" Only {evictable} bytes of unused installations can be removed. "
+                                        + kept_sentence,
+                                        scope="node",
+                                        node_ids=(item.node_id,),
+                                    )
+                                )
             nodes.append(
                 SparkFitNode(
                     node_id=item.node_id,
@@ -7603,14 +7649,15 @@ class RunSwitchOperationService:
             return True
         else:
             try:
-                execution = self._phase_executor.execute(
-                    plan,
-                    phase,
-                    item_index=item_index,
-                    actor=actor,
-                    request_key=request_key,
-                    progress=progress,
-                )
+                with patient_admission(_refused_retries(progress)):
+                    execution = self._phase_executor.execute(
+                        plan,
+                        phase,
+                        item_index=item_index,
+                        actor=actor,
+                        request_key=request_key,
+                        progress=progress,
+                    )
             except _RunSwitchBuildParentChanged:
                 return False
             except RunSwitchInstallPreflightExpired as expired:
@@ -7624,7 +7671,15 @@ class RunSwitchOperationService:
                 RecipeBuildAdmissionBusy,
             ) as busy:
                 return self._hold_capacity_writer(
-                    operation_id, phase_index, item_index, reason=busy.code
+                    operation_id,
+                    phase_index,
+                    item_index,
+                    reason=busy.code,
+                    detail=(
+                        busy.detail
+                        if isinstance(busy, RunAdmissionBusy) and busy.detail
+                        else busy_detail(busy)
+                    ),
                 )
             except RunSwitchPostStopEvidencePending as pending:
                 return self._hold_capacity_writer(
@@ -7756,6 +7811,8 @@ class RunSwitchOperationService:
                 AdmissionLockBusy.code,
                 InstallAdmissionBusy.code,
                 RunAdmissionBusy.code,
+                *RETRYABLE_PLAN_BLOCKERS,
+                *RUN_ADMISSION_WAIT_CODES,
                 RecipeBuildAdmissionBusy.code,
                 RunSwitchPostStopEvidencePending.code,
                 _RUNTIME_IMAGE_OWNER_CHANGED,
@@ -7797,6 +7854,31 @@ class RunSwitchOperationService:
                         if isinstance(raw_start_deadline, str)
                         else None
                     )
+                    # The start's budget begins when it is first dispatched, so
+                    # the Controller moves its deadline past the queue wait; the
+                    # start job's own payload is the one source of the accepted
+                    # deadline.
+                    verify_run_id = (execution.result or {}).get("run_id")
+                    if isinstance(verify_run_id, str):
+                        issued = session.scalar(
+                            select(Job)
+                            .where(
+                                Job.kind == "recipe.start",
+                                Job.payload["owner_id"].as_string() == verify_run_id,
+                            )
+                            .order_by(Job.created_at.desc())
+                            .limit(1)
+                        )
+                        issued_deadline = (
+                            issued.payload.get("start_deadline")
+                            if issued is not None
+                            else None
+                        )
+                        if isinstance(issued_deadline, str):
+                            anchored = _aware(datetime.fromisoformat(issued_deadline))
+                            if start_deadline is None or anchored > start_deadline:
+                                start_deadline = anchored
+                                progress["start_deadline"] = anchored.isoformat()
                     deadline_expired = (
                         plan.action in {"run", "switch"}
                         and start_deadline is not None
@@ -9178,11 +9260,18 @@ def _wait_blockers(job: Job, progress: Mapping[str, object]) -> list[OperationBl
         and retry_reason
         and progress.get("observation_due_at") is not None
     ):
-        # A phase that will be tried again is waiting, not failed.
+        # A phase that will be tried again is waiting, not failed.  The retry
+        # names its own cause: the underlying typed code first, then the
+        # detail the phase reported (never just a generic busy marker).
+        cause = reason.split("; admission retry", 1)[0].strip()
         return [
             make_blocker(
                 PHASE_RETRY_CODE,
-                retry_reason,
+                cause
+                if cause.startswith(retry_reason)
+                else f"{retry_reason}: {cause}"
+                if cause
+                else retry_reason,
                 node_ids=nodes,
             )
         ]

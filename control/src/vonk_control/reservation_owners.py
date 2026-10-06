@@ -33,6 +33,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import Text, cast, func, select
 from sqlalchemy.orm import Session
 
+from .fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from .models import (
     STOPPABLE_RUN_STATES,
@@ -47,7 +48,7 @@ from .models import (
 )
 
 _TERMINAL_JOB_STATES = ("succeeded", "failed", "expired", "cancelled")
-_ENDED_APPLICATION_STATES = frozenset({"succeeded", "failed", "cancelled"})
+_ENDED_APPLICATION_STATES = FLEET_PROFILE_ENDED_STATES
 # How long an unowned plan waits for the next attempt to adopt it.
 ADOPTION_WINDOW = timedelta(minutes=15)
 # A claim is created in the same transaction as the operation that owns it; this
@@ -94,6 +95,12 @@ def _referencing_active_job(session: Session, owner_kind: str, owner_id: str) ->
         )
         is not None
     )
+
+
+def run_has_live_operation(session: Session, run_id: str) -> bool:
+    """Whether a not-yet-ended operation (a Start, a Stop) still owns this run."""
+
+    return _referencing_active_job(session, "run", run_id)
 
 
 def _effect_is_uncertain(session: Session, installation_id: str) -> bool:

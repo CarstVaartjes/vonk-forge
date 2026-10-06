@@ -227,6 +227,57 @@ class CatalogService:
                     )
         return result
 
+    def retract_recipes_absent_from(
+        self, published: Sequence[tuple[str, str]]
+    ) -> list[RecipeCatalogLocalRevision]:
+        """Stop offering every recipe the published library no longer lists.
+
+        The recipe's head is cleared; its immutable revisions stay, so
+        installations and runs that reference them keep working until they are
+        replaced or retention removes them.  A recipe that is published again
+        becomes current through the normal import.
+        """
+        keep = set(published)
+        retracted: list[RecipeCatalogLocalRevision] = []
+        with self._sessions.begin() as session:
+            heads = session.scalars(
+                select(CatalogDocumentHead)
+                .where(
+                    CatalogDocumentHead.kind == "recipe",
+                    CatalogDocumentHead.active_revision_id.is_not(None),
+                )
+                .with_for_update()
+            ).all()
+            for head in heads:
+                identity = (head.publisher, head.slug)
+                if identity in keep:
+                    continue
+                revision = session.get(CatalogDocumentRevision, head.active_revision_id)
+                head.active_revision_id = None
+                head.generation += 1
+                root = session.scalar(
+                    select(CatalogDocument).where(
+                        CatalogDocument.kind == "recipe",
+                        CatalogDocument.publisher == head.publisher,
+                        CatalogDocument.slug == head.slug,
+                    )
+                )
+                if root is not None:
+                    root.updated_at = self._clock()
+                if revision is not None:
+                    retracted.append(
+                        RecipeCatalogLocalRevision(
+                            recipe_id=revision.document_id,
+                            source_kind="recipe_library",
+                            publisher=revision.publisher,
+                            slug=revision.slug,
+                            revision_number=revision.revision_number,
+                            content_sha256=revision.content_digest,
+                            release_version=_release_version(revision.document),
+                        )
+                    )
+        return retracted
+
     def import_catalog_models(
         self, actor: str, documents: Sequence[Mapping[str, object]]
     ) -> int:

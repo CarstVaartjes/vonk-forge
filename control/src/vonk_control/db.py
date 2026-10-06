@@ -36,7 +36,7 @@ _DATABASE_RETRYABLE_ERRORS = (InterfaceError, OperationalError, TimeoutError)
 _LOGGER = logging.getLogger(__name__)
 
 
-def build_engine(database_url: str) -> Engine:
+def build_engine(database_url: str, *, component: str = "control") -> Engine:
     """Build the one engine every component shares.
 
     The fixed wait budgets bound every wait; PostgreSQL receives all four
@@ -44,6 +44,10 @@ def build_engine(database_url: str) -> Engine:
     a saturated pool fails within the pool timeout instead of queueing a
     connection forever. SQLite accepts neither the server options nor an
     explicit pool size, so it keeps the default pool.
+
+    ``component`` becomes the connections' ``application_name`` (``vonk:<name>``),
+    so ``pg_stat_activity`` names the Controller process behind any session; an
+    admission transaction narrows it to the kind of work it is doing.
     """
 
     budgets = DATABASE_WAIT_BUDGETS
@@ -53,6 +57,7 @@ def build_engine(database_url: str) -> Engine:
         connect_args = {
             "options": " ".join(
                 (
+                    f"-c application_name=vonk:{component}",
                     f"-c lock_timeout={budgets.lock_timeout_ms}",
                     f"-c statement_timeout={budgets.statement_timeout_ms}",
                     f"-c transaction_timeout={budgets.transaction_timeout_ms}",

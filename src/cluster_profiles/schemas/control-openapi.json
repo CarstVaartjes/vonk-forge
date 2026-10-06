@@ -3621,6 +3621,95 @@
         "title": "FleetEnrollRequest",
         "type": "object"
       },
+      "FleetLockHolder": {
+        "additionalProperties": false,
+        "properties": {
+          "holder": {
+            "maxLength": 128,
+            "title": "Holder",
+            "type": "string"
+          },
+          "namespace": {
+            "maxLength": 64,
+            "title": "Namespace",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "transaction_age_seconds": {
+            "title": "Transaction Age Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "namespace",
+          "holder",
+          "transaction_age_seconds"
+        ],
+        "title": "FleetLockHolder",
+        "type": "object"
+      },
+      "FleetLocksResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "held": {
+            "items": {
+              "$ref": "#/components/schemas/FleetLockHolder"
+            },
+            "maxItems": 1000,
+            "title": "Held",
+            "type": "array"
+          },
+          "open_transactions": {
+            "items": {
+              "$ref": "#/components/schemas/FleetOpenTransaction"
+            },
+            "maxItems": 100,
+            "title": "Open Transactions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "held",
+          "open_transactions"
+        ],
+        "title": "FleetLocksResponse",
+        "type": "object"
+      },
       "FleetLogEntry": {
         "additionalProperties": false,
         "properties": {
@@ -3882,6 +3971,56 @@
           "hostname"
         ],
         "title": "FleetNodeIdentity",
+        "type": "object"
+      },
+      "FleetOpenTransaction": {
+        "additionalProperties": false,
+        "properties": {
+          "application_name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Name"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "transaction_age_seconds": {
+            "title": "Transaction Age Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "transaction_age_seconds"
+        ],
+        "title": "FleetOpenTransaction",
         "type": "object"
       },
       "FleetProfileAdmissionDecision": {
@@ -4419,6 +4558,34 @@
             "title": "Step Results",
             "type": "object"
           },
+          "supersede_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "superseded-by-retry",
+                  "superseded-by-intent",
+                  "effects-changed-during-admission"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersede Code"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          },
           "switch_adapter": {
             "anyOf": [
               {
@@ -4559,6 +4726,22 @@
           "progress": {
             "$ref": "#/components/schemas/FleetProfileApplicationProgress"
           },
+          "reason_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "superseded-by-retry",
+                  "superseded-by-intent",
+                  "effects-changed-during-admission"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
           "request_key": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Request Key",
@@ -4593,7 +4776,8 @@
               "waiting-for-operator",
               "succeeded",
               "failed",
-              "cancelled"
+              "cancelled",
+              "superseded"
             ],
             "title": "State",
             "type": "string"
@@ -4609,6 +4793,18 @@
               }
             ],
             "title": "Status Reason"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
           },
           "total_steps": {
             "maximum": 1024.0,
@@ -5538,7 +5734,8 @@
                   "waiting-for-operator",
                   "succeeded",
                   "failed",
-                  "cancelled"
+                  "cancelled",
+                  "superseded"
                 ],
                 "type": "string"
               },
@@ -6741,7 +6938,8 @@
               "waiting-for-operator",
               "succeeded",
               "failed",
-              "cancelled"
+              "cancelled",
+              "superseded"
             ],
             "title": "State",
             "type": "string"
@@ -23060,6 +23258,72 @@
         ],
         "summary": "Revoke Enrollment",
         "x-vonk-request-body": "none"
+      }
+    },
+    "/api/fleet/locks": {
+      "get": {
+        "operationId": "getFleetAdmissionLocks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetLocksResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Fleet Locks"
       }
     },
     "/api/fleet/stream": {

@@ -242,6 +242,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fleet/locks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fleet Locks */
+        get: operations["getFleetAdmissionLocks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet/upgrade": {
         parameters: {
             query?: never;
@@ -2198,6 +2215,28 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /** FleetLockHolder */
+        FleetLockHolder: {
+            /** Holder */
+            holder: string;
+            /** Namespace */
+            namespace: string;
+            /** Node Id */
+            node_id?: string | null;
+            /** Query */
+            query?: string | null;
+            /** State */
+            state?: string | null;
+            /** Transaction Age Seconds */
+            transaction_age_seconds: number;
+        };
+        /** FleetLocksResponse */
+        FleetLocksResponse: {
+            /** Held */
+            held: components["schemas"]["FleetLockHolder"][];
+            /** Open Transactions */
+            open_transactions: components["schemas"]["FleetOpenTransaction"][];
+        };
         /** FleetLogEntry */
         FleetLogEntry: {
             /** Evidence Id */
@@ -2272,6 +2311,17 @@ export interface components {
             id: string;
             /** Ip Address */
             ip_address?: string | null;
+        };
+        /** FleetOpenTransaction */
+        FleetOpenTransaction: {
+            /** Application Name */
+            application_name?: string | null;
+            /** Query */
+            query?: string | null;
+            /** State */
+            state?: string | null;
+            /** Transaction Age Seconds */
+            transaction_age_seconds: number;
         };
         /** FleetProfileAdmissionDecision */
         FleetProfileAdmissionDecision: {
@@ -2442,6 +2492,10 @@ export interface components {
             step_results?: {
                 [key: string]: components["schemas"]["FleetProfileStepResult"];
             };
+            /** Supersede Code */
+            supersede_code?: ("superseded-by-retry" | "superseded-by-intent" | "effects-changed-during-admission") | null;
+            /** Superseded By */
+            superseded_by?: string | null;
             switch_adapter?: components["schemas"]["FleetProfileSwitchAdapterState"] | null;
             /**
              * Total Steps
@@ -2491,6 +2545,8 @@ export interface components {
             /** Profile Id */
             profile_id: string;
             progress: components["schemas"]["FleetProfileApplicationProgress"];
+            /** Reason Code */
+            reason_code?: ("superseded-by-retry" | "superseded-by-intent" | "effects-changed-during-admission") | null;
             /** Request Key */
             request_key: string;
             result: components["schemas"]["FleetProfileApplicationResult"] | null;
@@ -2500,9 +2556,11 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
             /** Status Reason */
             status_reason: string | null;
+            /** Superseded By */
+            superseded_by?: string | null;
             /** Total Steps */
             total_steps: number;
             /**
@@ -2800,7 +2858,7 @@ export interface components {
             /** Application Id */
             application_id?: string | null;
             /** Application State */
-            application_state?: ("queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled") | null;
+            application_state?: ("queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded") | null;
             /** Assignments */
             assignments: components["schemas"]["FleetProfileEndpointAssignmentView"][] | null;
             /** Number */
@@ -3185,7 +3243,7 @@ export interface components {
              * @default queued
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
             /** Status Reason */
             status_reason?: string | null;
             /**
@@ -8761,6 +8819,62 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getFleetAdmissionLocks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetLocksResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

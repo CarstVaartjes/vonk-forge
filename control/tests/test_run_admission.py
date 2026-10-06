@@ -563,6 +563,23 @@ def test_queue_rejects_reservation_mutation_after_preview(tmp_path) -> None:
         service.accept_run(plan, actor="admin", now=now)
 
 
+def test_a_retryable_plan_blocker_keeps_its_typed_code_and_detail(tmp_path) -> None:
+    # Wrong implementation: the wait was raised as a generic ``run.capacity_busy``
+    # and the memory/port detail was dropped.
+    sessions, now, _node, installation = setup(tmp_path, free_memory=40)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    )
+    plan = service.plan_run(installation, "qwen", now=now)
+    assert not plan.allowed
+    with pytest.raises(RunAdmissionBusy) as raised:
+        service.accept_run(plan, actor="admin", now=now)
+    busy = raised.value
+    assert busy.code != RunAdmissionBusy.__dict__["code"]
+    assert busy.code in {reason.code for item in plan.nodes for reason in item.blockers}
+    assert busy.detail is not None and busy.code in busy.detail
+
+
 def test_run_adopts_a_fresh_plan_after_nonblocking_reservation_change(tmp_path) -> None:
     sessions, now, node, installation = setup(tmp_path, free_memory=400)
     service = RunAdmissionService(

@@ -144,6 +144,7 @@ class CommandOutcome:
             "failed",
             "blocked",
             "cancelled",
+            "superseded",
             "rejected",
             "waiting-for-operator",
         }:

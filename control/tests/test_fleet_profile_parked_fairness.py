@@ -78,6 +78,6 @@ def test_new_whole_fleet_profile_supersedes_a_parked_parent(
     active_child_id = service.application(active.id).current_operation_id
     assert active_child_id is not None
     superseded = service.application(parked.id)
-    assert superseded.state == "cancelled"
+    assert superseded.state == "superseded"
     assert "replaced" in (superseded.status_reason or "")
     assert service.application(active.id).state == "running"

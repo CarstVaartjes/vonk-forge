@@ -1086,7 +1086,9 @@ def test_new_profile_load_supersedes_older_queued_scope_by_acceptance_order() ->
     assert second.progress.workload_intent_ordinal == 2
     # Admission cancels the older logical order even if the worker selects
     # the newer row first under a tied clock.
-    assert service.application(first.id).state == "cancelled"
+    replaced = service.application(first.id)
+    assert replaced.state == "superseded"
+    assert replaced.reason_code == "superseded-by-intent"
     assert service.application(second.id).state == "queued"
 
 
@@ -1206,7 +1208,7 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
     assert service.tick() is True
     first = service.application(first.id)
     second = service.application(second.id)
-    assert first.state == "cancelled"
+    assert first.state == "superseded"
     assert "later scoped intent" in (first.status_reason or "")
     assert second.progress.workload_intent_ordinal == 2
 
@@ -1634,7 +1636,7 @@ def test_new_load_replaces_same_profile_while_same_key_replays() -> None:
     )
     assert second.id != first.id
     assert second.progress.workload_intent_ordinal == 2
-    assert service.application(first.id).state == "cancelled"
+    assert service.application(first.id).state == "superseded"
     assert second.progress.intended_profile is not None
     assert (
         service.load(
@@ -4034,3 +4036,46 @@ def test_a_stop_step_for_an_already_replaced_workload_is_skipped(
     state = current.progress.switch_adapter
     assert state is not None and state.active_operation_id is None
     assert current.state == "succeeded", current.status_reason
+
+
+def test_every_application_state_is_active_or_named_ended() -> None:
+    """A new terminal state must join the one ended-state set every consumer uses."""
+
+    from typing import get_args
+
+    from vonk_control.fleet_profile_contract import (
+        FLEET_PROFILE_ENDED_STATES,
+        FleetProfileOperationState,
+    )
+
+    active = {"queued", "running", "waiting-for-operator"}
+    assert set(get_args(FleetProfileOperationState)) == active | set(
+        FLEET_PROFILE_ENDED_STATES
+    )
+    assert "superseded" in FLEET_PROFILE_ENDED_STATES
+
+
+def test_a_superseded_application_names_its_reason_and_never_a_failure() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    view = service.apply(profile.id, request_key=_uuid(981), actor="admin")
+    ended = view.model_copy(update={"state": "superseded"})
+    with pytest.raises(ValueError, match="reason code"):
+        type(view).model_validate(ended.model_dump())
+    named = ended.model_copy(
+        update={"reason_code": "superseded-by-retry", "superseded_by": _uuid(982)}
+    )
+    type(view).model_validate(named.model_dump())
+    # A retry supersession must name its successor; others may not name a failure.
+    with pytest.raises(ValueError, match="successor"):
+        type(view).model_validate(
+            named.model_copy(update={"superseded_by": None}).model_dump()
+        )
+    with pytest.raises(ValueError, match="only a superseded"):
+        type(view).model_validate(
+            view.model_copy(update={"superseded_by": _uuid(982)}).model_dump()
+        )

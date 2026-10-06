@@ -86,6 +86,7 @@ from .inventory_repository import (
 )
 from .logging import log_event
 from .models import (
+    STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
     AgentCertificate,
     AgentNode,
@@ -102,6 +103,7 @@ from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceErr
 from .recipe_operations import (
     prepare_exact_recipe_run_observation_nodes,
 )
+from .reservation_owners import run_has_live_operation
 from .runtime_image_preparation import (
     IMAGE_CACHE_DIRECTORY,
 )
@@ -1035,7 +1037,7 @@ def install_agent_routes(
                             .join(RecipeRun, RecipeRun.id == RunNode.run_id)
                             .where(
                                 RunNode.node_id == identity.node_id,
-                                RecipeRun.state == "running",
+                                RecipeRun.state.in_(STOPPABLE_RUN_STATES),
                             )
                         )
                     )
@@ -1060,6 +1062,22 @@ def install_agent_routes(
                     assert run is not None
                     if evidence.run_generation != run.run_generation:
                         rejected.append("recipe run observation generation is stale")
+                        continue
+                    if run.state in STOPPABLE_NOT_RUNNING_RUN_STATES:
+                        # A stoppable run that is not running (a cancelled
+                        # start left it lost) can never be advanced by this
+                        # report, but the Spark's own current word on its
+                        # process is the evidence that releases its claim.
+                        if (
+                            run_has_live_operation(session, run.id)
+                            or _now(node.updated_at).astimezone(UTC) > observed_at
+                            or _now(run.updated_at).astimezone(UTC) > observed_at
+                        ):
+                            continue
+                        accepted += 1
+                        node.observed_run_generation = run.run_generation
+                        node.observation_process_running = evidence.process_running
+                        node.observation_observed_at = observed_at
                         continue
                     if node.state not in {"running", "failed"} or (
                         node.state == "failed" and run.route_state != "withdrawn"
@@ -1192,7 +1210,7 @@ def install_agent_routes(
                     },
                     RECIPE_RUN_GENERATION_HEADER: {
                         "description": (
-                            "The accepted run generation of a known running run."
+                            "The accepted run generation of a known stoppable run."
                         ),
                         "schema": {"type": "integer", "minimum": 1},
                     },
@@ -1216,9 +1234,11 @@ def install_agent_routes(
         with _require_services(services).sessions() as session:
             run = session.get(RecipeRun, run_id)
             wanted = run is not None and run.state in STOPPABLE_RUN_STATES
+            # A lost run (a cancelled start left it so) is reported on too: the
+            # agent's word that its process is gone releases its claims.
             generation = (
                 run.run_generation
-                if run is not None and run.state == "running"
+                if run is not None and run.state in {"running", "lost"}
                 else None
             )
         response = Response(status_code=status.HTTP_204_NO_CONTENT)

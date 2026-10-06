@@ -335,7 +335,7 @@ def test_new_intent_supersedes_a_parked_exhausted_application(tmp_path: Path) ->
     assert second.id != first.id
     assert second.state == "queued"
     ended = service.application(first.id)
-    assert ended.state == "cancelled"
+    assert ended.state == "superseded"
     assert "replaced by a later scoped intent" in (ended.status_reason or "")
 
 
@@ -1174,3 +1174,157 @@ def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
         ).intended_profile
         assert intended is not None
         assert {item.recipe_revision_id for item in intended.assignments} == {newer_id}
+
+
+def test_an_automatic_retry_supersedes_its_predecessor_instead_of_failing_it(
+    tmp_path: Path,
+) -> None:
+    """The Controller's own retry ends the tracked application ``superseded``.
+
+    A client following the original id must see the successor, never a failure
+    with the continuation lost; the earlier failure stays in the reason.
+    """
+
+    sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    later = lifecycle._clock() + timedelta(hours=2)
+    service._clock = lambda: later
+    for _ in range(6):
+        service.tick()
+    with sessions() as session:
+        successors = tuple(
+            session.scalars(
+                select(FleetProfileApplication).where(
+                    FleetProfileApplication.id != first.id
+                )
+            )
+        )
+    assert len(successors) == 1
+    ended = service.application(first.id)
+    assert ended.state == "superseded"
+    assert ended.reason_code == "superseded-by-retry"
+    assert ended.superseded_by == successors[0].id
+    assert "earlier failure: " in (ended.status_reason or "")
+    assert ended.blockers == [] and ended.next_attempt_at is None
+    # The ended receipt neither holds claims nor is retried again.
+    assert not service.retry_eligible(first.id)
+
+
+def test_a_legacy_failed_retry_parent_is_relabelled_superseded(
+    tmp_path: Path,
+) -> None:
+    sessions, _lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    successor = _uuid(990)
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        row.state = "failed"
+        row.status_reason = f"Automatically reconciled by profile retry {successor}"
+        progress = dict(row.progress)
+        progress["retry_due_at"] = None
+        row.progress = progress
+
+    assert service._heal_legacy_applications(_lifecycle._clock())
+
+    view = service.application(first.id)
+    assert view.state == "superseded"
+    assert view.superseded_by == successor
+    assert view.reason_code == "superseded-by-retry"
+    assert not service._heal_legacy_applications(_lifecycle._clock())
+
+
+def test_a_stale_review_ends_superseded_instead_of_retrying_forever(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A queued load whose reviewed plan went stale (its child would stop a
+    workload the review did not cover) can never succeed by waiting: it ends
+    superseded with the stale-review code so the client re-reviews."""
+
+    from vonk_control.fleet_profiles import FleetProfileReviewStale
+
+    _sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    attempts: list[str] = []
+
+    def stale(*_args, **_kwargs):
+        attempts.append("retry")
+        raise FleetProfileReviewStale(
+            "Profile child would stop an unreviewed workload; review again"
+        )
+
+    monkeypatch.setattr(service, "retry", stale)
+    later = lifecycle._clock() + timedelta(hours=2)
+    service._clock = lambda: later
+    for _ in range(6):
+        service.tick()
+
+    ended = service.application(first.id)
+    assert ended.state == "superseded"
+    assert ended.reason_code == "effects-changed-during-admission"
+    assert ended.superseded_by is None
+    assert "unreviewed workload" in (ended.status_reason or "")
+    assert len(attempts) == 1, "no retry loop: the end is final"
+
+
+def test_a_child_start_with_a_stale_review_ends_superseded_not_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vonk_control.fleet_profiles import FleetProfileReviewStale
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    service = build_production_fleet_profile_service(
+        sessions, clock=lifecycle._clock, run_switch_operations=run_switch
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Stale review",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "stale-chat",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    application = service.apply(profile.id, request_key=_uuid(830), actor="admin")
+
+    def stale(*_args, **_kwargs):
+        raise FleetProfileReviewStale(
+            "Profile child would stop an unreviewed workload; review again"
+        )
+
+    monkeypatch.setattr(service, "_start_step", stale)
+    for _ in range(4):
+        service.tick()
+
+    ended = service.application(application.id)
+    assert ended.state == "superseded", ended.status_reason
+    assert ended.reason_code == "effects-changed-during-admission"
+    assert ended.blockers == [] and ended.next_attempt_at is None

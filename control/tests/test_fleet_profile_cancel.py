@@ -801,7 +801,7 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
         issued = session.get(
             AgentOperation, fenced_operation(sessions, second_claim).id
         )
-    assert old is not None and old.state == "cancelled"
+    assert old is not None and old.state == "superseded"
     assert new is not None and new.state == "queued"
     assert old_child is not None and old_child.id == child_id
     assert stop_job is not None and stop_job.state == "running"
@@ -816,7 +816,7 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
     assert new_ordinal > old_ordinal
     assert run_switch.tick()
     assert run_switch.get(child_id).state == "cancelled"
-    assert service.application(application.id).state == "cancelled"
+    assert service.application(application.id).state == "superseded"
 
     # A late exact stop receipt settles its issued cleanup owner only; it
     # cannot reopen the superseded profile or change the replacement intent.
@@ -842,7 +842,7 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
             session.scalars(select(AgentNode).where(AgentNode.node_id.in_(nodes)))
         )
     assert settled is not None and settled.state == "cancelled"
-    assert old_after_receipt is not None and old_after_receipt.state == "cancelled"
+    assert old_after_receipt is not None and old_after_receipt.state == "superseded"
     assert new_after_receipt is not None and new_after_receipt.state == "queued"
     assert {node.workload_intent_ordinal for node in nodes_after_receipt} == {
         new_ordinal
@@ -1448,7 +1448,7 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
     latest_id = applications[2][1].id
     assert selected.generation == 3
     assert selected.application_id == latest_id
-    assert [row.state for row in rows] == ["cancelled", "cancelled", "running"]
+    assert [row.state for row in rows] == ["superseded", "superseded", "running"]
     assert [row.selection_generation for row in rows] == [1, 2, 3]
     assert [row.current_operation_id for row in rows] == [None, None, latest_id]
 

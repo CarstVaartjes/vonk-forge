@@ -99,6 +99,8 @@ export function activityStatus(event: ActivitySummary): ActivityStatus {
       compensated: "recorded",
       completed: "recorded",
       succeeded: "recorded",
+      // Replaced by a successor operation: not a fault.
+      superseded: "recorded",
     };
     return knownStates[state] ?? "unknown";
   }
@@ -123,7 +125,7 @@ function statusTone(status: ActivityStatus): "neutral" | "healthy" | "warning" |
   return "healthy";
 }
 
-const OPERATION_STATES = ["queued", "running", "waiting", LEGACY_WAIT_STATE, "compensating", "uncertain", "failed", "cancelled", "succeeded"];
+const OPERATION_STATES = ["queued", "running", "waiting", LEGACY_WAIT_STATE, "compensating", "uncertain", "failed", "cancelled", "superseded", "succeeded"];
 const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /** Filters live in the URL so a filtered view can be linked and reloaded, like `vonkctl fleet activity --state --target --request-id`. */

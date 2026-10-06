@@ -518,7 +518,7 @@ def test_pending_profile_edit_is_rejected_before_selection_after_restart(
         assert restarted.tick() is True
 
         resumed = restarted.application(accepted.id)
-        assert resumed.state == "cancelled", resumed.status_reason
+        assert resumed.state == "superseded", resumed.status_reason
         assert resumed.progress.admission_pending is False
         assert "profile changed" in (resumed.status_reason or "").lower()
         with restarted_sessions() as session:

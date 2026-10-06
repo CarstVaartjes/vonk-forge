@@ -2284,10 +2284,15 @@ def test_recipe_run_disposition_names_every_run_the_controller_does_not_want(
         assert not_wanted.status_code == 204
         assert not_wanted.headers["x-vonk-recipe-run-disposition"] == "unowned"
         assert "x-vonk-recipe-run-generation" not in not_wanted.headers
-    for state in ("planned", "starting", "stopping", "lost"):
+    for state in ("planned", "starting", "stopping"):
         wanted = in_state(state)
         assert "x-vonk-recipe-run-disposition" not in wanted.headers
         assert "x-vonk-recipe-run-generation" not in wanted.headers
+    # A lost run's generation lets the agent report its process gone, which
+    # releases the claims of a cancelled start.
+    lost = in_state("lost", generation=2)
+    assert "x-vonk-recipe-run-disposition" not in lost.headers
+    assert lost.headers["x-vonk-recipe-run-generation"] == "2"
     running = in_state("running", generation=4)
     assert "x-vonk-recipe-run-disposition" not in running.headers
     assert running.headers["x-vonk-recipe-run-generation"] == "4"

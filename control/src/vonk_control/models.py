@@ -416,7 +416,7 @@ class FleetProfileApplication(Base):
     __tablename__ = "fleet_profile_applications"
     __table_args__ = (
         CheckConstraint(
-            "state IN ('queued','running','waiting-for-operator','succeeded','failed','cancelled')",
+            "state IN ('queued','running','waiting-for-operator','succeeded','failed','cancelled','superseded')",
             name="ck_fleet_profile_applications_state",
         ),
         CheckConstraint(
@@ -1868,7 +1868,11 @@ class InstallationNode(Base):
     )
 
 
-ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
+#: Stoppable runs that no running-run path (observation, recovery) advances.
+STOPPABLE_NOT_RUNNING_RUN_STATES = frozenset(
+    {"planned", "starting", "stopping", "lost"}
+)
+ACTIVE_RUN_STATES = (STOPPABLE_NOT_RUNNING_RUN_STATES - {"lost"}) | {"running"}
 #: The run states that own capacity and a Spark lifecycle: any load that needs
 #: such a run's Sparks plans its exact Stop, which releases the claims. A run in
 #: any other state can never be stopped by a plan, so it holds no ports or

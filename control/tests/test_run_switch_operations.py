@@ -24,6 +24,7 @@ from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingSer
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.failure_classification import is_security_failure
 from vonk_control.install_admission import (
+    AdmissionReason,
     InstallAdmissionBusy,
     installation_plan_digest_from_stored_document,
 )
@@ -55,6 +56,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.operation_api import OperationQuery
+from vonk_control.operation_blockers import PHASE_RETRY_CODE
 from vonk_control.operation_contract import OperationFailureEvidence
 from vonk_control.recipe_build_cancellation import (
     lock_build_dependency,
@@ -5441,6 +5443,60 @@ def test_scoped_cleanup_retries_when_uninstall_capacity_writer_is_busy(
     assert parked.result.retry_reason == RunAdmissionBusy.code
     assert parked.result.phase_index == 0
     assert parked.result.item_index == 0
+
+
+def test_a_retryable_plan_blocker_is_named_not_hidden_as_capacity_busy(
+    tmp_path: Path,
+) -> None:
+    """The phase retry carries the underlying blocker code and detail.
+
+    Wrong implementation: every retryable plan blocker surfaced as
+    ``run.capacity_busy``, so a dual load waited two hours behind a generic
+    "capacity writer" with no hint that memory or a port was the cause.
+    """
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+    )
+    operation = service.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation.owner_id,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    blocker = AdmissionReason(
+        "run.insufficient_memory", "spark-1 has 10 GiB free but needs 80 GiB"
+    )
+
+    def blocked(*args, **kwargs):
+        del args, kwargs
+        raise RunAdmissionBusy("blocked", code=blocker.code, blockers=(blocker,))
+
+    original_uninstall = lifecycle.uninstall
+    lifecycle.uninstall = blocked  # type: ignore[method-assign]
+    try:
+        assert service.tick() is True
+    finally:
+        lifecycle.uninstall = original_uninstall  # type: ignore[method-assign]
+
+    parked = service.get(operation.operation_id)
+    assert parked.result is not None
+    assert parked.result.retry_reason == "run.insufficient_memory"
+    assert parked.status_reason is not None
+    assert "spark-1 has 10 GiB free but needs 80 GiB" in parked.status_reason
+    retry = [b for b in parked.blockers if b.code == PHASE_RETRY_CODE]
+    assert len(retry) == 1
+    assert retry[0].detail.startswith("run.insufficient_memory:")
+    assert "needs 80 GiB" in retry[0].detail
+    assert "capacity_busy" not in retry[0].detail
 
 
 def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(

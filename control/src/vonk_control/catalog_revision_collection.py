@@ -96,7 +96,7 @@ _SCAN_BATCH = 20
 # One sweep stops here and the rest continues on the next worker pass, so a
 # first sweep over a large catalog never holds the worker loop for long.
 SWEEP_BUDGET_SECONDS = 20.0
-_FINISHED = ("succeeded", "failed", "cancelled")
+_FINISHED = ("succeeded", "failed", "cancelled", "superseded")
 _FINISHED_BUILDS = ("succeeded", "failed")
 # Neither holds ports, memory or a place on a Spark (see STOPPABLE_RUN_STATES),
 # and nothing ever moves a failed run on to stopped.

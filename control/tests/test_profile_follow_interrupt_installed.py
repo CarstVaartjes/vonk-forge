@@ -268,7 +268,7 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
             assert newer.created_at > application.created_at
             assert service.progress_number(profile.number).id == newer.id
             superseded = service.application(identity)
-            assert superseded.state == "cancelled"
+            assert superseded.state == "superseded"
             assert superseded.status_reason is not None
             assert "replaced" in superseded.status_reason
             newer_application_id = newer.id
@@ -305,7 +305,7 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
     assert completed.stderr == ""
     document = json.loads(completed.stdout)
     assert document["id"] == identity
-    assert document["state"] == "cancelled"
+    assert document["state"] == "superseded"
     assert document["status_reason"] is not None
     assert "replaced" in document["status_reason"]
     assert newer_application_id is not None and newer_application_id != identity
@@ -317,7 +317,7 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
     with sessions() as session:
         original = session.get(FleetProfileApplication, identity)
         newer = session.get(FleetProfileApplication, newer_application_id)
-        assert original is not None and original.state == "cancelled"
+        assert original is not None and original.state == "superseded"
         assert original.status_reason is not None
         assert "replaced" in original.status_reason
         assert newer is not None and newer.id != original.id

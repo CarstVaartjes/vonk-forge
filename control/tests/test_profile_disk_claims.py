@@ -202,7 +202,7 @@ def test_supersession_and_failed_dispatch_release_only_unassigned_claims(
     second = load(next_review)
     with sessions() as session:
         prior = session.get(FleetProfileApplication, first)
-        assert prior is not None and prior.state == "cancelled"
+        assert prior is not None and prior.state == "superseded"
         claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
