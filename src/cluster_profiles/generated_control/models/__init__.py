@@ -191,7 +191,7 @@ from .fleet_log_entry_source import FleetLogEntrySource
 from .fleet_log_response import FleetLogResponse
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
-from .fleet_node_labels import FleetNodeLabels
+from .fleet_node_labels_type_0 import FleetNodeLabelsType0
 from .fleet_node_view import FleetNodeView
 from .fleet_open_transaction import FleetOpenTransaction
 from .fleet_profile_admission_decision import FleetProfileAdmissionDecision
@@ -819,6 +819,8 @@ from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
 from .topology_code import TopologyCode
 from .unavailable_fleet_profile_view import UnavailableFleetProfileView
+from .unavailable_recipe_presence import UnavailableRecipePresence
+from .unavailable_run_presence import UnavailableRunPresence
 from .uninstall_phase_operation import UninstallPhaseOperation
 from .uninstall_plan_code import UninstallPlanCode
 from .unknown_error import UnknownError
@@ -1019,7 +1021,7 @@ __all__ = (
     "FleetLogResponse",
     "FleetNode",
     "FleetNodeIdentity",
-    "FleetNodeLabels",
+    "FleetNodeLabelsType0",
     "FleetNodeView",
     "FleetOpenTransaction",
     "FleetProfileAdmissionDecision",
@@ -1647,6 +1649,8 @@ __all__ = (
     "TelemetryStateFreshness",
     "TopologyCode",
     "UnavailableFleetProfileView",
+    "UnavailableRecipePresence",
+    "UnavailableRunPresence",
     "UninstallPhaseOperation",
     "UninstallPlanCode",
     "UnknownError",

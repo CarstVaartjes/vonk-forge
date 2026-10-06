@@ -3414,18 +3414,20 @@ export interface components {
             /** Id */
             id: string;
             /** Installed */
-            installed: components["schemas"]["RecipePresence"][];
+            installed: (components["schemas"]["RecipePresence"] | components["schemas"]["UnavailableRecipePresence"])[];
             inventory: components["schemas"]["InventoryState"] | null;
             /** Ip Address */
             ip_address?: string | null;
             /** Labels */
             labels: {
                 [key: string]: string;
-            };
+            } | null;
             /** Lifecycle */
             lifecycle: string;
             /** Loaded */
-            loaded: components["schemas"]["RunPresence"][];
+            loaded: (components["schemas"]["RunPresence"] | components["schemas"]["UnavailableRunPresence"])[];
+            /** Projection Issues */
+            projection_issues?: string[] | null;
             reservations: components["schemas"]["CapacityReservations"];
             telemetry: components["schemas"]["TelemetryState"] | null;
             /** Warnings */
@@ -11850,6 +11852,96 @@ export interface components {
              * @constant
              */
             status: "unavailable";
+        };
+        /**
+         * UnavailableRecipePresence
+         * @description Known membership whose stored group evidence cannot be projected.
+         */
+        UnavailableRecipePresence: {
+            /** Affected Ranks */
+            affected_ranks?: null;
+            /** Complete */
+            complete: null;
+            /** Degraded Reason */
+            degraded_reason?: null;
+            /** Expected Rank Count */
+            expected_rank_count?: number | null;
+            group_state?: components["schemas"]["InstallationState"] | null;
+            /** Installation Id */
+            installation_id: string;
+            /** Installed Bytes */
+            installed_bytes?: number | null;
+            /** Member Node Ids */
+            member_node_ids?: string[] | null;
+            /** Present Ranks */
+            present_ranks?: number[] | null;
+            /** Projection Issue */
+            projection_issue: string;
+            /** Rank */
+            rank?: number | null;
+            rank_state?: components["schemas"]["InstallationState"] | null;
+            /** Recipe Id */
+            recipe_id?: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id?: string | null;
+            /** Required Bytes */
+            required_bytes?: null;
+            /** Role */
+            role?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Topology Name */
+            topology_name?: string | null;
+        };
+        /** UnavailableRunPresence */
+        UnavailableRunPresence: {
+            /** Alias */
+            alias?: string | null;
+            /** Degraded Reason */
+            degraded_reason?: null;
+            /** Expected Rank Count */
+            expected_rank_count?: number | null;
+            /**
+             * Group State
+             * @default unavailable
+             * @constant
+             */
+            group_state: "unavailable";
+            /** Healthy */
+            healthy: null;
+            /** Installation Id */
+            installation_id?: string | null;
+            /** Member Node Ids */
+            member_node_ids?: string[] | null;
+            /** Option Choices */
+            option_choices?: null;
+            /** Present Ranks */
+            present_ranks?: number[] | null;
+            /** Projection Issue */
+            projection_issue: string;
+            /** Rank */
+            rank?: number | null;
+            /** Rank Age Seconds */
+            rank_age_seconds?: null;
+            /** Rank Fresh */
+            rank_fresh?: null;
+            rank_state?: components["schemas"]["RunState"] | null;
+            /** Recipe Id */
+            recipe_id?: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id?: string | null;
+            /** Recipe Update */
+            recipe_update?: null;
+            /** Role */
+            role?: string | null;
+            /** Route Reason */
+            route_reason?: null;
+            route_state?: components["schemas"]["RouteState"] | null;
+            /** Run Id */
+            run_id: string;
+            run_state?: components["schemas"]["RunState"] | null;
+            /** Title */
+            title?: string | null;
         };
         /** UninstallPhaseOperation */
         UninstallPhaseOperation: {

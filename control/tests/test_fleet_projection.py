@@ -4,10 +4,11 @@ import json
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine, event, select, text, update
+from sqlalchemy import Table, create_engine, event, literal, select, text, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
@@ -1443,7 +1444,10 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
     ) == ([0], [NODE_A], False, "degraded", "external-member")
 
 
-@pytest.mark.parametrize("damage", ("document", "digest", "candidate"))
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize(
+    "damage", ("document", "digest", "candidate", "mapping", "rank", "state", "labels")
+)
 def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     damage: str,
 ) -> None:
@@ -1454,7 +1458,13 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     inconsistent". An ineligible revision is different: it is simply not this
     node's business, so it disappears without an error.
     """
-    engine = create_engine("sqlite+pysqlite:///:memory:")
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     recipe_id = "00000000-0000-4000-8000-000000000401"
@@ -1589,12 +1599,114 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
                 updated_at=NOW,
             )
         )
+    # A second known group on the same node must survive the damaged row.
+    healthy_installation_id = "00000000-0000-4000-8000-000000000907"
+    healthy_run_id = "00000000-0000-4000-8000-000000000908"
+    with sessions.begin() as session:
+        session.add(_profile(NODE_A, display_name="Spark A", hostname="spark-a"))
+        for model, source_id, replacements in (
+            (
+                ClusterMapping,
+                mapping_id,
+                {
+                    "id": "00000000-0000-4000-8000-000000000905",
+                    "placement_digest": "9" * 64,
+                },
+            ),
+            (
+                ClusterMappingNode,
+                "00000000-0000-4000-8000-000000000409",
+                {
+                    "id": "00000000-0000-4000-8000-000000000909",
+                    "mapping_id": "00000000-0000-4000-8000-000000000905",
+                },
+            ),
+            (
+                RecipeInstallation,
+                installation_id,
+                {
+                    "id": healthy_installation_id,
+                    "mapping_id": "00000000-0000-4000-8000-000000000905",
+                },
+            ),
+            (
+                InstallationNode,
+                "00000000-0000-4000-8000-000000000410",
+                {
+                    "id": "00000000-0000-4000-8000-000000000910",
+                    "installation_id": healthy_installation_id,
+                },
+            ),
+            (
+                RecipeRun,
+                run_id,
+                {
+                    "id": healthy_run_id,
+                    "installation_id": healthy_installation_id,
+                    "mapping_id": "00000000-0000-4000-8000-000000000905",
+                    "alias": "healthy-run",
+                },
+            ),
+            (
+                RunNode,
+                "00000000-0000-4000-8000-000000000411",
+                {
+                    "id": "00000000-0000-4000-8000-000000000911",
+                    "run_id": healthy_run_id,
+                },
+            ),
+        ):
+            table = cast(Table, model.__table__)
+            session.execute(
+                table.insert().from_select(
+                    [column.name for column in table.columns],
+                    select(
+                        *[
+                            literal(replacements[column.name])
+                            if column.name in replacements
+                            else column
+                            for column in table.columns
+                        ]
+                    ).where(table.c.id == source_id),
+                )
+            )
     # Damage the row the way an out-of-band write would, in its own session:
     # the ORM refuses to rewrite an active revision (before_update,
     # before_delete, and a commit-time digest check), so only a restore, manual
     # surgery or drift against a newer canonical model leaves this state on disk.
     with sessions.begin() as session:
-        if damage == "candidate":
+        session.execute(text("PRAGMA ignore_check_constraints = ON"))
+        if damage == "mapping":
+            session.execute(
+                update(ClusterMapping)
+                .where(ClusterMapping.id == mapping_id)
+                .values(node_count=-1)
+            )
+        elif damage == "rank":
+            session.execute(
+                update(InstallationNode)
+                .where(InstallationNode.installation_id == installation_id)
+                .values(rank=-1)
+            )
+            session.execute(
+                update(RunNode).where(RunNode.run_id == run_id).values(rank=-1)
+            )
+        elif damage == "state":
+            session.execute(
+                update(RecipeInstallation)
+                .where(RecipeInstallation.id == installation_id)
+                .values(state="invalid")
+            )
+            session.execute(
+                update(RecipeRun).where(RecipeRun.id == run_id).values(state="invalid")
+            )
+        elif damage == "labels":
+            session.execute(
+                update(AgentNodeProfile)
+                .where(AgentNodeProfile.node_id == NODE_A)
+                .values(labels=["invalid"])
+            )
+        elif damage == "candidate":
             session.execute(
                 update(CatalogDocumentRevision)
                 .where(CatalogDocumentRevision.id == revision_id)
@@ -1610,6 +1722,7 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
                 ),
                 {"value": value, "id": revision_id},
             )
+        session.execute(text("PRAGMA ignore_check_constraints = OFF"))
 
     projection = FleetProjection(sessions, clock=lambda: NOW)
     if damage == "candidate":
@@ -1619,11 +1732,44 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     from .test_operation_api import _client
 
     client, operator, *_ = _client(fleet_projection=projection)
+    snapshot = projection.read()
     observed = client.get("/api/fleet", headers=operator)
     assert observed.status_code == 200
-    assert observed.json()["nodes"][0]["installed"][0]["complete"] is None
-    assert observed.json()["nodes"][0]["loaded"][0]["healthy"] is None
+    if damage != "labels":
+        assert observed.json()["nodes"][0]["installed"][0]["complete"] is None
+        assert observed.json()["nodes"][0]["loaded"][0]["healthy"] is None
     snapshot = projection.read()
+    if damage == "labels":
+        assert observed.json()["nodes"][0]["labels"] is None
+        assert "unknown" in observed.json()["nodes"][0]["projection_issues"][0]
+        assert all(value.complete is True for value in snapshot.nodes[0].installed)
+        with sessions.begin() as session:
+            session.execute(
+                update(AgentNodeProfile)
+                .where(AgentNodeProfile.node_id == NODE_A)
+                .values(labels={"role": "inference"})
+            )
+        recovered = client.get("/api/fleet", headers=operator)
+        assert recovered.json()["nodes"][0]["labels"] == {"role": "inference"}
+        assert not recovered.json()["nodes"][0].get("projection_issues")
+        return
+    if damage in {"mapping", "rank", "state"}:
+        assert (
+            next(
+                value
+                for value in snapshot.nodes[0].installed
+                if value.installation_id == healthy_installation_id
+            ).complete
+            is True
+        )
+        assert (
+            next(
+                value
+                for value in snapshot.nodes[0].loaded
+                if value.run_id == healthy_run_id
+            ).healthy
+            is True
+        )
     assert snapshot.nodes[0].installed[0].installation_id == installation_id
     assert snapshot.nodes[0].loaded[0].run_id == run_id
     assert snapshot.nodes[0].installed[0].complete is None
@@ -1633,6 +1779,25 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     assert installation_issue is not None and "unknown" in installation_issue
     assert run_issue is not None and "unknown" in run_issue
     with sessions.begin() as session:
+        session.execute(
+            update(ClusterMapping)
+            .where(ClusterMapping.id == mapping_id)
+            .values(node_count=1)
+        )
+        session.execute(
+            update(InstallationNode)
+            .where(InstallationNode.installation_id == installation_id)
+            .values(rank=0)
+        )
+        session.execute(update(RunNode).where(RunNode.run_id == run_id).values(rank=0))
+        session.execute(
+            update(RecipeInstallation)
+            .where(RecipeInstallation.id == installation_id)
+            .values(state="installed")
+        )
+        session.execute(
+            update(RecipeRun).where(RecipeRun.id == run_id).values(state="running")
+        )
         session.execute(
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == revision_id)

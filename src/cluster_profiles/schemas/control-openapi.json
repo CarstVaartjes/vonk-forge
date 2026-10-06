@@ -7016,7 +7016,14 @@
           },
           "installed": {
             "items": {
-              "$ref": "#/components/schemas/RecipePresence"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RecipePresence"
+                },
+                {
+                  "$ref": "#/components/schemas/UnavailableRecipePresence"
+                }
+              ]
             },
             "maxItems": 512,
             "title": "Installed",
@@ -7045,18 +7052,25 @@
             "title": "Ip Address"
           },
           "labels": {
-            "additionalProperties": {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxProperties": 64,
-            "propertyNames": {
-              "maxLength": 64,
-              "minLength": 1
-            },
-            "title": "Labels",
-            "type": "object"
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxProperties": 64,
+                "propertyNames": {
+                  "maxLength": 64,
+                  "minLength": 1
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
           },
           "lifecycle": {
             "maxLength": 64,
@@ -7066,11 +7080,35 @@
           },
           "loaded": {
             "items": {
-              "$ref": "#/components/schemas/RunPresence"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunPresence"
+                },
+                {
+                  "$ref": "#/components/schemas/UnavailableRunPresence"
+                }
+              ]
             },
             "maxItems": 512,
             "title": "Loaded",
             "type": "array"
+          },
+          "projection_issues": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 16,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Issues"
           },
           "reservations": {
             "$ref": "#/components/schemas/CapacityReservations"
@@ -33448,6 +33486,429 @@
           "projection_issue"
         ],
         "title": "UnavailableFleetProfileView",
+        "type": "object"
+      },
+      "UnavailableRecipePresence": {
+        "additionalProperties": false,
+        "description": "Known membership whose stored group evidence cannot be projected.",
+        "properties": {
+          "affected_ranks": {
+            "title": "Affected Ranks",
+            "type": "null"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "null"
+          },
+          "degraded_reason": {
+            "title": "Degraded Reason",
+            "type": "null"
+          },
+          "expected_rank_count": {
+            "anyOf": [
+              {
+                "maximum": 500.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Rank Count"
+          },
+          "group_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstallationState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "installation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "installed_bytes": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed Bytes"
+          },
+          "member_node_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "pattern": "^spk_[0-9a-f]{32}$",
+                  "type": "string"
+                },
+                "maxItems": 500,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Node Ids"
+          },
+          "present_ranks": {
+            "anyOf": [
+              {
+                "items": {
+                  "maximum": 499.0,
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "maxItems": 500,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Present Ranks"
+          },
+          "projection_issue": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Projection Issue",
+            "type": "string"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "maximum": 499.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "rank_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstallationState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recipe_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Id"
+          },
+          "recipe_revision_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Revision Id"
+          },
+          "required_bytes": {
+            "title": "Required Bytes",
+            "type": "null"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "topology_name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topology Name"
+          }
+        },
+        "required": [
+          "installation_id",
+          "projection_issue",
+          "complete"
+        ],
+        "title": "UnavailableRecipePresence",
+        "type": "object"
+      },
+      "UnavailableRunPresence": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alias"
+          },
+          "degraded_reason": {
+            "title": "Degraded Reason",
+            "type": "null"
+          },
+          "expected_rank_count": {
+            "anyOf": [
+              {
+                "maximum": 500.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Rank Count"
+          },
+          "group_state": {
+            "const": "unavailable",
+            "default": "unavailable",
+            "title": "Group State",
+            "type": "string"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "null"
+          },
+          "installation_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation Id"
+          },
+          "member_node_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "pattern": "^spk_[0-9a-f]{32}$",
+                  "type": "string"
+                },
+                "maxItems": 500,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Node Ids"
+          },
+          "option_choices": {
+            "title": "Option Choices",
+            "type": "null"
+          },
+          "present_ranks": {
+            "anyOf": [
+              {
+                "items": {
+                  "maximum": 499.0,
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "maxItems": 500,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Present Ranks"
+          },
+          "projection_issue": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Projection Issue",
+            "type": "string"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "maximum": 499.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "rank_age_seconds": {
+            "title": "Rank Age Seconds",
+            "type": "null"
+          },
+          "rank_fresh": {
+            "title": "Rank Fresh",
+            "type": "null"
+          },
+          "rank_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recipe_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Id"
+          },
+          "recipe_revision_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Revision Id"
+          },
+          "recipe_update": {
+            "title": "Recipe Update",
+            "type": "null"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "route_reason": {
+            "title": "Route Reason",
+            "type": "null"
+          },
+          "route_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RouteState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "run_id",
+          "projection_issue",
+          "healthy"
+        ],
+        "title": "UnavailableRunPresence",
         "type": "object"
       },
       "UninstallPhaseOperation": {
