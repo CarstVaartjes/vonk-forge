@@ -2269,12 +2269,12 @@ def test_a_refused_lock_is_a_named_wait_wherever_a_model_call_raises_it() -> Non
     assert module._failure_detail(busy) == module.DATABASE_BUSY_DETAIL
     assert module.DATABASE_BUSY_CODE in module._DEPENDENCY_WAIT_CODES
 
-    wrapped = module._model_queue_error(busy, "queueing the model download failed")
+    wrapped = module._ModelQueueFailed(busy, "queueing the model download failed")
     assert wrapped.code == module.DATABASE_BUSY_CODE
     assert wrapped.retryable is True
     assert "could not obtain lock" not in wrapped.detail
 
-    other = module._model_queue_error(
+    other = module._ModelQueueFailed(
         RuntimeError("the hub refused the token"), "queueing the model download failed"
     )
     # Any other failure keeps its own cause in the reason.
