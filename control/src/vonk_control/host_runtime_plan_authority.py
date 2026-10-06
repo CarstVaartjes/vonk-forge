@@ -351,7 +351,7 @@ def _service_stop_authority(
         )
     except (RecipeExecutionContractError, RecipeStopAuthorityError) as error:
         raise RuntimePlanEvidenceUnavailable(
-            "durable prior Start authority is unavailable",
+            "durable exact run ownership is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
     recovery_marker = parent.payload.get("recovery")
@@ -379,7 +379,7 @@ def _service_stop_authority(
         or operation.kind != "recipe.stop"
     ):
         raise RuntimePlanAuthorityRefused(
-            "service Stop differs from exact prior Start",
+            "service Stop differs from exact accepted run ownership",
             reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
         )
 
@@ -637,8 +637,13 @@ def _load_run_authority(
         or not nodes
         or run.mapping_id != installation.mapping_id
         or run.mapping_generation != installation.mapping_generation
-        or mapping.generation != run.mapping_generation
-        or mapping.recipe_revision_id != installation.recipe_revision_id
+        or (
+            require_launch_plan
+            and (
+                mapping.generation != run.mapping_generation
+                or mapping.recipe_revision_id != installation.recipe_revision_id
+            )
+        )
         or revision.kind != "recipe"
         or revision.schema_version != 2
         or revision.content_digest is None
@@ -655,8 +660,11 @@ def _load_run_authority(
                 != {(node.node_id, node.rank, node.role) for node in stored.nodes}
             )
         )
-        or {(node.node_id, node.rank, node.role) for node in nodes}
-        != {(node.node_id, node.rank, node.role) for node in mapping_nodes}
+        or (
+            require_launch_plan
+            and {(node.node_id, node.rank, node.role) for node in nodes}
+            != {(node.node_id, node.rank, node.role) for node in mapping_nodes}
+        )
     ):
         raise RuntimePlanAuthorityStale(
             "recipe run authority is stale",
