@@ -192,7 +192,7 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
         "verified_image_digest": "sha256:" + "d" * 64,
         "verified_oci_layout_sha256": "e" * 64,
         "cached_nodes": list(nodes),
-        "cached_target_totals": {node: 0 for node in nodes},
+        "cached_target_totals": {node: 11 for node in nodes},
     }
 
 
