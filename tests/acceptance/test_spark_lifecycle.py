@@ -2782,7 +2782,10 @@ class SparkLifecycle:
                     "synthetic canary preparation receipts are incomplete"
                 )
 
-            self._arm_start_receipt_loss()
+            # The carry lane is still running the published baseline here;
+            # journal repair is a candidate behavior exercised by the fresh lane.
+            if carry is None:
+                self._arm_start_receipt_loss()
             application_payload = self._load_canary_profile(
                 preview,
                 request_key=self._canary_request_key(fixture, node_id, "profile-load"),
@@ -2866,7 +2869,8 @@ class SparkLifecycle:
                 inference, fixture.serving_check, fixture.slug
             )
             completed.append("inference-ok")
-            self._verify_lost_start_replay(run_id)
+            if carry is None:
+                self._verify_lost_start_replay(run_id)
             if carry is not None:
                 # A carry that replaced the workload reports the installation
                 # and run that now serve, which the cleanup must remove.
