@@ -171,6 +171,61 @@ impl StateStore {
         })
     }
 
+    /// Restore a disposable local journal after proven stored-state damage.
+    /// The Controller remains the authority for claims and observes exact
+    /// effects before reissuing work. Keep the damaged journal for diagnostics.
+    pub fn open_recovered(path: &Path, node_id: &str) -> Result<Self, StateError> {
+        let opened = Self::open(path, node_id).and_then(|mut state| {
+            state.recover_interrupted()?;
+            state.pending_results()?;
+            state.unreconciled_results()?;
+            Ok(state)
+        });
+        let error = match opened {
+            Ok(state) => return Ok(state),
+            Err(error) => error,
+        };
+        let repairable = match &error {
+            StateError::Identity | StateError::ResultState | StateError::Protocol(_) => true,
+            StateError::Database(rusqlite::Error::SqliteFailure(code, _)) => matches!(
+                code.code,
+                rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase
+            ),
+            _ => false,
+        };
+        if !repairable {
+            return Err(error);
+        }
+        // open() refuses links and non-files. Do not turn an unsafe path or
+        // an I/O failure into permission to replace somebody else's file.
+        let metadata = fs::symlink_metadata(path)?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(std::io::Error::other("state database path is unsafe").into());
+        }
+        let quarantine =
+            path.with_file_name(format!("state.sqlite.corrupt-{}", uuid::Uuid::new_v4()));
+        // The connection has been dropped by this point. Move WAL companions
+        // with the database so old pages cannot contaminate the new journal.
+        for suffix in ["-wal", "-shm"] {
+            let source = PathBuf::from(format!("{}{suffix}", path.display()));
+            let destination = PathBuf::from(format!("{}{suffix}", quarantine.display()));
+            match fs::rename(source, destination) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        fs::rename(path, &quarantine)?;
+        if let Some(parent) = path.parent() {
+            fs::File::open(parent)?.sync_all()?;
+        }
+        eprintln!(
+            "vonk-agent: state-journal-recreated: {error}; retained at {}",
+            quarantine.display()
+        );
+        Self::open(path, node_id)
+    }
+
     pub fn reopen(&self) -> Result<Self, StateError> {
         Self::open(&self.path, &self.node_id)
     }

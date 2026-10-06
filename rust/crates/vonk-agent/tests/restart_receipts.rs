@@ -305,3 +305,52 @@ fn older_operation_journal_is_replaced_without_touching_credentials() {
     assert!(state.pending_results().unwrap().is_empty());
     assert_eq!(std::fs::read(sentinel).unwrap(), b"credential sentinel");
 }
+
+#[test]
+fn damaged_bookkeeping_is_quarantined_without_blocking_new_claims() {
+    // Previously each of these made the startup open loop retry forever.
+    for damage in ["sqlite", "identity", "fence", "operation"] {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.sqlite");
+        if damage == "sqlite" {
+            std::fs::write(&path, b"not a sqlite database").unwrap();
+        } else {
+            let mut state = StateStore::open(&path, NODE_ID).unwrap();
+            state.begin(&claim(), Utc::now()).unwrap();
+            drop(state);
+            let connection = rusqlite::Connection::open(&path).unwrap();
+            let sql = match damage {
+                "identity" => "UPDATE metadata SET value='foreign-node' WHERE key='node_id'",
+                "fence" => "UPDATE operations SET fence='invalid-fence'",
+                _ => "UPDATE operations SET operation='invalid-operation'",
+            };
+            connection.execute(sql, []).unwrap();
+        }
+        let mut recovered = StateStore::open_recovered(&path, NODE_ID).unwrap();
+        assert_eq!(
+            recovered.begin(&claim(), Utc::now()).unwrap(),
+            BeginDecision::Execute
+        );
+        assert!(std::fs::read_dir(directory.path()).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("state.sqlite.corrupt-")
+        }));
+    }
+}
+
+#[test]
+fn unsafe_state_path_is_not_replaced_by_recovery() {
+    let directory = tempdir().unwrap();
+    let target = directory.path().join("private");
+    std::fs::write(&target, b"keep").unwrap();
+    let path = directory.path().join("state.sqlite");
+    std::os::unix::fs::symlink(&target, &path).unwrap();
+    assert!(matches!(
+        StateStore::open_recovered(&path, NODE_ID),
+        Err(StateError::Io(_))
+    ));
+    assert_eq!(std::fs::read(target).unwrap(), b"keep");
+}

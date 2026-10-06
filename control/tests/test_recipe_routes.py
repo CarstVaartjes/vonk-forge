@@ -1343,8 +1343,10 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         patch.setattr(
             operation_api, "verify_active_route_bundle", renew_after_bundle_verification
         )
-        with pytest.raises(RuntimeError, match="ownership changed during projection"):
-            projection.profile_endpoint(3, "qwen", GATEWAY)
+        racing = projection.profile_endpoint(3, "qwen", GATEWAY)
+        assert racing.assignments is not None
+        assert racing.assignments[0].state == "unavailable"
+        assert racing.assignments[0].endpoint is None
     assert renewed_during_verification
     assert replacement_generation is not None
     assert replacement_generation > generation.generation
@@ -1370,11 +1372,10 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
             "verify_active_route_bundle",
             withdraw_after_bundle_verification,
         )
-        with pytest.raises(
-            RuntimeError,
-            match="active publication is unavailable|ownership changed during projection",
-        ):
-            projection.profile_endpoint(3, "qwen", GATEWAY)
+        racing = projection.profile_endpoint(3, "qwen", GATEWAY)
+        assert racing.assignments is not None
+        assert racing.assignments[0].state == "unavailable"
+        assert racing.assignments[0].endpoint is None
     assert withdrew_during_verification
 
     withdrawn = projection.profile_endpoint(3, "qwen", GATEWAY)

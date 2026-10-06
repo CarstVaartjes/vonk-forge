@@ -1130,7 +1130,7 @@ def create_app(
                 status_code=503, detail="operation projection unavailable"
             ) from None
         try:
-            return activity_detail(item)
+            return activity_detail(item, tolerate_unreadable=True)
         except BoundedJSONError as error:
             raise HTTPException(status_code=503, detail=str(error)[:256]) from None
         except (OSError, RuntimeError, TypeError, ValueError):

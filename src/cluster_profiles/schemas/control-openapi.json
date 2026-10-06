@@ -10462,7 +10462,6 @@
             "items": {
               "$ref": "#/components/schemas/FleetNode"
             },
-            "maxItems": 500,
             "title": "Nodes",
             "type": "array"
           }

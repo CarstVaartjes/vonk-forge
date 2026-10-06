@@ -16,7 +16,7 @@ from .library_contract import (
     RecipeDetailResponse,
     RecipeLibraryResponse,
 )
-from .library_projection import LibraryAssessmentUnavailable, LibrarySelectorAmbiguous
+from .library_projection import LibrarySelectorAmbiguous
 from .operation_api import RequestValidationProblem, bounded_error_responses
 from .request_fault import RequestFault
 from .strict_json import stored_document_detail
@@ -47,8 +47,6 @@ class SelectorAmbiguityHTTPError(HTTPException):
 
 
 def _error(error: Exception) -> HTTPException:
-    if isinstance(error, LibraryAssessmentUnavailable):
-        return HTTPException(status_code=503, detail=str(error))
     if isinstance(error, LibrarySelectorAmbiguous):
         return SelectorAmbiguityHTTPError(error)
     if isinstance(error, KeyError):

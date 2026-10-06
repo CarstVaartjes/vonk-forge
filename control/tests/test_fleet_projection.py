@@ -1763,9 +1763,7 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
     assert "install-000" not in installation_ids
 
 
-def test_projection_rejects_more_than_500_registered_nodes_before_state_queries() -> (
-    None
-):
+def test_projection_keeps_every_registered_node_visible_beyond_500() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -1779,21 +1777,11 @@ def test_projection_rejects_more_than_500_registered_nodes_before_state_queries(
                 for index in range(1, 502)
             ]
         )
-    statements: list[str] = []
-
-    def record_statement(_connection, _cursor, statement, _parameters, _context, _many):
-        statements.append(" ".join(statement.split()).lower())
-
-    event.listen(engine, "before_cursor_execute", record_statement)
-    with pytest.raises(ValueError, match="more than 500 registered nodes"):
-        FleetProjection(sessions, clock=lambda: NOW).read()
-    event.remove(engine, "before_cursor_execute", record_statement)
-
-    selects = [value for value in statements if value.startswith("select")]
-    assert len(selects) == 2
-    assert "from fleet_event_cursor" in selects[0]
-    assert "from agent_nodes" in selects[1]
-    assert "agent_node_profiles" not in " ".join(selects)
+    snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
+    assert len(snapshot.nodes) == 501
+    assert {item.id for item in snapshot.nodes} == {
+        f"spk_{index:032x}" for index in range(1, 502)
+    }
 
 
 def _stored_installation_plan(

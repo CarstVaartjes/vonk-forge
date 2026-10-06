@@ -36,3 +36,21 @@ def test_concurrent_fresh_startup_migrates_once(postgres_engine: Engine) -> None
             ).scalar_one()
             == expected_migration_head
         )
+
+
+def test_bookkeeping_adoption_failure_preserves_current_schema(
+    postgres_engine: Engine,
+    monkeypatch,
+) -> None:
+    from vonk_control import db
+
+    def broken_adoption(connection):
+        # PostgreSQL aborts the current transaction after this fault; only a
+        # real savepoint prevents it from undoing schema reconciliation.
+        connection.exec_driver_sql("SELECT * FROM missing_adoption_bookkeeping")
+
+    monkeypatch.setattr(db, "adopt_legacy_rows", broken_adoption)
+    initialize_database(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.connect() as connection:
+        db.verify_schema_is_current(connection)
+        assert connection.exec_driver_sql("SELECT 1").scalar_one() == 1

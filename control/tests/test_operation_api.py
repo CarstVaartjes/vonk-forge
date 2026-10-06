@@ -1736,10 +1736,10 @@ def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None
     client, operator, *_ = _client(operations=services)
 
     detail = client.get(f"/api/operations/{value['id']}", headers=operator)
-    assert detail.status_code == 503
-    assert detail.json()["detail"] == (
-        f"evidence download for operation {value['id']} is invalid"
-    )
+    assert detail.status_code == 200
+    assert detail.json()["id"] == value["id"]
+    assert detail.json()["kind"] == "unreadable"
+    assert detail.json()["state"] == "unavailable"
 
     listed = client.get("/api/operations", headers=operator)
     assert listed.status_code == 200

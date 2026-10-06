@@ -33,7 +33,7 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - 'until [ -f /run/vonk-runtime-assets/postgres/init-databases.sh ]; do sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/postgres/entrypoint.sh "$$@"'
+      - 'attempts=0; until [ -f /run/vonk-runtime-assets/postgres/init-databases.sh ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/postgres/init-databases.sh; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/postgres/entrypoint.sh "$$@"'
       - vonk-postgres-entrypoint
     command: [postgres]
     restart: unless-stopped
@@ -178,7 +178,7 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - 'until [ -f /run/vonk-runtime-assets/litellm/entrypoint.sh ]; do sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/litellm/entrypoint.sh'
+      - 'attempts=0; until [ -f /run/vonk-runtime-assets/litellm/entrypoint.sh ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/litellm/entrypoint.sh; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/litellm/entrypoint.sh'
     read_only: true
     user: "10002:10001"
     cap_drop: [ALL]
@@ -220,7 +220,7 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - 'until [ -f /run/vonk-runtime-assets/prometheus/prometheus.yml ]; do sleep 1; done; exec /bin/prometheus "$$@"'
+      - 'attempts=0; until [ -f /run/vonk-runtime-assets/prometheus/prometheus.yml ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/prometheus/prometheus.yml; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/prometheus "$$@"'
       - prometheus
     command:
       - --config.file=/run/vonk-runtime-assets/prometheus/prometheus.yml
@@ -262,7 +262,7 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - 'until [ -f /run/vonk-runtime-assets/grafana/provisioning/datasources/prometheus.yaml ]; do sleep 1; done; exec /run.sh "$$@"'
+      - 'attempts=0; until [ -f /run/vonk-runtime-assets/grafana/provisioning/datasources/prometheus.yaml ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/grafana/provisioning/datasources/prometheus.yaml; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /run.sh "$$@"'
       - grafana
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "false"
@@ -320,7 +320,7 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - 'until [ -f /run/vonk-runtime-assets/caddy/entrypoint.sh ]; do sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/caddy/entrypoint.sh'
+      - 'attempts=0; until [ -f /run/vonk-runtime-assets/caddy/entrypoint.sh ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/caddy/entrypoint.sh; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/caddy/entrypoint.sh'
     environment:
       VONK_CONTROL_HOSTNAME: ${VONK_CONTROL_HOSTNAME:?set the control hostname}
     secrets: [agent-client-ca, agent-proxy-auth, controller-server-certificate, controller-server-key]
@@ -349,8 +349,7 @@ services:
       - /bin/sh
       - -c
       - >-
-        until [ -f /run/vonk-runtime-assets/registry/config.yml ]; do sleep 1;
-        done; exec /entrypoint.sh /run/vonk-runtime-assets/registry/config.yml
+        attempts=0; until [ -f /run/vonk-runtime-assets/registry/config.yml ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/registry/config.yml; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /entrypoint.sh /run/vonk-runtime-assets/registry/config.yml
     volumes:
       - runtime-assets:/run/vonk-runtime-assets:ro
       - registry-data:/var/lib/registry

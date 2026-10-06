@@ -1609,18 +1609,25 @@ class _DurableOperationProjection:
                 # A new application or route generation between membership
                 # lookup and bundle verification must never authorize a stale
                 # endpoint. Fence the projection with a fresh SQL read.
-                with self._sessions() as session:
-                    current = self._profile_endpoint_intent(session, number)
-                    current_snapshot = self._publication_snapshot(session)
-                    if (
-                        current.profile_id != intent.profile_id
-                        or current.application_id != intent.application_id
-                        or current.assignments != intent.assignments
-                        or current_snapshot != snapshot
-                    ):
-                        raise RuntimeError(
-                            "profile endpoint ownership changed during projection"
+                try:
+                    with self._sessions() as session:
+                        current = self._profile_endpoint_intent(session, number)
+                        current_snapshot = self._publication_snapshot(session)
+                        unchanged = (
+                            current.profile_id == intent.profile_id
+                            and current.application_id == intent.application_id
+                            and current.assignments == intent.assignments
+                            and current_snapshot == snapshot
                         )
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    unchanged = False
+                if not unchanged:
+                    # Retain the readable membership, but never present a
+                    # stale endpoint as current after its ownership fence moved.
+                    endpoints.clear()
+                    for item in assignments:
+                        if item.expected_run_id is not None:
+                            states[item.assignment_id] = EndpointState.UNAVAILABLE
 
         return FleetProfileEndpointsView(
             number=intent.number,

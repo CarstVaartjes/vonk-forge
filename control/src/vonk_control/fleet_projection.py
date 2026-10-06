@@ -453,7 +453,7 @@ class FleetSnapshot(StrictModel):
     event_cursor: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     generated_at: datetime
     authority_revision: AuthorityRevision
-    nodes: list[FleetNode] = Field(max_length=_MAX_FLEET_NODES)
+    nodes: list[FleetNode]
 
 
 class FleetNodeIdentity(StrictModel):
@@ -661,11 +661,8 @@ class FleetProjection:
                     AgentNode.revoked_at.is_(None),
                 )
                 .order_by(AgentNode.node_id)
-                .limit(_MAX_FLEET_NODES + 1)
             )
         )
-        if len(rows) > _MAX_FLEET_NODES:
-            raise ValueError("Fleet contains more than 500 registered nodes")
         return {row.node_id: row for row in rows}
 
     @staticmethod

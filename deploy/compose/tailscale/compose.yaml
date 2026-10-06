@@ -81,7 +81,7 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - 'until [ -f /run/vonk-runtime-assets/tailscale/configure.sh ]; do sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/tailscale/configure.sh'
+      - 'attempts=0; until [ -f /run/vonk-runtime-assets/tailscale/configure.sh ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/tailscale/configure.sh; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/tailscale/configure.sh'
     environment:
       # Compose profiles are a client-side selection and are not inherited by
       # containers. Pass the selection explicitly so the healthcheck cannot
