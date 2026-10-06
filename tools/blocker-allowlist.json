@@ -486,6 +486,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "Direct completion retries the same fence and evidence after rollback on the bounded admission schedule; spent attempts return the unknown outcome for exact resend, never acknowledge an uncommitted result."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_sync.py",
+      "function": "ManagedRecipeCatalogSyncService._apply",
+      "catches": [
+        "SourceBundleUnknown"
+      ],
+      "reason": "A transient source ingress fault records an item problem and retains the previous catalog revision; the automatic sync repeats ingress on its normal bounded interval after storage recovers."
     }
   ],
   "call_edges": [
@@ -2496,37 +2504,37 @@
     {
       "family": "source_bundles.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: operation bookkeeping by default.",
+      "reason": "Missing or unreadable source evidence stays unknown. Normal image preparation durably retries storage faults and catalog sync repeats source ingress, but alternate read/check paths are not all statically proven; these sites retain their debt classification.",
       "sites": [
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.not_found", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.not_found", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_generated_bundle", "bundle.read_failed", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.read_failed", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_read_archive", "bundle.empty", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_read_archive", "bundle.read_failed", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "generate_source_bundle", "bundle.empty", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.get", "bundle.storage_unavailable", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.put", "bundle.storage_unavailable", 1]
       ]
     },
     {
       "family": "source_bundles.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
+      "reason": "Reject malformed source input before effects: empty file maps, empty uploaded archives, and invalid declared paths. These are caller-owned inputs, not transient managed storage evidence.",
       "sites": [
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_safe_path", "bundle.path_too_long", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_safe_path", "bundle.path_too_long", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleInvalid", "_read_archive", "bundle.empty", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleInvalid", "generate_source_bundle", "bundle.empty", 1]
       ]
     },
     {
       "family": "source_bundles.security-edge",
       "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class SourceBundleError verifies content at its ingress.",
+      "reason": "Digest and archive ingress integrity remain enforced; explicit managed storage permission denial stays a typed refusal and cannot trigger bundle healing or replacement.",
       "sites": [
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.manifest_invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.storage_collision", 2],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.put", "bundle.digest_mismatch", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.digest_invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.storage_collision", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.put", "bundle.digest_invalid", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.put", "bundle.digest_mismatch", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.duplicate_path", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.entry_forbidden", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.expanded_too_large", 1],
@@ -2538,7 +2546,11 @@
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_safe_path", "bundle.path_forbidden", 2],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_validate_digest", "source-bundle-digest-is-invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "generate_source_bundle", "bundle.file_invalid", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "parse_source_bundle_manifest", "bundle.manifest_invalid", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "parse_source_bundle_manifest", "bundle.manifest_invalid", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore._put", "bundle.digest_invalid", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore._put", "bundle.digest_mismatch", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleRefused", "SourceBundleStore.get", "source-bundle-storage-access-was-denied", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleRefused", "SourceBundleStore.put", "source-bundle-storage-access-was-denied", 1]
       ]
     },
     {
@@ -3775,6 +3787,16 @@
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor.preflight", "run-switch.preflight-recipe-changed", 1]
+      ]
+    },
+    {
+      "family": "recipe_builds.security-edge",
+      "category": "security-edge",
+      "reason": "Explicit source storage permission denial is propagated as a typed build refusal, never a source miss, regeneration request, or automatic repair.",
+      "sites": [
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._heal_source_bundle", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._verified_bundle.read", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "rederive_source_bundle_from_closure", "permission-denied", 1]
       ]
     },
     {

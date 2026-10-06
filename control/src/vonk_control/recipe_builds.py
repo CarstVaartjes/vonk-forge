@@ -92,7 +92,9 @@ from .runtime_adapters import (
 from .source_bundles import (
     GeneratedSourceBundle,
     SourceBundleError,
+    SourceBundleRefused,
     SourceBundleStoreProtocol,
+    SourceBundleUnknown,
     generate_source_bundle,
 )
 from .source_policy import (
@@ -675,6 +677,12 @@ def rederive_source_bundle_from_closure(
             if path.is_file() and not path.is_symlink()
         }
         bundle = generate_source_bundle(files)
+    except PermissionError as error:
+        raise RecipeBuildRefused(
+            SecurityRefusalReason.PERMISSION_DENIED.value,
+            "recipe source closure access was denied",
+            reason=SecurityRefusalReason.PERMISSION_DENIED,
+        ) from error
     except (OSError, ValueError, SourceBundleError):
         return None
     return bundle.archive if bundle.sha256 == source_sha256 else None
@@ -745,6 +753,12 @@ class RecipeBuildService:
         def read() -> GeneratedSourceBundle | SourceBundleError:
             try:
                 return self._bundles.get(source_sha256)
+            except SourceBundleUnknown:
+                raise
+            except SourceBundleRefused as error:
+                raise RecipeBuildRefused(
+                    error.code, str(error), reason=error.typed_reason
+                ) from error
             except SourceBundleError as error:
                 return error
 
@@ -784,6 +798,12 @@ class RecipeBuildService:
             return False
         try:
             self._bundles.put(source_sha256, io.BytesIO(archive))
+        except SourceBundleUnknown:
+            raise
+        except SourceBundleRefused as error:
+            raise RecipeBuildRefused(
+                error.code, str(error), reason=error.typed_reason
+            ) from error
         except SourceBundleError:
             return False
         _LOGGER.warning(
@@ -1382,6 +1402,8 @@ class RecipeBuildService:
 
         try:
             return self.resolve(recipe_revision_id).build_id
+        except (UnknownOutcomeError, SecurityRefusalError):
+            raise
         except (RecipeBuildError, KeyError, TypeError, ValueError):
             return None
 
