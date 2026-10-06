@@ -410,7 +410,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
                 from importlib.resources import files
                 from vonk_agent_protocol import AgentProtocolError, DistributionObject
                 from vonk_control.recipe_runtime_specs import compile_runtime_spec
-                from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+                from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256, read_model, read_recipe
 
                 def rejects(value):
                     try:
@@ -423,10 +423,10 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
                 model = json.loads(files("vonk_forge_contracts").joinpath("examples/model-definition.json").read_text())
                 RecipeDefinition.model_validate(recipe)
                 ModelDefinition.model_validate(model)
-                compiled = compile_runtime_spec(recipe, models={document_sha256(model): model}, package_handle={"image_digest": "d" * 64, "image_reference": "localhost/vonk/build@sha256:" + "d" * 64, "paths": ["context.tar", "Dockerfile"]}, role="entrypoint", rank=0)
+                compiled = compile_runtime_spec(read_recipe(recipe), recipe_digest=document_sha256(recipe), models={document_sha256(model): read_model(model)}, package_handle={"image_digest": "d" * 64, "image_reference": "localhost/vonk/build@sha256:" + "d" * 64, "paths": ["context.tar", "Dockerfile"]}, role="entrypoint", rank=0)
                 empty = DistributionObject.parse({"name": "support/empty.safetensors", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "bytes": 0, "kind": "model"})
                 inconsistent = rejects({"name": "support/empty.safetensors", "sha256": "0" * 64, "bytes": 0, "kind": "model"})
-                print(json.dumps({"protocol": importlib.metadata.version("vonk-agent-protocol"), "contracts": importlib.metadata.version("vonk-forge-public-contracts"), "model": ModelDefinition.__name__, "recipe": RecipeDefinition.__name__, "distribution": DistributionObject.__name__, "zero_byte_model": empty.bytes == 0, "inconsistent_zero_byte_rejected": inconsistent, "compiled_interface": compiled["runtime"]["interface"], "compiled_image": compiled["runtime"]["image"]}))
+                print(json.dumps({"protocol": importlib.metadata.version("vonk-agent-protocol"), "contracts": importlib.metadata.version("vonk-forge-public-contracts"), "model": ModelDefinition.__name__, "recipe": RecipeDefinition.__name__, "distribution": DistributionObject.__name__, "zero_byte_model": empty.bytes == 0, "inconsistent_zero_byte_rejected": inconsistent, "compiled_interface": compiled.runtime.interface, "compiled_image": compiled.runtime.image}))
                 """
             ),
         ],

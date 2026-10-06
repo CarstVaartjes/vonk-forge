@@ -38,7 +38,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.wire_model import Digest, WireModel
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
-from .categorized_errors import InvalidType, InvalidValue
+from .categorized_errors import InvalidValue
 from .categorized_faults import security_reason
 from .content_identity import ImageContent, differing_image_fields, same_image
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
@@ -54,6 +54,7 @@ from .runtime_adapters import (
     RuntimeAdapter,
     resolve_runtime_adapter,
 )
+from .runtime_spec_contract import RuntimeSpec
 from .validation_detail import validation_error_detail
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -1067,7 +1068,7 @@ class RuntimeImagePreparer(Protocol):
     def __call__(
         self,
         document: Mapping[str, object],
-        runtime_spec: Mapping[str, object],
+        runtime_spec: RuntimeSpec,
         build: RecipeBuild | None,
         *,
         before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
@@ -1090,17 +1091,11 @@ def make_runtime_image_receipt_preparer(
 
     def prepare(
         document: Mapping[str, object],
-        runtime_spec: Mapping[str, object],
+        runtime_spec: RuntimeSpec,
         build: RecipeBuild | None,
         *,
         before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
     ) -> RuntimeImageReceipt:
-        runtime = runtime_spec.get("runtime")
-        if not isinstance(runtime, Mapping):
-            raise InvalidType(
-                "compiled runtime projection is unavailable",
-                reason=InvalidRequestReason.NOT_FOUND,
-            )
         if build is None:
             raise InvalidValue(
                 "source build receipt is unavailable",
@@ -1117,7 +1112,7 @@ def make_runtime_image_receipt_preparer(
 
         return prepare_runtime_image(
             document,
-            runtime=runtime,
+            runtime=runtime_spec.runtime,
             storage=storage,
             transport=transport,
             build_receipt=build_receipt,
@@ -1130,7 +1125,7 @@ def make_runtime_image_receipt_preparer(
 
 def stored_runtime_image_resolver(
     storage: RuntimeImageStorage,
-) -> Callable[[object, str, object], RuntimeImageReceipt]:
+) -> Callable[[object, str, RuntimeSpec], RuntimeImageReceipt]:
     """Resolve a compiled image to the verified archive managed storage holds.
 
     The image is identified by its content: no recipe revision is consulted.
@@ -1139,17 +1134,9 @@ def stored_runtime_image_resolver(
     """
 
     def resolve(
-        _document: object, image_digest: str, runtime_spec: object
+        _document: object, image_digest: str, runtime_spec: RuntimeSpec
     ) -> RuntimeImageReceipt:
-        runtime = (
-            runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None
-        )
-        if not isinstance(runtime, Mapping):
-            raise InvalidType(
-                "runtime image preparation is required: runtime projection is unavailable",
-                reason=InvalidRequestReason.NOT_FOUND,
-            )
-        expectations = runtime_image_expectations(runtime)
+        expectations = runtime_image_expectations(runtime_spec.runtime)
         receipt = storage.find_verified(
             image_digest,
             expected_architecture=expectations["architecture"],

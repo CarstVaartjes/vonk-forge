@@ -175,6 +175,27 @@
       "annotation": "dict[str, object]",
       "count": 1,
       "reason": "The recipe document exactly as the signed library published it: its content digest is over these JSON values and is verified where it is imported."
+    },
+    {
+      "path": "control/src/vonk_control/runtime_spec_contract.py",
+      "function": "RuntimeSpec.document",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed runtime spec for tests and the digest; the exact JSON shape those digests were computed over is the contract."
+    },
+    {
+      "path": "control/src/vonk_control/runtime_spec_contract.py",
+      "function": "SpecRuntime.document",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed runtime for the execution-identity digest; the exact JSON shape those digests were computed over is the contract."
+    },
+    {
+      "path": "control/src/vonk_control/runtime_spec_contract.py",
+      "function": "_digest",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "Generic canonical-JSON digest utility over a document the caller built from typed values."
     }
   ],
   "debt": [
@@ -212,7 +233,7 @@
     },
     {
       "path": "control/src/vonk_control/availability_production.py",
-      "count": 12
+      "count": 10
     },
     {
       "path": "control/src/vonk_control/bounded_json.py",
@@ -241,10 +262,6 @@
     {
       "path": "control/src/vonk_control/compiled_artifact_contract.py",
       "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/compiled_execution_plan.py",
-      "count": 14
     },
     {
       "path": "control/src/vonk_control/contract_graph.py",
@@ -276,7 +293,7 @@
     },
     {
       "path": "control/src/vonk_control/execution_plan_service.py",
-      "count": 22
+      "count": 6
     },
     {
       "path": "control/src/vonk_control/failure_evidence.py",
@@ -296,7 +313,7 @@
     },
     {
       "path": "control/src/vonk_control/harnesses/canonical.py",
-      "count": 8
+      "count": 5
     },
     {
       "path": "control/src/vonk_control/host_helper_authority.py",
@@ -304,7 +321,7 @@
     },
     {
       "path": "control/src/vonk_control/install_admission.py",
-      "count": 15
+      "count": 10
     },
     {
       "path": "control/src/vonk_control/jobs.py",
@@ -432,7 +449,7 @@
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
-      "count": 54
+      "count": 51
     },
     {
       "path": "control/src/vonk_control/recipe_packages.py",
@@ -448,11 +465,11 @@
     },
     {
       "path": "control/src/vonk_control/recipe_runtime_specs.py",
-      "count": 19
+      "count": 2
     },
     {
       "path": "control/src/vonk_control/recipe_start_payloads.py",
-      "count": 5
+      "count": 3
     },
     {
       "path": "control/src/vonk_control/recipe_stop_payloads.py",
@@ -496,7 +513,7 @@
     },
     {
       "path": "control/src/vonk_control/runtime_image_preparation.py",
-      "count": 16
+      "count": 14
     },
     {
       "path": "control/src/vonk_control/runtime_preflight.py",
@@ -532,7 +549,7 @@
     },
     {
       "path": "control/src/vonk_control/worker.py",
-      "count": 4
+      "count": 3
     }
   ]
 }

@@ -71,6 +71,7 @@ from vonk_control.recipe_operations import (
 from vonk_control.recipe_runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
+    split_option_choices,
 )
 from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.run_switch_contract import (
@@ -1487,11 +1488,11 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
 
     def resolve_runtime_image(document, requested_digest, runtime_spec):
         assert requested_digest == image_digest
-        runtime = runtime_spec["runtime"]
+        runtime = runtime_spec.runtime
         receipt = controller_storage.find_verified(
             requested_digest,
-            expected_architecture=runtime["architecture"],
-            expected_runtime_interface=runtime["interface"],
+            expected_architecture=runtime.architecture,
+            expected_runtime_interface=runtime.interface,
         )
         if receipt is None:
             raise RuntimeError("verified runtime image receipt is unavailable")
@@ -1561,14 +1562,15 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     build = session.get(RecipeBuild, build_id)
                     assert revision is not None and build is not None
                     entities = resolve_recipe_entities(session, revision.document)
+                    option_choices, settings = split_option_choices(
+                        plan.mapping.parameters if plan.mapping is not None else None
+                    )
                     runtime_spec = compile_runtime_spec(
-                        revision.document,
-                        resolved_entities=entities,
-                        parameters=(
-                            dict(plan.mapping.parameters)
-                            if plan.mapping is not None
-                            else {}
-                        ),
+                        entities.recipe,
+                        recipe_digest=entities.recipe_digest,
+                        models=entities.models,
+                        parameters=settings,
+                        option_choices=option_choices,
                         role=plan.spark_group.nodes[0].role,
                         rank=plan.spark_group.nodes[0].rank,
                         package_handle={
@@ -1580,7 +1582,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     )
                     receipt = prepare_runtime_image(
                         revision.document,
-                        runtime=runtime_spec["runtime"],
+                        runtime=runtime_spec.runtime.document(),
                         storage=controller_storage,
                         transport=transport,
                         build_receipt={

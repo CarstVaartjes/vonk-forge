@@ -5,7 +5,7 @@ from pathlib import Path
 
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.source_policy import dockerfile_base_images
-from vonk_forge_contracts import document_sha256
+from vonk_forge_contracts import document_sha256, read_model, read_recipe
 
 from .canonical_recipe_fixtures import canonical_example
 
@@ -29,8 +29,9 @@ def test_synthetic_v2_source_build_compiles_with_a_canonical_receipt() -> None:
 
     digest = "d" * 64
     spec = compile_runtime_spec(
-        recipe,
-        models={document_sha256(model): model},
+        read_recipe(recipe),
+        recipe_digest=document_sha256(recipe),
+        models={document_sha256(model): read_model(model)},
         package_handle={
             "image_digest": digest,
             "image_reference": f"localhost/vonk/build@sha256:{digest}",
@@ -38,7 +39,7 @@ def test_synthetic_v2_source_build_compiles_with_a_canonical_receipt() -> None:
         },
         role="entrypoint",
         rank=0,
-    )
+    ).document()
 
     runtime = spec["runtime"]
     assert isinstance(runtime, Mapping)

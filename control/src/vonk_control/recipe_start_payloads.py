@@ -11,6 +11,9 @@ from vonk_agent_protocol import (
     RecipeStartPayload,
     canonical_message,
 )
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledExecutionPlan as WireCompiledExecutionPlan,
+)
 
 from .run_switch_contract import MemoryKind
 
@@ -50,7 +53,7 @@ def build_recipe_start_payload(
     placement: RecipeStartPlacement,
     compiled_endpoint_address: str | None,
     world_size: int,
-    compiled_execution_plan: Mapping[str, object],
+    compiled_execution_plan: WireCompiledExecutionPlan,
     master_address: str | None,
     master_port: int | None,
     phase: str | None = None,
@@ -89,7 +92,7 @@ def build_recipe_start_payload(
 
 
 def _bind_compiled_execution_plan(
-    value: Mapping[str, object],
+    value: WireCompiledExecutionPlan,
     *,
     placement: RecipeStartPlacement,
     endpoint_address: str | None,

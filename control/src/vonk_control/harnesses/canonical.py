@@ -22,6 +22,7 @@ from vonk_forge_contracts.resolver import (
 )
 
 from ..platform_ports import rebind_port_argument, serving_port
+from ..runtime_spec_contract import SpecArtifact, SpecModelIdentity, SpecModelMount
 from ..runtime_writable_paths import (
     RUNTIME_REQUIREMENT_DECLARATION,
     RuntimeWritablePath,
@@ -293,13 +294,13 @@ def _merge_environment(
 
 def _model_mounts(
     recipe: RecipeDefinition, models: Mapping[str, ModelDefinition], role: str
-) -> tuple[tuple[dict[str, object], HarnessMount], ...]:
+) -> tuple[tuple[SpecArtifact, HarnessMount], ...]:
     try:
         validate_recipe_models(recipe, models)
     except ContractResolutionError as error:
         raise HarnessCompileError(str(error)) from error
     by_identity = {(m.identity.publisher, m.identity.slug): m for m in models.values()}
-    selected: list[tuple[dict[str, object], HarnessMount]] = []
+    selected: list[tuple[SpecArtifact, HarnessMount]] = []
     mounts_by_key: dict[tuple[str, str], HarnessMount] = {}
     target_owner: dict[str, str] = {}
     for selection in recipe.models:
@@ -324,19 +325,21 @@ def _model_mounts(
             )
             selected.append(
                 (
-                    {
-                        "id": selector.id,
-                        "selection_id": selection.id,
-                        "file_id": selector.file_id,
-                        "path": files[selector.file_id].path,
-                        "roles": list(selector.roles),
-                        "mount": {"source": source, "target": selector.mount.target},
-                        "model": {
-                            "publisher": selection.model.publisher,
-                            "slug": selection.model.slug,
-                            "content_sha256": selection.model.content_sha256,
-                        },
-                    },
+                    SpecArtifact(
+                        id=selector.id,
+                        selection_id=selection.id,
+                        file_id=selector.file_id,
+                        path=files[selector.file_id].path,
+                        roles=list(selector.roles),
+                        mount=SpecModelMount(
+                            source=source, target=selector.mount.target
+                        ),
+                        model=SpecModelIdentity(
+                            publisher=selection.model.publisher,
+                            slug=selection.model.slug,
+                            content_sha256=selection.model.content_sha256,
+                        ),
+                    ),
                     mount,
                 )
             )
@@ -427,7 +430,7 @@ def compile_canonical_harness(
     role: str,
     rank: int,
     settings: Mapping[str, object] | None = None,
-) -> tuple[HarnessProjection, tuple[dict[str, object], ...], str]:
+) -> tuple[HarnessProjection, tuple[SpecArtifact, ...], str]:
     slug = recipe.runtime.engine
     if slug not in _BUILTINS:
         raise HarnessCompileError(f"unknown execution harness: {slug}")

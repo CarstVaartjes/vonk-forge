@@ -1730,12 +1730,8 @@ class RunSwitchFleetProfileAdapter:
                 "the recipe revision is not stored",
             )
         resolved = resolve_recipe_entities(session, revision.document)
-        models = resolved.get("models")
-        model_digest = (
-            models[0].content_digest
-            if isinstance(models, Sequence) and models
-            else None
-        )
+        models = resolved.model_revisions
+        model_digest = models[0].content_digest if models else None
         if not isinstance(model_digest, str):
             # The recipe revision this assignment names no longer resolves to an
             # exact model: unknown, not a verdict.  The caller leaves the
@@ -10084,10 +10080,10 @@ class FleetProfileService:
             resources = (
                 cache.resources if cache is not None else CachedResourceEstimate()
             )
-            model_document = sequence(
-                resolve_recipe_entities(session, revision.document).get("models", ())
-            )
-            candidate_model = next(iter(model_document or ()), None)
+            model_document = resolve_recipe_entities(
+                session, revision.document
+            ).model_revisions
+            candidate_model = next(iter(model_document), None)
             model = (
                 candidate_model
                 if isinstance(candidate_model, CatalogDocumentRevision)
@@ -10346,10 +10342,10 @@ class FleetProfileService:
         # here is a referenced model revision that is not currently active,
         # for which a missing display title is deliberate.
         try:
-            models = resolve_recipe_entities(session, document).get("models")
+            models = resolve_recipe_entities(session, document).model_revisions
         except (KeyError, RuntimeError, TypeError, ValueError):
             return None
-        if not isinstance(models, Sequence) or not models:
+        if not models:
             return None
         model = models[0]
         root = session.get(CatalogDocument, model.document_id)

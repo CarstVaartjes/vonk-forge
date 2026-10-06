@@ -7,11 +7,10 @@ adds the platform execution invariants at the final boundary.
 
 from __future__ import annotations
 
-import copy
-import hashlib
-import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.recipe_jobs import MAX_TIMEOUT_SECONDS
@@ -22,7 +21,7 @@ from vonk_forge_contracts import (
     document_sha256,
     read_recipe,
 )
-from vonk_forge_contracts.recipe import RecipeTopology
+from vonk_forge_contracts.recipe import RecipeTopology, Scalar
 from vonk_forge_contracts.resolver import (
     ContractResolutionError,
     validate_recipe_package_paths,
@@ -33,6 +32,23 @@ from .harnesses.canonical import compile_canonical_harness
 from .harnesses.common import HarnessCompileError
 from .models import CatalogDocumentRevision
 from .platform_ports import serving_port
+from .runtime_spec_contract import (
+    RuntimeSpec,
+    SpecArgument,
+    SpecEndpoint,
+    SpecEnvironmentEntry,
+    SpecIdentity,
+    SpecJob,
+    SpecLifecycle,
+    SpecModelDependency,
+    SpecModelMount,
+    SpecPlacementEnvironment,
+    SpecRuntime,
+    SpecSecurity,
+    SpecTelemetry,
+    SpecTopology,
+    SpecWritablePath,
+)
 from .runtime_writable_paths import document as writable_path_document
 
 RUNTIME_INTERFACE = "vonk.runtime.v1"
@@ -47,20 +63,27 @@ class RecipeRuntimeSpecError(ValueError):
     """The canonical recipe cannot produce a secure runtime projection."""
 
 
+_SETTING_VALUES = TypeAdapter(dict[str, Scalar])
+
+
 def split_option_choices(
     parameters: Mapping[str, object] | None,
-) -> tuple[dict[str, str], dict[str, object]]:
+) -> tuple[dict[str, str], dict[str, Scalar]]:
     """Separate the recipe-option choices from the setting values."""
 
     settings = dict(parameters or {})
     raw = settings.pop(OPTION_CHOICES_KEY, None)
+    try:
+        values = _SETTING_VALUES.validate_python(settings, strict=True)
+    except ValidationError as error:
+        raise RecipeRuntimeSpecError("recipe setting values are invalid") from error
     if raw is None:
-        return {}, settings
+        return {}, values
     if not isinstance(raw, Mapping) or any(
         type(name) is not str or type(value) is not str for name, value in raw.items()
     ):
         raise RecipeRuntimeSpecError("recipe option choices are invalid")
-    return dict(raw), settings
+    return dict(raw), values
 
 
 def recipe_topology(value: object) -> RecipeTopology:
@@ -83,28 +106,11 @@ def _recipe(value: object) -> RecipeDefinition:
         ) from error
 
 
-def _recipe_digest(value: object, resolved: Mapping[str, object]) -> str:
-    digest = resolved.get("recipe_digest")
-    if not isinstance(digest, str):
-        digest = getattr(value, "content_digest", None)
-    if not isinstance(digest, str) and isinstance(value, Mapping):
-        digest = document_sha256(value)
-    if not isinstance(digest, str):
-        raise RecipeRuntimeSpecError("recipe document digest is unavailable")
-    return digest
-
-
 def _models(value: object) -> dict[str, ModelDefinition]:
     try:
         return read_model_set(value)
     except Exception as error:
         raise RecipeRuntimeSpecError("canonical model projection is invalid") from error
-
-
-def _package(value: object, resolved: Mapping[str, object]) -> object:
-    if value is not None:
-        return value
-    return resolved.get("package_handle")
 
 
 def _artifact_inputs(package: object) -> dict[str, str]:
@@ -152,56 +158,37 @@ def _package_paths(package: object) -> Sequence[str] | None:
     return raw
 
 
-def _resolved_inputs(
-    resolved_entities: Mapping[str, object] | None,
-    models: object,
-    package_handle: object,
-) -> tuple[dict[str, ModelDefinition], object]:
-    resolved = {} if resolved_entities is None else dict(resolved_entities)
-    allowed = {"recipe", "recipe_digest", "models", "package_handle"}
-    unknown = set(resolved) - allowed
-    if unknown:
-        raise RecipeRuntimeSpecError("resolved inputs contain retired authorities")
-    supplied_models = models if models is not None else resolved.get("models")
-    return _models(supplied_models), _package(package_handle, resolved)
-
-
 def compile_runtime_spec(
-    recipe: RecipeDefinition | Mapping[str, object] | object,
-    resolved_entities: Mapping[str, object] | None = None,
-    parameters: Mapping[str, object] | None = None,
-    role: str | None = None,
-    rank: int | None = None,
+    recipe: RecipeDefinition,
     *,
-    models: object = None,
-    package_handle: object = None,
-    recipe_digest: str | None = None,
-) -> dict[str, object]:
+    recipe_digest: str,
+    models: Mapping[str, ModelDefinition],
+    package_handle: object,
+    parameters: Mapping[str, Scalar] | None = None,
+    option_choices: Mapping[str, str] | None = None,
+    role: str,
+    rank: int,
+) -> RuntimeSpec:
     """Compile one canonical recipe role into a secure runtime transport.
 
-    ``resolved_entities`` is retained as the composition seam name used by
-    callers, but only canonical model projections and a package/build handle
-    are accepted.  Retired harness/distribution/patch identities are rejected.
+    Only canonical model projections and a package/build handle are accepted;
+    retired harness/distribution/patch identities have no place to enter.
     """
-    parsed = _recipe(recipe)
-    option_choices, parameters = split_option_choices(parameters)
-    if parsed.options or option_choices:
+    parsed = recipe
+    choices = dict(option_choices or {})
+    settings = dict(parameters or {})
+    if parsed.options or choices:
         # The chosen values become ordinary runtime arguments and environment,
         # so the platform checks below apply to them exactly as to authored ones.
         try:
-            parsed = parsed.with_option_choices(option_choices)
+            parsed = parsed.with_option_choices(choices)
         except RecipeOptionError as error:
             raise RecipeRuntimeSpecError(str(error)) from error
-    if resolved_entities is not None and not isinstance(resolved_entities, Mapping):
-        raise RecipeRuntimeSpecError("resolved canonical inputs are invalid")
     if type(role) is not str or not role:
         raise RecipeRuntimeSpecError("mapped role is invalid")
     if type(rank) is not int or isinstance(rank, bool) or rank < 0:
         raise RecipeRuntimeSpecError("mapped rank is invalid")
-    supplied_models, package = _resolved_inputs(
-        resolved_entities, models, package_handle
-    )
-    recipe_digest = recipe_digest or _recipe_digest(recipe, resolved_entities or {})
+    package = package_handle
     try:
         # The package handle is also the exact closure authority when member
         # paths are available.  Source/build inputs are never inferred from a
@@ -211,11 +198,11 @@ def compile_runtime_spec(
             validate_recipe_package_paths(parsed, paths)
         projection, artifacts, _image_digest = compile_canonical_harness(
             parsed,
-            supplied_models,
+            models,
             package,
             role=role,
             rank=rank,
-            settings=parameters,
+            settings=settings,
         )
     except (
         HarnessCompileError,
@@ -234,132 +221,108 @@ def compile_runtime_spec(
         # contract; a projection without one is an internal contract failure,
         # not a runtime default.
         raise RecipeRuntimeSpecError("canonical harness telemetry is missing")
-    environment = writable_path_document(
+    writable = writable_path_document(
         parsed.runtime.engine, projection.environment, projection.writable_paths
     )
-    compiled_arguments = _compiled_arguments(parsed, parameters)
-    runtime: dict[str, object] = {
-        "interface": RUNTIME_INTERFACE,
-        "adapter": projection.slug,
-        "adapter_version": projection.contract_version,
-        "telemetry": {
-            "engine": parsed.runtime.engine,
-            "engine_version": None,
-            "metrics_format": (
+    runtime = SpecRuntime(
+        interface=RUNTIME_INTERFACE,
+        adapter=projection.slug,
+        adapter_version=projection.contract_version,
+        telemetry=SpecTelemetry(
+            engine=parsed.runtime.engine,
+            engine_version=None,
+            metrics_format=(
                 None
                 if telemetry.path is None
                 else "comfyui-queue"
                 if telemetry.adapter == "comfyui"
                 else "prometheus"
             ),
-            "metrics_path": telemetry.path,
-        },
-        "image": projection.image,
-        "architecture": "linux/arm64",
-        "entrypoint": list(projection.command),
-        "arguments": compiled_arguments,
-        "environment": [
-            {"name": name, "value": value} for name, value in projection.environment
+            metrics_path=telemetry.path,
+        ),
+        image=projection.image,
+        architecture="linux/arm64",
+        entrypoint=list(projection.command),
+        arguments=_compiled_arguments(parsed, settings),
+        environment=[
+            SpecEnvironmentEntry(name=name, value=value)
+            for name, value in projection.environment
         ],
-        "writable_paths": environment,
-    }
-    if parsed.topology.node_count > 1:
-        runtime["placement_environment"] = {
-            "local_address": "VONK_LOCAL_ADDR",
-            "master_address": "VONK_MASTER_ADDR",
-            "master_port": "VONK_MASTER_PORT",
-        }
+        writable_paths=[SpecWritablePath.model_validate(item) for item in writable],
+        placement_environment=(
+            SpecPlacementEnvironment() if parsed.topology.node_count > 1 else None
+        ),
+    )
     artifact_inputs = _artifact_inputs(package)
-    dependencies = []
-    for selection in parsed.models:
-        dependencies.append(
-            {
-                "selection_id": selection.id,
-                "publisher": selection.model.publisher,
-                "slug": selection.model.slug,
-                "content_sha256": selection.model.content_sha256,
-                "artifact_key": artifact_inputs.get(selection.id),
-            }
+    dependencies = [
+        SpecModelDependency(
+            selection_id=selection.id,
+            publisher=selection.model.publisher,
+            slug=selection.model.slug,
+            content_sha256=selection.model.content_sha256,
+            artifact_key=artifact_inputs.get(selection.id),
         )
+        for selection in parsed.models
+    ]
     # Model and input mounts are read-only; the output mount is writable.
     mounts = [
-        {"source": mount.source, "target": mount.target}
+        SpecModelMount(source=mount.source, target=mount.target)
         for mount in projection.model_mounts
     ]
-    mounts.append({"source": "/run/vonk/outputs", "target": "/outputs"})
+    mounts.append(SpecModelMount(source="/run/vonk/outputs", target="/outputs"))
     if projection.input_mount is not None:
-        mounts.append({"source": "/run/vonk/inputs", "target": "/inputs"})
-    security = {
-        "gpu": projection.gpu,
-        "user": projection.user,
-        "network_mode": projection.network_mode,
-        "mounts": mounts,
-    }
-    lifecycle_spec = {
-        "stop_timeout_seconds": parsed.runtime.lifecycle.stop_timeout_seconds,
-    }
-    topology_spec = {
-        "name": parsed.topology.name,
-        "node_count": parsed.topology.node_count,
-        "rank": rank,
-        "role": role,
-    }
-    identity: dict[str, object] = {
-        "recipe_revision_sha256": recipe_digest,
-        "model_dependencies": dependencies,
-        "harness_sha256": binding.harness_content_sha256,
-        "execution_sha256": None,
-        "build_input_sha256": _build_input_digest(package),
-    }
-    spec: dict[str, object] = {
-        "identity": identity,
-        "model_dependencies": dependencies,
-        "runtime": runtime,
+        mounts.append(SpecModelMount(source="/run/vonk/inputs", target="/inputs"))
+    spec = RuntimeSpec(
+        identity=SpecIdentity(
+            recipe_revision_sha256=recipe_digest,
+            model_dependencies=dependencies,
+            harness_sha256=binding.harness_content_sha256,
+            execution_sha256=None,
+            build_input_sha256=_build_input_digest(package),
+        ),
+        model_dependencies=dependencies,
+        runtime=runtime,
         # These are compiler output, assembled from ModelDefinition selectors;
         # they are not a second recipe authoring authority.
-        "artifacts": copy.deepcopy(list(artifacts)),
-        "security": security,
-        "lifecycle": lifecycle_spec,
-        "topology": topology_spec,
-    }
-    if interface.adapter == "openai":
-        spec["endpoint"] = {
-            "port": serving_port(interface.port, node_count=parsed.topology.node_count),
-            "model_aliases": list(interface.model_aliases),
-            "health_path": interface.health_path,
-        }
-    else:
-        spec["job"] = {
-            "interface": interface.adapter,
-            "input": (
-                None
-                if interface.input is None
-                else interface.input.model_dump(mode="json")
-            ),
-            "timeout_seconds": MAX_TIMEOUT_SECONDS,
-        }
-    identity["execution_sha256"] = _execution_digest(
-        {
-            "harness_sha256": binding.harness_content_sha256,
-            "model_dependencies": dependencies,
-            "artifacts": artifacts,
-            "runtime": runtime,
-            "security": security,
-            "lifecycle": lifecycle_spec,
-            "topology": topology_spec,
-            "interface": spec.get("endpoint", spec.get("job")),
-        }
+        artifacts=list(artifacts),
+        security=SpecSecurity(
+            gpu=projection.gpu,
+            user=projection.user,
+            network_mode=projection.network_mode,
+            mounts=mounts,
+        ),
+        lifecycle=SpecLifecycle(
+            stop_timeout_seconds=parsed.runtime.lifecycle.stop_timeout_seconds
+        ),
+        topology=SpecTopology(
+            name=parsed.topology.name,
+            node_count=parsed.topology.node_count,
+            rank=rank,
+            role=role,
+        ),
+        endpoint=(
+            SpecEndpoint(
+                port=serving_port(
+                    interface.port, node_count=parsed.topology.node_count
+                ),
+                model_aliases=list(interface.model_aliases),
+                health_path=interface.health_path,
+            )
+            if interface.adapter == "openai"
+            else None
+        ),
+        job=(
+            None
+            if interface.adapter == "openai"
+            else SpecJob(
+                interface=interface.adapter,
+                input=interface.input,
+                timeout_seconds=MAX_TIMEOUT_SECONDS,
+            )
+        ),
     )
+    spec.identity.execution_sha256 = spec.compile_identity_sha256()
     return spec
-
-
-def _execution_digest(projection: Mapping[str, object]) -> str:
-    """Hash only normalized compiled launch behavior and platform invariants."""
-    return hashlib.sha256(
-        json.dumps(
-            projection, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-        ).encode()
-    ).hexdigest()
 
 
 def _build_input_digest(package: object) -> str | None:
@@ -387,9 +350,9 @@ def _build_input_digest(package: object) -> str | None:
 
 
 def _compiled_arguments(
-    recipe: RecipeDefinition, supplied: Mapping[str, object] | None
-) -> list[dict[str, object]]:
-    values: dict[str, object] = {}
+    recipe: RecipeDefinition, supplied: Mapping[str, Scalar] | None
+) -> list[SpecArgument]:
+    values: dict[str, Scalar] = {}
     for name in ("context_tokens", "concurrency", "max_batch_tokens"):
         setting = getattr(recipe.settings, name, None)
         if setting is not None:
@@ -399,16 +362,35 @@ def _compiled_arguments(
     )
     if supplied:
         values.update(supplied)
-    result: list[dict[str, object]] = []
-    for argument in recipe.runtime.arguments:
-        value = argument.value if argument.setting is None else values[argument.setting]
-        result.append({"name": argument.name, "value": value})
-    return result
+    return [
+        SpecArgument(
+            name=argument.name,
+            value=argument.value
+            if argument.setting is None
+            else values[argument.setting],
+        )
+        for argument in recipe.runtime.arguments
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedRecipe:
+    """A canonical recipe with the exact active Model revisions it selects."""
+
+    recipe: RecipeDefinition
+    recipe_digest: str
+    model_revisions: tuple[CatalogDocumentRevision, ...]
+
+    @property
+    def models(self) -> dict[str, ModelDefinition]:
+        """The Model documents keyed by the digest recipes reference."""
+
+        return read_model_set(self.model_revisions)
 
 
 def resolve_recipe_entities(
     session: Session, document: Mapping[str, object]
-) -> dict[str, object]:
+) -> ResolvedRecipe:
     """Resolve a canonical recipe and its exact active Model revisions."""
     try:
         recipe = read_recipe(document)
@@ -434,15 +416,16 @@ def resolve_recipe_entities(
         if revision is None:
             raise RecipeRuntimeSpecError("exact recipe model is not active")
         models.append(revision)
-    return {
-        "recipe": recipe,
-        "recipe_digest": document_sha256(document),
-        "models": tuple(models),
-    }
+    return ResolvedRecipe(
+        recipe=recipe,
+        recipe_digest=document_sha256(document),
+        model_revisions=tuple(models),
+    )
 
 
 __all__ = [
     "RecipeRuntimeSpecError",
+    "ResolvedRecipe",
     "compile_runtime_spec",
     "resolve_recipe_entities",
 ]

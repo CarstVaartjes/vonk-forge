@@ -13,42 +13,48 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledExecutionPlan as WireCompiledExecutionPlan,
+)
+from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, read_recipe
+from vonk_forge_contracts.model import ModelFile
+from vonk_forge_contracts.recipe import Scalar
 
-from .catalog_revision_contract import read_model_set
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
     CompiledRuntimeImage,
+    DistributionObjectReceipt,
+    VerifiedModelObject,
     compile_verified_execution_plan,
-    execution_identity_sha256,
 )
 from .distribution import ModelCacheObjectSource
 from .models import CatalogDocumentRevision, ClusterMappingNode, RecipeBuild
 from .recipe_runtime_specs import (
-    OPTION_CHOICES_KEY,
     RecipeRuntimeSpecError,
+    ResolvedRecipe,
     compile_runtime_spec,
     resolve_recipe_entities,
+    split_option_choices,
 )
 from .runtime_image_preparation import RuntimeImageReceipt
+from .runtime_spec_contract import RuntimeSpec, SpecArtifact, SpecModelMount
 
 
 def compile_job_invocation(
     session: Session,
     *,
     revision: CatalogDocumentRevision,
-    installed: object,
+    installed: WireCompiledExecutionPlan,
     build: RecipeBuild | None,
-    parameters: Mapping[str, object],
+    parameters: Mapping[str, Scalar],
     timeout_seconds: int,
     memory_floor_bytes: int,
     reserved_memory_bytes: int,
     option_choices: Mapping[str, str] | None = None,
-) -> dict[str, object]:
+) -> WireCompiledExecutionPlan:
     """Compile invocation settings against the installation's exact receipts."""
-    from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
-
-    plan = CompiledExecutionPlan.model_validate(installed)
+    plan = installed
     recipe = read_recipe(revision.document)
     if plan.job is None or not 1 <= timeout_seconds <= plan.job.timeout_seconds:
         raise ExecutionPlanCompilationError(
@@ -79,7 +85,7 @@ def compile_job_invocation(
     if type(reserved_memory_bytes) is not int or reserved_memory_bytes <= 0:
         raise ExecutionPlanCompilationError("job memory reservation is invalid")
     resolved = resolve_recipe_entities(session, revision.document)
-    models = _canonical_models(resolved["models"])
+    models = resolved.models
     if build is None:
         raise ExecutionPlanCompilationError("job build receipt is unavailable")
     runtime_spec = compile_runtime_spec(
@@ -87,20 +93,14 @@ def compile_job_invocation(
         recipe_digest=revision.content_digest,
         models=models,
         package_handle=_build_package(build),
+        parameters=parameters,
         # The job runs with the recipe options its installation was made with.
-        parameters=(
-            {**parameters, OPTION_CHOICES_KEY: dict(option_choices)}
-            if option_choices
-            else parameters
-        ),
+        option_choices=option_choices,
         role=plan.runtime.placement.role,
         rank=plan.runtime.placement.rank,
     )
     runtime_spec = _bind_runtime_artifacts(runtime_spec, models)
-    runtime = runtime_spec.get("runtime")
-    compiled_image_digest = _image_digest(
-        runtime.get("image") if isinstance(runtime, Mapping) else None
-    )
+    compiled_image_digest = _image_digest(runtime_spec.runtime.image)
     # The installed plan binds the exact reviewed runtime image, and a
     # repaired build row can acquire a different image digest after
     # installation.  The stored plan carries no execution digest of its own
@@ -111,44 +111,46 @@ def compile_job_invocation(
         raise ExecutionPlanCompilationError(
             "job build differs from the installed workload"
         )
-    job = runtime_spec.get("job")
-    if not isinstance(job, dict):
+    if runtime_spec.job is None:
         raise ExecutionPlanCompilationError(
             "compiled runtime job settings are unavailable"
         )
-    job["timeout_seconds"] = timeout_seconds
-    identity = runtime_spec.get("identity")
-    if not isinstance(identity, dict):
-        raise ExecutionPlanCompilationError("compiled runtime identity is unavailable")
-    identity["execution_sha256"] = execution_identity_sha256(runtime_spec)
-    objects = {
-        (artifact.model.content_sha256, artifact.file_id): {
-            "model_content_sha256": artifact.model.content_sha256,
-            "file_id": artifact.file_id,
-            "path": artifact.path,
-            "sha256": artifact.sha256,
-            "bytes": artifact.size_bytes,
-            "roles": artifact.roles,
-            "distribution_object": {
-                "name": artifact.path,
-                "sha256": artifact.sha256,
-                "bytes": artifact.size_bytes,
-                "kind": "model",
-            },
-        }
+    runtime_spec.job.timeout_seconds = timeout_seconds
+    runtime_spec.identity.execution_sha256 = runtime_spec.launch_identity_sha256()
+    objects = tuple(
+        VerifiedModelObject(
+            model_content_sha256=artifact.model.content_sha256,
+            file_id=artifact.file_id,
+            path=artifact.path,
+            sha256=artifact.sha256,
+            bytes=artifact.size_bytes,
+            roles=list(artifact.roles),
+            distribution_object=DistributionObjectReceipt(
+                name=artifact.path,
+                sha256=artifact.sha256,
+                bytes=artifact.size_bytes,
+                kind="model",
+            ),
+        )
         for artifact in plan.artifacts
-    }
+    )
     compiled = compile_verified_execution_plan(
         runtime_spec,
         model_artifact_set_sha256=plan.identity.model_artifact_set_sha256,
-        model_objects=tuple(objects.values()),
-        runtime_image=plan.runtime_image.model_dump(mode="json"),
+        model_objects=objects,
+        runtime_image=CompiledRuntimeImage.model_validate(
+            plan.runtime_image.model_dump(mode="json")
+        ),
     )
-    placement = plan.runtime.placement.model_dump(mode="json")
-    placement["memory_floor_bytes"] = memory_floor_bytes
     # Installation carries the recipe's estimated envelope. The running
     # assignment owns the accepted capacity promise used by every job.
-    placement["reserved_memory_bytes"] = reserved_memory_bytes
+    placement = CompiledPlacement.model_validate(
+        {
+            **plan.runtime.placement.model_dump(mode="json"),
+            "memory_floor_bytes": memory_floor_bytes,
+            "reserved_memory_bytes": reserved_memory_bytes,
+        }
+    )
     return compiled.to_compiled_launch_payload(runtime_spec, placement=placement)
 
 
@@ -157,11 +159,11 @@ class ExecutionPlanCompilationError(ValueError):
 
 
 RuntimeImageResolver = Callable[
-    [Mapping[str, object], str, Mapping[str, object]],
+    [Mapping[str, object], str, RuntimeSpec],
     RuntimeImageReceipt,
 ]
 RuntimeImagePreparer = Callable[
-    [Mapping[str, object], Mapping[str, object], RecipeBuild | None],
+    [Mapping[str, object], RuntimeSpec, RecipeBuild | None],
     RuntimeImageReceipt,
 ]
 
@@ -189,8 +191,8 @@ class ControllerExecutionPlanService:
         mapping_nodes: Sequence[ClusterMappingNode],
         parameters: Mapping[str, object] | None,
         mapping: object | None = None,
-        resolved_entities: Mapping[str, object] | None = None,
-    ) -> dict[str, dict[str, object]]:
+        resolved_entities: ResolvedRecipe | None = None,
+    ) -> dict[str, WireCompiledExecutionPlan]:
         """Compile one launch document per mapped Spark rank.
 
         The model cache is asked for the exact recipe selection manifest.  A
@@ -206,18 +208,22 @@ class ControllerExecutionPlanService:
         ):
             raise ExecutionPlanCompilationError("recipe revision digest is unavailable")
         try:
-            recipe = _canonical_recipe(revision.document, resolved_entities)
+            recipe = (
+                resolved_entities.recipe
+                if resolved_entities is not None
+                else read_recipe(revision.document)
+            )
         except (TypeError, ValueError) as error:
             raise ExecutionPlanCompilationError(
                 "recipe does not satisfy the canonical contract"
             ) from error
         try:
             resolved = (
-                dict(resolved_entities)
+                resolved_entities
                 if resolved_entities is not None
                 else resolve_recipe_entities(session, revision.document)
             )
-            models = _canonical_models(resolved["models"])
+            models = resolved.models
             resolver = getattr(self._model_cache, "resolve_artifact_set", None)
             if not isinstance(resolver, Callable):
                 raise TypeError("NAS cache artifact-set resolver is unavailable")
@@ -229,7 +235,7 @@ class ControllerExecutionPlanService:
             direct_receipts = getattr(
                 self._model_cache, "verified_model_objects_for_set", None
             )
-            model_objects: Sequence[object]
+            model_objects: Sequence[VerifiedModelObject]
             if callable(direct_receipts):
                 # The production ModelCacheService exposes the persisted
                 # manifest through ModelCacheObjectSource.  A bound
@@ -241,22 +247,28 @@ class ControllerExecutionPlanService:
                     direct_objects, (str, bytes)
                 ):
                     raise TypeError("verified model object receipts are unavailable")
-                model_objects = direct_objects
+                model_objects = tuple(
+                    VerifiedModelObject.model_validate(item) for item in direct_objects
+                )
             else:
                 model_source = ModelCacheObjectSource.from_service(self._model_cache)
                 # Describe the shared verified bytes with this revision's
                 # model identities, whichever revision cached them first.
-                model_objects = model_source.verified_model_objects_for_set(
-                    artifact_set_sha256, manifest
+                model_objects = tuple(
+                    VerifiedModelObject.model_validate(item)
+                    for item in model_source.verified_model_objects_for_set(
+                        artifact_set_sha256, manifest
+                    )
                 )
         except Exception as error:
             raise ExecutionPlanCompilationError(
                 "verified model artifact-set receipt is unavailable"
             ) from error
 
+        option_choices, settings = split_option_choices(parameters)
         document = revision.document
         world_size = _world_size(recipe)
-        result: dict[str, dict[str, object]] = {}
+        result: dict[str, WireCompiledExecutionPlan] = {}
         if build is None:
             raise ExecutionPlanCompilationError("recipe build receipt is unavailable")
         package = _build_package(build)
@@ -264,15 +276,13 @@ class ControllerExecutionPlanService:
             try:
                 runtime_spec = compile_runtime_spec(
                     recipe,
-                    resolved_entities={
-                        "recipe": recipe,
-                        "recipe_digest": revision.content_digest,
-                        "models": models,
-                    },
-                    parameters=parameters,
+                    recipe_digest=revision.content_digest,
+                    models=models,
+                    package_handle=package,
+                    parameters=settings,
+                    option_choices=option_choices,
                     role=node.role,
                     rank=node.rank,
-                    package_handle=package,
                 )
                 runtime_spec = _bind_runtime_artifacts(runtime_spec, models)
                 receipt = self._runtime_image(document, build, runtime_spec)
@@ -306,11 +316,9 @@ class ControllerExecutionPlanService:
         self,
         document: Mapping[str, object],
         build: RecipeBuild | None,
-        runtime_spec: Mapping[str, object],
+        runtime_spec: RuntimeSpec,
     ) -> CompiledRuntimeImage:
-        runtime = runtime_spec.get("runtime")
-        runtime_image = runtime.get("image") if isinstance(runtime, Mapping) else None
-        image_digest = _image_digest(runtime_image)
+        image_digest = _image_digest(runtime_spec.runtime.image)
         if self._runtime_image_preparer is not None:
             receipt = self._runtime_image_preparer(document, runtime_spec, build)
             value = _runtime_receipt_mapping(receipt)
@@ -355,25 +363,6 @@ def _runtime_receipt_mapping(receipt: object) -> dict[str, object]:
     }
 
 
-def _canonical_recipe(
-    document: Mapping[str, object], resolved_entities: Mapping[str, object] | None
-) -> RecipeDefinition:
-    """Return the producer-resolved canonical recipe, or parse the stored one."""
-
-    resolved = (
-        resolved_entities.get("recipe") if resolved_entities is not None else None
-    )
-    if isinstance(resolved, RecipeDefinition):
-        return resolved
-    return read_recipe(document)
-
-
-def _canonical_models(value: object) -> dict[str, ModelDefinition]:
-    """Validate resolved model revisions, keyed by their document digest."""
-
-    return read_model_set(value)
-
-
 def _build_package(build: RecipeBuild) -> dict[str, object]:
     if (
         build.state != "succeeded"
@@ -390,8 +379,8 @@ def _build_package(build: RecipeBuild) -> dict[str, object]:
     }
 
 
-def _image_digest(value: object) -> str:
-    if not isinstance(value, str) or "@sha256:" not in value:
+def _image_digest(value: str) -> str:
+    if "@sha256:" not in value:
         raise ExecutionPlanCompilationError(
             "compiled runtime image digest is unavailable"
         )
@@ -415,11 +404,11 @@ class _PlacementTarget:
 
 def _placement(
     recipe: RecipeDefinition,
-    runtime_spec: Mapping[str, object],
+    runtime_spec: RuntimeSpec,
     node: ClusterMappingNode | _PlacementTarget,
     world_size: int,
-) -> dict[str, object]:
-    endpoint = runtime_spec.get("endpoint")
+) -> CompiledPlacement:
+    endpoint = runtime_spec.endpoint
     role = next(
         (item for item in recipe.topology.roles if item.name == node.role), None
     )
@@ -430,12 +419,12 @@ def _placement(
     reserved = role.resources.memory.peak_bytes
     memory_floor = role.resources.memory.reserve_bytes
     if recipe.interfaces[0].adapter == "openai":
-        if not isinstance(endpoint, Mapping):
+        if endpoint is None:
             raise ExecutionPlanCompilationError(
                 "compiled runtime endpoint is unavailable"
             )
-        port = endpoint.get("port")
-        if type(port) is not int or port <= 0 or port > 65535:
+        port: int | None = endpoint.port
+        if port <= 0 or port > 65535:
             raise ExecutionPlanCompilationError(
                 "compiled runtime endpoint port is invalid"
             )
@@ -445,98 +434,58 @@ def _placement(
                 "job recipe has an unexpected runtime endpoint"
             )
         port = None
-    return {
-        "endpoint_address": None,
-        "rank": node.rank,
-        "role": node.role,
-        "world_size": world_size,
-        "local_address": None,
-        "master_address": None,
+    return CompiledPlacement(
+        endpoint_address=None,
+        rank=node.rank,
+        role=node.role,
+        world_size=world_size,
+        local_address=None,
+        master_address=None,
         # Installation has no rendezvous authority. Bind the complete fabric
         # placement together in the signed start request.
-        "master_port": None,
-        "port": port,
-        "reserved_memory_bytes": reserved,
-        "memory_floor_bytes": memory_floor,
-    }
+        master_port=None,
+        port=port,
+        reserved_memory_bytes=reserved,
+        memory_floor_bytes=memory_floor,
+    )
 
 
 def _bind_runtime_artifacts(
-    runtime_spec: Mapping[str, object], models: object
-) -> dict[str, object]:
+    runtime_spec: RuntimeSpec, models: Mapping[str, ModelDefinition]
+) -> RuntimeSpec:
     """Add exact file bytes from canonical model revisions to harness output."""
 
-    result = dict(runtime_spec)
-    raw_artifacts = runtime_spec.get("artifacts")
-    if not isinstance(raw_artifacts, Sequence) or isinstance(
-        raw_artifacts, (str, bytes)
-    ):
-        raise ExecutionPlanCompilationError(
-            "canonical runtime model artifacts are unavailable"
-        )
-    by_identity: dict[tuple[str, str], Mapping[str, object]] = {}
-    try:
-        canonical_models = _canonical_models(models)
-    except (TypeError, ValueError) as error:
-        raise ExecutionPlanCompilationError(
-            "canonical model projection is invalid"
-        ) from error
-    for identity, model in canonical_models.items():
+    by_identity: dict[tuple[str, str], ModelFile] = {}
+    for identity, model in models.items():
         for file in model.files:
-            by_identity[(identity, file.id)] = file.model_dump(mode="json")
-    bound: list[dict[str, object]] = []
-    for raw in raw_artifacts:
-        if not isinstance(raw, Mapping):
-            raise ExecutionPlanCompilationError(
-                "canonical runtime model artifact is invalid"
-            )
-        model = raw.get("model")
-        file_id = raw.get("file_id")
-        model_digest = (
-            model.get("content_sha256") if isinstance(model, Mapping) else None
-        )
-        if not isinstance(model_digest, str) or not isinstance(file_id, str):
-            raise ExecutionPlanCompilationError(
-                "selected model file is absent from the canonical model manifest"
-            )
-        file = by_identity.get((model_digest, file_id))
+            by_identity[(identity, file.id)] = file
+    bound: list[SpecArtifact] = []
+    for artifact in runtime_spec.artifacts:
+        file = by_identity.get((artifact.model.content_sha256, artifact.file_id))
         if file is None:
             raise ExecutionPlanCompilationError(
                 "selected model file is absent from the canonical model manifest"
             )
-        digest = file.get("sha256")
-        size = file.get("size_bytes")
-        path = file.get("path")
-        if (
-            not isinstance(digest, str)
-            or type(size) is not int
-            or size < 0
-            or not isinstance(path, str)
-        ):
-            raise ExecutionPlanCompilationError(
-                "selected model file integrity metadata is invalid"
-            )
-        item = dict(raw)
-        if item.get("path") != path:
+        if artifact.path != file.path:
             raise ExecutionPlanCompilationError(
                 "selected model file path does not match the canonical manifest"
             )
-        item["sha256"] = digest
-        item["bytes"] = size
-        mount = item.get("mount")
-        if not isinstance(mount, Mapping):
-            raise ExecutionPlanCompilationError("selected model file mount is invalid")
-        item["mount"] = {
-            "source": f"/run/vonk/models/{item.get('selection_id')}",
-            "target": mount.get("target"),
-        }
-        bound.append(item)
-    result["artifacts"] = bound
-    identity = result.get("identity")
-    if isinstance(identity, Mapping):
-        identity = dict(identity)
-        identity["execution_sha256"] = execution_identity_sha256(result)
-        result["identity"] = identity
+        bound.append(
+            artifact.model_copy(
+                update={
+                    "sha256": file.sha256,
+                    "bytes": file.size_bytes,
+                    "mount": SpecModelMount(
+                        source=f"/run/vonk/models/{artifact.selection_id}",
+                        target=artifact.mount.target,
+                    ),
+                }
+            )
+        )
+    result = runtime_spec.model_copy(update={"artifacts": bound})
+    result.identity = result.identity.model_copy(
+        update={"execution_sha256": result.launch_identity_sha256()}
+    )
     return result
 
 

@@ -1456,11 +1456,14 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             return None
         if plan.recipe_revision_id is None or not plan.spark_group.nodes:
             raise RuntimeError("runtime image preparation identity is unavailable")
-        from .execution_plan_service import (
-            ExecutionPlanCompilationError,
-            _bind_runtime_artifacts,
+        from .execution_plan_service import _bind_runtime_artifacts
+        from .recipe_runtime_specs import (
+            RecipeRuntimeSpecError,
+            compile_runtime_spec,
+            resolve_recipe_entities,
+            split_option_choices,
         )
-        from .recipe_runtime_specs import compile_runtime_spec, resolve_recipe_entities
+        from .runtime_spec_contract import RuntimeSpec
 
         with self._sessions() as session:
             revision = session.scalar(
@@ -1490,34 +1493,32 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 "platform": "linux/arm64",
             }
             entities = resolve_recipe_entities(session, revision.document)
-            parameters = (
-                dict(plan.mapping.parameters) if plan.mapping is not None else {}
+            option_choices, settings = split_option_choices(
+                plan.mapping.parameters if plan.mapping is not None else None
             )
-            resolved_models = sequence(entities["models"])
-            if resolved_models is None:
-                raise ExecutionPlanCompilationError(
+            try:
+                resolved_models = entities.models
+            except (TypeError, ValueError) as error:
+                raise RecipeRuntimeSpecError(
                     "canonical model projection is invalid"
-                )
-            runtime_specs = {}
+                ) from error
+            runtime_specs: dict[str, RuntimeSpec] = {}
             for node in sorted(
                 plan.spark_group.nodes, key=lambda item: (item.rank, item.node_id)
             ):
                 runtime_spec = compile_runtime_spec(
-                    revision.document,
-                    resolved_entities=entities,
-                    parameters=parameters,
+                    entities.recipe,
+                    recipe_digest=entities.recipe_digest,
+                    models=resolved_models,
+                    package_handle=package_handle,
+                    parameters=settings,
+                    option_choices=option_choices,
                     role=node.role,
                     rank=node.rank,
-                    package_handle=package_handle,
                 )
                 runtime_spec = _bind_runtime_artifacts(runtime_spec, resolved_models)
-                identity = runtime_spec.get("identity")
-                execution_key = (
-                    identity.get("execution_sha256")
-                    if isinstance(identity, Mapping)
-                    else None
-                )
-                if not isinstance(execution_key, str):
+                execution_key = runtime_spec.identity.execution_sha256
+                if execution_key is None:
                     raise TypeError(
                         "runtime image preparation execution identity is unavailable"
                     )

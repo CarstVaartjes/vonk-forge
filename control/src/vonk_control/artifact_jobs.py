@@ -1325,17 +1325,8 @@ class ArtifactJobService:
                     "installed job execution plan is unavailable",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-            installed_document = installation_plan.compiled_execution_plans[
-                node.node_id
-            ].model_dump(mode="json")
-            placement = installed_document.get("runtime", {}).get("placement", {})
-            floor = placement.get("memory_floor_bytes")
-            if type(floor) is not int:
-                _record_unservable_run(run.id, "installed plan has no memory floor")
-                raise ArtifactJobUnavailableError(
-                    "installed job execution plan is invalid",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
+            installed_plan = installation_plan.compiled_execution_plans[node.node_id]
+            floor = installed_plan.runtime.placement.memory_floor_bytes
             stored_contract = self._stored_contract(session, artifact_job)
             if isinstance(stored_contract, Residue):
                 raise ArtifactJobUnavailableError(
@@ -1360,9 +1351,7 @@ class ArtifactJobService:
             invocation = compile_job_invocation(
                 session,
                 revision=revision,
-                installed=installation_plan.compiled_execution_plans[
-                    node.node_id
-                ].model_dump(mode="json"),
+                installed=installed_plan,
                 build=(
                     session.get(RecipeBuild, installation.recipe_build_id)
                     if installation.recipe_build_id is not None
@@ -1387,7 +1376,7 @@ class ArtifactJobService:
                 "input_manifest_sha256": artifact_job.input_manifest_sha256,
                 "input_total_bytes": artifact_job.input_total_bytes,
                 "inputs": raw_files,
-                "compiled_execution_plan": invocation,
+                "compiled_execution_plan": invocation.model_dump(mode="json"),
                 "run_generation": run.run_generation,
                 "output_mappings": [
                     item.model_dump(mode="json") for item in _output_mappings(contract)

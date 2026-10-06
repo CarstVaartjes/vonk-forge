@@ -688,12 +688,9 @@ def setup_services(
     canonical_cache = _CanonicalModelCache()
 
     def prepare_canonical_runtime_image(document, runtime_spec, build):
-        runtime = runtime_spec.get("runtime")
-        if not isinstance(runtime, dict):
-            raise TypeError("canonical runtime projection is unavailable")
         return prepare_runtime_image(
             document,
-            runtime=runtime,
+            runtime=runtime_spec.runtime,
             storage=runtime_image_storage,
             transport=_CanonicalImageTransport(),
             build_receipt={

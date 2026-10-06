@@ -4447,13 +4447,7 @@ class RunSwitchOperationService:
             )
         try:
             resolved = resolve_recipe_entities(session, revision.document)
-            resolved_models = resolved.get("models")
-            resolved_model_items = (
-                tuple(resolved_models)
-                if isinstance(resolved_models, Sequence)
-                and not isinstance(resolved_models, (str, bytes))
-                else ()
-            )
+            resolved_model_items = resolved.model_revisions
             resolved_model = resolved_model_items[0] if resolved_model_items else None
             for resolved_item in resolved_model_items:
                 candidate_item = getattr(resolved_item, "document", None)
