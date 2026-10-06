@@ -56,6 +56,8 @@ from vonk_agent_protocol import (
     LifecycleEventKind,
     LifecycleState,
     OperatorActionName,
+    ResourceBlockerCode,
+    RunAdmissionCode,
     SecurityRefusalReason,
     StateAlias,
     WaitReason,
@@ -178,6 +180,8 @@ def _vocabulary_words() -> frozenset[str]:
         InvalidRequestReason,
         SecurityRefusalReason,
         FailureCode,
+        RunAdmissionCode,
+        ResourceBlockerCode,
     ):
         words.update(member.value for member in enum)
     return frozenset(words)

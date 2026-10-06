@@ -2683,6 +2683,8 @@ pub struct LifecycleVocabulary {
     pub operator_action: OperatorActionName,
     pub operator_surface: OperatorSurface,
     pub outcome_kind: OutcomeKind,
+    pub resource_blocker_code: ResourceBlockerCode,
+    pub run_admission_code: RunAdmissionCode,
     pub security_refusal_reason: SecurityRefusalReason,
     pub state: LifecycleState,
     pub state_alias: StateAlias,
@@ -4193,6 +4195,160 @@ pub struct RequestValidationProblem {
     pub context: ::std::option::Option<ErrorContextResponse>,
     pub detail: ::std::string::String,
     pub issues: ::std::vec::Vec<RequestValidationIssue>,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ResourceBlockerCode {
+    #[serde(rename = "resource.capacity_unknown")]
+    ResourceCapacityUnknown,
+    #[serde(rename = "resource.insufficient")]
+    ResourceInsufficient,
+    #[serde(rename = "resource.insufficient_capacity")]
+    ResourceInsufficientCapacity,
+    #[serde(rename = "resource.insufficient_capacity_after_stop")]
+    ResourceInsufficientCapacityAfterStop,
+    #[serde(rename = "resource.insufficient_reservation_budget")]
+    ResourceInsufficientReservationBudget,
+    #[serde(rename = "resource.resident_usage_unknown")]
+    ResourceResidentUsageUnknown,
+}
+impl ::std::fmt::Display for ResourceBlockerCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ResourceCapacityUnknown => f.write_str("resource.capacity_unknown"),
+            Self::ResourceInsufficient => f.write_str("resource.insufficient"),
+            Self::ResourceInsufficientCapacity => f.write_str("resource.insufficient_capacity"),
+            Self::ResourceInsufficientCapacityAfterStop => {
+                f.write_str("resource.insufficient_capacity_after_stop")
+            }
+            Self::ResourceInsufficientReservationBudget => {
+                f.write_str("resource.insufficient_reservation_budget")
+            }
+            Self::ResourceResidentUsageUnknown => f.write_str("resource.resident_usage_unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for ResourceBlockerCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "resource.capacity_unknown" => Ok(Self::ResourceCapacityUnknown),
+            "resource.insufficient" => Ok(Self::ResourceInsufficient),
+            "resource.insufficient_capacity" => Ok(Self::ResourceInsufficientCapacity),
+            "resource.insufficient_capacity_after_stop" => {
+                Ok(Self::ResourceInsufficientCapacityAfterStop)
+            }
+            "resource.insufficient_reservation_budget" => {
+                Ok(Self::ResourceInsufficientReservationBudget)
+            }
+            "resource.resident_usage_unknown" => Ok(Self::ResourceResidentUsageUnknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ResourceBlockerCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ResourceBlockerCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RunAdmissionCode {
+    #[serde(rename = "run.plan_invalid")]
+    RunPlanInvalid,
+    #[serde(rename = "run.plan_stale")]
+    RunPlanStale,
+    #[serde(rename = "run.dependencies_stale")]
+    RunDependenciesStale,
+    #[serde(rename = "run.capacity_busy")]
+    RunCapacityBusy,
+    #[serde(rename = "run.target_membership_changed")]
+    RunTargetMembershipChanged,
+    #[serde(rename = "run.mapping_not_ready")]
+    RunMappingNotReady,
+    #[serde(rename = "run.inventory_missing")]
+    RunInventoryMissing,
+    #[serde(rename = "run.stale_inventory")]
+    RunStaleInventory,
+    #[serde(rename = "run.insufficient_memory")]
+    RunInsufficientMemory,
+    #[serde(rename = "run.port_occupied")]
+    RunPortOccupied,
+    #[serde(rename = "run.rendezvous_port_occupied")]
+    RunRendezvousPortOccupied,
+    #[serde(rename = "run.unreconciled_lost_rank")]
+    RunUnreconciledLostRank,
+    #[serde(rename = "run.not_installed")]
+    RunNotInstalled,
+    #[serde(rename = "run.fabric_address_missing")]
+    RunFabricAddressMissing,
+    #[serde(rename = "run.fabric_address_duplicate")]
+    RunFabricAddressDuplicate,
+}
+impl ::std::fmt::Display for RunAdmissionCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::RunPlanInvalid => f.write_str("run.plan_invalid"),
+            Self::RunPlanStale => f.write_str("run.plan_stale"),
+            Self::RunDependenciesStale => f.write_str("run.dependencies_stale"),
+            Self::RunCapacityBusy => f.write_str("run.capacity_busy"),
+            Self::RunTargetMembershipChanged => f.write_str("run.target_membership_changed"),
+            Self::RunMappingNotReady => f.write_str("run.mapping_not_ready"),
+            Self::RunInventoryMissing => f.write_str("run.inventory_missing"),
+            Self::RunStaleInventory => f.write_str("run.stale_inventory"),
+            Self::RunInsufficientMemory => f.write_str("run.insufficient_memory"),
+            Self::RunPortOccupied => f.write_str("run.port_occupied"),
+            Self::RunRendezvousPortOccupied => f.write_str("run.rendezvous_port_occupied"),
+            Self::RunUnreconciledLostRank => f.write_str("run.unreconciled_lost_rank"),
+            Self::RunNotInstalled => f.write_str("run.not_installed"),
+            Self::RunFabricAddressMissing => f.write_str("run.fabric_address_missing"),
+            Self::RunFabricAddressDuplicate => f.write_str("run.fabric_address_duplicate"),
+        }
+    }
+}
+impl ::std::str::FromStr for RunAdmissionCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "run.plan_invalid" => Ok(Self::RunPlanInvalid),
+            "run.plan_stale" => Ok(Self::RunPlanStale),
+            "run.dependencies_stale" => Ok(Self::RunDependenciesStale),
+            "run.capacity_busy" => Ok(Self::RunCapacityBusy),
+            "run.target_membership_changed" => Ok(Self::RunTargetMembershipChanged),
+            "run.mapping_not_ready" => Ok(Self::RunMappingNotReady),
+            "run.inventory_missing" => Ok(Self::RunInventoryMissing),
+            "run.stale_inventory" => Ok(Self::RunStaleInventory),
+            "run.insufficient_memory" => Ok(Self::RunInsufficientMemory),
+            "run.port_occupied" => Ok(Self::RunPortOccupied),
+            "run.rendezvous_port_occupied" => Ok(Self::RunRendezvousPortOccupied),
+            "run.unreconciled_lost_rank" => Ok(Self::RunUnreconciledLostRank),
+            "run.not_installed" => Ok(Self::RunNotInstalled),
+            "run.fabric_address_missing" => Ok(Self::RunFabricAddressMissing),
+            "run.fabric_address_duplicate" => Ok(Self::RunFabricAddressDuplicate),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RunAdmissionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RunAdmissionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -8392,6 +8548,8 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             pub operator_action: OperatorActionName,
             pub operator_surface: OperatorSurface,
             pub outcome_kind: OutcomeKind,
+            pub resource_blocker_code: ResourceBlockerCode,
+            pub run_admission_code: RunAdmissionCode,
             pub security_refusal_reason: SecurityRefusalReason,
             pub state: LifecycleState,
             pub state_alias: StateAlias,
@@ -8416,6 +8574,8 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             operator_action: raw.operator_action,
             operator_surface: raw.operator_surface,
             outcome_kind: raw.outcome_kind,
+            resource_blocker_code: raw.resource_blocker_code,
+            run_admission_code: raw.run_admission_code,
             security_refusal_reason: raw.security_refusal_reason,
             state: raw.state,
             state_alias: raw.state_alias,
@@ -10396,6 +10556,192 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
             context: raw.context,
             detail: raw.detail,
             issues: raw.issues,
+        })
+    }
+}
+impl ResourceBlockerCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ResourceCapacityUnknown => "resource.capacity_unknown",
+            Self::ResourceInsufficient => "resource.insufficient",
+            Self::ResourceInsufficientCapacity => "resource.insufficient_capacity",
+            Self::ResourceInsufficientCapacityAfterStop => {
+                "resource.insufficient_capacity_after_stop"
+            }
+            Self::ResourceInsufficientReservationBudget => {
+                "resource.insufficient_reservation_budget"
+            }
+            Self::ResourceResidentUsageUnknown => "resource.resident_usage_unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for ResourceBlockerCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ResourceBlockerCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ResourceBlockerCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ResourceBlockerCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ResourceBlockerCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "resource.capacity_unknown")]
+            ResourceCapacityUnknown,
+            #[serde(rename = "resource.insufficient")]
+            ResourceInsufficient,
+            #[serde(rename = "resource.insufficient_capacity")]
+            ResourceInsufficientCapacity,
+            #[serde(rename = "resource.insufficient_capacity_after_stop")]
+            ResourceInsufficientCapacityAfterStop,
+            #[serde(rename = "resource.insufficient_reservation_budget")]
+            ResourceInsufficientReservationBudget,
+            #[serde(rename = "resource.resident_usage_unknown")]
+            ResourceResidentUsageUnknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ResourceCapacityUnknown => Self::ResourceCapacityUnknown,
+            Raw::ResourceInsufficient => Self::ResourceInsufficient,
+            Raw::ResourceInsufficientCapacity => Self::ResourceInsufficientCapacity,
+            Raw::ResourceInsufficientCapacityAfterStop => {
+                Self::ResourceInsufficientCapacityAfterStop
+            }
+            Raw::ResourceInsufficientReservationBudget => {
+                Self::ResourceInsufficientReservationBudget
+            }
+            Raw::ResourceResidentUsageUnknown => Self::ResourceResidentUsageUnknown,
+        })
+    }
+}
+impl RunAdmissionCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RunPlanInvalid => "run.plan_invalid",
+            Self::RunPlanStale => "run.plan_stale",
+            Self::RunDependenciesStale => "run.dependencies_stale",
+            Self::RunCapacityBusy => "run.capacity_busy",
+            Self::RunTargetMembershipChanged => "run.target_membership_changed",
+            Self::RunMappingNotReady => "run.mapping_not_ready",
+            Self::RunInventoryMissing => "run.inventory_missing",
+            Self::RunStaleInventory => "run.stale_inventory",
+            Self::RunInsufficientMemory => "run.insufficient_memory",
+            Self::RunPortOccupied => "run.port_occupied",
+            Self::RunRendezvousPortOccupied => "run.rendezvous_port_occupied",
+            Self::RunUnreconciledLostRank => "run.unreconciled_lost_rank",
+            Self::RunNotInstalled => "run.not_installed",
+            Self::RunFabricAddressMissing => "run.fabric_address_missing",
+            Self::RunFabricAddressDuplicate => "run.fabric_address_duplicate",
+        }
+    }
+}
+impl ::std::ops::Deref for RunAdmissionCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RunAdmissionCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RunAdmissionCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RunAdmissionCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RunAdmissionCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "run.plan_invalid")]
+            RunPlanInvalid,
+            #[serde(rename = "run.plan_stale")]
+            RunPlanStale,
+            #[serde(rename = "run.dependencies_stale")]
+            RunDependenciesStale,
+            #[serde(rename = "run.capacity_busy")]
+            RunCapacityBusy,
+            #[serde(rename = "run.target_membership_changed")]
+            RunTargetMembershipChanged,
+            #[serde(rename = "run.mapping_not_ready")]
+            RunMappingNotReady,
+            #[serde(rename = "run.inventory_missing")]
+            RunInventoryMissing,
+            #[serde(rename = "run.stale_inventory")]
+            RunStaleInventory,
+            #[serde(rename = "run.insufficient_memory")]
+            RunInsufficientMemory,
+            #[serde(rename = "run.port_occupied")]
+            RunPortOccupied,
+            #[serde(rename = "run.rendezvous_port_occupied")]
+            RunRendezvousPortOccupied,
+            #[serde(rename = "run.unreconciled_lost_rank")]
+            RunUnreconciledLostRank,
+            #[serde(rename = "run.not_installed")]
+            RunNotInstalled,
+            #[serde(rename = "run.fabric_address_missing")]
+            RunFabricAddressMissing,
+            #[serde(rename = "run.fabric_address_duplicate")]
+            RunFabricAddressDuplicate,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::RunPlanInvalid => Self::RunPlanInvalid,
+            Raw::RunPlanStale => Self::RunPlanStale,
+            Raw::RunDependenciesStale => Self::RunDependenciesStale,
+            Raw::RunCapacityBusy => Self::RunCapacityBusy,
+            Raw::RunTargetMembershipChanged => Self::RunTargetMembershipChanged,
+            Raw::RunMappingNotReady => Self::RunMappingNotReady,
+            Raw::RunInventoryMissing => Self::RunInventoryMissing,
+            Raw::RunStaleInventory => Self::RunStaleInventory,
+            Raw::RunInsufficientMemory => Self::RunInsufficientMemory,
+            Raw::RunPortOccupied => Self::RunPortOccupied,
+            Raw::RunRendezvousPortOccupied => Self::RunRendezvousPortOccupied,
+            Raw::RunUnreconciledLostRank => Self::RunUnreconciledLostRank,
+            Raw::RunNotInstalled => Self::RunNotInstalled,
+            Raw::RunFabricAddressMissing => Self::RunFabricAddressMissing,
+            Raw::RunFabricAddressDuplicate => Self::RunFabricAddressDuplicate,
         })
     }
 }

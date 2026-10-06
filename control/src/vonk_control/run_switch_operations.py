@@ -28,6 +28,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     OperationProgress,
+    ResourceBlockerCode,
+    RunAdmissionCode,
     SecurityRefusalReason,
     canonical_message,
 )
@@ -530,7 +532,8 @@ class _ResourceFits:
     def stop_before_prepare(self) -> bool:
         return (
             self.requires_early_stop(
-                "run-switch.insufficient-memory", "run-switch.resource.insufficient"
+                "run-switch.insufficient-memory",
+                f"run-switch.{ResourceBlockerCode.INSUFFICIENT}",
             )
             or self.post_stop_memory_check is not None
         )
@@ -546,13 +549,13 @@ _OPERATION_KINDS = frozenset(
 )
 _MEMORY_CAPACITY_REFUSALS = frozenset(
     {
-        "run-switch.resource.insufficient_capacity",
-        "run-switch.resource.insufficient_capacity_after_stop",
+        f"run-switch.{ResourceBlockerCode.INSUFFICIENT_CAPACITY}",
+        f"run-switch.{ResourceBlockerCode.INSUFFICIENT_CAPACITY_AFTER_STOP}",
     }
 )
 _MEMORY_STOP_CONDITIONAL_REFUSALS = _MEMORY_CAPACITY_REFUSALS | {
-    "run-switch.resource.insufficient_reservation_budget",
-    "run-switch.resource.resident_usage_unknown",
+    f"run-switch.{ResourceBlockerCode.INSUFFICIENT_RESERVATION_BUDGET}",
+    f"run-switch.{ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN}",
 }
 _INSTALL_PREFLIGHT_REFRESH_REASON = (
     "runtime preflight expired during install compilation"
@@ -4060,7 +4063,7 @@ class RunSwitchOperationService:
                                 # installs and excludes only exact reviewed stops.
                                 continue
                             if (
-                                reason.code == "run.insufficient_memory"
+                                reason.code == RunAdmissionCode.INSUFFICIENT_MEMORY
                                 and resource_fits.post_stop_memory_check is not None
                             ):
                                 # The reviewed exact stops require a fresh

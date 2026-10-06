@@ -608,6 +608,48 @@ class FailureCode(WireEnum):
     RETAINED_CONTAINER_FOREIGN = "retained_container_foreign"
 
 
+class RunAdmissionCode(WireEnum):
+    """The typed codes a run admission names for a refusal, blocker or wait.
+
+    ``capacity_busy`` is lock contention only.  Every other reason an admission
+    must wait or is refused carries its own member, so a waiting operation shows
+    the real cause.  The retryable blockers (a plan that may become admissible
+    by itself) are a subset the Controller derives from these members.
+    """
+
+    PLAN_INVALID = "run.plan_invalid"
+    PLAN_STALE = "run.plan_stale"
+    DEPENDENCIES_STALE = "run.dependencies_stale"
+    CAPACITY_BUSY = "run.capacity_busy"
+    TARGET_MEMBERSHIP_CHANGED = "run.target_membership_changed"
+    MAPPING_NOT_READY = "run.mapping_not_ready"
+    INVENTORY_MISSING = "run.inventory_missing"
+    STALE_INVENTORY = "run.stale_inventory"
+    INSUFFICIENT_MEMORY = "run.insufficient_memory"
+    PORT_OCCUPIED = "run.port_occupied"
+    RENDEZVOUS_PORT_OCCUPIED = "run.rendezvous_port_occupied"
+    UNRECONCILED_LOST_RANK = "run.unreconciled_lost_rank"
+    NOT_INSTALLED = "run.not_installed"
+    FABRIC_ADDRESS_MISSING = "run.fabric_address_missing"
+    FABRIC_ADDRESS_DUPLICATE = "run.fabric_address_duplicate"
+
+
+class ResourceBlockerCode(WireEnum):
+    """The capacity-fit codes the resource planner gives a node that cannot fit.
+
+    ``insufficient`` is the family prefix a run admission maps onto
+    ``run.insufficient_memory``; the planner itself names the exact
+    ``insufficient_capacity*`` member.
+    """
+
+    CAPACITY_UNKNOWN = "resource.capacity_unknown"
+    INSUFFICIENT = "resource.insufficient"
+    INSUFFICIENT_CAPACITY = "resource.insufficient_capacity"
+    INSUFFICIENT_CAPACITY_AFTER_STOP = "resource.insufficient_capacity_after_stop"
+    INSUFFICIENT_RESERVATION_BUDGET = "resource.insufficient_reservation_budget"
+    RESIDENT_USAGE_UNKNOWN = "resource.resident_usage_unknown"
+
+
 class LifecycleVocabulary(WireModel):
     """Carrier that publishes every vocabulary enum into the wire schema.
 
@@ -636,6 +678,8 @@ class LifecycleVocabulary(WireModel):
     invalid_request_reason: InvalidRequestReason
     security_refusal_reason: SecurityRefusalReason
     failure_code: FailureCode
+    run_admission_code: RunAdmissionCode
+    resource_blocker_code: ResourceBlockerCode
 
 
 __all__ = [
@@ -662,6 +706,8 @@ __all__ = [
     "OperatorActionName",
     "OperatorSurface",
     "OutcomeKind",
+    "ResourceBlockerCode",
+    "RunAdmissionCode",
     "SecurityRefusalReason",
     "StateAlias",
     "StateWriteKind",

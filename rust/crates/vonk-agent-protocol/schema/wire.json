@@ -3631,6 +3631,12 @@
         "outcome_kind": {
           "$ref": "#/$defs/OutcomeKind"
         },
+        "resource_blocker_code": {
+          "$ref": "#/$defs/ResourceBlockerCode"
+        },
+        "run_admission_code": {
+          "$ref": "#/$defs/RunAdmissionCode"
+        },
         "security_refusal_reason": {
           "$ref": "#/$defs/SecurityRefusalReason"
         },
@@ -3673,7 +3679,9 @@
         "wait_reason",
         "invalid_request_reason",
         "security_refusal_reason",
-        "failure_code"
+        "failure_code",
+        "run_admission_code",
+        "resource_blocker_code"
       ],
       "title": "LifecycleVocabulary",
       "type": "object"
@@ -6282,6 +6290,41 @@
       ],
       "title": "RequestValidationProblem",
       "type": "object"
+    },
+    "ResourceBlockerCode": {
+      "description": "The capacity-fit codes the resource planner gives a node that cannot fit.\n\n``insufficient`` is the family prefix a run admission maps onto\n``run.insufficient_memory``; the planner itself names the exact\n``insufficient_capacity*`` member.",
+      "enum": [
+        "resource.capacity_unknown",
+        "resource.insufficient",
+        "resource.insufficient_capacity",
+        "resource.insufficient_capacity_after_stop",
+        "resource.insufficient_reservation_budget",
+        "resource.resident_usage_unknown"
+      ],
+      "title": "ResourceBlockerCode",
+      "type": "string"
+    },
+    "RunAdmissionCode": {
+      "description": "The typed codes a run admission names for a refusal, blocker or wait.\n\n``capacity_busy`` is lock contention only.  Every other reason an admission\nmust wait or is refused carries its own member, so a waiting operation shows\nthe real cause.  The retryable blockers (a plan that may become admissible\nby itself) are a subset the Controller derives from these members.",
+      "enum": [
+        "run.plan_invalid",
+        "run.plan_stale",
+        "run.dependencies_stale",
+        "run.capacity_busy",
+        "run.target_membership_changed",
+        "run.mapping_not_ready",
+        "run.inventory_missing",
+        "run.stale_inventory",
+        "run.insufficient_memory",
+        "run.port_occupied",
+        "run.rendezvous_port_occupied",
+        "run.unreconciled_lost_rank",
+        "run.not_installed",
+        "run.fabric_address_missing",
+        "run.fabric_address_duplicate"
+      ],
+      "title": "RunAdmissionCode",
+      "type": "string"
     },
     "RuntimePreflightFinding": {
       "additionalProperties": false,

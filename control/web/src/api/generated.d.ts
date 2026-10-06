@@ -4190,6 +4190,8 @@ export interface components {
             operator_action: components["schemas"]["OperatorActionName"];
             operator_surface: components["schemas"]["OperatorSurface"];
             outcome_kind: components["schemas"]["OutcomeKind"];
+            resource_blocker_code: components["schemas"]["ResourceBlockerCode"];
+            run_admission_code: components["schemas"]["RunAdmissionCode"];
             security_refusal_reason: components["schemas"]["SecurityRefusalReason"];
             state: components["schemas"]["LifecycleState"];
             state_alias: components["schemas"]["StateAlias"];
@@ -6326,6 +6328,16 @@ export interface components {
             issues: components["schemas"]["RequestValidationIssue"][];
         };
         /**
+         * ResourceBlockerCode
+         * @description The capacity-fit codes the resource planner gives a node that cannot fit.
+         *
+         *     ``insufficient`` is the family prefix a run admission maps onto
+         *     ``run.insufficient_memory``; the planner itself names the exact
+         *     ``insufficient_capacity*`` member.
+         * @enum {string}
+         */
+        ResourceBlockerCode: "resource.capacity_unknown" | "resource.insufficient" | "resource.insufficient_capacity" | "resource.insufficient_capacity_after_stop" | "resource.insufficient_reservation_budget" | "resource.resident_usage_unknown";
+        /**
          * ResourceDemandEvidence
          * @description The evidence terms used for one selected rank's memory fit.
          */
@@ -6376,6 +6388,17 @@ export interface components {
             /** Targets Ready */
             targets_ready: boolean;
         };
+        /**
+         * RunAdmissionCode
+         * @description The typed codes a run admission names for a refusal, blocker or wait.
+         *
+         *     ``capacity_busy`` is lock contention only.  Every other reason an admission
+         *     must wait or is refused carries its own member, so a waiting operation shows
+         *     the real cause.  The retryable blockers (a plan that may become admissible
+         *     by itself) are a subset the Controller derives from these members.
+         * @enum {string}
+         */
+        RunAdmissionCode: "run.plan_invalid" | "run.plan_stale" | "run.dependencies_stale" | "run.capacity_busy" | "run.target_membership_changed" | "run.mapping_not_ready" | "run.inventory_missing" | "run.stale_inventory" | "run.insufficient_memory" | "run.port_occupied" | "run.rendezvous_port_occupied" | "run.unreconciled_lost_rank" | "run.not_installed" | "run.fabric_address_missing" | "run.fabric_address_duplicate";
         /**
          * RunMemoryResidualRange
          * @description Possible remaining bytes for one exact active run reservation.

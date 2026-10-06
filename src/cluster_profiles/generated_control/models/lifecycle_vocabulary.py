@@ -36,6 +36,10 @@ from ..models.operator_surface import check_operator_surface
 from ..models.operator_surface import OperatorSurface
 from ..models.outcome_kind import check_outcome_kind
 from ..models.outcome_kind import OutcomeKind
+from ..models.resource_blocker_code import check_resource_blocker_code
+from ..models.resource_blocker_code import ResourceBlockerCode
+from ..models.run_admission_code import check_run_admission_code
+from ..models.run_admission_code import RunAdmissionCode
 from ..models.security_refusal_reason import check_security_refusal_reason
 from ..models.security_refusal_reason import SecurityRefusalReason
 from ..models.state_alias import check_state_alias
@@ -107,6 +111,18 @@ class LifecycleVocabulary:
                 happened, which the core resolves by observing it.  On the agent wire a
                 cancellation is a definite ``failed`` outcome with the
                 ``operation_cancelled`` code.
+            resource_blocker_code (ResourceBlockerCode): The capacity-fit codes the resource planner gives a node that
+                cannot fit.
+
+                ``insufficient`` is the family prefix a run admission maps onto
+                ``run.insufficient_memory``; the planner itself names the exact
+                ``insufficient_capacity*`` member.
+            run_admission_code (RunAdmissionCode): The typed codes a run admission names for a refusal, blocker or wait.
+
+                ``capacity_busy`` is lock contention only.  Every other reason an admission
+                must wait or is refused carries its own member, so a waiting operation shows
+                the real cause.  The retryable blockers (a plan that may become admissible
+                by itself) are a subset the Controller derives from these members.
             security_refusal_reason (SecurityRefusalReason): Closed reason codes of a security refusal: a real security
                 boundary.
 
@@ -150,6 +166,8 @@ class LifecycleVocabulary:
     operator_action: OperatorActionName
     operator_surface: OperatorSurface
     outcome_kind: OutcomeKind
+    resource_blocker_code: ResourceBlockerCode
+    run_admission_code: RunAdmissionCode
     security_refusal_reason: SecurityRefusalReason
     state: LifecycleState
     state_alias: StateAlias
@@ -189,6 +207,10 @@ class LifecycleVocabulary:
 
         outcome_kind: str = self.outcome_kind
 
+        resource_blocker_code: str = self.resource_blocker_code
+
+        run_admission_code: str = self.run_admission_code
+
         security_refusal_reason: str = self.security_refusal_reason
 
         state: str = self.state
@@ -220,6 +242,8 @@ class LifecycleVocabulary:
             "operator_action": operator_action,
             "operator_surface": operator_surface,
             "outcome_kind": outcome_kind,
+            "resource_blocker_code": resource_blocker_code,
+            "run_admission_code": run_admission_code,
             "security_refusal_reason": security_refusal_reason,
             "state": state,
             "state_alias": state_alias,
@@ -301,6 +325,16 @@ class LifecycleVocabulary:
 
 
 
+        resource_blocker_code = check_resource_blocker_code(d.pop("resource_blocker_code"))
+
+
+
+
+        run_admission_code = check_run_admission_code(d.pop("run_admission_code"))
+
+
+
+
         security_refusal_reason = check_security_refusal_reason(d.pop("security_refusal_reason"))
 
 
@@ -350,6 +384,8 @@ class LifecycleVocabulary:
             operator_action=operator_action,
             operator_surface=operator_surface,
             outcome_kind=outcome_kind,
+            resource_blocker_code=resource_blocker_code,
+            run_admission_code=run_admission_code,
             security_refusal_reason=security_refusal_reason,
             state=state,
             state_alias=state_alias,
