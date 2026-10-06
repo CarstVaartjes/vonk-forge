@@ -245,8 +245,9 @@ def test_result_consumer_receives_exact_canonical_message_in_finish_transaction(
         assert session.in_transaction()
         # The agent's own word for "unknown" is stored as an observed attempt
         # whose cause says the executor reported it, and the order is parked.
-        if state == aos.WIRE_UNKNOWN:
-            assert operation.state in aos.PARKED
+        if message.state == aos.WIRE_UNKNOWN:
+            assert operation.state == "backoff"
+            assert operation.next_action_at is not None
             assert aos.attempt_reported_unknown(attempt)
         else:
             assert operation.state == state

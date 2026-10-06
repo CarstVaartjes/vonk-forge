@@ -35,6 +35,8 @@ RESTART_REISSUE_OPERATIONS = LIFECYCLE_RESTART_OPERATIONS | frozenset(
     {
         AgentOperation.ARTIFACT_DISTRIBUTION.value,
         AgentOperation.RUNTIME_PREFLIGHT.value,
+        AgentOperation.RECIPE_BUILD.value,
+        AgentOperation.RECIPE_BUILD_CLEANUP.value,
     }
 )
 

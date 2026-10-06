@@ -199,8 +199,6 @@ def test_startup_adoption_moves_the_legacy_schedule_onto_next_action_at(
 def test_the_irreversible_kinds_are_exactly_the_ones_a_repeat_could_not_undo() -> None:
     assert IRREVERSIBLE_OPERATIONS == {
         ProtocolAgentOperation.RECIPE_JOB_RUN.value,
-        ProtocolAgentOperation.RECIPE_BUILD.value,
-        ProtocolAgentOperation.RECIPE_BUILD_CLEANUP.value,
     }
     assert ProtocolAgentOperation.AGENT_UPGRADE.value not in IRREVERSIBLE_OPERATIONS
 
@@ -521,13 +519,14 @@ def _decision_for(jobs, sessions, clock, operation_id):
         ([("succeeded", False), ("queued", False)], False, None),
         # every unfinished order is an automatic retry: the job is progressing
         ([("waiting-for-operator", True), ("succeeded", False)], False, "queued"),
-        ([("waiting-for-operator", True)], True, "needs-operator"),
+        ([("waiting-for-operator", True)], True, None),
         (
-            [("waiting-for-operator", False), ("succeeded", False)],
+            [("needs-operator", False), ("succeeded", False)],
             False,
             "needs-operator",
         ),
-        ([("failed", False), ("waiting-for-operator", False)], False, "failed"),
+        ([("failed", False), ("needs-operator", False)], False, "failed"),
+        ([("failed", False), ("observing", False)], False, "failed"),
         ([("cancelled", False), ("succeeded", False)], False, "cancelled"),
         ([("succeeded", False), ("succeeded", False)], False, "succeeded"),
         ([], False, None),
@@ -659,3 +658,38 @@ def test_the_agent_word_for_unknown_is_mapped_at_ingress_to_an_observed_attempt(
     assert aos.attempt_wire_state(attempt) == "failed"
     aos.lapse(attempt)
     assert aos.attempt_lapsed(attempt)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [ProtocolAgentOperation.RECIPE_BUILD, ProtocolAgentOperation.RECIPE_BUILD_CLEANUP],
+)
+def test_unknown_build_effect_retries_after_the_observation_budget(kind) -> None:
+    """Rebuildable work must not inherit the irreversible user-job observation loop."""
+    from sqlalchemy.orm import Session
+    from vonk_control.lifecycle.types import Claimed, Lifecycle, Observed
+
+    now = datetime(2026, 10, 6, tzinfo=UTC)
+    with Session() as session:
+        adapter = AgentOperationAdapter(session=session, clock=lambda: now)
+        row = Lifecycle(
+            id="build",
+            kind=kind.value,
+            state=State.OBSERVING,
+            attempt=1,
+            effect=Effect.UNKNOWN,
+            observe_count=OBSERVE_BUDGET,
+            next_action_at=now,
+        )
+        scheduled = transition(row, Observed(Effect.UNKNOWN), adapter, now).row
+        assert scheduled.state is State.BACKOFF
+        assert scheduled.next_action_at is not None and scheduled.next_action_at > now
+        due = scheduled.next_action_at
+        claimed = transition(
+            scheduled,
+            Claimed(2, "fresh-fence", due + timedelta(seconds=30)),
+            adapter,
+            due,
+        ).row
+        assert claimed.state is State.RUNNING
+        assert claimed.fence == "fresh-fence"

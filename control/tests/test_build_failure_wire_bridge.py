@@ -5,7 +5,7 @@ from __future__ import annotations
 import ssl
 import threading
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -33,7 +33,7 @@ from vonk_control.models import (
     User,
 )
 
-from .agent_fences import fenced_operation
+from .agent_fences import fenced_attempt, fenced_operation
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_agent_restart_recovery_wire_bridge import (
     _certificate_files,
@@ -273,14 +273,68 @@ def test_native_source_fetch_failure_reaches_availability_owner(
         # The exact accepted attempt and its real producer result cross the
         # fenced queue boundary before the parent is allowed to classify it.
         jobs.record_result(result)
+        retry_at: datetime | None = None
         with sessions() as session:
             accepted_job = session.get(Job, build_job.id)
             stored_operation = session.get(
                 AgentOperation, fenced_operation(sessions, first_claim).id
             )
             assert accepted_job is not None and stored_operation is not None
-            assert accepted_job.state == "failed"
-            assert stored_operation.state == "failed"
+            if expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY:
+                assert accepted_job.state == "queued"
+                assert stored_operation.state == "backoff"
+                retry_at = stored_operation.next_action_at
+                assert retry_at is not None
+            else:
+                assert accepted_job.state == "failed"
+                assert stored_operation.state == "failed"
+            attempt = fenced_attempt(sessions, first_claim)
+            assert attempt.state == "failed"
+            attempt_failure = AgentFailureResult.model_validate_json(
+                canonical_message(attempt.result)
+            )
+            assert attempt_failure.failure_kind is expected_kind
+
+        if expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY:
+            # The accepted build retries its exact order, rather than ending the
+            # owner and relying on preparation to create a replacement build.
+            assert retry_at is not None
+            clock.now = (
+                retry_at if retry_at.tzinfo else retry_at.replace(tzinfo=UTC)
+            ) + timedelta(seconds=1)
+            second_claim = claim_agent(
+                jobs, node_id, "build-wire-serial", runtime_identity=runtime_identity
+            )
+            assert second_claim is not None
+            first_operation = fenced_operation(sessions, first_claim)
+            resumed_operation = fenced_operation(sessions, second_claim)
+            assert resumed_operation.id == first_operation.id
+            assert resumed_operation.parent_job_id == build_job.id
+            assert second_claim.fence != first_claim.fence
+            assert fenced_attempt(sessions, second_claim).attempt == 2
+            assert (
+                RecipeBuildRequest.model_validate_json(
+                    canonical_message(second_claim.payload)
+                )
+                == accepted_request
+            )
+            with sessions() as session:
+                assert (
+                    len(
+                        tuple(
+                            session.scalars(
+                                select(Job).where(Job.kind == "recipe.build.v1")
+                            )
+                        )
+                    )
+                    == 1
+                )
+            assert service.get(parent.id).state in {"queued", "running", "partial"}
+            return
+
+        with sessions() as session:
+            accepted_job = session.get(Job, build_job.id)
+            assert accepted_job is not None
             stored_evidence = accepted_job.result
             assert isinstance(stored_evidence, dict)
             node_evidence = stored_evidence.get("node_evidence")
@@ -314,69 +368,26 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY
         )
 
-        if expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY:
-            # The original authorized parent retries automatically with a new
-            # fenced child after the transient failure's next check is due.
-            assert observed.state == "queued"
-            retry_time = observed.failure.get("retry_time")
-            assert isinstance(retry_time, str)
-            clock.now = datetime.fromisoformat(retry_time) + timedelta(seconds=1)
-            retry_parent_claim = service.claim_pending(
-                limit=1, owner_id="build-wire-recovery"
-            )
-            assert len(retry_parent_claim) == 1
-            assert retry_parent_claim[0].operation_id == parent.id
-            service.run_claim(retry_parent_claim[0])
-            with sessions() as session:
-                jobs_for_build = tuple(
-                    session.scalars(
-                        select(Job)
-                        .where(Job.kind == "recipe.build.v1")
-                        .order_by(Job.created_at, Job.id)
-                    )
-                )
-            assert len(jobs_for_build) == 2
-            assert jobs_for_build[0].id == build_job.id
-            assert jobs_for_build[1].request_id != jobs_for_build[0].request_id
-            second_claim = claim_agent(
-                jobs,
-                node_id,
-                "build-wire-serial",
-                runtime_identity=runtime_identity,
-            )
-            assert second_claim is not None
+        assert observed.state == "failed"
+        # The refusal never retries on its own. An explicit operator retry
+        # is a newer request and is accepted; it dispatches nothing until
+        # the parent runs again.
+        service.retry(
+            parent.id,
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        )
+        with sessions() as session:
             assert (
-                fenced_operation(sessions, second_claim).parent_job_id
-                == jobs_for_build[1].id
-            )
-            assert (
-                RecipeBuildRequest.model_validate_json(
-                    canonical_message(second_claim.payload)
-                )
-                == accepted_request
-            )
-            assert service.get(parent.id).state in {"queued", "running", "partial"}
-        else:
-            assert observed.state == "failed"
-            # The refusal never retries on its own. An explicit operator retry
-            # is a newer request and is accepted; it dispatches nothing until
-            # the parent runs again.
-            service.retry(
-                parent.id,
-                actor="operator",
-                request_id=str(uuid.uuid4()),
-            )
-            with sessions() as session:
-                assert (
-                    len(
-                        tuple(
-                            session.scalars(
-                                select(Job).where(Job.kind == "recipe.build.v1")
-                            )
+                len(
+                    tuple(
+                        session.scalars(
+                            select(Job).where(Job.kind == "recipe.build.v1")
                         )
                     )
-                    == 1
                 )
+                == 1
+            )
     finally:
         production.close()
         source_server.shutdown()

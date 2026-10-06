@@ -55,10 +55,10 @@ the intended topology:
 1. Confirm Fleet inventory is fresh and the planned resource reservation fits.
 2. Select an immutable canonical Model and Recipe revision from the Controller's
    automatically refreshed global repository metadata.
-3. Prepare the exact model artifact set and required runtime image in the
-   trusted Controller/NAS cache. Missing or unverified assets are named as
-   blockers; preparation is explicit and apply never downloads them silently.
-4. Apply the complete profile to the selected Spark set and require exact
+3. Review the exact model artifact set and runtime image required by the profile.
+   Loading requests missing assets automatically in the trusted Controller/NAS
+   cache, with the preparation dependency and next check reported as progress.
+4. Load the complete profile to the selected Spark set and require exact
    cache, transfer, image-load, and runtime evidence.
 5. Require route publication only after the workload reports serving readiness.
 6. Send a bounded inference request through the normal private Tailscale URL.
