@@ -2158,11 +2158,13 @@ def _installed_byte_group(
 
 def _installed_presence(sessions, installation_id: str) -> RecipePresence:
     snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
-    return next(
+    presence = next(
         value
         for value in snapshot.nodes[0].installed
         if value.installation_id == installation_id
     )
+    assert isinstance(presence, RecipePresence)
+    return presence
 
 
 @pytest.mark.parametrize(
