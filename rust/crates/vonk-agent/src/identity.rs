@@ -10,9 +10,11 @@ use rcgen::string::Ia5String;
 use rcgen::{
     CertificateParams, DistinguishedName, DnType, KeyPair, PKCS_ED25519, PublicKeyData, SanType,
 };
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use vonk_agent_protocol::generated::{
+    AgentGenerationPointer as GenerationPointer, AgentIdentityMetadata as IdentityMetadata,
+};
 use x509_parser::{parse_x509_certificate, pem::parse_x509_pem};
 
 const MAX_RETIRED_GENERATIONS: usize = 4;
@@ -58,21 +60,6 @@ pub struct IdentityPaths {
     pub chain: PathBuf,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct GenerationPointer {
-    generation: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct IdentityMetadata<'a> {
-    fingerprint: &'a str,
-    generation: u64,
-    node_id: &'a str,
-    serial: &'a str,
-}
-
 pub fn generate_pending(node_id: &str) -> Result<PendingIdentity, IdentityError> {
     if !valid_node_id(node_id) {
         return Err(IdentityError::Node);
@@ -115,10 +102,10 @@ pub fn persist_identity(root: &Path, material: &IdentityMaterial) -> Result<(), 
 
 fn identity_metadata(material: &IdentityMaterial) -> Result<Vec<u8>, IdentityError> {
     Ok(serde_json::to_vec(&IdentityMetadata {
-        fingerprint: &material.fingerprint,
+        fingerprint: material.fingerprint.clone(),
         generation: material.generation,
-        node_id: &material.node_id,
-        serial: &material.serial,
+        node_id: material.node_id.clone(),
+        serial: material.serial.clone(),
     })?)
 }
 
@@ -304,7 +291,7 @@ fn flat_generation(root: &Path) -> Result<Option<u64>, IdentityError> {
         return Ok(None);
     }
     let raw = read_private(&path)?;
-    let metadata: IdentityMetadata<'_> = serde_json::from_slice(&raw)
+    let metadata: IdentityMetadata = serde_json::from_slice(&raw)
         .map_err(|_| std::io::Error::other("flat identity metadata is invalid"))?;
     Ok(Some(metadata.generation))
 }

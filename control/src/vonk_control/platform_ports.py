@@ -19,45 +19,25 @@ file, so the two cannot drift.
 
 from __future__ import annotations
 
-import json
 from importlib.resources import files
 
+from vonk_agent_protocol.installer_setup import SitePorts
 
-def _site_ports() -> dict[str, object]:
-    document = json.loads(
+
+def _site_ports() -> SitePorts:
+    return SitePorts.model_validate_json(
         files("vonk_control.resources")
         .joinpath("site-ports.json")
         .read_text(encoding="utf-8")
     )
-    if not isinstance(document, dict):
-        raise TypeError("site ports document is invalid")
-    return document
 
 
-def _ports(name: str) -> tuple[int, ...]:
-    value = _site_ports()[name]
-    if (
-        not isinstance(value, list)
-        or not value
-        or any(type(port) is not int or not 1024 <= port <= 65535 for port in value)
-        or len(set(value)) != len(value)
-    ):
-        raise TypeError(f"site ports {name} are invalid")
-    return tuple(value)
-
-
-def _port(name: str) -> int:
-    value = _site_ports()[name]
-    if type(value) is not int or not 1024 <= value <= 65535:
-        raise TypeError(f"site port {name} is invalid")
-    return value
-
-
+_PORTS = _site_ports()
 # Authorised Docker-published endpoint host ports, in allocation order.
-ENDPOINT_HOST_PORTS = _ports("endpoint_host_ports")
+ENDPOINT_HOST_PORTS = tuple(_PORTS.endpoint_host_ports)
 # The one host port a host-networked (multi-Spark) endpoint may listen on.
-HOST_ENDPOINT_PORT = _ports("host_endpoint_ports")[0]
-RENDEZVOUS_PORT = _port("rendezvous_port")
+HOST_ENDPOINT_PORT = _PORTS.host_endpoint_ports[0]
+RENDEZVOUS_PORT = _PORTS.rendezvous_port
 
 
 def serving_port(declared: int, *, node_count: int) -> int:

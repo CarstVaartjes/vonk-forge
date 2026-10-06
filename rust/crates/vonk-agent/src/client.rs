@@ -1536,28 +1536,7 @@ impl AgentHttpClient {
     }
 
     pub async fn report_inventory(&self, inventory: &Inventory) -> Result<(), ClientError> {
-        let mut request = InventoryRequest {
-            schema_version: 1,
-            observed_at: chrono::Utc::now().into(),
-            disk_total_bytes: inventory.disk_total_bytes,
-            disk_free_bytes: inventory.disk_available_bytes,
-            host_memory_total_bytes: inventory.memory_total_bytes,
-            host_memory_free_bytes: inventory.memory_available_bytes,
-            gpu_memory_total_bytes: inventory.gpu_memory_total_bytes,
-            gpu_memory_free_bytes: inventory.gpu_memory_free_bytes,
-            gpu_count: inventory.gpu_count,
-            memory_pool: inventory.memory_pool,
-            artifact_store_read_only: inventory.artifact_store_read_only,
-            capabilities: inventory.capabilities.clone(),
-            fabric_address: inventory.fabric_address.map(|value| value.to_string()),
-            fabric_bandwidth_mbps: inventory
-                .fabric_bandwidth_mbps
-                .and_then(|value| u32::try_from(value).ok()),
-            nvidia_driver_version: inventory.nvidia_driver_version.clone(),
-            container_runtime_version: inventory.container_runtime_version.clone(),
-            network_interfaces: inventory.network_interfaces.clone(),
-            nas_route_interface: inventory.nas_route_interface.clone(),
-        };
+        let mut request = inventory.to_request(chrono::Utc::now().into());
         clamp_inventory_request(&mut request);
         request.validate().map_err(|_| ClientError::Protocol)?;
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;

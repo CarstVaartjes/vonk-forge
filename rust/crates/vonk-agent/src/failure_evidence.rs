@@ -3,7 +3,6 @@
 
 use crate::outcome::{Failure, RefusalBound};
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     fs::File,
@@ -22,12 +21,7 @@ pub use vonk_agent_protocol::failure_evidence::{
     FailureCategory, FailureDiagnostics, FailureLogTail, FailureProperty,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct FailureProcessLogs {
-    pub stdout: FailureLogTail,
-    pub stderr: FailureLogTail,
-}
+pub use vonk_agent_protocol::generated::HostHelperProcessLogs as FailureProcessLogs;
 
 /// Credential names whose *value* makes a line sensitive.
 ///

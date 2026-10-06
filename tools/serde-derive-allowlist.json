@@ -3,289 +3,94 @@
   "note": "Hand-written serde types outside generated.rs. Each entry needs a reason; the list only shrinks toward zero by generating the type from its Pydantic contract.",
   "entries": [
     {
-      "file": "rust/crates/vonk-agent-helper/src/operations.rs",
-      "type": "InstallationReconciliationReceipt",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent-helper/src/operations.rs",
-      "type": "LegacyRuntimeImageReceipt",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent-helper/src/operations.rs",
-      "type": "OperationOutcome",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent-helper/src/operations.rs",
-      "type": "RuntimeGenerationFence",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent-helper/src/operations.rs",
-      "type": "RuntimeImageReceipt",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent-helper/src/package_rollback.rs",
-      "type": "Transaction",
-      "reason": "pending"
-    },
-    {
       "file": "rust/crates/vonk-agent-protocol/examples/recipe_job_wire_probe.rs",
       "type": "BridgeInput",
-      "reason": "pending"
+      "reason": "test harness: stdin envelope of the Python wire-bridge test; the contract types inside it (AgentClaim, AgentResult) are the generated ones"
     },
     {
       "file": "rust/crates/vonk-agent-protocol/tests/recipe_builds.rs",
       "type": "SharedVectorCase",
-      "reason": "pending"
+      "reason": "test harness: the shared-vector file layout of one integration test, not product data"
     },
     {
       "file": "rust/crates/vonk-agent-protocol/tests/recipe_builds.rs",
       "type": "SharedVectorChange",
-      "reason": "pending"
+      "reason": "test harness: the shared-vector file layout of one integration test, not product data"
     },
     {
       "file": "rust/crates/vonk-agent-protocol/tests/recipe_builds.rs",
       "type": "SharedVectors",
-      "reason": "pending"
+      "reason": "test harness: the shared-vector file layout of one integration test, not product data"
     },
     {
       "file": "rust/crates/vonk-agent/examples/recipe_observation_wire_probe.rs",
       "type": "PersistBindingInput",
-      "reason": "pending"
+      "reason": "test harness: stdin envelope of the Python wire-bridge test; the contract types inside it are the generated ones"
     },
     {
       "file": "rust/crates/vonk-agent/examples/recipe_observation_wire_probe.rs",
       "type": "SerializeInput",
-      "reason": "pending"
+      "reason": "test harness: stdin envelope of the Python wire-bridge test; the contract types inside it are the generated ones"
     },
     {
       "file": "rust/crates/vonk-agent/examples/restart_recovery_probe.rs",
       "type": "Request",
-      "reason": "pending"
+      "reason": "test harness: stdin request of the restart-recovery probe, not product data"
     },
     {
       "file": "rust/crates/vonk-agent/src/base_images.rs",
       "type": "Descriptor",
-      "reason": "pending"
+      "reason": "external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content"
     },
     {
       "file": "rust/crates/vonk-agent/src/base_images.rs",
       "type": "ImageConfig",
-      "reason": "pending"
+      "reason": "external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content"
     },
     {
       "file": "rust/crates/vonk-agent/src/base_images.rs",
       "type": "Index",
-      "reason": "pending"
+      "reason": "external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content"
     },
     {
       "file": "rust/crates/vonk-agent/src/base_images.rs",
       "type": "Manifest",
-      "reason": "pending"
+      "reason": "external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content"
     },
     {
       "file": "rust/crates/vonk-agent/src/base_images.rs",
       "type": "OciLayout",
-      "reason": "pending"
+      "reason": "external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content"
     },
     {
       "file": "rust/crates/vonk-agent/src/config.rs",
       "type": "AgentConfig",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/failure_evidence.rs",
-      "type": "FailureProcessLogs",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/health.rs",
-      "type": "HealthEvidence",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/identity.rs",
-      "type": "GenerationPointer",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/identity.rs",
-      "type": "IdentityMetadata",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/inventory.rs",
-      "type": "Inventory",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/oci.rs",
-      "type": "InstallationMetadataEntry",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/oci.rs",
-      "type": "InstallationMetadataReceipt",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/oci.rs",
-      "type": "InstallationReconciliationCheckpoint",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/oci.rs",
-      "type": "InstallationReconciliationState",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/oci.rs",
-      "type": "JobOutputState",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/oci.rs",
-      "type": "RunLifecycle",
-      "reason": "pending"
+      "reason": "operator-editable site TOML that must ignore keys a newer or older release dropped; the generated readers are JSON-only and reject unknown keys, so the file is not a wire document"
     },
     {
       "file": "rust/crates/vonk-agent/src/oci.rs",
       "type": "RuntimePolicy",
-      "reason": "pending"
+      "reason": "external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here"
     },
     {
       "file": "rust/crates/vonk-agent/src/oci.rs",
       "type": "RuntimePolicyLabel",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/readiness.rs",
-      "type": "ReadinessReceipt",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/source_policy.rs",
-      "type": "SourceFinding",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/source_policy.rs",
-      "type": "SourcePolicyReport",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "CanonicalTemplatePayload",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "Ed25519KeyRequest",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "GeneratedSecrets",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "GroupReadableSecrets",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "HermesPrompt",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "InstallModes",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "InternalValue",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "PostgresUrlRequest",
-      "reason": "pending"
+      "reason": "external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here"
     },
     {
       "file": "rust/crates/vonk-nas-setup/src/lib.rs",
       "type": "PrivateJwk",
-      "reason": "pending"
+      "reason": "external format: RFC 7517 JSON Web Key as step-ca consumes it"
     },
     {
       "file": "rust/crates/vonk-nas-setup/src/lib.rs",
       "type": "PublicJwk",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "RandomTextRequest",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "RequiredValuePrompt",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "RequiredValueValidation",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "SecretPrompt",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "StepCaControllerFiles",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
-      "type": "StepCaControllerRequest",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-spark-setup/src/lib.rs",
-      "type": "ApplyEnvelope",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-spark-setup/src/lib.rs",
-      "type": "ApplyOperation",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-spark-setup/src/lib.rs",
-      "type": "FirewallConfig",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-spark-setup/src/lib.rs",
-      "type": "HostMapping",
-      "reason": "pending"
-    },
-    {
-      "file": "rust/crates/vonk-spark-setup/src/lib.rs",
-      "type": "SitePorts",
-      "reason": "pending"
+      "reason": "external format: RFC 7517 JSON Web Key as step-ca consumes it"
     },
     {
       "file": "rust/crates/vonk-spark-setup/src/lib.rs",
       "type": "WrittenConfig",
-      "reason": "pending"
+      "reason": "TOML agent configuration written by this setup program and read back for validation; TOML is not a generated JSON wire document, and the agent's tolerant reader of the same file is allowlisted for the same reason"
     }
   ]
 }

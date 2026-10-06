@@ -4,7 +4,7 @@ use std::path::Path;
 use tempfile::tempdir;
 use vonk_nas_setup::{
     CanonicalTemplatePayload, PromptIo, SecretGenerationError, SecretGenerator, SecretInput,
-    SetupOutcome, SetupRequest, prepare,
+    SetupOutcome, SetupRequest, parse_template_payload, prepare,
 };
 
 struct FixedSecretGenerator;
@@ -38,7 +38,7 @@ impl SecretGenerator for SizedSecretGenerator {
 }
 
 fn payload() -> CanonicalTemplatePayload {
-    CanonicalTemplatePayload::from_json(
+    parse_template_payload(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services:\n  api:\n    image: example.invalid/api:latest\n",
@@ -65,7 +65,7 @@ fn payload() -> CanonicalTemplatePayload {
 
 /// The site-facing part of the real release payload (scripts/build-nas-compose-bundle).
 fn site_payload() -> CanonicalTemplatePayload {
-    CanonicalTemplatePayload::from_json(
+    parse_template_payload(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
@@ -246,7 +246,7 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
 
 #[test]
 fn optional_huggingface_secret_is_prompted_and_can_be_skipped() {
-    let payload = CanonicalTemplatePayload::from_json(
+    let payload = parse_template_payload(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
@@ -398,7 +398,7 @@ fn lab_install_asks_only_for_the_nas_address_and_optional_secrets() {
 
 #[test]
 fn secure_remote_bundle_upgrades_and_toggles_hermes_beside_its_profile() {
-    let payload = CanonicalTemplatePayload::from_json(
+    let payload = parse_template_payload(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
@@ -486,12 +486,12 @@ fn payload_rejects_multiline_preflight_items() {
         "secrets": []
     });
 
-    CanonicalTemplatePayload::from_json(&serde_json::to_vec(&payload).expect("payload JSON"))
+    parse_template_payload(&serde_json::to_vec(&payload).expect("payload JSON"))
         .expect_err("multiline checklist rejected");
 }
 
 fn compose_payload(compose: &str) -> CanonicalTemplatePayload {
-    CanonicalTemplatePayload::from_json(
+    parse_template_payload(
         &serde_json::to_vec(&serde_json::json!({
             "schema_version": 2,
             "docker_compose_yaml": compose,
@@ -685,7 +685,7 @@ fn explicit_upgrade_atomically_replaces_only_compose() {
 
 #[test]
 fn upgrade_prompts_only_for_new_undefaulted_inputs_and_preserves_existing_values() {
-    let payload = CanonicalTemplatePayload::from_json(
+    let payload = parse_template_payload(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services:\n  api:\n    image: example.invalid/api@sha256:new\n",
@@ -756,7 +756,7 @@ fn upgrade_prompts_only_for_new_undefaulted_inputs_and_preserves_existing_values
 
 #[test]
 fn upgrade_rewrites_an_old_environment_with_only_known_keys() {
-    let payload = CanonicalTemplatePayload::from_json(
+    let payload = parse_template_payload(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
@@ -1129,7 +1129,7 @@ fn prompts_retry_invalid_required_values_and_confirmation() {
 
 #[test]
 fn typed_site_values_reject_invalid_addresses_cidrs_and_hostnames() {
-    let payload = CanonicalTemplatePayload::from_json(
+    let payload = parse_template_payload(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
@@ -1226,7 +1226,7 @@ fn os_secret_generator_returns_fresh_hex_encoded_entropy() {
 
 #[test]
 fn payload_rejects_secret_path_traversal() {
-    let error = CanonicalTemplatePayload::from_json(
+    let error = parse_template_payload(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
@@ -1301,7 +1301,7 @@ fn install_rejects_a_symlinked_output_root() {
 
 #[test]
 fn install_creates_safe_nested_secret_paths() {
-    let payload = CanonicalTemplatePayload::from_json(
+    let payload = parse_template_payload(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
@@ -1354,7 +1354,7 @@ fn install_creates_safe_nested_secret_paths() {
 
 #[test]
 fn schema_v2_emits_internal_values_and_maps_hermes_to_compose_profiles() {
-    let payload = CanonicalTemplatePayload::from_json(
+    let payload = parse_template_payload(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",

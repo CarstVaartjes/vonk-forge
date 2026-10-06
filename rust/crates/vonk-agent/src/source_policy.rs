@@ -2,10 +2,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
 use serde_yaml::{Mapping, Value};
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFinding {
     pub code: &'static str,
     pub path: String,
@@ -13,7 +12,7 @@ pub struct SourceFinding {
     pub detail: &'static str,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourcePolicyReport {
     pub passed: bool,
     pub dockerfile: String,
