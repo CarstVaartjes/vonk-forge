@@ -822,7 +822,7 @@ def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(
 
     for attempt in (0, 1):
         bundle = service.read(job_id, attempt)
-        assert bundle.diagnostics.stderr.text == "Killed"
+        assert bundle.diagnostics.stderr.text == "Killed\n"
         assert bundle.diagnostics.preflight[0].value == "oom_killed"
         assert "run-switch phase operation failed" in bundle.summary
         assert (
