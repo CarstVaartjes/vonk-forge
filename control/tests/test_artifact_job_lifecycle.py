@@ -211,6 +211,7 @@ def test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it(tmp_path) -> No
 # ------------------------------------------------------- legacy adoption
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_legacy_waiting_job_with_a_cancel_heals_to_cancelled(tmp_path) -> None:
     sessions, _ops, service, agent_jobs, clock, submitted, _claim, _run = _issued_job(
         tmp_path, 330

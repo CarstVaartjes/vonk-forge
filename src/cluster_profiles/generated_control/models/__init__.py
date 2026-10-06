@@ -1,5 +1,7 @@
 """ Contains all the data models used in inputs/outputs """
 
+from .activation_marker import ActivationMarker
+from .activation_marker_state import ActivationMarkerState
 from .admission_code import AdmissionCode
 from .agent_failure_kind import AgentFailureKind
 from .agent_failure_result import AgentFailureResult
@@ -7,12 +9,25 @@ from .agent_install_result import AgentInstallResult
 from .agent_operation import AgentOperation
 from .agent_operation_change import AgentOperationChange
 from .agent_operation_payload import AgentOperationPayload
+from .agent_package_source import AgentPackageSource
 from .agent_result_state import AgentResultState
 from .agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
 from .agent_upgrade_identity_response import AgentUpgradeIdentityResponse
+from .agent_upgrade_package import AgentUpgradePackage
+from .agent_upgrade_payload import AgentUpgradePayload
+from .agent_upgrade_repair_manifest import AgentUpgradeRepairManifest
+from .agent_upgrade_request_intent import AgentUpgradeRequestIntent
+from .agent_upgrade_result import AgentUpgradeResult
+from .agent_upgrade_rollout_payload import AgentUpgradeRolloutPayload
+from .agent_upgrade_rollout_payload_sources import AgentUpgradeRolloutPayloadSources
+from .agent_upgrade_rollout_result import AgentUpgradeRolloutResult
+from .agent_upgrade_rollout_result_skipped_type_0 import AgentUpgradeRolloutResultSkippedType0
 from .agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
+from .artifact_distribution_payload import ArtifactDistributionPayload
+from .artifact_distribution_result import ArtifactDistributionResult
 from .artifact_file_declaration import ArtifactFileDeclaration
 from .artifact_input_contract import ArtifactInputContract
+from .artifact_input_projection import ArtifactInputProjection
 from .artifact_job_capabilities_response import ArtifactJobCapabilitiesResponse
 from .artifact_job_create import ArtifactJobCreate
 from .artifact_job_create_parameters import ArtifactJobCreateParameters
@@ -22,6 +37,7 @@ from .artifact_job_response_interface import ArtifactJobResponseInterface
 from .artifact_job_response_preparation_type_0 import ArtifactJobResponsePreparationType0
 from .artifact_job_response_state_type_0 import ArtifactJobResponseStateType0
 from .artifact_job_result_evidence import ArtifactJobResultEvidence
+from .artifact_job_result_evidence_failure_kind_type_0 import ArtifactJobResultEvidenceFailureKindType0
 from .artifact_job_storage_capabilities import ArtifactJobStorageCapabilities
 from .artifact_job_transport_capabilities import ArtifactJobTransportCapabilities
 from .artifact_lifecycle_code import ArtifactLifecycleCode
@@ -38,18 +54,34 @@ from .artifact_storage_impact_running_coverage import ArtifactStorageImpactRunni
 from .artifact_storage_impact_spark_coverage import ArtifactStorageImpactSparkCoverage
 from .artifact_verification_evidence import ArtifactVerificationEvidence
 from .asset_availability import AssetAvailability
+from .availability_job_payload import AvailabilityJobPayload
+from .availability_job_result import AvailabilityJobResult
+from .availability_model_child import AvailabilityModelChild
+from .availability_model_child_state import AvailabilityModelChildState
 from .availability_operation_failure import AvailabilityOperationFailure
 from .availability_recovery_action import AvailabilityRecoveryAction
+from .availability_retry import AvailabilityRetry
+from .availability_runtime import AvailabilityRuntime
+from .availability_runtime_placement_environment_type_0 import AvailabilityRuntimePlacementEnvironmentType0
+from .availability_supersession import AvailabilitySupersession
 from .blocker_category import BlockerCategory
 from .boolean_parameter import BooleanParameter
 from .bounded_error_response import BoundedErrorResponse
+from .build_cleanup_phase_operation import BuildCleanupPhaseOperation
 from .build_compatibility_evidence import BuildCompatibilityEvidence
 from .build_compatibility_evidence_state import BuildCompatibilityEvidenceState
 from .build_context import BuildContext
+from .build_model_artifact_projection import BuildModelArtifactProjection
 from .build_network import BuildNetwork
 from .build_patch import BuildPatch
+from .build_phase_operation import BuildPhaseOperation
+from .build_resources_projection import BuildResourcesProjection
+from .build_security_projection import BuildSecurityProjection
 from .build_source_evidence import BuildSourceEvidence
 from .build_source_evidence_state import BuildSourceEvidenceState
+from .cache_manifest import CacheManifest
+from .cache_manifest_artifact import CacheManifestArtifact
+from .cache_manifest_artifact_part import CacheManifestArtifactPart
 from .cache_reference_reason import CacheReferenceReason
 from .cache_removal_asset import CacheRemovalAsset
 from .cache_removal_asset_disposition import CacheRemovalAssetDisposition
@@ -73,24 +105,52 @@ from .compatibility_preparation import CompatibilityPreparation
 from .compatibility_preparation_kind import CompatibilityPreparationKind
 from .compatibility_preparation_stage import CompatibilityPreparationStage
 from .compatibility_preparation_state import CompatibilityPreparationState
+from .compiled_artifact import CompiledArtifact
 from .compiled_artifact_contract import CompiledArtifactContract
 from .compiled_artifact_contract_engine_type_0 import CompiledArtifactContractEngineType0
 from .compiled_artifact_contract_interface import CompiledArtifactContractInterface
+from .compiled_artifact_mount import CompiledArtifactMount
+from .compiled_endpoint import CompiledEndpoint
+from .compiled_environment_entry import CompiledEnvironmentEntry
+from .compiled_execution_plan import CompiledExecutionPlan
+from .compiled_identity import CompiledIdentity
+from .compiled_job import CompiledJob
+from .compiled_job_input import CompiledJobInput
+from .compiled_job_input_slot import CompiledJobInputSlot
+from .compiled_job_interface import CompiledJobInterface
+from .compiled_lifecycle import CompiledLifecycle
+from .compiled_model_identity import CompiledModelIdentity
+from .compiled_placement import CompiledPlacement
+from .compiled_runtime import CompiledRuntime
+from .compiled_runtime_image import CompiledRuntimeImage
+from .compiled_security import CompiledSecurity
+from .compiled_security_mount import CompiledSecurityMount
+from .compiled_security_mount_source import CompiledSecurityMountSource
+from .compiled_security_network_mode import CompiledSecurityNetworkMode
+from .compiled_topology import CompiledTopology
 from .conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
 from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
 from .controller_error_code import ControllerErrorCode
 from .desired_assignment_state import DesiredAssignmentState
+from .distributed_recovery_marker import DistributedRecoveryMarker
 from .distribution_assignment_state import DistributionAssignmentState
 from .distribution_code import DistributionCode
+from .distribution_job_payload import DistributionJobPayload
+from .distribution_job_payload_assignments import DistributionJobPayloadAssignments
+from .distribution_job_payload_phase import DistributionJobPayloadPhase
+from .distribution_job_payload_target_totals import DistributionJobPayloadTargetTotals
 from .distribution_object import DistributionObject
+from .distribution_transfer_progress import DistributionTransferProgress
+from .distribution_transfer_progress_phase import DistributionTransferProgressPhase
 from .effective_parallelism import EffectiveParallelism
 from .effective_settings_selection import EffectiveSettingsSelection
 from .effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects
 from .effective_settings_selection_change_effects_additional_property import EffectiveSettingsSelectionChangeEffectsAdditionalProperty
 from .effective_settings_selection_kind import EffectiveSettingsSelectionKind
 from .effective_settings_selection_knobs import EffectiveSettingsSelectionKnobs
+from .empty_job_result import EmptyJobResult
 from .endpoint_response import EndpointResponse
 from .endpoint_state import EndpointState
 from .enrollment_grant_response import EnrollmentGrantResponse
@@ -241,6 +301,7 @@ from .image_store_code import ImageStoreCode
 from .install_admission_code import InstallAdmissionCode
 from .install_degraded_reason import InstallDegradedReason
 from .install_partial_evidence import InstallPartialEvidence
+from .install_phase_operation import InstallPhaseOperation
 from .installation_node_change import InstallationNodeChange
 from .installation_node_payload import InstallationNodePayload
 from .installation_node_state import InstallationNodeState
@@ -261,6 +322,7 @@ from .job_progress import JobProgress
 from .job_resume_request import JobResumeRequest
 from .job_resume_request_disposition import JobResumeRequestDisposition
 from .job_resume_response import JobResumeResponse
+from .job_run_phase_operation import JobRunPhaseOperation
 from .library_assessment_code import LibraryAssessmentCode
 from .library_facet_values import LibraryFacetValues
 from .library_filter_values import LibraryFilterValues
@@ -293,6 +355,8 @@ from .managed_catalog_sync_failure import ManagedCatalogSyncFailure
 from .managed_catalog_sync_problem import ManagedCatalogSyncProblem
 from .managed_catalog_sync_response import ManagedCatalogSyncResponse
 from .managed_catalog_sync_response_trigger import ManagedCatalogSyncResponseTrigger
+from .managed_catalog_sync_result import ManagedCatalogSyncResult
+from .managed_catalog_sync_result_state import ManagedCatalogSyncResultState
 from .managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe
 from .mapping_selection import MappingSelection
 from .mapping_selection_action import MappingSelectionAction
@@ -303,18 +367,30 @@ from .migration_step import MigrationStep
 from .model_artifact_identity import ModelArtifactIdentity
 from .model_artifact_preparation import ModelArtifactPreparation
 from .model_artifact_preparation_completeness import ModelArtifactPreparationCompleteness
+from .model_cache_access_recheck import ModelCacheAccessRecheck
 from .model_cache_blocker_code import ModelCacheBlockerCode
 from .model_cache_cancellation import ModelCacheCancellation
 from .model_cache_cancellation_request import ModelCacheCancellationRequest
+from .model_cache_claim import ModelCacheClaim
 from .model_cache_code import ModelCacheCode
+from .model_cache_download_payload import ModelCacheDownloadPayload
 from .model_cache_download_result import ModelCacheDownloadResult
+from .model_cache_operation_progress import ModelCacheOperationProgress
+from .model_cache_operation_progress_phase import ModelCacheOperationProgressPhase
 from .model_cache_operator_request import ModelCacheOperatorRequest
 from .model_cache_operator_response import ModelCacheOperatorResponse
 from .model_cache_operator_response_action import ModelCacheOperatorResponseAction
 from .model_cache_operator_response_state_type_1 import ModelCacheOperatorResponseStateType1
 from .model_cache_operator_status import ModelCacheOperatorStatus
+from .model_cache_removal_payload import ModelCacheRemovalPayload
 from .model_cache_removal_request import ModelCacheRemovalRequest
 from .model_cache_removal_result import ModelCacheRemovalResult
+from .model_cache_repair_checkpoint import ModelCacheRepairCheckpoint
+from .model_cache_repair_payload import ModelCacheRepairPayload
+from .model_cache_retry import ModelCacheRetry
+from .model_cache_transfer import ModelCacheTransfer
+from .model_cache_transfer_artifact import ModelCacheTransferArtifact
+from .model_cache_transfer_artifacts import ModelCacheTransferArtifacts
 from .model_definition import ModelDefinition
 from .model_definition_modalities_item import ModelDefinitionModalitiesItem
 from .model_detail_response import ModelDetailResponse
@@ -329,6 +405,8 @@ from .model_license import ModelLicense
 from .model_metadata import ModelMetadata
 from .model_record import ModelRecord
 from .model_reference import ModelReference
+from .model_revision_projection import ModelRevisionProjection
+from .model_revision_projection_modalities_item import ModelRevisionProjectionModalitiesItem
 from .model_source import ModelSource
 from .model_territorial_restrictions import ModelTerritorialRestrictions
 from .network_interface import NetworkInterface
@@ -340,6 +418,7 @@ from .node_distribution_assignment import NodeDistributionAssignment
 from .node_offline_reason import NodeOfflineReason
 from .node_profile_change import NodeProfileChange
 from .node_profile_payload import NodeProfilePayload
+from .node_telemetry_payload import NodeTelemetryPayload
 from .observation_cause import ObservationCause
 from .observed_assignment_state import ObservedAssignmentState
 from .operation_blocker import OperationBlocker
@@ -359,15 +438,27 @@ from .operation_recovery_action import OperationRecoveryAction
 from .operations_response import OperationsResponse
 from .operator_action_name import OperatorActionName
 from .operator_surface import OperatorSurface
+from .outcome_done import OutcomeDone
+from .outcome_evidence import OutcomeEvidence
+from .outcome_failed import OutcomeFailed
 from .outcome_kind import OutcomeKind
+from .outcome_unknown import OutcomeUnknown
 from .output_limits import OutputLimits
 from .package_activation_receipt import PackageActivationReceipt
 from .package_activation_receipt_phase import PackageActivationReceiptPhase
+from .package_rollback_authority import PackageRollbackAuthority
+from .package_rollback_source import PackageRollbackSource
 from .placement_install_state import PlacementInstallState
 from .placement_load_state import PlacementLoadState
+from .prebuilt_image import PrebuiltImage
 from .prebuilt_image_code import PrebuiltImageCode
 from .preparation_reason import PreparationReason
 from .preparation_reason_severity import PreparationReasonSeverity
+from .profile_job_run_stop_authorization import ProfileJobRunStopAuthorization
+from .profile_job_run_stop_job import ProfileJobRunStopJob
+from .profile_job_run_stop_phase_item import ProfileJobRunStopPhaseItem
+from .profile_job_run_stop_target import ProfileJobRunStopTarget
+from .profile_partial_stop import ProfilePartialStop
 from .profile_reason_code import ProfileReasonCode
 from .progress_phase import ProgressPhase
 from .projection_code import ProjectionCode
@@ -377,10 +468,37 @@ from .reason_code_vocabulary import ReasonCodeVocabulary
 from .recipe_alternative import RecipeAlternative
 from .recipe_alternative_cache import RecipeAlternativeCache
 from .recipe_alternative_fits_fleet import RecipeAlternativeFitsFleet
+from .recipe_build_adapter import RecipeBuildAdapter
+from .recipe_build_adapter_definition import RecipeBuildAdapterDefinition
+from .recipe_build_additional_context import RecipeBuildAdditionalContext
+from .recipe_build_base_image import RecipeBuildBaseImage
 from .recipe_build_cleanup_evidence import RecipeBuildCleanupEvidence
+from .recipe_build_cleanup_parent import RecipeBuildCleanupParent
+from .recipe_build_cleanup_parent_owner_kind import RecipeBuildCleanupParentOwnerKind
+from .recipe_build_cleanup_request import RecipeBuildCleanupRequest
 from .recipe_build_code import RecipeBuildCode
 from .recipe_build_definition import RecipeBuildDefinition
+from .recipe_build_dependency import RecipeBuildDependency
+from .recipe_build_environment_argument import RecipeBuildEnvironmentArgument
 from .recipe_build_evidence import RecipeBuildEvidence
+from .recipe_build_intent import RecipeBuildIntent
+from .recipe_build_intent_kind import RecipeBuildIntentKind
+from .recipe_build_limits import RecipeBuildLimits
+from .recipe_build_metadata import RecipeBuildMetadata
+from .recipe_build_network import RecipeBuildNetwork
+from .recipe_build_options import RecipeBuildOptions
+from .recipe_build_options_format import RecipeBuildOptionsFormat
+from .recipe_build_options_layer_compression import RecipeBuildOptionsLayerCompression
+from .recipe_build_options_squash import RecipeBuildOptionsSquash
+from .recipe_build_parent import RecipeBuildParent
+from .recipe_build_parent_owner_kind import RecipeBuildParentOwnerKind
+from .recipe_build_request import RecipeBuildRequest
+from .recipe_cache_removal_checkpoint import RecipeCacheRemovalCheckpoint
+from .recipe_cache_removal_intent import RecipeCacheRemovalIntent
+from .recipe_cache_removal_model_child import RecipeCacheRemovalModelChild
+from .recipe_cache_removal_owner import RecipeCacheRemovalOwner
+from .recipe_cache_removal_plan import RecipeCacheRemovalPlan
+from .recipe_cache_removal_result import RecipeCacheRemovalResult
 from .recipe_cancellation_request import RecipeCancellationRequest
 from .recipe_definition import RecipeDefinition
 from .recipe_detail_response import RecipeDetailResponse
@@ -406,14 +524,30 @@ from .recipe_image_availability_response_state import RecipeImageAvailabilityRes
 from .recipe_image_availability_result import RecipeImageAvailabilityResult
 from .recipe_image_code import RecipeImageCode
 from .recipe_input_slot import RecipeInputSlot
+from .recipe_install_parent import RecipeInstallParent
+from .recipe_install_parent_owner_kind import RecipeInstallParentOwnerKind
+from .recipe_install_payload import RecipeInstallPayload
 from .recipe_installation_change import RecipeInstallationChange
 from .recipe_installation_payload import RecipeInstallationPayload
 from .recipe_integer_setting import RecipeIntegerSetting
 from .recipe_integer_setting_change_effect import RecipeIntegerSettingChangeEffect
+from .recipe_job_activate_parent import RecipeJobActivateParent
+from .recipe_job_activate_parent_owner_kind import RecipeJobActivateParentOwnerKind
+from .recipe_job_evidence import RecipeJobEvidence
+from .recipe_job_file import RecipeJobFile
 from .recipe_job_input import RecipeJobInput
+from .recipe_job_input_file import RecipeJobInputFile
+from .recipe_job_input_manifest import RecipeJobInputManifest
 from .recipe_job_interface import RecipeJobInterface
 from .recipe_job_interface_adapter import RecipeJobInterfaceAdapter
 from .recipe_job_output import RecipeJobOutput
+from .recipe_job_output_limits import RecipeJobOutputLimits
+from .recipe_job_output_manifest import RecipeJobOutputManifest
+from .recipe_job_output_mapping import RecipeJobOutputMapping
+from .recipe_job_run_parent import RecipeJobRunParent
+from .recipe_job_run_parent_owner_kind import RecipeJobRunParentOwnerKind
+from .recipe_job_run_request import RecipeJobRunRequest
+from .recipe_job_run_result import RecipeJobRunResult
 from .recipe_job_serving_request import RecipeJobServingRequest
 from .recipe_job_serving_request_input_slots import RecipeJobServingRequestInputSlots
 from .recipe_job_settings import RecipeJobSettings
@@ -427,10 +561,18 @@ from .recipe_model_file import RecipeModelFile
 from .recipe_model_selection import RecipeModelSelection
 from .recipe_mount import RecipeMount
 from .recipe_open_ai_interface import RecipeOpenAIInterface
+from .recipe_operation_activated_result import RecipeOperationActivatedResult
 from .recipe_operation_cancellation_result import RecipeOperationCancellationResult
 from .recipe_operation_cancellation_result_launch_evidence_type_0 import RecipeOperationCancellationResultLaunchEvidenceType0
 from .recipe_operation_cancellation_result_node_evidence_type_0 import RecipeOperationCancellationResultNodeEvidenceType0
 from .recipe_operation_code import RecipeOperationCode
+from .recipe_operation_progress_result import RecipeOperationProgressResult
+from .recipe_operation_progress_result_launch_evidence_type_0 import RecipeOperationProgressResultLaunchEvidenceType0
+from .recipe_operation_progress_result_node_evidence_type_0 import RecipeOperationProgressResultNodeEvidenceType0
+from .recipe_operation_result import RecipeOperationResult
+from .recipe_operation_result_launch_evidence_type_0 import RecipeOperationResultLaunchEvidenceType0
+from .recipe_operation_result_node_evidence import RecipeOperationResultNodeEvidence
+from .recipe_operation_stopped_result import RecipeOperationStoppedResult
 from .recipe_operator_request import RecipeOperatorRequest
 from .recipe_operator_response import RecipeOperatorResponse
 from .recipe_operator_response_state import RecipeOperatorResponseState
@@ -439,16 +581,21 @@ from .recipe_option_choice import RecipeOptionChoice
 from .recipe_option_choice_env import RecipeOptionChoiceEnv
 from .recipe_output_slot import RecipeOutputSlot
 from .recipe_package_code import RecipePackageCode
+from .recipe_package_handle_projection import RecipePackageHandleProjection
 from .recipe_parallelism import RecipeParallelism
 from .recipe_presence import RecipePresence
 from .recipe_provenance import RecipeProvenance
 from .recipe_readiness import RecipeReadiness
 from .recipe_readiness_check import RecipeReadinessCheck
 from .recipe_readiness_check_state import RecipeReadinessCheckState
+from .recipe_reconcile_parent import RecipeReconcileParent
+from .recipe_reconcile_parent_owner_kind import RecipeReconcileParentOwnerKind
+from .recipe_reconcile_payload import RecipeReconcilePayload
 from .recipe_reconcile_result import RecipeReconcileResult
 from .recipe_release import RecipeRelease
 from .recipe_retry_intent import RecipeRetryIntent
 from .recipe_revision_intent import RecipeRevisionIntent
+from .recipe_revision_projection import RecipeRevisionProjection
 from .recipe_role_resources import RecipeRoleResources
 from .recipe_run_change import RecipeRunChange
 from .recipe_run_payload import RecipeRunPayload
@@ -460,14 +607,25 @@ from .recipe_serving_validation import RecipeServingValidation
 from .recipe_serving_validation_interface import RecipeServingValidationInterface
 from .recipe_setting import RecipeSetting
 from .recipe_setting_change_effect import RecipeSettingChangeEffect
+from .recipe_start_parent import RecipeStartParent
+from .recipe_start_parent_owner_kind import RecipeStartParentOwnerKind
+from .recipe_start_payload import RecipeStartPayload
+from .recipe_start_payload_phase_type_0 import RecipeStartPayloadPhaseType0
 from .recipe_start_result import RecipeStartResult
+from .recipe_stop_parent import RecipeStopParent
+from .recipe_stop_parent_owner_kind import RecipeStopParentOwnerKind
+from .recipe_stop_payload import RecipeStopPayload
 from .recipe_stop_result import RecipeStopResult
 from .recipe_topology import RecipeTopology
 from .recipe_topology_role import RecipeTopologyRole
+from .recipe_uninstall_parent import RecipeUninstallParent
+from .recipe_uninstall_parent_owner_kind import RecipeUninstallParentOwnerKind
+from .recipe_uninstall_payload import RecipeUninstallPayload
 from .recipe_uninstall_result import RecipeUninstallResult
 from .recipe_update_child import RecipeUpdateChild
 from .recipe_update_child_state import RecipeUpdateChildState
 from .recipe_update_code import RecipeUpdateCode
+from .recipe_update_document import RecipeUpdateDocument
 from .recipe_update_failure import RecipeUpdateFailure
 from .recipe_update_notice import RecipeUpdateNotice
 from .recipe_update_request import RecipeUpdateRequest
@@ -479,6 +637,8 @@ from .recipe_validation_check import RecipeValidationCheck
 from .recipe_validation_check_assertions_item import RecipeValidationCheckAssertionsItem
 from .recipe_validation_check_kind import RecipeValidationCheckKind
 from .reconcile_code import ReconcileCode
+from .reconcile_phase_operation import ReconcilePhaseOperation
+from .recovery_start_item import RecoveryStartItem
 from .removed_recipe_node_result import RemovedRecipeNodeResult
 from .request_validation_issue import RequestValidationIssue
 from .request_validation_problem import RequestValidationProblem
@@ -490,6 +650,7 @@ from .resource_planning_code import ResourcePlanningCode
 from .resource_term import ResourceTerm
 from .resource_term_problem import ResourceTermProblem
 from .rollout_preparation import RolloutPreparation
+from .route_claim_marker import RouteClaimMarker
 from .route_publication_state import RoutePublicationState
 from .route_state import RouteState
 from .run_admission_code import RunAdmissionCode
@@ -502,6 +663,10 @@ from .run_presence import RunPresence
 from .run_presence_group_state import RunPresenceGroupState
 from .run_presence_option_choices import RunPresenceOptionChoices
 from .run_state import RunState
+from .run_switch_apply_request import RunSwitchApplyRequest
+from .run_switch_apply_request_action import RunSwitchApplyRequestAction
+from .run_switch_apply_request_option_choices import RunSwitchApplyRequestOptionChoices
+from .run_switch_apply_request_retention import RunSwitchApplyRequestRetention
 from .run_switch_assessment import RunSwitchAssessment
 from .run_switch_build_evidence import RunSwitchBuildEvidence
 from .run_switch_build_evidence_state import RunSwitchBuildEvidenceState
@@ -510,6 +675,8 @@ from .run_switch_cached_transfer_result_cached_target_totals import RunSwitchCac
 from .run_switch_cancellation import RunSwitchCancellation
 from .run_switch_child_progress import RunSwitchChildProgress
 from .run_switch_child_progress_phase_type_0 import RunSwitchChildProgressPhaseType0
+from .run_switch_cleanup_intent import RunSwitchCleanupIntent
+from .run_switch_cleanup_intent_cleanup_mode import RunSwitchCleanupIntentCleanupMode
 from .run_switch_cleanup_result import RunSwitchCleanupResult
 from .run_switch_cleanup_result_subphase_type_0 import RunSwitchCleanupResultSubphaseType0
 from .run_switch_cleanup_verify_result import RunSwitchCleanupVerifyResult
@@ -518,10 +685,14 @@ from .run_switch_cleanup_verify_result_subphase_type_0 import RunSwitchCleanupVe
 from .run_switch_code import RunSwitchCode
 from .run_switch_container_build_result import RunSwitchContainerBuildResult
 from .run_switch_container_build_result_state import RunSwitchContainerBuildResultState
+from .run_switch_distribution_child_result import RunSwitchDistributionChildResult
 from .run_switch_final_verify_result import RunSwitchFinalVerifyResult
 from .run_switch_final_verify_result_subphase_type_0 import RunSwitchFinalVerifyResultSubphaseType0
 from .run_switch_installation_verify_result import RunSwitchInstallationVerifyResult
 from .run_switch_installation_verify_result_subphase_type_0 import RunSwitchInstallationVerifyResultSubphaseType0
+from .run_switch_job_payload import RunSwitchJobPayload
+from .run_switch_job_payload_action import RunSwitchJobPayloadAction
+from .run_switch_job_payload_operation_kind import RunSwitchJobPayloadOperationKind
 from .run_switch_member_progress import RunSwitchMemberProgress
 from .run_switch_member_progress_phase_type_0 import RunSwitchMemberProgressPhaseType0
 from .run_switch_member_progress_state import RunSwitchMemberProgressState
@@ -551,6 +722,7 @@ from .run_switch_plan_action import RunSwitchPlanAction
 from .run_switch_plan_cleanup_disposition import RunSwitchPlanCleanupDisposition
 from .run_switch_plan_cleanup_mode import RunSwitchPlanCleanupMode
 from .run_switch_prepared_result import RunSwitchPreparedResult
+from .run_switch_profile_stop_intent import RunSwitchProfileStopIntent
 from .run_switch_profile_stop_scope import RunSwitchProfileStopScope
 from .run_switch_progress import RunSwitchProgress
 from .run_switch_progress_phase_type_0 import RunSwitchProgressPhaseType0
@@ -563,12 +735,14 @@ from .run_switch_reason_severity import RunSwitchReasonSeverity
 from .run_switch_reconciliation_authority import RunSwitchReconciliationAuthority
 from .run_switch_reconciliation_target import RunSwitchReconciliationTarget
 from .run_switch_reconciliation_target_state import RunSwitchReconciliationTargetState
+from .run_switch_run_intent import RunSwitchRunIntent
 from .run_switch_runtime_image_reference_intent import RunSwitchRuntimeImageReferenceIntent
 from .run_switch_runtime_image_result import RunSwitchRuntimeImageResult
 from .run_switch_runtime_install_result import RunSwitchRuntimeInstallResult
 from .run_switch_runtime_plan_result import RunSwitchRuntimePlanResult
 from .run_switch_start_result import RunSwitchStartResult
 from .run_switch_start_result_subphase_type_0 import RunSwitchStartResultSubphaseType0
+from .run_switch_stop_intent import RunSwitchStopIntent
 from .run_switch_stop_result import RunSwitchStopResult
 from .run_switch_stop_result_subphase_type_0 import RunSwitchStopResultSubphaseType0
 from .run_switch_target_transfer_evidence_result import RunSwitchTargetTransferEvidenceResult
@@ -579,10 +753,13 @@ from .run_switch_uninstall_result_disposition import RunSwitchUninstallResultDis
 from .run_switch_uninstall_result_subphase_type_0 import RunSwitchUninstallResultSubphaseType0
 from .run_switch_verify_result import RunSwitchVerifyResult
 from .run_switch_verify_result_cached_target_totals import RunSwitchVerifyResultCachedTargetTotals
+from .runtime_argument import RuntimeArgument
+from .runtime_environment_entry import RuntimeEnvironmentEntry
 from .runtime_image_code import RuntimeImageCode
 from .runtime_image_identity import RuntimeImageIdentity
 from .runtime_image_preparation import RuntimeImagePreparation
 from .runtime_image_receipt import RuntimeImageReceipt
+from .runtime_image_reference_intent import RuntimeImageReferenceIntent
 from .runtime_image_storage_impact import RuntimeImageStorageImpact
 from .runtime_image_storage_impact_missing_image_distribution_bytes_by_node_type_0 import RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0
 from .runtime_image_storage_impact_nas_coverage import RuntimeImageStorageImpactNasCoverage
@@ -592,10 +769,16 @@ from .runtime_preflight_code import RuntimePreflightCode
 from .runtime_preflight_finding import RuntimePreflightFinding
 from .runtime_preflight_finding_code import RuntimePreflightFindingCode
 from .runtime_preflight_finding_status import RuntimePreflightFindingStatus
+from .runtime_preflight_request import RuntimePreflightRequest
+from .runtime_preflight_request_fabric_connectivity import RuntimePreflightRequestFabricConnectivity
 from .runtime_preflight_result import RuntimePreflightResult
+from .runtime_telemetry_projection import RuntimeTelemetryProjection
 from .security_refusal import SecurityRefusal
 from .security_refusal_reason import SecurityRefusalReason
 from .source_bundle_code import SourceBundleCode
+from .source_bundle_file import SourceBundleFile
+from .source_bundle_file_mode import SourceBundleFileMode
+from .source_bundle_manifest import SourceBundleManifest
 from .source_policy_code import SourcePolicyCode
 from .spark_fit import SparkFit
 from .spark_fit_node import SparkFitNode
@@ -603,12 +786,26 @@ from .spark_fit_node_memory_kind_type_0 import SparkFitNodeMemoryKindType0
 from .spark_fit_node_memory_pool_type_0 import SparkFitNodeMemoryPoolType0
 from .spark_group import SparkGroup
 from .spark_group_node import SparkGroupNode
+from .start_phase_operation import StartPhaseOperation
 from .state_alias import StateAlias
 from .state_write_kind import StateWriteKind
 from .stop_impact import StopImpact
 from .stop_outcome import StopOutcome
+from .stop_phase_operation import StopPhaseOperation
 from .stop_plan_code import StopPlanCode
 from .storage_demand_code import StorageDemandCode
+from .stored_admission_reason import StoredAdmissionReason
+from .stored_build_policy_report import StoredBuildPolicyReport
+from .stored_install_node_plan import StoredInstallNodePlan
+from .stored_installation_plan import StoredInstallationPlan
+from .stored_installation_plan_compiled_execution_plans import StoredInstallationPlanCompiledExecutionPlans
+from .stored_policy_finding import StoredPolicyFinding
+from .stored_prebuilt_decision import StoredPrebuiltDecision
+from .stored_run_endpoint import StoredRunEndpoint
+from .stored_run_node_plan import StoredRunNodePlan
+from .stored_run_node_plan_memory_kind import StoredRunNodePlanMemoryKind
+from .stored_run_node_plan_memory_pool import StoredRunNodePlanMemoryPool
+from .stored_run_plan import StoredRunPlan
 from .string_parameter import StringParameter
 from .supersede_code import SupersedeCode
 from .target_asset_state import TargetAssetState
@@ -617,12 +814,17 @@ from .telemetry_point import TelemetryPoint
 from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
 from .topology_code import TopologyCode
+from .uninstall_phase_operation import UninstallPhaseOperation
 from .uninstall_plan_code import UninstallPlanCode
 from .unknown_error import UnknownError
+from .unprojected_revision import UnprojectedRevision
 from .wait_reason import WaitReason
 from .wait_verdict import WaitVerdict
+from .writable_path import WritablePath
 
 __all__ = (
+    "ActivationMarker",
+    "ActivationMarkerState",
     "AdmissionCode",
     "AgentFailureKind",
     "AgentFailureResult",
@@ -630,12 +832,25 @@ __all__ = (
     "AgentOperation",
     "AgentOperationChange",
     "AgentOperationPayload",
+    "AgentPackageSource",
     "AgentResultState",
     "AgentUpgradeDiagnosticsResponse",
     "AgentUpgradeIdentityResponse",
+    "AgentUpgradePackage",
+    "AgentUpgradePayload",
+    "AgentUpgradeRepairManifest",
+    "AgentUpgradeRequestIntent",
+    "AgentUpgradeResult",
+    "AgentUpgradeRolloutPayload",
+    "AgentUpgradeRolloutPayloadSources",
+    "AgentUpgradeRolloutResult",
+    "AgentUpgradeRolloutResultSkippedType0",
     "AgentUpgradeTargetDiagnosticsResponse",
+    "ArtifactDistributionPayload",
+    "ArtifactDistributionResult",
     "ArtifactFileDeclaration",
     "ArtifactInputContract",
+    "ArtifactInputProjection",
     "ArtifactJobCapabilitiesResponse",
     "ArtifactJobCreate",
     "ArtifactJobCreateParameters",
@@ -645,6 +860,7 @@ __all__ = (
     "ArtifactJobResponsePreparationType0",
     "ArtifactJobResponseStateType0",
     "ArtifactJobResultEvidence",
+    "ArtifactJobResultEvidenceFailureKindType0",
     "ArtifactJobStorageCapabilities",
     "ArtifactJobTransportCapabilities",
     "ArtifactLifecycleCode",
@@ -661,18 +877,34 @@ __all__ = (
     "ArtifactStorageImpactSparkCoverage",
     "ArtifactVerificationEvidence",
     "AssetAvailability",
+    "AvailabilityJobPayload",
+    "AvailabilityJobResult",
+    "AvailabilityModelChild",
+    "AvailabilityModelChildState",
     "AvailabilityOperationFailure",
     "AvailabilityRecoveryAction",
+    "AvailabilityRetry",
+    "AvailabilityRuntime",
+    "AvailabilityRuntimePlacementEnvironmentType0",
+    "AvailabilitySupersession",
     "BlockerCategory",
     "BooleanParameter",
     "BoundedErrorResponse",
+    "BuildCleanupPhaseOperation",
     "BuildCompatibilityEvidence",
     "BuildCompatibilityEvidenceState",
     "BuildContext",
+    "BuildModelArtifactProjection",
     "BuildNetwork",
     "BuildPatch",
+    "BuildPhaseOperation",
+    "BuildResourcesProjection",
+    "BuildSecurityProjection",
     "BuildSourceEvidence",
     "BuildSourceEvidenceState",
+    "CacheManifest",
+    "CacheManifestArtifact",
+    "CacheManifestArtifactPart",
     "CacheReferenceReason",
     "CacheRemovalAsset",
     "CacheRemovalAssetDisposition",
@@ -696,24 +928,52 @@ __all__ = (
     "CompatibilityPreparationKind",
     "CompatibilityPreparationStage",
     "CompatibilityPreparationState",
+    "CompiledArtifact",
     "CompiledArtifactContract",
     "CompiledArtifactContractEngineType0",
     "CompiledArtifactContractInterface",
+    "CompiledArtifactMount",
+    "CompiledEndpoint",
+    "CompiledEnvironmentEntry",
+    "CompiledExecutionPlan",
+    "CompiledIdentity",
+    "CompiledJob",
+    "CompiledJobInput",
+    "CompiledJobInputSlot",
+    "CompiledJobInterface",
+    "CompiledLifecycle",
+    "CompiledModelIdentity",
+    "CompiledPlacement",
+    "CompiledRuntime",
+    "CompiledRuntimeImage",
+    "CompiledSecurity",
+    "CompiledSecurityMount",
+    "CompiledSecurityMountSource",
+    "CompiledSecurityNetworkMode",
+    "CompiledTopology",
     "ConditionalPostStopMemoryCheck",
     "ControllerAssetState",
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
     "ControllerErrorCode",
     "DesiredAssignmentState",
+    "DistributedRecoveryMarker",
     "DistributionAssignmentState",
     "DistributionCode",
+    "DistributionJobPayload",
+    "DistributionJobPayloadAssignments",
+    "DistributionJobPayloadPhase",
+    "DistributionJobPayloadTargetTotals",
     "DistributionObject",
+    "DistributionTransferProgress",
+    "DistributionTransferProgressPhase",
     "EffectiveParallelism",
     "EffectiveSettingsSelection",
     "EffectiveSettingsSelectionChangeEffects",
     "EffectiveSettingsSelectionChangeEffectsAdditionalProperty",
     "EffectiveSettingsSelectionKind",
     "EffectiveSettingsSelectionKnobs",
+    "EmptyJobResult",
     "EndpointResponse",
     "EndpointState",
     "EnrollmentGrantResponse",
@@ -869,6 +1129,7 @@ __all__ = (
     "InstallationState",
     "InstallDegradedReason",
     "InstallPartialEvidence",
+    "InstallPhaseOperation",
     "IntegerParameter",
     "InvalidRequest",
     "InvalidRequestReason",
@@ -884,6 +1145,7 @@ __all__ = (
     "JobResumeRequest",
     "JobResumeRequestDisposition",
     "JobResumeResponse",
+    "JobRunPhaseOperation",
     "LibraryAssessmentCode",
     "LibraryFacetValues",
     "LibraryFilterValues",
@@ -916,6 +1178,8 @@ __all__ = (
     "ManagedCatalogSyncProblem",
     "ManagedCatalogSyncResponse",
     "ManagedCatalogSyncResponseTrigger",
+    "ManagedCatalogSyncResult",
+    "ManagedCatalogSyncResultState",
     "ManagedCatalogWithdrawnRecipe",
     "MappingSelection",
     "MappingSelectionAction",
@@ -926,18 +1190,30 @@ __all__ = (
     "ModelArtifactIdentity",
     "ModelArtifactPreparation",
     "ModelArtifactPreparationCompleteness",
+    "ModelCacheAccessRecheck",
     "ModelCacheBlockerCode",
     "ModelCacheCancellation",
     "ModelCacheCancellationRequest",
+    "ModelCacheClaim",
     "ModelCacheCode",
+    "ModelCacheDownloadPayload",
     "ModelCacheDownloadResult",
+    "ModelCacheOperationProgress",
+    "ModelCacheOperationProgressPhase",
     "ModelCacheOperatorRequest",
     "ModelCacheOperatorResponse",
     "ModelCacheOperatorResponseAction",
     "ModelCacheOperatorResponseStateType1",
     "ModelCacheOperatorStatus",
+    "ModelCacheRemovalPayload",
     "ModelCacheRemovalRequest",
     "ModelCacheRemovalResult",
+    "ModelCacheRepairCheckpoint",
+    "ModelCacheRepairPayload",
+    "ModelCacheRetry",
+    "ModelCacheTransfer",
+    "ModelCacheTransferArtifact",
+    "ModelCacheTransferArtifacts",
     "ModelDefinition",
     "ModelDefinitionModalitiesItem",
     "ModelDetailResponse",
@@ -952,6 +1228,8 @@ __all__ = (
     "ModelMetadata",
     "ModelRecord",
     "ModelReference",
+    "ModelRevisionProjection",
+    "ModelRevisionProjectionModalitiesItem",
     "ModelSource",
     "ModelTerritorialRestrictions",
     "NetworkInterface",
@@ -963,6 +1241,7 @@ __all__ = (
     "NodeOfflineReason",
     "NodeProfileChange",
     "NodeProfilePayload",
+    "NodeTelemetryPayload",
     "ObservationCause",
     "ObservedAssignmentState",
     "OperationBlocker",
@@ -982,15 +1261,27 @@ __all__ = (
     "OperationsResponse",
     "OperatorActionName",
     "OperatorSurface",
+    "OutcomeDone",
+    "OutcomeEvidence",
+    "OutcomeFailed",
     "OutcomeKind",
+    "OutcomeUnknown",
     "OutputLimits",
     "PackageActivationReceipt",
     "PackageActivationReceiptPhase",
+    "PackageRollbackAuthority",
+    "PackageRollbackSource",
     "PlacementInstallState",
     "PlacementLoadState",
+    "PrebuiltImage",
     "PrebuiltImageCode",
     "PreparationReason",
     "PreparationReasonSeverity",
+    "ProfileJobRunStopAuthorization",
+    "ProfileJobRunStopJob",
+    "ProfileJobRunStopPhaseItem",
+    "ProfileJobRunStopTarget",
+    "ProfilePartialStop",
     "ProfileReasonCode",
     "ProgressPhase",
     "ProjectionCode",
@@ -1000,10 +1291,37 @@ __all__ = (
     "RecipeAlternative",
     "RecipeAlternativeCache",
     "RecipeAlternativeFitsFleet",
+    "RecipeBuildAdapter",
+    "RecipeBuildAdapterDefinition",
+    "RecipeBuildAdditionalContext",
+    "RecipeBuildBaseImage",
     "RecipeBuildCleanupEvidence",
+    "RecipeBuildCleanupParent",
+    "RecipeBuildCleanupParentOwnerKind",
+    "RecipeBuildCleanupRequest",
     "RecipeBuildCode",
     "RecipeBuildDefinition",
+    "RecipeBuildDependency",
+    "RecipeBuildEnvironmentArgument",
     "RecipeBuildEvidence",
+    "RecipeBuildIntent",
+    "RecipeBuildIntentKind",
+    "RecipeBuildLimits",
+    "RecipeBuildMetadata",
+    "RecipeBuildNetwork",
+    "RecipeBuildOptions",
+    "RecipeBuildOptionsFormat",
+    "RecipeBuildOptionsLayerCompression",
+    "RecipeBuildOptionsSquash",
+    "RecipeBuildParent",
+    "RecipeBuildParentOwnerKind",
+    "RecipeBuildRequest",
+    "RecipeCacheRemovalCheckpoint",
+    "RecipeCacheRemovalIntent",
+    "RecipeCacheRemovalModelChild",
+    "RecipeCacheRemovalOwner",
+    "RecipeCacheRemovalPlan",
+    "RecipeCacheRemovalResult",
     "RecipeCancellationRequest",
     "RecipeDefinition",
     "RecipeDetailResponse",
@@ -1031,12 +1349,28 @@ __all__ = (
     "RecipeInputSlot",
     "RecipeInstallationChange",
     "RecipeInstallationPayload",
+    "RecipeInstallParent",
+    "RecipeInstallParentOwnerKind",
+    "RecipeInstallPayload",
     "RecipeIntegerSetting",
     "RecipeIntegerSettingChangeEffect",
+    "RecipeJobActivateParent",
+    "RecipeJobActivateParentOwnerKind",
+    "RecipeJobEvidence",
+    "RecipeJobFile",
     "RecipeJobInput",
+    "RecipeJobInputFile",
+    "RecipeJobInputManifest",
     "RecipeJobInterface",
     "RecipeJobInterfaceAdapter",
     "RecipeJobOutput",
+    "RecipeJobOutputLimits",
+    "RecipeJobOutputManifest",
+    "RecipeJobOutputMapping",
+    "RecipeJobRunParent",
+    "RecipeJobRunParentOwnerKind",
+    "RecipeJobRunRequest",
+    "RecipeJobRunResult",
     "RecipeJobServingRequest",
     "RecipeJobServingRequestInputSlots",
     "RecipeJobSettings",
@@ -1050,10 +1384,18 @@ __all__ = (
     "RecipeModelSelection",
     "RecipeMount",
     "RecipeOpenAIInterface",
+    "RecipeOperationActivatedResult",
     "RecipeOperationCancellationResult",
     "RecipeOperationCancellationResultLaunchEvidenceType0",
     "RecipeOperationCancellationResultNodeEvidenceType0",
     "RecipeOperationCode",
+    "RecipeOperationProgressResult",
+    "RecipeOperationProgressResultLaunchEvidenceType0",
+    "RecipeOperationProgressResultNodeEvidenceType0",
+    "RecipeOperationResult",
+    "RecipeOperationResultLaunchEvidenceType0",
+    "RecipeOperationResultNodeEvidence",
+    "RecipeOperationStoppedResult",
     "RecipeOperatorRequest",
     "RecipeOperatorResponse",
     "RecipeOperatorResponseState",
@@ -1062,16 +1404,21 @@ __all__ = (
     "RecipeOptionChoiceEnv",
     "RecipeOutputSlot",
     "RecipePackageCode",
+    "RecipePackageHandleProjection",
     "RecipeParallelism",
     "RecipePresence",
     "RecipeProvenance",
     "RecipeReadiness",
     "RecipeReadinessCheck",
     "RecipeReadinessCheckState",
+    "RecipeReconcileParent",
+    "RecipeReconcileParentOwnerKind",
+    "RecipeReconcilePayload",
     "RecipeReconcileResult",
     "RecipeRelease",
     "RecipeRetryIntent",
     "RecipeRevisionIntent",
+    "RecipeRevisionProjection",
     "RecipeRoleResources",
     "RecipeRunChange",
     "RecipeRunPayload",
@@ -1083,14 +1430,25 @@ __all__ = (
     "RecipeServingValidationInterface",
     "RecipeSetting",
     "RecipeSettingChangeEffect",
+    "RecipeStartParent",
+    "RecipeStartParentOwnerKind",
+    "RecipeStartPayload",
+    "RecipeStartPayloadPhaseType0",
     "RecipeStartResult",
+    "RecipeStopParent",
+    "RecipeStopParentOwnerKind",
+    "RecipeStopPayload",
     "RecipeStopResult",
     "RecipeTopology",
     "RecipeTopologyRole",
+    "RecipeUninstallParent",
+    "RecipeUninstallParentOwnerKind",
+    "RecipeUninstallPayload",
     "RecipeUninstallResult",
     "RecipeUpdateChild",
     "RecipeUpdateChildState",
     "RecipeUpdateCode",
+    "RecipeUpdateDocument",
     "RecipeUpdateFailure",
     "RecipeUpdateNotice",
     "RecipeUpdateRequest",
@@ -1102,6 +1460,8 @@ __all__ = (
     "RecipeValidationCheckAssertionsItem",
     "RecipeValidationCheckKind",
     "ReconcileCode",
+    "ReconcilePhaseOperation",
+    "RecoveryStartItem",
     "RemovedRecipeNodeResult",
     "RequestValidationIssue",
     "RequestValidationProblem",
@@ -1113,6 +1473,7 @@ __all__ = (
     "ResourceTerm",
     "ResourceTermProblem",
     "RolloutPreparation",
+    "RouteClaimMarker",
     "RoutePublicationState",
     "RouteState",
     "RunAdmissionCode",
@@ -1125,6 +1486,10 @@ __all__ = (
     "RunPresenceGroupState",
     "RunPresenceOptionChoices",
     "RunState",
+    "RunSwitchApplyRequest",
+    "RunSwitchApplyRequestAction",
+    "RunSwitchApplyRequestOptionChoices",
+    "RunSwitchApplyRequestRetention",
     "RunSwitchAssessment",
     "RunSwitchBuildEvidence",
     "RunSwitchBuildEvidenceState",
@@ -1133,6 +1498,8 @@ __all__ = (
     "RunSwitchCancellation",
     "RunSwitchChildProgress",
     "RunSwitchChildProgressPhaseType0",
+    "RunSwitchCleanupIntent",
+    "RunSwitchCleanupIntentCleanupMode",
     "RunSwitchCleanupResult",
     "RunSwitchCleanupResultSubphaseType0",
     "RunSwitchCleanupVerifyResult",
@@ -1141,10 +1508,14 @@ __all__ = (
     "RunSwitchCode",
     "RunSwitchContainerBuildResult",
     "RunSwitchContainerBuildResultState",
+    "RunSwitchDistributionChildResult",
     "RunSwitchFinalVerifyResult",
     "RunSwitchFinalVerifyResultSubphaseType0",
     "RunSwitchInstallationVerifyResult",
     "RunSwitchInstallationVerifyResultSubphaseType0",
+    "RunSwitchJobPayload",
+    "RunSwitchJobPayloadAction",
+    "RunSwitchJobPayloadOperationKind",
     "RunSwitchMemberProgress",
     "RunSwitchMemberProgressPhaseType0",
     "RunSwitchMemberProgressState",
@@ -1174,6 +1545,7 @@ __all__ = (
     "RunSwitchPlanCleanupDisposition",
     "RunSwitchPlanCleanupMode",
     "RunSwitchPreparedResult",
+    "RunSwitchProfileStopIntent",
     "RunSwitchProfileStopScope",
     "RunSwitchProgress",
     "RunSwitchProgressPhaseType0",
@@ -1186,12 +1558,14 @@ __all__ = (
     "RunSwitchReconciliationAuthority",
     "RunSwitchReconciliationTarget",
     "RunSwitchReconciliationTargetState",
+    "RunSwitchRunIntent",
     "RunSwitchRuntimeImageReferenceIntent",
     "RunSwitchRuntimeImageResult",
     "RunSwitchRuntimeInstallResult",
     "RunSwitchRuntimePlanResult",
     "RunSwitchStartResult",
     "RunSwitchStartResultSubphaseType0",
+    "RunSwitchStopIntent",
     "RunSwitchStopResult",
     "RunSwitchStopResultSubphaseType0",
     "RunSwitchTargetTransferEvidenceResult",
@@ -1202,10 +1576,13 @@ __all__ = (
     "RunSwitchUninstallResultSubphaseType0",
     "RunSwitchVerifyResult",
     "RunSwitchVerifyResultCachedTargetTotals",
+    "RuntimeArgument",
+    "RuntimeEnvironmentEntry",
     "RuntimeImageCode",
     "RuntimeImageIdentity",
     "RuntimeImagePreparation",
     "RuntimeImageReceipt",
+    "RuntimeImageReferenceIntent",
     "RuntimeImageStorageImpact",
     "RuntimeImageStorageImpactMissingImageDistributionBytesByNodeType0",
     "RuntimeImageStorageImpactNasCoverage",
@@ -1215,10 +1592,16 @@ __all__ = (
     "RuntimePreflightFinding",
     "RuntimePreflightFindingCode",
     "RuntimePreflightFindingStatus",
+    "RuntimePreflightRequest",
+    "RuntimePreflightRequestFabricConnectivity",
     "RuntimePreflightResult",
+    "RuntimeTelemetryProjection",
     "SecurityRefusal",
     "SecurityRefusalReason",
     "SourceBundleCode",
+    "SourceBundleFile",
+    "SourceBundleFileMode",
+    "SourceBundleManifest",
     "SourcePolicyCode",
     "SparkFit",
     "SparkFitNode",
@@ -1226,12 +1609,26 @@ __all__ = (
     "SparkFitNodeMemoryPoolType0",
     "SparkGroup",
     "SparkGroupNode",
+    "StartPhaseOperation",
     "StateAlias",
     "StateWriteKind",
     "StopImpact",
     "StopOutcome",
+    "StopPhaseOperation",
     "StopPlanCode",
     "StorageDemandCode",
+    "StoredAdmissionReason",
+    "StoredBuildPolicyReport",
+    "StoredInstallationPlan",
+    "StoredInstallationPlanCompiledExecutionPlans",
+    "StoredInstallNodePlan",
+    "StoredPolicyFinding",
+    "StoredPrebuiltDecision",
+    "StoredRunEndpoint",
+    "StoredRunNodePlan",
+    "StoredRunNodePlanMemoryKind",
+    "StoredRunNodePlanMemoryPool",
+    "StoredRunPlan",
     "StringParameter",
     "SupersedeCode",
     "TargetAssetState",
@@ -1240,8 +1637,11 @@ __all__ = (
     "TelemetryState",
     "TelemetryStateFreshness",
     "TopologyCode",
+    "UninstallPhaseOperation",
     "UninstallPlanCode",
     "UnknownError",
+    "UnprojectedRevision",
     "WaitReason",
     "WaitVerdict",
+    "WritablePath",
 )

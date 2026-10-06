@@ -1043,6 +1043,7 @@ def test_due_scheduler_reaches_work_past_a_full_parked_batch(
 
 
 @pytest.mark.parametrize("damage", ["plan", "result"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_malformed_operation_is_rejected_without_aborting_the_batch(
     tmp_path: Path,
     damage: str,
@@ -2315,6 +2316,7 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
     assert switch.executor.events.count("runtime-install") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     tmp_path: Path,
 ) -> None:
@@ -2486,6 +2488,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     assert executor.receipts == [receipt]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_first_profile_preparation_preview_replans_a_missing_build_archive(
     tmp_path: Path,
 ) -> None:
@@ -2579,6 +2582,7 @@ def test_first_profile_preparation_preview_replans_a_missing_build_archive(
     ]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) -> None:
     """A notes-only successor reuses the identical prepared build.
 
@@ -2853,6 +2857,7 @@ def test_a_spark_whose_agent_cannot_pull_images_asks_for_an_upgrade(
     assert [reason.node_ids for reason in upgrade] == [[nodes[0]]]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
     tmp_path: Path,
 ) -> None:
@@ -2943,6 +2948,7 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
     }
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_container_phase_delegates_to_existing_recipe_build_child(
     tmp_path: Path,
 ) -> None:
@@ -4002,6 +4008,7 @@ def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
     tmp_path: Path,
 ) -> None:
@@ -5062,6 +5069,7 @@ def _record_successful_reconcile_member(
     return {}
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconcile_review_binds_opaque_invalid_launch_spec_and_uninstall_rebuilds_its_ranks(
     tmp_path: Path,
 ) -> None:
@@ -5111,6 +5119,7 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_uninstall_rebuild
         )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
     tmp_path: Path,
 ) -> None:
@@ -5219,6 +5228,7 @@ def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
     assert cleanup_result.final_verified is True
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
     tmp_path: Path,
 ) -> None:
@@ -5943,6 +5953,7 @@ def test_shared_admission_contention_preserves_operation_for_retry(
         pytest.fail("shared admission contention did not schedule a durable retry")
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_stored_run_switch_with_retired_fields_stays_readable_and_new_work_proceeds(
     tmp_path: Path,
 ) -> None:

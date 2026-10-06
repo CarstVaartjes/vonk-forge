@@ -227,6 +227,7 @@ def test_run_switch_status_is_a_typed_exact_id_lookup() -> None:
     operations.get.assert_called_once_with(OPERATION_ID)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
     tmp_path,
     monkeypatch,

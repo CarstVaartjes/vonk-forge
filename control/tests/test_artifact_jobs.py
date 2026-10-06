@@ -554,6 +554,7 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
         service.create(**request)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_artifact_job_damaged_contract_is_rebuilt_from_its_recipe_before_projection(
     tmp_path,
 ) -> None:
@@ -889,6 +890,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         "null-request-id",
     ),
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_artifact_submission_receipt_degrades_on_corrupt_owner(
     tmp_path, corruption: str
 ) -> None:
@@ -1874,6 +1876,7 @@ def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
 @pytest.mark.parametrize(
     "damage", ["missing-files", "invalid-file", "wrong-total", "wrong-digest"]
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
     tmp_path, damage
 ):
@@ -1911,6 +1914,7 @@ def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
         service.finalize(created.id)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_artifact_input_manifest_is_rebuilt_from_the_uploaded_inputs(tmp_path):
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
@@ -1937,6 +1941,7 @@ def test_artifact_input_manifest_is_rebuilt_from_the_uploaded_inputs(tmp_path):
 
 
 @pytest.mark.parametrize("evidence", [[], "invalid", {"elapsed_milliseconds": "1"}])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_artifact_cancel_completes_over_corrupt_evidence(tmp_path, evidence):
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
@@ -1955,7 +1960,7 @@ def test_artifact_cancel_completes_over_corrupt_evidence(tmp_path, evidence):
     assert cancelled.state == "cancelled"
 
 
-def test_artifact_cancel_preserves_declared_engine_evidence_and_meaningful_values(
+def test_artifact_cancel_preserves_declared_evidence_and_meaningful_values(
     tmp_path,
 ):
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
@@ -1966,7 +1971,8 @@ def test_artifact_cancel_preserves_declared_engine_evidence_and_meaningful_value
     )
     evidence = {
         "elapsed_milliseconds": 0,
-        "engine": {"null": None, "empty": [], "enabled": False},
+        "peak_memory_bytes": 0,
+        "recoverable": False,
     }
     with sessions.begin() as session:
         stored = session.get(ArtifactJob, created.id)

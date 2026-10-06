@@ -288,6 +288,7 @@ def test_blocked_roster_preview_retries_without_advancing_selection(
 
 
 @pytest.mark.parametrize("authority_change", ["disabled", "demoted"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recovers(
     postgres_engine: Engine, authority_change: str
 ) -> None:

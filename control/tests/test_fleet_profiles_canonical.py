@@ -271,6 +271,7 @@ def test_competing_profile_saves_accept_only_one_observed_revision(
     assert saved.definition == accepted[0].definition
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_definition_read_retires_a_malformed_persisted_assignment():
     from vonk_control.models import FleetProfile
 
@@ -627,6 +628,7 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
     assert any("is not in the local cache" in warning for warning in profile.warnings)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_profile_reads_the_newest_readable_revision_of_its_recipe() -> None:
     sessions = _sessions()
     _seed(sessions)
@@ -686,6 +688,7 @@ def test_profile_reads_the_newest_readable_revision_of_its_recipe() -> None:
     assert view.assignments[0].spark_ids == [NODE_1]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_stored_application_with_a_retired_field_does_not_block_apply() -> None:
     from .test_fleet_profiles import _SwitchAdapter
 

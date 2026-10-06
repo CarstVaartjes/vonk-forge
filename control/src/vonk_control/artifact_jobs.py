@@ -218,12 +218,25 @@ class OutputLimits(ArtifactJobContractModel):
 
 
 class ArtifactJobResultEvidence(ArtifactJobContractModel):
-    """Known evidence fields with room for engine-specific evidence keys."""
+    """Every fact the Controller records beside an artifact job's result.
 
-    model_config = ConfigDict(extra="allow", strict=True)
+    The run's measurements (``elapsed_milliseconds``, ``peak_memory_bytes``),
+    the cancellation that was asked for, and, for a job whose active scope may
+    still exist, what is known about that residue.
+    """
 
     elapsed_milliseconds: int | None = Field(default=None, ge=0)
     peak_memory_bytes: int | None = Field(default=None, ge=0)
+    cancel_request_id: str | None = Field(default=None, max_length=128)
+    cancel_actor: str | None = Field(default=None, max_length=256)
+    cancel_reason: str | None = Field(default=None, max_length=512)
+    failure_kind: (
+        Literal["cancellation-stop-uncertain", "agent-lease-expired"] | None
+    ) = None
+    recoverable: bool | None = None
+    active_scope_may_remain: bool | None = None
+    late_results_accepted: bool | None = None
+    residue_resolved_by: Literal["exact-stop"] | None = None
 
 
 def _read_input_manifest(job: ArtifactJob) -> RecipeJobInputManifest | Damaged:

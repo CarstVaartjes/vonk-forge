@@ -169,6 +169,7 @@ def test_changed_frozen_revision_is_refused_before_child_commit(update_env):
     assert observed.children[0].failure.code == "recipe_update.operation_invalid"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_malformed_parent_does_not_block_other_eligible_updates(update_env):
     sessions, recipes, now, fresh = update_env
     service = fresh()

@@ -122,7 +122,6 @@ def derive_build_input_identity(
     artifact_format: str = BUILD_ARTIFACT_FORMAT,
     base_images: Sequence[Mapping[str, object]] = (),
     effective_settings: object | None = None,
-    topology_inputs: Mapping[str, object] | None = None,
     model_artifacts: Sequence[object] | None = None,
     runtime_adapter: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
@@ -166,8 +165,6 @@ def derive_build_input_identity(
     settings = _build_effective_settings(effective_settings)
     if settings:
         identity["effective_build_settings"] = settings
-    if topology_inputs is not None:
-        identity["topology_inputs"] = copy.deepcopy(dict(topology_inputs))
     if model_artifacts is not None:
         identity["model_artifacts"] = _canonical_model_build_inputs(model_artifacts)
     if runtime_adapter is not None:
@@ -749,14 +746,12 @@ class RecipeBuildService:
         _canonical_build_resources(projected)
         _declared_image_bytes(document)
         model_inputs = projected.build_model_artifacts
-        topology_inputs = projected.build_topology_inputs
         model_artifacts = (
             model_inputs
             if isinstance(model_inputs, Sequence)
             and not isinstance(model_inputs, (str, bytes))
             else None
         )
-        topology = topology_inputs if isinstance(topology_inputs, Mapping) else None
         intent = derive_build_input_identity(
             build,
             source_bundle_sha256=source_sha256,
@@ -764,7 +759,6 @@ class RecipeBuildService:
             artifact_format=BUILD_ARTIFACT_FORMAT,
             base_images=base_images,
             effective_settings=document["settings"],
-            topology_inputs=topology,
             model_artifacts=model_artifacts,
             runtime_adapter=adapter.document(),
         )
@@ -1144,7 +1138,6 @@ class RecipeBuildService:
                 )
                 raise
         model_inputs = projected.build_model_artifacts
-        topology_inputs = projected.build_topology_inputs
         build_identity = derive_build_input_identity(
             build,
             source_bundle_sha256=source_sha256,
@@ -1152,9 +1145,6 @@ class RecipeBuildService:
             artifact_format=BUILD_ARTIFACT_FORMAT,
             base_images=base_images,
             effective_settings=document["settings"],
-            topology_inputs=(
-                topology_inputs if isinstance(topology_inputs, Mapping) else None
-            ),
             model_artifacts=(
                 model_inputs
                 if isinstance(model_inputs, Sequence)

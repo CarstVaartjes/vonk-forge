@@ -143,13 +143,25 @@ class RecipeRevisionProjection(_CatalogRevisionProjection):
     build_security: BuildSecurityProjection | None = None
     build_options: RecipeBuildOptions | None = None
     build_model_artifacts: list[BuildModelArtifactProjection] | None = None
-    build_topology_inputs: dict[str, object] | None = None
     artifact_inputs: list[ArtifactInputProjection] | None = None
     # The CI-built image the signed catalog pins for this revision, if any.
     prebuilt_image: PrebuiltImage | None = None
 
 
 CatalogRevisionProjection = ModelRevisionProjection | RecipeRevisionProjection
+
+
+class UnprojectedRevision(_CatalogRevisionProjection):
+    """The column's own default: a revision whose projection is not derived yet.
+
+    ``catalog_document_revisions.projected`` defaults to ``{}``.  The importer
+    always writes the derived projection; a row that still holds the default is
+    read as unknown by :func:`read_catalog_projection` and re-derived by the
+    catalog's own repair path.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
 
 _CatalogRevisionProjection.model_rebuild()
 ModelRevisionProjection.model_rebuild()

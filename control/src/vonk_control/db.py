@@ -51,6 +51,11 @@ def build_engine(database_url: str, *, component: str = "control") -> Engine:
     """
 
     budgets = DATABASE_WAIT_BUDGETS
+    # Every JSON column write is checked against its contract (stored_columns);
+    # a document no contract describes is reported once, never refused.
+    from .stored_json import install_write_guard
+
+    install_write_guard()
     if "postgres" in database_url:
         # transaction_timeout exists only on PostgreSQL 17+; the deployed
         # Compose service pins postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722, so the server accepts it.

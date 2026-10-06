@@ -44,6 +44,7 @@ from vonk_forge_contracts import (
 )
 
 from .preflight_fixtures import record_passing_preflight
+from .stored_documents_support import valid_policy_report
 
 MODEL_SOURCE = "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
 MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
@@ -421,7 +422,7 @@ def setup(
             source_bundle_sha256="c" * 64,
             build_input_sha256="b" * 64,
             state="succeeded",
-            policy_report={"passed": True},
+            policy_report=valid_policy_report(),
             plan={},
             image_digest="sha256:" + "1" * 64,
             oci_layout_sha256="2" * 64,
