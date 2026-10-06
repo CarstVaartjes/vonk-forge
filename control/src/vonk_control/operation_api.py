@@ -45,6 +45,7 @@ from .agent_jobs import (
     operator_resume_eligible_operations_in_session,
     retire_exhausted_operations_in_session,
 )
+from .agent_upgrade_contract import AgentUpgradePackage
 from .agent_upgrade_status import (
     GENERIC_AGENT_UPGRADE_REASONS,
     RECOVERABLE_AGENT_UPGRADE_REASONS,
@@ -444,7 +445,7 @@ class OperationPage:
     items: Sequence[Mapping[str, object]]
     next_cursor: str | None
     progress: JobProgress
-    agent_upgrade_diagnostics: Mapping[str, object] | None = None
+    agent_upgrade_diagnostics: AgentUpgradeDiagnosticsResponse | None = None
     recovery_actions: tuple[str, ...] = ()
 
 
@@ -955,9 +956,7 @@ def job_response(
         else None
     )
     diagnostics = operation_page.agent_upgrade_diagnostics
-    operator_summary = (
-        None if diagnostics is None else diagnostics.get("operator_summary")
-    )
+    operator_summary = None if diagnostics is None else diagnostics.operator_summary
     return JobDetailResponse(
         id=job.id,
         state=job.state,
@@ -974,11 +973,7 @@ def job_response(
         operation_next_cursor=operation_page.next_cursor,
         operation_total=operation_page.progress.total,
         progress=operation_page.progress,
-        agent_upgrade_diagnostics=(
-            None
-            if diagnostics is None
-            else AgentUpgradeDiagnosticsResponse.model_validate(diagnostics)
-        ),
+        agent_upgrade_diagnostics=diagnostics,
         recovery=recovery_for_operation(
             job.state,
             supported_actions=operation_page.recovery_actions,
@@ -1246,7 +1241,7 @@ def _aware(value: datetime) -> datetime:
 
 def _agent_upgrade_diagnostics(
     session: Session, job_id: str
-) -> Mapping[str, object] | None:
+) -> AgentUpgradeDiagnosticsResponse | None:
     job = session.get(Job, job_id)
     if job is None or job.kind != "agent-upgrade":
         return None
@@ -1259,9 +1254,12 @@ def _agent_upgrade_diagnostics(
         # An upgrade that carries no package document simply has no
         # diagnostics to project; only a present but unreadable one fails.
         return None
-    package = payload["package"]
-    if not isinstance(package, Mapping):
-        raise BoundedJSONError(f"agent upgrade job {job_id} package payload is invalid")
+    try:
+        package = read_stored_model(AgentUpgradePackage, payload["package"])
+    except (TypeError, ValueError):
+        raise BoundedJSONError(
+            f"agent upgrade job {job_id} package payload is invalid"
+        ) from None
     operations = list(
         session.scalars(
             select(AgentOperation)
@@ -1296,9 +1294,7 @@ def _agent_upgrade_diagnostics(
             select(AgentNode).where(AgentNode.node_id.in_(job.targets))
         )
     }
-    expected_binary = package.get("target_binary_digest")
-    expected_build = package.get("target_build_digest")
-    targets: list[dict[str, object]] = []
+    targets: list[AgentUpgradeTargetDiagnosticsResponse] = []
     failure_details_unavailable = False
     retry_queued_any = False
     operator_summary = None
@@ -1336,7 +1332,7 @@ def _agent_upgrade_diagnostics(
             operator_summary = operator_agent_upgrade_reason(
                 node_id=node_id,
                 attempt_count=(0 if operation is None else operation.current_attempt),
-                package=package,
+                package=package.model_dump(mode="json"),
                 observed_semantic_version=(
                     None if node is None else node.semantic_version
                 ),
@@ -1346,44 +1342,44 @@ def _agent_upgrade_diagnostics(
                 retry_queued=retry_queued,
             )
         targets.append(
-            {
-                "node_id": node_id,
-                "state": "not-started" if operation is None else operation.state,
-                "attempts": 0 if operation is None else operation.current_attempt,
-                "target_proven": target_proven,
-                "observed_identity": {
-                    "version": None if node is None else node.semantic_version,
-                    "binary_digest": None if node is None else node.binary_digest,
-                    "build_digest": None if node is None else node.build_digest,
-                },
-                "raw_reason": raw_reason,
-                "retry_not_before": retry_not_before,
-                "retry_queued": retry_queued,
-            }
+            AgentUpgradeTargetDiagnosticsResponse(
+                node_id=node_id,
+                state="not-started" if operation is None else operation.state,
+                attempts=0 if operation is None else operation.current_attempt,
+                target_proven=target_proven,
+                observed_identity=AgentUpgradeIdentityResponse(
+                    version=None if node is None else node.semantic_version,
+                    binary_digest=None if node is None else node.binary_digest,
+                    build_digest=None if node is None else node.build_digest,
+                ),
+                raw_reason=raw_reason,
+                retry_not_before=retry_not_before,
+                retry_queued=retry_queued,
+            )
         )
-    return {
-        "expected_identity": {
-            "version": package.get("package_version"),
-            "binary_digest": expected_binary,
-            "build_digest": expected_build,
-        },
-        "targets": targets,
-        "failure_details_unavailable": failure_details_unavailable,
-        "next_action": (
+    return AgentUpgradeDiagnosticsResponse(
+        expected_identity=AgentUpgradeIdentityResponse(
+            version=package.package_version,
+            binary_digest=package.target_binary_digest,
+            build_digest=package.target_build_digest,
+        ),
+        targets=targets,
+        failure_details_unavailable=failure_details_unavailable,
+        next_action=(
             agent_upgrade_next_action(retry_queued=retry_queued_any)
             if any(
-                not target["target_proven"]
-                and target["attempts"]
+                not target.target_proven
+                and target.attempts
                 and (
-                    target["state"] in agent_operation_states.PARKED
-                    or target["raw_reason"] in RECOVERABLE_AGENT_UPGRADE_REASONS
+                    target.state in agent_operation_states.PARKED
+                    or target.raw_reason in RECOVERABLE_AGENT_UPGRADE_REASONS
                 )
                 for target in targets
             )
             else None
         ),
-        "operator_summary": operator_summary,
-    }
+        operator_summary=operator_summary,
+    )
 
 
 class _DurableOperationProjection:

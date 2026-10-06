@@ -784,12 +784,12 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "title": "Selectors"
           }
         },
         "required": [
-          "all"
+          "all",
+          "selectors"
         ],
         "title": "AgentUpgradeRequestIntent",
         "type": "object"
@@ -855,7 +855,6 @@
               "type": "string"
             },
             "maxItems": 64,
-            "minItems": 1,
             "title": "Node Order",
             "type": "array"
           },

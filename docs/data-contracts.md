@@ -174,6 +174,7 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/telemetry.py` | agent-protocol | 3 | The authenticated agent telemetry wire contract: a flat sample of host scalars. |
 | `agent_protocol/src/vonk_agent_protocol/wire_model.py` | agent-protocol | 5 | Shared strict JSON boundary helpers for Pydantic wire models. |
 | `control/src/vonk_control/agent_api.py` | declared | 8 | mTLS-authenticated machine agent API routes. |
+| `control/src/vonk_control/agent_upgrade_contract.py` | controller-contract | 5 | Package, repair manifest, request intent, plan and result documents of an agent upgrade rollout. |
 | `control/src/vonk_control/artifact_blob_store.py` | declared | 2 | Usage and reconciliation reports of the artifact blob store. |
 | `control/src/vonk_control/artifact_job_api.py` | declared | 3 | Authenticated controller and mTLS agent routes for artifact recipe jobs. |
 | `control/src/vonk_control/artifact_job_evidence.py` | controller-contract | 1 | The one closed result-evidence contract of an artifact job. |
@@ -196,7 +197,7 @@ module defines its own.
 | `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 13 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
 | `control/src/vonk_control/gateway_keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
-| `control/src/vonk_control/job_documents.py` | controller-contract | 46 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
+| `control/src/vonk_control/job_documents.py` | controller-contract | 41 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
 | `control/src/vonk_control/library_contract.py` | controller-contract | 45 | Bounded typed contract and deterministic display helpers for Library reads. |
 | `control/src/vonk_control/lifecycle_preflight.py` | declared | 1 | Durable, recipe-bound admission probes without replaying expensive phases. |
 | `control/src/vonk_control/model_cache.py` | declared | 3 | Durable, content-addressed model artifacts stored on the Controller NAS. |

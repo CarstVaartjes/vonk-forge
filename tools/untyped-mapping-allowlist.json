@@ -225,7 +225,7 @@
     },
     {
       "path": "control/src/vonk_control/agent_upgrades.py",
-      "count": 26
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/api.py",
@@ -308,14 +308,6 @@
       "count": 8
     },
     {
-      "path": "control/src/vonk_control/fleet_event_contract.py",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/fleet_events.py",
-      "count": 3
-    },
-    {
       "path": "control/src/vonk_control/fleet_profiles.py",
       "count": 30
     },
@@ -393,7 +385,7 @@
     },
     {
       "path": "control/src/vonk_control/operation_api.py",
-      "count": 38
+      "count": 35
     },
     {
       "path": "control/src/vonk_control/operation_blockers.py",
@@ -405,10 +397,6 @@
     },
     {
       "path": "control/src/vonk_control/operation_progress.py",
-      "count": 6
-    },
-    {
-      "path": "control/src/vonk_control/operator_projection_api.py",
       "count": 6
     },
     {

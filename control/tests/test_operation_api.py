@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import NoReturn, cast
@@ -48,6 +47,8 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.operation_api import (
+    AgentUpgradeDiagnosticsResponse,
+    AgentUpgradeTargetDiagnosticsResponse,
     JobProgress,
     OperationApiServices,
     OperationListPage,
@@ -131,14 +132,13 @@ def _encoded(document: object) -> bytes:
     return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
-def _first_diagnostic_target(diagnostics: Mapping[str, object]) -> Mapping[str, object]:
+def _first_diagnostic_target(
+    diagnostics: AgentUpgradeDiagnosticsResponse,
+) -> AgentUpgradeTargetDiagnosticsResponse:
     """Return the first projected agent-upgrade target or fail loudly."""
 
-    targets = diagnostics["targets"]
-    assert isinstance(targets, list) and targets
-    target = targets[0]
-    assert isinstance(target, dict)
-    return target
+    assert diagnostics.targets
+    return diagnostics.targets[0]
 
 
 @dataclass
@@ -1288,7 +1288,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
         "package_bytes": 5_539_780,
         "package_sha256": "f" * 64,
         "package_signature": "1" * 128,
-        "package_url": "https://install.vonkforge.ai/example.deb",
+        "package_url": "https://install.vonkforge.ai/example/vonk-forge-agent.deb",
         "package_version": "0.1.0~dev.350+g15f9faf7c5bf",
         "schema_version": 1,
         "target_binary_digest": expected_binary,
@@ -1368,7 +1368,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
     diagnostics = page.agent_upgrade_diagnostics
     assert diagnostics is not None
 
-    assert diagnostics == {
+    assert diagnostics.model_dump(mode="json") == {
         "expected_identity": {
             "version": "0.1.0~dev.350+g15f9faf7c5bf",
             "binary_digest": expected_binary,
@@ -1410,7 +1410,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
         limit=20,
         cursors=TokenCodec(b"k" * 32).cursor_codec(),
     )
-    assert projected.status_reason == diagnostics["operator_summary"]
+    assert projected.status_reason == diagnostics.operator_summary
     assert projected.agent_upgrade_diagnostics is not None
     assert projected.agent_upgrade_diagnostics.targets[0].raw_reason == (
         "agent upgrade request is invalid"
@@ -1434,11 +1434,9 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
     queued = services.job_operations(job.id, None, 20).agent_upgrade_diagnostics
     assert queued is not None
     queued_target = _first_diagnostic_target(queued)
-    assert queued_target["retry_queued"] is True
-    assert (
-        queued_target["retry_not_before"] == (now + timedelta(seconds=240)).isoformat()
-    )
-    queued_next_action = queued["next_action"]
+    assert queued_target.retry_queued is True
+    assert queued_target.retry_not_before == (now + timedelta(seconds=240)).isoformat()
+    queued_next_action = queued.next_action
     assert queued_next_action is not None
     assert isinstance(queued_next_action, str)
     assert "controller-managed retry" in queued_next_action
@@ -1460,8 +1458,8 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
     ).agent_upgrade_diagnostics
     assert matching_digests is not None
     matching_target = _first_diagnostic_target(matching_digests)
-    assert matching_target["target_proven"] is False
-    assert matching_target["retry_not_before"] is None
+    assert matching_target.target_proven is False
+    assert matching_target.retry_not_before is None
 
     with sessions.begin() as session:
         operation = session.scalar(
@@ -1479,8 +1477,8 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
 
     specific = services.job_operations(job.id, None, 20).agent_upgrade_diagnostics
     assert specific is not None
-    assert specific["failure_details_unavailable"] is False
-    specific_next_action = specific["next_action"]
+    assert specific.failure_details_unavailable is False
+    specific_next_action = specific.next_action
     assert specific_next_action is not None
     assert isinstance(specific_next_action, str)
     assert specific_next_action == agent_upgrade_next_action(retry_queued=False)

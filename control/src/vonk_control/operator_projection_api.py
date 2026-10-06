@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
 
 from . import agent_operation_states
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
+from .agent_upgrade_contract import AgentUpgradePackage, AgentUpgradeRequestIntent
 from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
 from .auth import MUTATION_ROLES, Actor, CursorError
 from .bounded_json import BoundedJSONError
@@ -205,33 +206,33 @@ class FleetEnrollmentProvider(Protocol):
 
 
 class FleetUpgradeProvider(Protocol):
-    def current_package(self) -> Mapping[str, object]: ...
+    def current_package(self) -> AgentUpgradePackage: ...
 
     def get_request(
         self,
         request_id: str,
         *,
         actor: str,
-        request_intent: Mapping[str, object],
+        request_intent: AgentUpgradeRequestIntent,
     ) -> Any | None: ...
 
     def preview(
         self,
         node_ids: Sequence[str],
-        package: Mapping[str, object],
+        package: AgentUpgradePackage,
         *,
-        request_intent: Mapping[str, object],
+        request_intent: AgentUpgradeRequestIntent,
     ) -> Any: ...
 
     def apply(
         self,
         node_ids: Sequence[str],
-        package: Mapping[str, object],
+        package: AgentUpgradePackage,
         *,
         plan_digest: str,
         actor: str,
         request_id: str,
-        request_intent: Mapping[str, object],
+        request_intent: AgentUpgradeRequestIntent,
     ) -> Any: ...
 
 
@@ -1053,8 +1054,10 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=503, detail="fleet upgrades unavailable")
         if body.all == (body.selectors is not None):
             raise HTTPException(status_code=422, detail="choose all or selectors")
-        request_intent = {"all": body.all, "selectors": body.selectors}
         try:
+            request_intent = AgentUpgradeRequestIntent(
+                all=body.all, selectors=body.selectors
+            )
             existing = fleet_services.upgrades.get_request(
                 body.request_key,
                 actor=actor.subject,

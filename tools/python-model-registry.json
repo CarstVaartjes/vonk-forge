@@ -120,6 +120,10 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/agent_upgrade_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/artifact_blob_store.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
