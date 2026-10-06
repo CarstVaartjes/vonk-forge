@@ -2876,6 +2876,7 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
     assert transport.calls == 1
     assert partial.image_state == "succeeded"
     assert partial.image_failure is None
+    assert partial.progress is not None
     assert partial.progress["completed_bytes"] == 40 + len(ARCHIVE)
     image_child = next(
         item
@@ -3670,6 +3671,7 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
     with sessions.begin() as session:
         session.add(operation)
     view = service.get("availability-progress")
+    assert view.progress is not None
     assert view.progress["completed_bytes"] == 60
     assert view.progress["total_bytes"] == 120
     members = {
