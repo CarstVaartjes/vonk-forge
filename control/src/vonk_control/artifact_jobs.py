@@ -55,10 +55,13 @@ from .artifact_blob_store import (
     ArtifactBlobStoreError,
     StoredArtifactBlob,
 )
+from .artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
 from .categorized_errors import InvalidValue, MissingRecord
 from .cluster_mappings import mapping_option_choices
 from .compiled_artifact_contract import (
     CompiledArtifactContract,
+    ParameterDefinition,
+    ParameterScalar,
     compile_artifact_contract,
     validate_parameter_definition,
 )
@@ -218,15 +221,6 @@ class OutputLimits(ArtifactJobContractModel):
     allowed_media_types: list[str] = Field(min_length=1, max_length=16)
 
 
-class ArtifactJobResultEvidence(ArtifactJobContractModel):
-    """Known evidence fields with room for engine-specific evidence keys."""
-
-    model_config = ConfigDict(extra="allow", strict=True)
-
-    elapsed_milliseconds: int | None = Field(default=None, ge=0)
-    peak_memory_bytes: int | None = Field(default=None, ge=0)
-
-
 def _input_manifest(job: ArtifactJob) -> RecipeJobInputManifest:
     try:
         manifest = read_stored_model(
@@ -249,26 +243,6 @@ def _input_manifest(job: ArtifactJob) -> RecipeJobInputManifest:
             reason=WaitReason.JOB_STATE_UNCERTAIN,
         )
     return manifest
-
-
-def _result_evidence(value: object) -> dict[str, object] | None:
-    if value is None:
-        return None
-    try:
-        evidence = read_stored_model(
-            ArtifactJobResultEvidence, canonical_message(value), from_json=True
-        )
-    except (TypeError, ValueError) as error:
-        # Damaged result evidence is no evidence: nothing re-derives it, so it is
-        # retired as unknown and the job is shown without it.
-        retire_as_unknown(
-            "artifact-job.result-evidence",
-            "stored-evidence",
-            BookkeepingReason.PERSISTED_STATE_DAMAGED,
-            f"{type(error).__name__}: {error}",
-        )
-        return None
-    return json.loads(canonical_message(evidence))
 
 
 class ArtifactJobResponse(ArtifactJobContractModel):
@@ -423,7 +397,7 @@ class ArtifactJobView:
     output_limits: dict[str, object]
     output_manifest_sha256: str | None
     output_files: tuple[dict[str, object], ...]
-    result_evidence: dict[str, object] | None
+    result_evidence: ArtifactJobResultEvidence | None
     status_reason: str | None
     timeout_seconds: int
     created_at: datetime
@@ -501,9 +475,9 @@ def _contract_sha256(contract: CompiledArtifactContract | Mapping[str, object]) 
     return _canonical_contract(contract).sha256()
 
 
-def _validate_parameter_definition(raw: Mapping[str, object]) -> dict[str, object]:
+def _validate_parameter_definition(raw: object) -> ParameterDefinition:
     try:
-        return validate_parameter_definition(raw).model_dump(mode="json")
+        return validate_parameter_definition(raw)
     except (TypeError, ValueError) as error:
         raise ArtifactJobUnavailableError(
             "artifact parameter contract is invalid",
@@ -673,92 +647,19 @@ def _validate_outputs_against_contract(
 
 
 def _effective_parameters(
-    contract: CompiledArtifactContract | Mapping[str, object],
-    supplied: Mapping[str, object],
-) -> dict[str, object]:
-    if isinstance(contract, CompiledArtifactContract):
-        by_name = {item.name: item for item in contract.parameters}
-        if set(supplied) - set(by_name):
-            raise ArtifactJobInvalid(
-                "artifact job contains undeclared parameters",
-                reason=InvalidRequestReason.UNKNOWN_FIELD,
-            )
-        effective: dict[str, object] = {}
-        for name, definition in by_name.items():
-            value = supplied.get(name, definition.default)
-            kind = definition.type
-            valid_type = (
-                kind == "string"
-                and isinstance(value, str)
-                and "\x00" not in value
-                and len(value.encode("utf-8")) <= 4096
-                or kind == "integer"
-                and isinstance(value, int)
-                and not isinstance(value, bool)
-                or kind == "float"
-                and _finite_parameter_number(value)
-                or kind == "boolean"
-                and isinstance(value, bool)
-                or kind == "enum"
-                and value in definition.allowed_values
-            )
-            if not valid_type:
-                raise ArtifactJobInvalid(
-                    f"artifact job parameter {name} has the wrong type",
-                    reason=InvalidRequestReason.MALFORMED,
-                )
-            if (
-                isinstance(value, (int, float))
-                and not isinstance(value, bool)
-                and (
-                    definition.minimum is not None
-                    and value < definition.minimum
-                    or definition.maximum is not None
-                    and value > definition.maximum
-                )
-            ):
-                raise ArtifactJobInvalid(
-                    f"artifact job parameter {name} is outside its range",
-                    reason=InvalidRequestReason.OUT_OF_RANGE,
-                )
-            if isinstance(definition.pattern, str) and isinstance(value, str):
-                try:
-                    matched = re.fullmatch(definition.pattern, value) is not None
-                except re.error as error:
-                    raise ArtifactJobInvalid(
-                        "artifact parameter pattern is invalid",
-                        reason=InvalidRequestReason.MALFORMED,
-                    ) from error
-                if not matched:
-                    raise ArtifactJobInvalid(
-                        f"artifact job parameter {name} does not match",
-                        reason=InvalidRequestReason.MALFORMED,
-                    )
-            effective[name] = value
-        return effective
-
-    # Retain the narrow mapping form for the focused helper's isolated tests;
-    # service paths always take the typed branch above.
-    definitions = contract.get("parameters") if isinstance(contract, Mapping) else None
-    if not isinstance(definitions, list):
-        raise ArtifactJobInvalid(
-            "artifact parameter contract is invalid",
-            reason=InvalidRequestReason.MALFORMED,
-        )
-    by_name = {
-        item["name"]: item
-        for item in definitions
-        if isinstance(item, Mapping) and isinstance(item.get("name"), str)
-    }
+    definitions: Sequence[ParameterDefinition],
+    supplied: Mapping[str, ParameterScalar],
+) -> dict[str, ParameterScalar]:
+    by_name = {item.name: item for item in definitions}
     if set(supplied) - set(by_name):
         raise ArtifactJobInvalid(
             "artifact job contains undeclared parameters",
             reason=InvalidRequestReason.UNKNOWN_FIELD,
         )
-    effective: dict[str, object] = {}
+    effective: dict[str, ParameterScalar] = {}
     for name, definition in by_name.items():
-        value = supplied.get(name, definition.get("default"))
-        kind = definition.get("type")
+        value = supplied.get(name, definition.default)
+        kind = definition.type
         valid_type = (
             kind == "string"
             and isinstance(value, str)
@@ -772,33 +673,30 @@ def _effective_parameters(
             or kind == "boolean"
             and isinstance(value, bool)
             or kind == "enum"
-            and value in definition.get("allowed_values", [])
+            and value in definition.allowed_values
         )
         if not valid_type:
             raise ArtifactJobInvalid(
                 f"artifact job parameter {name} has the wrong type",
                 reason=InvalidRequestReason.MALFORMED,
             )
-        minimum = definition.get("minimum")
-        maximum = definition.get("maximum")
         if (
             isinstance(value, (int, float))
             and not isinstance(value, bool)
             and (
-                isinstance(minimum, (int, float))
-                and value < minimum
-                or isinstance(maximum, (int, float))
-                and value > maximum
+                definition.minimum is not None
+                and value < definition.minimum
+                or definition.maximum is not None
+                and value > definition.maximum
             )
         ):
             raise ArtifactJobInvalid(
                 f"artifact job parameter {name} is outside its range",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
-        pattern = definition.get("pattern")
-        if isinstance(pattern, str) and isinstance(value, str):
+        if isinstance(definition.pattern, str) and isinstance(value, str):
             try:
-                matched = re.fullmatch(pattern, value) is not None
+                matched = re.fullmatch(definition.pattern, value) is not None
             except re.error as error:
                 raise ArtifactJobInvalid(
                     "artifact parameter pattern is invalid",
@@ -815,7 +713,7 @@ def _effective_parameters(
 
 def _canonical_declared_parameters(
     contract: CompiledArtifactContract, value: object
-) -> dict[str, object]:
+) -> dict[str, ParameterScalar]:
     """Load persisted parameters as canonical JSON and enforce the contract.
 
     Parameter names and their scalar shapes come from the compiled recipe
@@ -824,31 +722,15 @@ def _canonical_declared_parameters(
     maintain a separate engine-key allowlist.
     """
     try:
-        decoded = json.loads(canonical_message(value))
+        decoded = TypeAdapter(dict[str, ParameterScalar]).validate_json(
+            canonical_message(value)
+        )
     except (TypeError, ValueError) as error:
         raise ArtifactJobInvalid(
             "artifact job parameters must be a JSON object",
             reason=InvalidRequestReason.MALFORMED,
         ) from error
-    if not isinstance(decoded, dict):
-        raise ArtifactJobInvalid(
-            "artifact job parameters must be a JSON object",
-            reason=InvalidRequestReason.MALFORMED,
-        )
-    effective = _effective_parameters(contract, decoded)
-    try:
-        canonical = json.loads(canonical_message(effective))
-    except (TypeError, ValueError) as error:
-        raise ArtifactJobInvalid(
-            "artifact job parameters are not canonical JSON",
-            reason=InvalidRequestReason.MALFORMED,
-        ) from error
-    if not isinstance(canonical, dict):
-        raise ArtifactJobInvalid(
-            "artifact job parameters must be a JSON object",
-            reason=InvalidRequestReason.MALFORMED,
-        )
-    return canonical
+    return _effective_parameters(contract.parameters, decoded)
 
 
 def _artifact_submission_in_session(
@@ -1003,7 +885,7 @@ class ArtifactJobService:
         run_id: str,
         *,
         interface: str,
-        parameters: Mapping[str, object],
+        parameters: Mapping[str, ParameterScalar],
         inputs: Sequence[Mapping[str, object]],
         output_limits: Mapping[str, object],
         timeout_seconds: int,
@@ -1045,12 +927,7 @@ class ArtifactJobService:
                 "artifact job timeout is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
-        supplied_parameters = _json_copy(parameters)
-        if not isinstance(supplied_parameters, dict):
-            raise ArtifactJobInvalid(
-                "artifact job parameters must be an object",
-                reason=InvalidRequestReason.MALFORMED,
-            )
+        supplied_parameters = dict(parameters)
         manifest = RecipeJobInputManifest(
             schema_version=1, total_bytes=total, files=list(parsed_inputs)
         ).model_dump(mode="json")
@@ -1109,7 +986,7 @@ class ArtifactJobService:
         *,
         run_id: str,
         interface: str,
-        supplied_parameters: Mapping[str, object],
+        supplied_parameters: Mapping[str, ParameterScalar],
         parsed_inputs: tuple[RecipeJobInputFile, ...],
         output_limits: Mapping[str, object],
         timeout_seconds: int,
@@ -1170,7 +1047,9 @@ class ArtifactJobService:
         try:
             contract = _compile_contract(document, interface)
             contract_digest = _contract_sha256(contract)
-            parameters_copy = _effective_parameters(contract, supplied_parameters)
+            parameters_copy = _effective_parameters(
+                contract.parameters, supplied_parameters
+            )
             limits = _effective_output_limits(contract, output_limits)
             if timeout_seconds > contract.max_timeout_seconds:
                 raise ArtifactJobInvalid(
@@ -1596,7 +1475,7 @@ class ArtifactJobService:
                 raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             operation_id = job.operation_id
             state = ajs.state_of(job)
-            evidence = _result_evidence(job.result_evidence)
+            evidence = read_result_evidence(job.result_evidence)
         if state in {ajs.SUCCEEDED, ajs.FAILED}:
             raise ArtifactJobInvalid(
                 "artifact job is not cancellable", reason=InvalidRequestReason.CONFLICT
@@ -1604,9 +1483,9 @@ class ArtifactJobService:
         if state == ajs.CANCELLED and operation_id is None:
             if (
                 evidence is not None
-                and evidence.get("cancel_request_id") == request_id
-                and evidence.get("cancel_actor") == actor
-                and evidence.get("cancel_reason") == cancellation_reason
+                and evidence.cancel_request_id == request_id
+                and evidence.cancel_actor == actor
+                and evidence.cancel_reason == cancellation_reason
             ):
                 return self.get(job_id)
             raise ArtifactJobInvalid(
@@ -1628,11 +1507,11 @@ class ArtifactJobService:
             assert job is not None
             if not ajs.is_ended(job):
                 adapter = ArtifactJobAdapter(session, clock=self._clock)
-                evidence = {
-                    "cancel_request_id": request_id,
-                    "cancel_actor": actor,
-                    "cancel_reason": cancellation_reason,
-                }
+                evidence = ArtifactJobResultEvidence(
+                    cancel_request_id=request_id,
+                    cancel_actor=actor,
+                    cancel_reason=cancellation_reason,
+                )
                 if job.operation_id is None:
                     # Nothing was ever issued: the core cancels it at once.
                     adapter.settle(
@@ -1968,13 +1847,13 @@ class ArtifactJobService:
                     if waiting_result.reason
                     else "artifact cancellation could not safely stop the active scope"
                 ),
-                evidence={
-                    "failure_kind": "cancellation-stop-uncertain",
-                    "recoverable": True,
-                    "active_scope_may_remain": True,
-                    "elapsed_milliseconds": waiting_result.elapsed_milliseconds,
-                    "peak_memory_bytes": waiting_result.peak_memory_bytes,
-                },
+                evidence=ArtifactJobResultEvidence(
+                    failure_kind="cancellation-stop-uncertain",
+                    recoverable=True,
+                    active_scope_may_remain=True,
+                    elapsed_milliseconds=waiting_result.elapsed_milliseconds,
+                    peak_memory_bytes=waiting_result.peak_memory_bytes,
+                ),
             )
             return
         try:
@@ -2063,10 +1942,10 @@ class ArtifactJobService:
                 else result.reason
                 or ("artifact job cancelled" if cancelled else "recipe job failed")
             ),
-            evidence={
-                "elapsed_milliseconds": result.elapsed_milliseconds,
-                "peak_memory_bytes": result.peak_memory_bytes,
-            },
+            evidence=ArtifactJobResultEvidence(
+                elapsed_milliseconds=result.elapsed_milliseconds,
+                peak_memory_bytes=result.peak_memory_bytes,
+            ),
             output_manifest_sha256=result.output_manifest_sha256,
         )
 
@@ -2320,7 +2199,7 @@ class ArtifactJobService:
             output_limits=dict(job.output_limits),
             output_manifest_sha256=job.output_manifest_sha256,
             output_files=outputs,
-            result_evidence=_result_evidence(job.result_evidence),
+            result_evidence=read_result_evidence(job.result_evidence),
             status_reason=job.status_reason,
             timeout_seconds=job.timeout_seconds,
             created_at=job.created_at,

@@ -22,6 +22,7 @@ from .artifact_jobs import (
     OutputLimits,
 )
 from .auth import Actor, agent_identity_from_scope
+from .compiled_artifact_contract import ParameterScalar
 from .download_contract import download_responses, upload_request_body
 from .operation_api import bounded_error_responses
 
@@ -39,7 +40,7 @@ class ArtifactJobCreate(StrictModel):
     interface: str = Field(
         pattern=r"^(audio-job|video-job|image-job|mesh-job|artifact-job)$"
     )
-    parameters: dict[str, object] = Field(default_factory=dict)
+    parameters: dict[str, ParameterScalar] = Field(default_factory=dict)
     inputs: list[ArtifactFileDeclaration] = Field(default_factory=list, max_length=32)
     output_limits: OutputLimits
     timeout_seconds: int = Field(ge=1, le=3_600)

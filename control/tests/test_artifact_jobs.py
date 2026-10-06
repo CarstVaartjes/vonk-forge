@@ -38,6 +38,7 @@ from vonk_control.artifact_jobs import (
     _validate_parameter_definition,
 )
 from vonk_control.bounded_json import require_mapping
+from vonk_control.compiled_artifact_contract import ParameterScalar
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -116,7 +117,7 @@ class _ArtifactCreateRequest(TypedDict):
 
     run_id: str
     interface: str
-    parameters: dict[str, object]
+    parameters: dict[str, ParameterScalar]
     inputs: list[dict[str, object]]
     output_limits: dict[str, object]
     timeout_seconds: int
@@ -158,13 +159,11 @@ def test_artifact_settings_preserve_strict_float_and_max64_name_contract() -> No
             "maximum": 64.0,
         }
     )
-    assert _effective_parameters(
-        {"parameters": [definition]}, {"guidance_scale": 2.25}
-    ) == {"guidance_scale": 2.25}
+    assert _effective_parameters([definition], {"guidance_scale": 2.25}) == {
+        "guidance_scale": 2.25
+    }
     with pytest.raises(ArtifactJobError, match="wrong type"):
-        _effective_parameters(
-            {"parameters": [definition]}, {"guidance_scale": float("nan")}
-        )
+        _effective_parameters([definition], {"guidance_scale": float("nan")})
 
     with pytest.raises(ArtifactJobError, match="contract"):
         _validate_parameter_definition(
@@ -192,7 +191,7 @@ def test_artifact_settings_preserve_strict_float_and_max64_name_contract() -> No
         definition = _validate_parameter_definition(
             {"name": name, "type": "integer", "default": 1}
         )
-        assert definition["name"] == name
+        assert definition.name == name
 
 
 def _configure_artifact_recipe(document: dict[str, object]) -> None:
@@ -1418,7 +1417,7 @@ def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> N
         "recoverable": True,
         "active_scope_may_remain": True,
         "elapsed_milliseconds": 10,
-    }.items() <= view.result_evidence.items()
+    }.items() <= view.result_evidence.model_dump(exclude_none=True).items()
     assert recipe_operations.preview_stop(run_id).allowed
 
     for _ in range(40):
@@ -1430,9 +1429,9 @@ def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> N
     assert ended.state == "cancelled"
     assert ended.supported_actions == ()
     assert ended.result_evidence is not None
-    assert ended.result_evidence["active_scope_may_remain"] is True
-    assert ended.result_evidence["failure_kind"] == "cancellation-stop-uncertain"
-    assert ended.result_evidence["cancel_request_id"] == (
+    assert ended.result_evidence.active_scope_may_remain is True
+    assert ended.result_evidence.failure_kind == "cancellation-stop-uncertain"
+    assert ended.result_evidence.cancel_request_id == (
         "00000000-0000-4000-8000-000000000123"
     )
     # An ended job never blocks the run's Stop: its residue is recorded, not awaited.
@@ -1464,8 +1463,8 @@ def test_artifact_lease_expiry_is_observed_then_stoppable(tmp_path) -> None:
     assert observed.state == ajs.OBSERVING
     assert observed.supported_actions == ("stop",)
     assert observed.result_evidence is not None
-    assert observed.result_evidence["failure_kind"] == "agent-lease-expired"
-    assert observed.result_evidence["late_results_accepted"] is False
+    assert observed.result_evidence.failure_kind == "agent-lease-expired"
+    assert observed.result_evidence.late_results_accepted is False
     with pytest.raises(StaleAgentAttempt):
         agent_jobs.record_result(
             cancellation_result(
@@ -1499,7 +1498,7 @@ def test_artifact_lease_expiry_is_observed_then_stoppable(tmp_path) -> None:
     ended = service.get(submitted.id)
     assert ended.state == "cancelled"
     assert ended.result_evidence is not None
-    assert ended.result_evidence["active_scope_may_remain"] is True
+    assert ended.result_evidence.active_scope_may_remain is True
 
 
 def test_draft_artifact_cancel_idempotency_rejects_mismatched_replay(tmp_path) -> None:
@@ -1920,7 +1919,7 @@ def test_artifact_cancel_completes_over_corrupt_evidence(tmp_path, evidence):
     assert cancelled.state == "cancelled"
 
 
-def test_artifact_cancel_preserves_declared_engine_evidence_and_meaningful_values(
+def test_artifact_cancel_preserves_declared_evidence_and_meaningful_values(
     tmp_path,
 ):
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
@@ -1929,10 +1928,7 @@ def test_artifact_cancel_preserves_declared_engine_evidence_and_meaningful_value
     created = service.create(
         **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000153")
     )
-    evidence = {
-        "elapsed_milliseconds": 0,
-        "engine": {"null": None, "empty": [], "enabled": False},
-    }
+    evidence = {"elapsed_milliseconds": 0, "recoverable": False}
     with sessions.begin() as session:
         stored = session.get(ArtifactJob, created.id)
         assert stored is not None
@@ -1942,5 +1938,5 @@ def test_artifact_cancel_preserves_declared_engine_evidence_and_meaningful_value
     )
     assert cancelled.result_evidence is not None
     for key, value in evidence.items():
-        assert cancelled.result_evidence[key] == value
+        assert getattr(cancelled.result_evidence, key) == value
     assert service.get(created.id).result_evidence == cancelled.result_evidence

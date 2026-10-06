@@ -629,7 +629,9 @@
             "$ref": "#/components/schemas/OutputLimits"
           },
           "parameters": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ParameterScalar"
+            },
             "title": "Parameters",
             "type": "object"
           },
@@ -885,9 +887,56 @@
         "type": "object"
       },
       "ArtifactJobResultEvidence": {
-        "additionalProperties": true,
-        "description": "Known evidence fields with room for engine-specific evidence keys.",
+        "additionalProperties": false,
+        "description": "What the Controller knows about how a job ended, to every field.",
         "properties": {
+          "active_scope_may_remain": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Scope May Remain"
+          },
+          "cancel_actor": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Actor"
+          },
+          "cancel_reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Reason"
+          },
+          "cancel_request_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Request Id"
+          },
           "elapsed_milliseconds": {
             "anyOf": [
               {
@@ -900,6 +949,32 @@
             ],
             "title": "Elapsed Milliseconds"
           },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "cancellation-stop-uncertain",
+                  "agent-lease-expired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Kind"
+          },
+          "late_results_accepted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Late Results Accepted"
+          },
           "peak_memory_bytes": {
             "anyOf": [
               {
@@ -911,6 +986,29 @@
               }
             ],
             "title": "Peak Memory Bytes"
+          },
+          "recoverable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recoverable"
+          },
+          "residue_resolved_by": {
+            "anyOf": [
+              {
+                "const": "exact-stop",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residue Resolved By"
           }
         },
         "title": "ArtifactJobResultEvidence",
@@ -2553,18 +2651,6 @@
         "additionalProperties": false,
         "description": "The canonical typed artifact execution contract.",
         "properties": {
-          "engine": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Engine"
-          },
           "input": {
             "$ref": "#/components/schemas/ArtifactInputContract"
           },

@@ -119,6 +119,13 @@
       "annotation": "Mapping[str, Any]",
       "count": 1,
       "reason": "WireModel is a read-only Mapping view over its own fields for legacy subscripting; the Mapping ABC needs a value type."
+    },
+    {
+      "path": "control/src/vonk_control/artifact_job_evidence.py",
+      "function": "dump_result_evidence",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "JSON serialization of the typed evidence model for its JSON column; the model is the contract and the column binding belongs to the stored-JSON registry."
     }
   ],
   "debt": [
@@ -155,12 +162,8 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/artifact_job_api.py",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/artifact_jobs.py",
-      "count": 35
+      "count": 23
     },
     {
       "path": "control/src/vonk_control/artifact_maintenance.py",
@@ -212,7 +215,7 @@
     },
     {
       "path": "control/src/vonk_control/compiled_artifact_contract.py",
-      "count": 8
+      "count": 6
     },
     {
       "path": "control/src/vonk_control/compiled_execution_plan.py",
@@ -309,10 +312,6 @@
     {
       "path": "control/src/vonk_control/lifecycle/agent_operation.py",
       "count": 3
-    },
-    {
-      "path": "control/src/vonk_control/lifecycle/artifact_job.py",
-      "count": 6
     },
     {
       "path": "control/src/vonk_control/lifecycle/fleet_profile.py",

@@ -1232,7 +1232,7 @@ export interface components {
             output_limits: components["schemas"]["OutputLimits"];
             /** Parameters */
             parameters?: {
-                [key: string]: unknown;
+                [key: string]: components["schemas"]["ParameterScalar"];
             };
             /** Timeout Seconds */
             timeout_seconds: number;
@@ -1302,15 +1302,29 @@ export interface components {
         };
         /**
          * ArtifactJobResultEvidence
-         * @description Known evidence fields with room for engine-specific evidence keys.
+         * @description What the Controller knows about how a job ended, to every field.
          */
         ArtifactJobResultEvidence: {
+            /** Active Scope May Remain */
+            active_scope_may_remain?: boolean | null;
+            /** Cancel Actor */
+            cancel_actor?: string | null;
+            /** Cancel Reason */
+            cancel_reason?: string | null;
+            /** Cancel Request Id */
+            cancel_request_id?: string | null;
             /** Elapsed Milliseconds */
             elapsed_milliseconds?: number | null;
+            /** Failure Kind */
+            failure_kind?: ("cancellation-stop-uncertain" | "agent-lease-expired") | null;
+            /** Late Results Accepted */
+            late_results_accepted?: boolean | null;
             /** Peak Memory Bytes */
             peak_memory_bytes?: number | null;
-        } & {
-            [key: string]: unknown;
+            /** Recoverable */
+            recoverable?: boolean | null;
+            /** Residue Resolved By */
+            residue_resolved_by?: "exact-stop" | null;
         };
         /** ArtifactJobStorageCapabilities */
         ArtifactJobStorageCapabilities: {
@@ -1862,10 +1876,6 @@ export interface components {
          * @description The canonical typed artifact execution contract.
          */
         CompiledArtifactContract: {
-            /** Engine */
-            engine?: {
-                [key: string]: unknown;
-            } | null;
             input: components["schemas"]["ArtifactInputContract"];
             /**
              * Interface

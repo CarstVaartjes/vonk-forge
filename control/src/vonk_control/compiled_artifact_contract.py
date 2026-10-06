@@ -1,8 +1,8 @@
 """Canonical compiled contract for artifact-producing recipe jobs.
 
 The recipe document is the authoring contract.  This module is the one typed
-projection used after compilation, while ``engine`` remains an opaque JSON
-extension point for engine-specific options.
+projection used after compilation.  The recipe's interface declares no engine
+options, so the contract carries none.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import hashlib
 import math
 import re
 from collections.abc import Mapping
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     ConfigDict,
@@ -20,7 +20,6 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
     field_validator,
-    model_serializer,
     model_validator,
 )
 from vonk_agent_protocol import canonical_message
@@ -320,7 +319,7 @@ type ParameterDefinition = Annotated[
 _PARAMETER_ADAPTER = TypeAdapter(ParameterDefinition)
 
 
-def validate_parameter_definition(raw: Mapping[str, object]) -> ParameterDefinition:
+def validate_parameter_definition(raw: object) -> ParameterDefinition:
     """Validate one parameter declaration with the contract's discriminator."""
     return _PARAMETER_ADAPTER.validate_python(raw)
 
@@ -337,7 +336,6 @@ class CompiledArtifactContract(ArtifactContractModel):
     output: ArtifactOutputContract
     output_limits: ArtifactOutputLimits
     max_timeout_seconds: int = Field(ge=1, le=3_600)
-    engine: dict[str, object] | None = None
 
     @field_validator("parameters", mode="before")
     @classmethod
@@ -350,13 +348,6 @@ class CompiledArtifactContract(ArtifactContractModel):
         if names != sorted(names) or len(names) != len(set(names)):
             raise ValueError("artifact parameters are not canonical")
         return self
-
-    @model_serializer(mode="wrap")
-    def serialize_without_empty_engine(self, handler: Any):
-        document = handler(self)
-        if document.get("engine") is None:
-            document.pop("engine", None)
-        return document
 
     @classmethod
     def parse(cls, raw: object) -> CompiledArtifactContract:
@@ -536,8 +527,6 @@ def compile_artifact_contract(
         "output_limits": output_limits,
         "max_timeout_seconds": 3_600,
     }
-    if "engine" in interface:
-        raw_document["engine"] = interface["engine"]
     try:
         return CompiledArtifactContract.model_validate(raw_document)
     except ValidationError as error:
@@ -558,6 +547,7 @@ __all__ = [
     "FloatParameter",
     "IntegerParameter",
     "ParameterDefinition",
+    "ParameterScalar",
     "StringParameter",
     "compile_artifact_contract",
     "validate_parameter_definition",
