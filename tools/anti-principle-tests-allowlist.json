@@ -2771,6 +2771,14 @@
       "count": 1,
       "reason": "security-edge",
       "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission."
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_role_phases_use_exact_stop_identity_without_launch_history",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "input-validation",
+      "justification": "Pure canonical Stop payload and role-order parser test; calls only payload construction and _role_phases, with no operation execution, ending, effect acknowledgement, capacity release or fresh-admission claim."
     }
   ]
 }
