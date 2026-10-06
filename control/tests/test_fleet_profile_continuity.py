@@ -103,7 +103,7 @@ def test_new_lane_adopts_original_identity_without_fencing_its_spark():
                         "recipe_selector": "vonk-forge/synthetic-tiny-build",
                         "spark_ids": [_node_id(2)],
                         "desired_state": "running",
-                        "assignment_name": "lane-C",
+                        "assignment_name": "lane-c",
                     },
                 ],
             }

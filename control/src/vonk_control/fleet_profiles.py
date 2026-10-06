@@ -9143,16 +9143,7 @@ class FleetProfileService:
                     row.updated_at = now
                     return True
                 continuing_scope = self._adopted_application_scope(session, row)
-                self._lifecycle.succeed(
-                    row,
-                    now,
-                    reason=(
-                        "Continuing assignments completed under the newer selected profile; changed sibling assignments were superseded"
-                        if continuing_scope is not None
-                        else None
-                    ),
-                    session=session,
-                )
+                self._lifecycle.succeed(row, now, reason=None, session=session)
                 progress = read_stored_model(
                     FleetProfileApplicationProgress,
                     canonical_message(
@@ -9160,6 +9151,11 @@ class FleetProfileService:
                             **progress.model_dump(mode="json"),
                             "completed_steps": len(steps),
                             "total_steps": len(steps),
+                            "current_label": (
+                                "Continuing assignments completed; changed sibling assignments were superseded"
+                                if continuing_scope is not None
+                                else progress.current_label
+                            ),
                         }
                     ),
                     strict=True,

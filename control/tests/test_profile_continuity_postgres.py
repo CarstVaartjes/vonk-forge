@@ -153,7 +153,7 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
     )
     claim = claim_agent(jobs, _node_id(2), "continuity-2")
     assert claim is not None
-    replacement_choices = [choices[0], {**choices[1], "assignment_name": "lane-C"}]
+    replacement_choices = [choices[0], {**choices[1], "assignment_name": "lane-c"}]
     newer_profile = profiles.create(
         FleetProfileInput.model_validate(
             {"name": "A plus C", "assignments": replacement_choices}
