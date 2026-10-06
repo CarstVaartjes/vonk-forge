@@ -667,9 +667,9 @@ def test_build_archive_presence_checks_the_whole_image_by_name_and_size(
     place_test_image(storage, ARCHIVE_DIGEST, len(ARCHIVE))
     assert storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE)) is True
 
-    with pytest.raises(RuntimeImagePreparationError) as mismatch:
-        storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE) + 1)
-    assert mismatch.value.code == "runtime_image.archive_mismatch"
+    # A recorded size that is not the stored size is no proof the recorded build is
+    # there: the answer is "not available" (the caller builds again), not a refusal.
+    assert storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE) + 1) is False
 
     # A layer blob that vanished makes the whole image absent.
     layers = [

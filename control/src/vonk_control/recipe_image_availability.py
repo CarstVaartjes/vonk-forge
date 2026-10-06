@@ -76,6 +76,7 @@ from .catalog_revision_contract import read_catalog_document
 from .content_identity import ImageContent, same_image
 from .failure_classification import is_redownload, is_security_failure
 from .lifecycle.core import STOP_BUDGET
+from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .lifecycle.image_availability import ImageAvailabilityAdapter
 from .lifecycle.types import State
 from .model_cache import (
@@ -195,10 +196,16 @@ def _removal_retry_is_due(
     try:
         retry_time = datetime.fromisoformat(failure.retry_time)
     except ValueError as error:
-        raise RecipeImageAvailabilityError(
-            "recipe_image.operation_invalid",
-            "stored removal retry time is malformed",
-        ) from error
+        # A damaged stored retry time is no schedule: the removal is due now (it
+        # re-derives its next attempt from the core's clock) and the damage is
+        # recorded instead of wedging the removal.
+        retire_as_unknown(
+            "recipe-image.removal-retry-time",
+            failure.code,
+            BookkeepingReason.PERSISTED_STATE_DAMAGED,
+            f"{type(error).__name__}: {error}",
+        )
+        return True
     retry_time = (
         retry_time if retry_time.tzinfo is not None else retry_time.replace(tzinfo=UTC)
     )
@@ -506,6 +513,10 @@ def _iso(value: datetime) -> str:
     return value.astimezone(UTC).isoformat()
 
 
+def _is_digest(value: object) -> bool:
+    return isinstance(value, str) and _SHA256.fullmatch(value) is not None
+
+
 def _digest(value: object, *, field: str) -> str:
     if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
         raise RecipeImageAvailabilityError(
@@ -784,24 +795,25 @@ class RecipeImageAvailabilityService:
                 "recipe_image.selector_missing",
                 "selected recipe revision is not active",
             )
-        try:
-            recipe = read_catalog_document(revision)
-            if not isinstance(recipe, RecipeDefinition):
-                raise TypeError("catalog revision is not a Recipe")
-        except (TypeError, ValueError) as error:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.recipe_invalid",
-                "selected canonical recipe revision is invalid",
-            ) from error
+        # The recipe document itself is not read: its cache is selected by the
+        # revision identity, so a revision whose stored document is damaged can
+        # still have its cache reviewed and removed.
 
         # The images the recipe's builds produced are the ones its removal
         # selects; the reference scan keeps whatever another owner still uses.
         image_sizes: dict[str, int] = {}
         for image in revision_images(session, [revision_id]).get(revision_id, ()):
-            archive = _digest(
-                image.archive_sha256, field="runtime image archive digest"
-            )
-            image_sizes.setdefault(archive, image.image_bytes)
+            if not _is_digest(image.archive_sha256):
+                # A stored archive digest that is not a digest names nothing that
+                # can be removed: the damage is recorded and the image skipped.
+                retire_as_unknown(
+                    "recipe-image.removal-archive",
+                    revision_id,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    "stored runtime image archive digest is not a SHA-256 digest",
+                )
+                continue
+            image_sizes.setdefault(image.archive_sha256, image.image_bytes)
 
         model_scope: ModelCacheRemovalScope | None = None
         if with_model:
@@ -1168,59 +1180,66 @@ class RecipeImageAvailabilityService:
         model_owner_findings: tuple[CacheRemovalFinding, ...] = ()
         retained_model_findings: tuple[CacheRemovalFinding, ...] = ()
         scan_blockers: list[CacheRemovalBlocker] = []
+        # What the model scan needs is known before it runs: an evidence gap is a
+        # retryable blocker of this review (the caller observes and asks again),
+        # decided here instead of raised out of the scan and caught below.
+        model_identities: set[ArtifactIdentity] = set()
+        own_model_identities: set[ArtifactIdentity] = set()
+        precondition: CacheRemovalBlocker | None = None
+        if selection.model_scope is not None:
+            model_identities = {
+                ArtifactIdentity("model-set", digest)
+                for digest in selection.model_scope.selected_sets
+            } | {
+                ArtifactIdentity("model-object", digest)
+                for digest in selection.model_scope.delete_objects
+            }
+            own_model_identities = {
+                identity
+                for identity in expected_owners
+                if identity.kind in {"model-set", "model-object"}
+            }
+            # A model scope exists only when the ModelCache is wired (the selection
+            # refuses a with-model review without it).
+            if own_model_identities and not model_identities <= own_model_identities:
+                precondition = CacheRemovalBlocker(
+                    code="artifact.removal_owner_unresolved",
+                    detail="recipe removal holds an incomplete model deletion fence",
+                    retryable=True,
+                    recovery_actions=["retry"],
+                )
         try:
-            # Caught owner-scan errors must roll back their PostgreSQL
-            # subtransaction before the independent lifecycle-gate scan runs.
-            with session.begin_nested():
-                image_findings = runtime_image_reference_findings(
-                    session, selection.image_archives
-                )
-                model_findings = (
-                    {}
-                    if selection.model_scope is None
-                    else model_set_reference_findings(
-                        session, selection.model_scope.selected_sets
+            if precondition is not None:
+                scan_blockers.append(precondition)
+            else:
+                # Caught owner-scan errors must roll back their PostgreSQL
+                # subtransaction before the independent lifecycle-gate scan runs.
+                with session.begin_nested():
+                    image_findings = runtime_image_reference_findings(
+                        session, selection.image_archives
                     )
-                )
-                if selection.model_scope is not None:
-                    if self._model_cache is None:
-                        raise ArtifactLifecycleError(
-                            "model_cache.review_unavailable",
-                            "ModelCache cannot explain shared retained model objects",
-                            retryable=True,
-                        )
-                    model_coordinator = cast(
-                        ModelCacheRemovalCoordinator, self._model_cache
-                    )
-                    retained_model_findings = (
-                        model_coordinator.retained_model_object_findings(
-                            selection.model_scope
+                    model_findings = (
+                        {}
+                        if selection.model_scope is None
+                        else model_set_reference_findings(
+                            session, selection.model_scope.selected_sets
                         )
                     )
-                    model_identities = {
-                        ArtifactIdentity("model-set", digest)
-                        for digest in selection.model_scope.selected_sets
-                    } | {
-                        ArtifactIdentity("model-object", digest)
-                        for digest in selection.model_scope.delete_objects
-                    }
-                    own_model_identities = {
-                        identity
-                        for identity in expected_owners
-                        if identity.kind in {"model-set", "model-object"}
-                    }
-                    if not model_identities <= own_model_identities:
-                        if own_model_identities:
-                            raise ArtifactLifecycleError(
-                                "artifact.removal_owner_unresolved",
-                                "recipe removal holds an incomplete model deletion fence",
-                                retryable=True,
-                            )
-                        model_owner_findings = (
-                            model_coordinator.removal_owner_findings_in_session(
-                                session, selection.model_scope
+                    if selection.model_scope is not None:
+                        model_coordinator = cast(
+                            ModelCacheRemovalCoordinator, self._model_cache
+                        )
+                        retained_model_findings = (
+                            model_coordinator.retained_model_object_findings(
+                                selection.model_scope
                             )
                         )
+                        if not model_identities <= own_model_identities:
+                            model_owner_findings = (
+                                model_coordinator.removal_owner_findings_in_session(
+                                    session, selection.model_scope
+                                )
+                            )
         except ArtifactLifecycleError as error:
             image_findings = {}
             model_findings = {}
@@ -2762,10 +2781,16 @@ class RecipeImageAvailabilityService:
                 from_json=True,
             )
         except (TypeError, ValueError) as error:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.operation_invalid",
-                "stored cancellation evidence is malformed",
-            ) from error
+            # Damaged cancellation evidence is no cancellation: nothing re-derives
+            # it, so it is retired as unknown and the operation reads as not
+            # cancelled. The operator's next cancel request writes fresh evidence.
+            retire_as_unknown(
+                "recipe-image.cancellation",
+                job.id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                f"{type(error).__name__}: {error}",
+            )
+            return None
 
     def _cancel_update_child(
         self, operation_id: str, cancellation: RecipeOperationCancellationResult
@@ -3940,10 +3965,15 @@ class RecipeImageAvailabilityService:
             payload = require_mapping(existing.payload, "availability payload")
             stored = read_availability_intent(payload.get("request"))
         except (TypeError, ValueError, ValidationError) as error:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.operation_invalid",
-                "stored preparation request is malformed",
-            ) from error
+            # A stored request that does not parse cannot be the caller's request:
+            # it is recorded and the key reads as used by another operation.
+            retire_as_unknown(
+                "recipe-image.request",
+                existing.id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                f"{type(error).__name__}: {error}",
+            )
+            stored = None
         if stored != intent:
             raise RecipeImageAvailabilityError(
                 "recipe_image.request_key_reused",
@@ -4622,7 +4652,7 @@ class RecipeImageAvailabilityService:
         )
         heartbeat.start()
         try:
-            recipe = _canonical_recipe(payload["recipe"])
+            recipe = self._stored_recipe(payload)
             runtime = payload["runtime"]
             if not isinstance(runtime, Mapping):
                 raise RecipeImageAvailabilityError(
@@ -4775,6 +4805,43 @@ class RecipeImageAvailabilityService:
             self._release_cancelled_claim(claim)
             self._reconcile_availability_cancellation(operation_id)
 
+    def _stored_recipe(self, payload: Mapping[str, object]) -> RecipeDefinition:
+        """The recipe an operation was accepted for: its stored copy, else its revision.
+
+        A stored copy that does not parse is rebuilt from the catalog revision the
+        operation names, accepted only when that revision has the content digest
+        the operation was accepted under (never a newer recipe); otherwise the
+        original validation failure stands.
+        """
+
+        try:
+            return _canonical_recipe(payload.get("recipe"))
+        except RecipeImageAvailabilityError:
+            revision_id = payload.get("recipe_revision_id")
+            digest = payload.get("recipe_content_sha256")
+            rebuilt: RecipeDefinition | None = None
+            if isinstance(revision_id, str) and isinstance(digest, str):
+                with self._sessions() as session:
+                    revision = session.get(CatalogDocumentRevision, revision_id)
+                    if (
+                        revision is not None
+                        and revision.kind == "recipe"
+                        and revision.content_digest == digest
+                    ):
+                        try:
+                            document = read_catalog_document(revision)
+                        except (TypeError, ValueError):
+                            document = None
+                        if isinstance(document, RecipeDefinition):
+                            rebuilt = document
+            if rebuilt is None:
+                raise
+            _LOGGER.info(
+                "stored recipe of availability operation rebuilt from its revision",
+                extra={"recipe_revision_id": revision_id},
+            )
+            return rebuilt
+
     def _current_model_child(
         self,
         payload: Mapping[str, object],
@@ -4789,7 +4856,7 @@ class RecipeImageAvailabilityService:
                 and self._model_cache is not None
                 and actor is not None
                 and parent_request_key is not None
-                and _canonical_recipe(payload["recipe"]).models
+                and self._stored_recipe(payload).models
             ):
                 return self._ensure_model_child(
                     str(payload["recipe_revision_id"]),
@@ -4931,10 +4998,17 @@ class RecipeImageAvailabilityService:
             )
             return True
         except (TypeError, ValueError, ValidationError) as error:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.model_cache_invalid",
-                "ModelCache cancellation evidence is malformed",
-            ) from error
+            # The ModelCache row owns its cancellation: damaged evidence is no
+            # intent for this join, which keeps observing the child (the owner
+            # settles the row's own state, and a cancelled state still stops the
+            # join through the state check). The damage is recorded.
+            retire_as_unknown(
+                "recipe-image.model-child-cancellation",
+                operation.id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                f"{type(error).__name__}: {error}",
+            )
+            return False
 
     def _defer_for_model(self, claim: RecipeImageAvailabilityClaim) -> None:
         with self._sessions.begin() as session:
@@ -5039,7 +5113,7 @@ class RecipeImageAvailabilityService:
                 }
         self._update_progress(claim, "verify")
         return prepare_runtime_image(
-            payload["recipe"],
+            recipe.model_dump(mode="json"),
             runtime=runtime,
             storage=self._storage,
             transport=self._transport,
