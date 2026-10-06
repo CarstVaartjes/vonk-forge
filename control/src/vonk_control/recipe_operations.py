@@ -100,6 +100,9 @@ from .install_admission import (
 from .install_admission import (
     require_admissible as require_install_admissible,
 )
+from .install_admission import (
+    require_same_execution as require_same_install_execution,
+)
 from .lifecycle import CancelRequested, Effect, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
 from .lifecycle.artifact_job import ArtifactJobAdapter
@@ -204,6 +207,9 @@ from .run_admission import (
 )
 from .run_admission import (
     require_admissible as require_run_admissible,
+)
+from .run_admission import (
+    require_same_execution as require_same_run_execution,
 )
 from .source_policy import SourcePolicyReport
 from .storage_demands import StorageDemands, spark_scope
@@ -2166,6 +2172,12 @@ class RecipeOperationService:
         request_id: str,
         workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
+        if plan_digest != plan.plan_digest:
+            raise RecipeRequestInvalid(
+                "reviewed plan digest does not match the submitted plan",
+                reason=InvalidRequestReason.CONFLICT,
+            )
+        reviewed = plan
         now = self._clock()
         install_identity = (plan.mapping_id, plan.recipe_build_id)
         existing = self._idempotent(
@@ -2182,6 +2194,7 @@ class RecipeOperationService:
         if not plan.allowed:
             self._request_install_storage(plan)
         require_install_admissible(plan)
+        require_same_install_execution(reviewed, plan)
         try:
             self._install_admission.refresh_install_receipts(plan, now=now)
         except InstallAdmissionBusy:
@@ -2292,11 +2305,18 @@ class RecipeOperationService:
         workload_intent_ordinal: int | None = None,
         profile_application_id: str | None = None,
     ) -> RecipeOperationView:
+        if plan_digest != plan.plan_digest:
+            raise RecipeRequestInvalid(
+                "reviewed plan digest does not match the submitted plan",
+                reason=InvalidRequestReason.CONFLICT,
+            )
+        reviewed = plan
         existing = self._idempotent(
             request_id,
             "recipe.start",
             None,
             installation_id=plan.installation_id,
+            run_alias=plan.alias,
         )
         if existing is not None:
             return existing
@@ -2310,6 +2330,7 @@ class RecipeOperationService:
                 profile_application_id=profile_application_id,
             )
             require_run_admissible(plan)
+            require_same_run_execution(reviewed, plan)
             try:
                 acquire_admission_keys(
                     session,
@@ -2327,6 +2348,7 @@ class RecipeOperationService:
                 "recipe.start",
                 None,
                 installation_id=plan.installation_id,
+                run_alias=plan.alias,
             )
             if replay is not None:
                 return replay
@@ -2591,11 +2613,18 @@ class RecipeOperationService:
         actor: str,
         request_id: str,
     ) -> RecipeOperationView:
+        if plan_digest != plan.plan_digest:
+            raise RecipeRequestInvalid(
+                "reviewed plan digest does not match the submitted plan",
+                reason=InvalidRequestReason.CONFLICT,
+            )
+        reviewed = plan
         existing = self._idempotent(
             request_id,
             "recipe.job.activate.v1",
             None,
             installation_id=plan.installation_id,
+            run_alias=plan.alias,
         )
         if existing is not None:
             return existing
@@ -2611,6 +2640,7 @@ class RecipeOperationService:
                 "recipe.job.activate.v1",
                 None,
                 installation_id=plan.installation_id,
+                run_alias=plan.alias,
             )
             if replay is not None:
                 return replay
@@ -2618,6 +2648,7 @@ class RecipeOperationService:
                 plan.installation_id, plan.alias, now=now, _session=session
             )
             require_run_admissible(plan)
+            require_same_run_execution(reviewed, plan)
             installation = session.get(RecipeInstallation, plan.installation_id)
             revision = (
                 _active_recipe_revision(session, installation.recipe_revision_id)
@@ -8243,6 +8274,7 @@ class RecipeOperationService:
         owner_kind: str | None = None,
         owner_id: str | None = None,
         installation_id: str | None = None,
+        run_alias: str | None = None,
         install_identity: tuple[str, str | None] | None = None,
     ) -> RecipeOperationView | None:
         with self._sessions() as session:
@@ -8254,6 +8286,7 @@ class RecipeOperationService:
                 owner_kind=owner_kind,
                 owner_id=owner_id,
                 installation_id=installation_id,
+                run_alias=run_alias,
                 install_identity=install_identity,
             )
 
@@ -8267,6 +8300,7 @@ class RecipeOperationService:
         owner_kind: str | None = None,
         owner_id: str | None = None,
         installation_id: str | None = None,
+        run_alias: str | None = None,
         install_identity: tuple[str, str | None] | None = None,
     ) -> RecipeOperationView | None:
         existing = self._idempotent_job_in_session(
@@ -8277,6 +8311,7 @@ class RecipeOperationService:
             owner_kind=owner_kind,
             owner_id=owner_id,
             installation_id=installation_id,
+            run_alias=run_alias,
             install_identity=install_identity,
         )
         return self._view(existing) if existing is not None else None
@@ -8291,6 +8326,7 @@ class RecipeOperationService:
         owner_kind: str | None = None,
         owner_id: str | None = None,
         installation_id: str | None = None,
+        run_alias: str | None = None,
         install_identity: tuple[str, str | None] | None = None,
     ) -> Job | None:
         existing = session.scalar(select(Job).where(Job.request_id == request_id))
@@ -8320,7 +8356,11 @@ class RecipeOperationService:
                     reason=InvalidRequestReason.CONFLICT,
                 )
             run = session.get(RecipeRun, existing.payload.get("owner_id"))
-            if run is None or run.installation_id != installation_id:
+            if (
+                run is None
+                or run.installation_id != installation_id
+                or (run_alias is not None and run.alias != run_alias)
+            ):
                 raise RecipeRequestInvalid(
                     "request key was already used differently",
                     reason=InvalidRequestReason.CONFLICT,

@@ -2596,15 +2596,22 @@ def test_start_uses_current_alias_and_replays_by_request_identity(
     qwen = service.preview_run(installation.owner_id, "qwen")
     alternate = service.preview_run(installation.owner_id, "qwen-alt")
 
+    with pytest.raises(RecipeOperationConflict, match="reviewed plan digest"):
+        service.start(
+            alternate,
+            plan_digest=qwen.plan_digest,
+            actor="admin",
+            request_id="0" * 35 + "2",
+        )
     started = service.start(
         alternate,
-        plan_digest=qwen.plan_digest,
+        plan_digest=alternate.plan_digest,
         actor="admin",
         request_id="0" * 35 + "2",
     )
     replayed = service.start(
         alternate,
-        plan_digest=qwen.plan_digest,
+        plan_digest=alternate.plan_digest,
         actor="admin",
         request_id="0" * 35 + "2",
     )
