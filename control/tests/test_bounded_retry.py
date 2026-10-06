@@ -4,7 +4,9 @@ of times before the requester hears of it."""
 from __future__ import annotations
 
 import pytest
+from sqlalchemy.exc import OperationalError
 from vonk_control import recipe_operations as recipe_operations_module
+from vonk_control.admission_locking import AdmissionLockBusy, admission_wait_exhausted
 from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
 from vonk_control.install_admission import InstallAdmissionBusy
 from vonk_control.lifecycle.evidence import (
@@ -140,6 +142,50 @@ def test_start_repeats_a_busy_run_capacity_writer(
 
     assert result == "accepted"
     assert flaky.calls == 2
+
+
+def test_start_returns_after_the_implicit_sql_wait_budget_is_spent(
+    monkeypatch: pytest.MonkeyPatch, no_pauses: None
+) -> None:
+    class LockTimeout(Exception):
+        sqlstate = "55P03"
+
+    busy = RunAdmissionBusy("run capacity writer is busy")
+    busy.__cause__ = OperationalError("INSERT INTO jobs", {}, LockTimeout())
+    flaky = _Flaky(99, busy)
+    monkeypatch.setattr(RecipeOperationService, "_start_once", flaky)
+
+    with pytest.raises(RunAdmissionBusy) as returned:
+        _service().start(
+            object(),  # type: ignore[arg-type]
+            plan_digest="d",
+            actor="a",
+            request_id="same-request",
+        )
+
+    assert returned.value is busy
+    assert flaky.calls == 1
+
+
+def test_immediate_nowait_refusal_keeps_its_request_retry(
+    monkeypatch: pytest.MonkeyPatch, no_pauses: None
+) -> None:
+    busy = RunAdmissionBusy("run capacity writer is busy")
+    busy.__cause__ = AdmissionLockBusy("row is busy", sqlstate="55P03")
+    assert not admission_wait_exhausted(busy)
+    flaky = _Flaky(2, busy)
+    monkeypatch.setattr(RecipeOperationService, "_start_once", flaky)
+
+    assert (
+        _service().start(
+            object(),  # type: ignore[arg-type]
+            plan_digest="d",
+            actor="a",
+            request_id="same-request",
+        )
+        == "accepted"
+    )
+    assert flaky.calls == 3
 
 
 def test_a_build_cancellation_repeats_a_lock_another_writer_holds(
