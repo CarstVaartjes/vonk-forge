@@ -21,10 +21,8 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
-from .categorized_faults import (
-    StoredStateDamaged,
-    security_reason,
-)
+from .categorized_errors import BookkeepingUnknown
+from .categorized_faults import security_reason
 from .models import (
     AgentOperation,
     CatalogDocumentRevision,
@@ -48,7 +46,7 @@ class RecipeStopAuthorityError(ValueError):
     """A durable recipe start cannot authorize an exact runtime Stop."""
 
 
-class RecipeStopAuthorityRefused(SecurityRefusalError, RecipeStopAuthorityError):
+class StopPayloadRefused(SecurityRefusalError, RecipeStopAuthorityError):
     """Durable Start evidence disagrees with the run, mapping or plan: the Stop is refused (destructive-effect fence)."""
 
     def __init__(
@@ -63,7 +61,7 @@ class RecipeStopAuthorityRefused(SecurityRefusalError, RecipeStopAuthorityError)
         )
 
 
-class RecipeStopAuthorityInvalid(InvalidRequestError, RecipeStopAuthorityError):
+class StopPayloadInvalid(InvalidRequestError, RecipeStopAuthorityError):
     """The Stop request names an invalid generation, an empty target set or an ambiguous durable plan."""
 
     def __init__(
@@ -78,7 +76,7 @@ class RecipeStopAuthorityInvalid(InvalidRequestError, RecipeStopAuthorityError):
         self.typed_field = field
 
 
-class RecipeStopAuthorityUnknown(UnknownOutcomeError, RecipeStopAuthorityError):
+class StopPayloadUnknown(UnknownOutcomeError, RecipeStopAuthorityError):
     """Durable Start evidence that cannot be read or is incomplete: unknown until the owner re-derives it."""
 
     def __init__(
@@ -103,7 +101,7 @@ def stop_payload_from_start(
             RecipeStartPayload, canonical_message(value), from_json=True
         )
         if type(start.run_generation) is not int or start.run_generation < 1:
-            raise StoredStateDamaged("start generation is missing")
+            raise BookkeepingUnknown("start generation is missing")
         payload = RecipeStopPayload(
             run_id=start.run_id,
             target_runtime_id=start.run_id,
@@ -119,7 +117,7 @@ def stop_payload_from_start(
             RecipeStopPayload, canonical_message(payload), from_json=True
         )
     except (TypeError, ValueError) as error:
-        raise RecipeStopAuthorityUnknown(
+        raise StopPayloadUnknown(
             "recipe Start payload is invalid", reason=WaitReason.OBSERVATION_UNAVAILABLE
         ) from error
 
@@ -136,7 +134,7 @@ def stop_payload_from_job_run(
             RecipeJobRunRequest, canonical_message(value), from_json=True
         )
         if type(job.run_generation) is not int or job.run_generation < 1:
-            raise StoredStateDamaged("job run generation is missing")
+            raise BookkeepingUnknown("job run generation is missing")
         payload = RecipeStopPayload(
             run_id=job.run_id,
             target_runtime_id=job.job_id,
@@ -152,7 +150,7 @@ def stop_payload_from_job_run(
             RecipeStopPayload, canonical_message(payload), from_json=True
         )
     except (TypeError, ValueError) as error:
-        raise RecipeStopAuthorityUnknown(
+        raise StopPayloadUnknown(
             "recipe JobRun payload is invalid",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
@@ -175,13 +173,13 @@ def durable_run_stop_payloads(
     """
 
     if type(run_generation) is not int or run_generation < 1:
-        raise RecipeStopAuthorityInvalid(
+        raise StopPayloadInvalid(
             "recipe Stop generation is invalid",
             reason=InvalidRequestReason.OUT_OF_RANGE,
         )
     requested = {node.node_id: node for node in nodes}
     if not requested:
-        raise RecipeStopAuthorityInvalid(
+        raise StopPayloadInvalid(
             "recipe Stop target set is empty", reason=InvalidRequestReason.INCOMPLETE
         )
 
@@ -205,7 +203,7 @@ def durable_run_stop_payloads(
         or revision.schema_version != 2
         or revision.content_digest is None
     ):
-        raise RecipeStopAuthorityRefused("recipe Stop identity is stale")
+        raise StopPayloadRefused("recipe Stop identity is stale")
     mapping_nodes = tuple(
         session.scalars(
             select(ClusterMappingNode)
@@ -216,11 +214,11 @@ def durable_run_stop_payloads(
     if {(item.node_id, item.rank, item.role) for item in mapping_nodes} != {
         (node.node_id, node.rank, node.role) for node in nodes
     }:
-        raise RecipeStopAuthorityRefused("recipe Stop mapping membership differs")
+        raise StopPayloadRefused("recipe Stop mapping membership differs")
     try:
         stored_run_plan = parse_stored_run_plan(run.plan)
     except RecipeExecutionContractError as error:
-        raise RecipeStopAuthorityUnknown(
+        raise StopPayloadUnknown(
             "recipe Stop run plan is invalid", reason=WaitReason.OBSERVATION_UNAVAILABLE
         ) from error
     if (
@@ -232,7 +230,7 @@ def durable_run_stop_payloads(
         or {(item.node_id, item.rank, item.role) for item in stored_run_plan.nodes}
         != {(node.node_id, node.rank, node.role) for node in nodes}
     ):
-        raise RecipeStopAuthorityRefused("recipe Stop run plan identity differs")
+        raise StopPayloadRefused("recipe Stop run plan identity differs")
 
     jobs = tuple(
         session.scalars(
@@ -246,7 +244,7 @@ def durable_run_stop_payloads(
         )
     )
     if not jobs:
-        raise RecipeStopAuthorityUnknown(
+        raise StopPayloadUnknown(
             "recipe Stop lacks durable Start authority",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
@@ -265,16 +263,16 @@ def durable_run_stop_payloads(
             or hashlib.sha256(canonical_message(parent.payload)).hexdigest()
             != parent.payload_digest
         ):
-            raise RecipeStopAuthorityRefused("recipe Start parent is inconsistent")
+            raise StopPayloadRefused("recipe Start parent is inconsistent")
         try:
             phases: StoredPhases = decode_stored_phases(parent.payload)
         except (TypeError, ValueError) as error:
-            raise RecipeStopAuthorityUnknown(
+            raise StopPayloadUnknown(
                 "recipe Start phases are invalid",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         if not phases:
-            raise RecipeStopAuthorityUnknown(
+            raise StopPayloadUnknown(
                 "recipe Start phases are missing",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
@@ -284,9 +282,7 @@ def durable_run_stop_payloads(
         for phase in phases:
             for operation_id, node_id, raw_payload in phase:
                 if operation_id in planned:
-                    raise RecipeStopAuthorityRefused(
-                        "recipe Start phase identities overlap"
-                    )
+                    raise StopPayloadRefused("recipe Start phase identities overlap")
                 planned[operation_id] = (node_id, raw_payload)
                 raw_run_id = raw_payload.get("run_id")
                 raw_generation = raw_payload.get("run_generation")
@@ -307,14 +303,12 @@ def durable_run_stop_payloads(
                         from_json=True,
                     )
                 except (TypeError, ValueError) as error:
-                    raise RecipeStopAuthorityUnknown(
+                    raise StopPayloadUnknown(
                         "recipe Start payload is invalid",
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     ) from error
                 if start.run_id != run.id:
-                    raise RecipeStopAuthorityRefused(
-                        "recipe Start run identity differs"
-                    )
+                    raise StopPayloadRefused("recipe Start run identity differs")
                 if start.run_generation != run_generation:
                     continue
                 node = requested.get(node_id)
@@ -331,9 +325,7 @@ def durable_run_stop_payloads(
                     or start.compiled_execution_plan.runtime.placement.world_size
                     != len(requested)
                 ):
-                    raise RecipeStopAuthorityRefused(
-                        "recipe Start target identity differs"
-                    )
+                    raise StopPayloadRefused("recipe Start target identity differs")
                 current_starts[operation_id] = start
 
         phase_ids = set(planned)
@@ -361,7 +353,7 @@ def durable_run_stop_payloads(
                 if child.id in phase_ids
             )
         ):
-            raise RecipeStopAuthorityRefused(
+            raise StopPayloadRefused(
                 "recipe Start children differ from retained phases"
             )
         for phase_index, phase in enumerate(phases):
@@ -381,7 +373,7 @@ def durable_run_stop_payloads(
                     or hashlib.sha256(canonical_message(child.payload)).hexdigest()
                     != child.payload_digest
                 ):
-                    raise RecipeStopAuthorityRefused(
+                    raise StopPayloadRefused(
                         "recipe Start child differs from retained phase"
                     )
                 start = current_starts.get(operation_id)
@@ -398,7 +390,7 @@ def durable_run_stop_payloads(
             if (phase_index == 0 and present != len(phase)) or (
                 phase_index > 0 and present not in {0, len(phase)}
             ):
-                raise RecipeStopAuthorityUnknown(
+                raise StopPayloadUnknown(
                     "recipe Start phase materialization is incomplete",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
@@ -420,14 +412,14 @@ def durable_run_stop_payloads(
     for node_id, payloads in candidates.items():
         canonical = {canonical_message(payload) for payload in payloads}
         if len(canonical) != 1:
-            raise RecipeStopAuthorityInvalid(
+            raise StopPayloadInvalid(
                 "recipe Start target has ambiguous durable plans",
                 reason=InvalidRequestReason.CONFLICT,
             )
         selected[node_id] = payloads[0]
     missing = set(requested) - set(selected)
     if missing and not allow_missing_nodes:
-        raise RecipeStopAuthorityUnknown(
+        raise StopPayloadUnknown(
             "recipe Stop lacks an exact Start target for every node",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )

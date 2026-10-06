@@ -37,11 +37,8 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.wire_model import Digest, WireModel
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
-from .categorized_faults import (
-    RequestFault,
-    RequestTypeFault,
-    security_reason,
-)
+from .categorized_errors import InvalidType, InvalidValue
+from .categorized_faults import security_reason
 from .content_identity import ImageContent, differing_image_fields, same_image
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .models import RecipeBuild
@@ -1099,12 +1096,12 @@ def make_runtime_image_receipt_preparer(
     ) -> RuntimeImageReceipt:
         runtime = runtime_spec.get("runtime")
         if not isinstance(runtime, Mapping):
-            raise RequestTypeFault(
+            raise InvalidType(
                 "compiled runtime projection is unavailable",
                 reason=InvalidRequestReason.NOT_FOUND,
             )
         if build is None:
-            raise RequestFault(
+            raise InvalidValue(
                 "source build receipt is unavailable",
                 reason=InvalidRequestReason.NOT_FOUND,
             )
@@ -1147,7 +1144,7 @@ def stored_runtime_image_resolver(
             runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None
         )
         if not isinstance(runtime, Mapping):
-            raise RequestTypeFault(
+            raise InvalidType(
                 "runtime image preparation is required: runtime projection is unavailable",
                 reason=InvalidRequestReason.NOT_FOUND,
             )
@@ -1158,7 +1155,7 @@ def stored_runtime_image_resolver(
             expected_runtime_interface=expectations["interface"],
         )
         if receipt is None:
-            raise RequestFault(
+            raise InvalidValue(
                 "runtime image preparation is required before compile/install",
                 reason=InvalidRequestReason.INCOMPLETE,
             )
@@ -1372,18 +1369,18 @@ def _receipt_runtime_identity(
 
     architecture = _wire_architecture(evidence.architecture)
     if architecture != _RUNTIME_ARCHITECTURE:
-        raise RequestFault(
+        raise InvalidValue(
             "runtime image architecture is not supported",
             reason=InvalidRequestReason.UNSUPPORTED,
         )
     if expected_interface != _RUNTIME_INTERFACE:
-        raise RequestFault(
+        raise InvalidValue(
             "runtime image interface is not supported",
             reason=InvalidRequestReason.UNSUPPORTED,
         )
     interface_label = evidence.runtime_interface
     if interface_label != _RUNTIME_INTERFACE_LABEL:
-        raise RequestFault(
+        raise InvalidValue(
             "runtime image interface label is not supported",
             reason=InvalidRequestReason.UNSUPPORTED,
         )

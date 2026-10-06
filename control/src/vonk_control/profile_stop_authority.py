@@ -17,7 +17,7 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
 from . import job_states
-from .categorized_faults import StoredStateDamaged
+from .categorized_errors import BookkeepingUnknown
 from .models import (
     AgentNode,
     AgentOperation,
@@ -104,7 +104,7 @@ class ProfileJobRunStopAuthorization(StrictJSONModel):
             or set(target_ids) & set(self.unissued_artifact_job_ids)
             or any(target.node_id not in reachable for target in self.targets)
         ):
-            raise StoredStateDamaged("profile JobRun Stop authorization is ambiguous")
+            raise BookkeepingUnknown("profile JobRun Stop authorization is ambiguous")
         return self
 
 
@@ -152,7 +152,7 @@ class ProfileJobRunStopJob(StrictJSONModel):
                 for phase in parent.phases
             )
         ):
-            raise StoredStateDamaged(
+            raise BookkeepingUnknown(
                 "profile JobRun Stop parent identity is inconsistent"
             )
         target_keys = {
@@ -174,7 +174,7 @@ class ProfileJobRunStopJob(StrictJSONModel):
                 for item in parent.flattened_phase_items
             )
         ):
-            raise StoredStateDamaged("profile JobRun Stop child set is inconsistent")
+            raise BookkeepingUnknown("profile JobRun Stop child set is inconsistent")
         return parent
 
 

@@ -79,11 +79,8 @@ from .cache_removal_review import (
 )
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
-from .categorized_faults import (
-    RequestFault,
-    RequestKeyFault,
-    security_reason,
-)
+from .categorized_errors import InvalidValue, MissingRecord
+from .categorized_faults import security_reason
 from .content_identity import ImageContent, same_image
 from .failure_classification import is_redownload, is_security_failure
 from .lifecycle.core import STOP_BUDGET
@@ -620,7 +617,7 @@ def _canonical_cancellation_id(value: object) -> str:
         )
     try:
         if str(uuid.UUID(value)) != value:
-            raise RequestFault("noncanonical UUID")
+            raise InvalidValue("noncanonical UUID")
     except ValueError as error:
         raise RecipeImageAvailabilityInvalid(
             "recipe_image.cancellation_invalid",
@@ -811,9 +808,9 @@ class RecipeImageAvailabilityService:
         claim_lease_seconds: int = 120,
     ) -> None:
         if not 1 <= max_parallel <= 16:
-            raise RequestFault("availability parallelism is invalid")
+            raise InvalidValue("availability parallelism is invalid")
         if not 10 <= claim_lease_seconds <= 3_600:
-            raise RequestFault("availability claim lease is invalid")
+            raise InvalidValue("availability claim lease is invalid")
         self._sessions = sessions
         self._storage = storage
         self._authority = authority
@@ -994,7 +991,7 @@ class RecipeImageAvailabilityService:
         try:
             encoded = canonical_message(operation.payload)
             if len(encoded) > MAX_ARTIFACT_OWNER_SCAN_BYTES:
-                raise RequestFault(
+                raise InvalidValue(
                     "stored recipe removal owner exceeds the scan byte budget",
                     reason=InvalidRequestReason.LIMIT_EXCEEDED,
                 )
@@ -2073,7 +2070,7 @@ class RecipeImageAvailabilityService:
         """Advance bounded, durable cache removals without claiming image slots."""
 
         if not 1 <= limit <= 16:
-            raise RequestFault(
+            raise InvalidValue(
                 "recipe removal batch limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
@@ -2718,7 +2715,7 @@ class RecipeImageAvailabilityService:
         with self._sessions() as session:
             operation = session.get(Job, operation_id)
             if operation is None:
-                raise RequestKeyFault(operation_id)
+                raise MissingRecord(operation_id)
             kind = operation.kind
         if kind == UPDATE_KIND:
             try:
@@ -2747,7 +2744,7 @@ class RecipeImageAvailabilityService:
                     .with_for_update(nowait=True)
                 )
                 if job is None:
-                    raise RequestKeyFault(operation_id)
+                    raise MissingRecord(operation_id)
                 self._request_cancellation(
                     session,
                     job,
@@ -2924,7 +2921,7 @@ class RecipeImageAvailabilityService:
         """Reconcile accepted cancellation fences without claiming image slots."""
 
         if not 1 <= limit <= 100:
-            raise RequestFault(
+            raise InvalidValue(
                 "cancellation reconciliation limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
@@ -4105,7 +4102,7 @@ class RecipeImageAvailabilityService:
         with self._sessions() as session:
             operation = session.get(Job, operation_id)
             if operation is None or operation.kind != OPERATION_KIND:
-                raise RequestKeyFault(operation_id)
+                raise MissingRecord(operation_id)
             return self._view(operation)
 
     def get_operator_operation(
@@ -4116,14 +4113,14 @@ class RecipeImageAvailabilityService:
         with self._sessions() as session:
             operation = session.get(Job, operation_id)
             if operation is None:
-                raise RequestKeyFault(operation_id)
+                raise MissingRecord(operation_id)
             if operation.kind == OPERATION_KIND:
                 return self._view(operation)
             if operation.kind == REMOVE_OPERATION_KIND:
                 intent = self._read_removal_intent(operation)
                 return self._read_removal_result(operation, intent)
             if operation.kind != UPDATE_KIND:
-                raise RequestKeyFault(operation_id)
+                raise MissingRecord(operation_id)
         return self._updates.get(operation_id)
 
     def get_operator_request(
@@ -4140,7 +4137,7 @@ class RecipeImageAvailabilityService:
                 REMOVE_OPERATION_KIND,
                 UPDATE_KIND,
             }:
-                raise RequestKeyFault(request_key)
+                raise MissingRecord(request_key)
             operation_id = operation.id
         return self.get_operator_operation(operation_id)
 
@@ -4153,7 +4150,7 @@ class RecipeImageAvailabilityService:
         boundary: tuple[str, str] | None = None,
     ) -> tuple[tuple[RecipeImageAvailabilityView, ...], int, tuple[str, str] | None]:
         if not 1 <= limit <= 100:
-            raise RequestFault(
+            raise InvalidValue(
                 "availability list limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
@@ -4204,7 +4201,7 @@ class RecipeImageAvailabilityService:
         with self._sessions() as session:
             previous = session.get(Job, operation_id)
             if previous is None or previous.kind != OPERATION_KIND:
-                raise RequestKeyFault(operation_id)
+                raise MissingRecord(operation_id)
             if previous.state != "failed":
                 raise RecipeImageAvailabilityInvalid(
                     "recipe_image.not_retryable", "operation is not failed"
@@ -4258,7 +4255,7 @@ class RecipeImageAvailabilityService:
 
     def resume_operations(self, *, limit: int = 16) -> int:
         if not 1 <= limit <= 100:
-            raise RequestFault(
+            raise InvalidValue(
                 "availability operation limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
@@ -4287,7 +4284,7 @@ class RecipeImageAvailabilityService:
 
     def run_pending(self, *, limit: int = 1) -> int:
         if not 1 <= limit <= 16:
-            raise RequestFault(
+            raise InvalidValue(
                 "availability worker batch limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
@@ -4312,7 +4309,7 @@ class RecipeImageAvailabilityService:
         """
 
         if not 1 <= limit <= self._max_parallel:
-            raise RequestFault(
+            raise InvalidValue(
                 "availability claim limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
@@ -5693,17 +5690,17 @@ class RecipeImageAvailabilityService:
         raw_failure = payload.get("failure")
         failure = raw_failure if isinstance(raw_failure, Mapping) else None
         if operation.state == "succeeded" and (result is None or failure is not None):
-            raise RequestFault(
+            raise InvalidValue(
                 "successful image availability requires a result and no failure",
                 reason=InvalidRequestReason.INCOMPLETE,
             )
         if operation.state == "failed" and failure is None:
-            raise RequestFault(
+            raise InvalidValue(
                 "failed image availability requires failure evidence",
                 reason=InvalidRequestReason.INCOMPLETE,
             )
         if operation.state != "succeeded" and result is not None:
-            raise RequestFault(
+            raise InvalidValue(
                 "image availability result requires success",
                 reason=InvalidRequestReason.INCOMPLETE,
             )

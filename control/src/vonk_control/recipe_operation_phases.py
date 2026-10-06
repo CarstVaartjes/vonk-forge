@@ -5,7 +5,8 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 
-from .categorized_faults import StoredStateDamaged, StoredStateTypeDamaged
+from .categorized_errors import BookkeepingUnknown
+from .categorized_faults import StoredStateTypeDamaged
 
 type StoredPhaseItem = tuple[str, str, Mapping[str, object]]
 type StoredPhases = tuple[tuple[StoredPhaseItem, ...], ...]
@@ -18,12 +19,12 @@ def decode_stored_phases(payload: Mapping[str, object]) -> StoredPhases:
         return ()
     raw_phases = payload["phases"]
     if not isinstance(raw_phases, list) or not raw_phases:
-        raise StoredStateDamaged("stored operation phases are invalid")
+        raise BookkeepingUnknown("stored operation phases are invalid")
     phases: list[tuple[StoredPhaseItem, ...]] = []
     seen_operations: set[str] = set()
     for raw_phase in raw_phases:
         if not isinstance(raw_phase, list) or not raw_phase:
-            raise StoredStateDamaged("stored operation phases are invalid")
+            raise BookkeepingUnknown("stored operation phases are invalid")
         group: list[StoredPhaseItem] = []
         for raw_item in raw_phase:
             if not isinstance(raw_item, Mapping):
@@ -37,11 +38,11 @@ def decode_stored_phases(payload: Mapping[str, object]) -> StoredPhases:
                 or not isinstance(item_payload, Mapping)
                 or operation_id in seen_operations
             ):
-                raise StoredStateDamaged("stored operation phases are invalid")
+                raise BookkeepingUnknown("stored operation phases are invalid")
             try:
                 uuid.UUID(operation_id)
             except ValueError as error:
-                raise StoredStateDamaged(
+                raise BookkeepingUnknown(
                     "stored operation phases are invalid"
                 ) from error
             seen_operations.add(operation_id)
