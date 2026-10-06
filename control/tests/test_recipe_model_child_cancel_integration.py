@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.bounded_json import require_mapping
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocument, Job, User
@@ -127,7 +128,7 @@ if mode == "accept-cancellation":
         # A separate SQLAlchemy session must see the durable child intent before
         # the process-local wakeup is sent.
         child = cache.get_operation(operation_id)
-        assert child.state == "cancelling"
+        assert child.state == LifecycleState.OBSERVING
         assert child.cancellation["actor"] == "operator"
         assert child.cancellation["reason"] == config["reason"]
         original_signal(operation_id)
@@ -136,10 +137,10 @@ if mode == "accept-cancellation":
         config["parent_id"], actor="operator",
         request_id=config["cancel_request_id"], reason=config["reason"],
     )
-    assert receipt.state == "cancelling"
+    assert receipt.state == LifecycleState.OBSERVING
     availability.reconcile_cancellations()
-    assert availability.get(config["parent_id"]).state == "cancelling"
-    assert cache.get_operation(config["child_id"]).state == "cancelling"
+    assert availability.get(config["parent_id"]).state == LifecycleState.OBSERVING
+    assert cache.get_operation(config["child_id"]).state == LifecycleState.OBSERVING
     os._exit(23)
 
 if mode == "new-consumer":
@@ -386,11 +387,11 @@ def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
         )
         _controller(config_path, "accept-cancellation", expected_code=23)
         durable = cache.get_operation(child_id)
-        assert durable.state == "cancelling"
+        assert durable.state == LifecycleState.OBSERVING
         assert durable.cancellation is not None
         assert durable.cancellation["actor"] == "operator"
         assert durable.cancellation["reason"] == reason
-        assert service.get(parent.id).state == "cancelling"
+        assert service.get(parent.id).state == LifecycleState.OBSERVING
 
         joined = _controller(config_path, "new-consumer")
         assert joined is not None

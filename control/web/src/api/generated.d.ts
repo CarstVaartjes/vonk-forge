@@ -3971,7 +3971,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "backoff" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
             /** Total Bytes */
             total_bytes?: number | null;
         };
@@ -4500,7 +4500,7 @@ export interface components {
             /** Selector */
             selector: string;
             /** State */
-            state: ("accepted" | "cancelling") | ("queued" | "running" | "backoff" | "succeeded" | "failed" | "cancelled");
+            state: "accepted" | ("queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled");
             /** Total Bytes */
             total_bytes?: number | null;
             /** Transferred Bytes */

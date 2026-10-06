@@ -69,7 +69,7 @@ def test_installed_profile_cancel_recovery_is_visible_in_activity(
         assert cancelled.returncode == 0, cancelled.stdout + cancelled.stderr
         receipt = json.loads(cancelled.stdout)
         assert receipt["cancellation"]["request_key"] == cancel_key
-        assert receipt["cancellation"]["state"] == "cancelling"
+        assert receipt["cancellation"]["state"] == "observing"
         assert peer.dropped_responses == [("POST", path)]
         assert [(method, endpoint) for method, endpoint, _ in peer.calls] == [
             ("POST", path),
@@ -177,7 +177,7 @@ def test_installed_cancel_reports_issued_child_until_late_receipt_is_reconciled(
                 )
                 assert result.returncode == 0, result.stdout + result.stderr
                 cancellation = json.loads(result.stdout)["cancellation"]
-                assert cancellation["state"] == "cancelling"
+                assert cancellation["state"] == "observing"
                 assert cancellation["dependency"] == child_id
                 assert any(
                     effect["operation_id"] == child_id
@@ -190,7 +190,7 @@ def test_installed_cancel_reports_issued_child_until_late_receipt_is_reconciled(
                 assert observed.returncode == 0, observed.stdout + observed.stderr
                 pending = json.loads(observed.stdout)
                 assert pending["id"] == application.id
-                assert pending["cancellation"]["state"] == "cancelling"
+                assert pending["cancellation"]["state"] == "observing"
                 assert pending["cancellation"]["request_key"] == cancel_key
                 with sessions() as session:
                     claims = tuple(

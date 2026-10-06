@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import vonk_control.recipe_image_availability as availability_module
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState
 from vonk_control import fleet_profiles as profile_module
 from vonk_control.models import (
     AgentNode,
@@ -177,7 +178,7 @@ def test_recipe_parent_cancellation_detaches_one_shared_build_consumer(
         reason="stop final image preparation",
     )
     availability.reconcile_cancellations()
-    assert availability.get(other_parent.id).state == "cancelling"
+    assert availability.get(other_parent.id).state == LifecycleState.OBSERVING
     with sessions() as session:
         job = session.get(Job, build.id)
         assert job is not None and job.result is not None
@@ -473,7 +474,7 @@ def test_new_availability_consumer_committing_before_cancellation_keeps_shared_b
             # The accepted-request transaction owns the build row. Cancellation
             # must remain durable and pending instead of cancelling its child.
             availability.reconcile_cancellations()
-            assert availability.get(first.id).state == "cancelling"
+            assert availability.get(first.id).state == LifecycleState.OBSERVING
         finally:
             resume.set()
         second = acceptance.result(timeout=10)

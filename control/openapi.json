@@ -9280,6 +9280,7 @@
               "queued",
               "running",
               "backoff",
+              "observing",
               "succeeded",
               "failed",
               "cancelled"
@@ -10898,10 +10899,7 @@
           "state": {
             "anyOf": [
               {
-                "enum": [
-                  "accepted",
-                  "cancelling"
-                ],
+                "const": "accepted",
                 "type": "string"
               },
               {
@@ -10909,6 +10907,7 @@
                   "queued",
                   "running",
                   "backoff",
+                  "observing",
                   "succeeded",
                   "failed",
                   "cancelled"

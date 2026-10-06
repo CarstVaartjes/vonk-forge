@@ -1771,7 +1771,7 @@ def test_model_cancel_requires_consent_and_reuses_its_stable_identity() -> None:
         ),
         client,
     )
-    assert status == 0 and payload["state"] == "cancelling"
+    assert status == 0 and payload["state"] == "observing"
     assert client.calls == [
         (
             "POST",
@@ -3325,7 +3325,7 @@ def test_recipe_cancel_recovers_accepted_request_after_lost_response() -> None:
         ),
         client,
     )
-    assert status == 0 and result["state"] == "cancelling"
+    assert status == 0 and result["state"] == "observing"
     assert [(method, path) for method, path, _, _ in client.calls] == [
         ("POST", "/api/recipe/operations/recipe-operation/cancel"),
         ("GET", "/api/recipe/operations/recipe-operation"),

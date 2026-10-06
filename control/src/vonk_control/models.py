@@ -444,7 +444,16 @@ class FleetProfileApplication(Base):
     __tablename__ = "fleet_profile_applications"
     __table_args__ = (
         CheckConstraint(
-            "state IN ('queued','running','waiting-for-operator','succeeded','failed','cancelled','superseded')",
+            _state_in(
+                LifecycleSubject.FLEET_PROFILE_APPLICATION,
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.NEEDS_OPERATOR,
+                LifecycleState.SUCCEEDED,
+                LifecycleState.FAILED,
+                LifecycleState.CANCELLED,
+                LifecycleState.SUPERSEDED,
+            ),
             name="ck_fleet_profile_applications_state",
         ),
         CheckConstraint(

@@ -72,6 +72,10 @@ ARTIFACT_JOB_IN_FLIGHT = frozenset(
 #: done (now ``failed`` with ``partial`` set) and a cache operation that retries
 #: (now ``backoff``).
 LEGACY_PARTIAL = "partial"
+#: The field of an operation that says some of it was done (a failed update).
+PARTIAL_FIELD = "partial"
+#: The states of a job a CLI user is told has failed (an expired job is over).
+FAILED_JOB_STATES = frozenset({"failed", "expired"})
 #: An accepted cancel: still being driven (``observing``, or the old
 #: ``cancelling``) or already ended.
 CANCEL_ACCEPTED_STATES = frozenset({"observing", LEGACY_CANCELLING, "cancelled"})

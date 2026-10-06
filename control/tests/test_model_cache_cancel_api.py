@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
+from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import Actor
 from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
@@ -174,7 +175,7 @@ def test_cancel_route_requires_operator_and_returns_durable_intent():
     operation.request_key = REQUEST_KEY
     operation.model_content_sha256 = None
     operation.review_digest = None
-    operation.state = "cancelling"
+    operation.state = LifecycleState.OBSERVING
     operation.progress = cache_progress(
         {
             "phase": "cancelling",
@@ -216,7 +217,7 @@ def test_cancel_route_requires_operator_and_returns_durable_intent():
     )
     assert response.status_code == 202, response.text
     parsed = ModelCacheOperatorResponse.model_validate_json(response.content)
-    assert parsed.state == "cancelling"
+    assert parsed.state == LifecycleState.OBSERVING
     assert parsed.cancellation == operation.cancellation
     service.cancel_operation.assert_called_once_with(
         OPERATION_ID,

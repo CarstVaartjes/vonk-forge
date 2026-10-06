@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.models import Base, Job, User
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityClaim
 from vonk_control.runtime_image_preparation import (
@@ -275,12 +276,12 @@ def test_cancelled_image_owner_recovers_after_publication_process_dies(claimed_i
             request_id=str(uuid.uuid4()),
             reason="stop after verified publication intent",
         )
-        assert cancelled.state == "cancelling"
+        assert cancelled.state == LifecycleState.OBSERVING
         assert service.reconcile_cancellations() == 0
         with sessions() as session:
             row = session.get(Job, parent.id)
             assert row is not None
-            assert row.state == "cancelling"
+            assert row.state == LifecycleState.OBSERVING
             assert row.payload["claim_owner"] == claim.claim_owner
             assert "image_reference_intent" in row.payload
             lease = datetime.fromisoformat(row.payload["claim_until"])

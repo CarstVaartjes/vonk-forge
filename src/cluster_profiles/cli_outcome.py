@@ -13,6 +13,7 @@ from .cli_states import (
     CANCEL_ACCEPTED_STATES,
     LEGACY_PARTIAL,
     OPERATOR_WAIT_STATES,
+    PARTIAL_FIELD,
 )
 
 OutcomeContext = Literal["read", "preview", "mutation", "await"]
@@ -148,7 +149,7 @@ class CommandOutcome:
         if self.context == "read":
             return 0
         state = operation_state(self.document)
-        if state == LEGACY_PARTIAL or self.document.get("partial") is True:
+        if state == LEGACY_PARTIAL or self.document.get(PARTIAL_FIELD) is True:
             return 1
         if state in {
             "failed",

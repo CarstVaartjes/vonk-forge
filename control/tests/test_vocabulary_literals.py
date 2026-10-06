@@ -232,3 +232,13 @@ def test_the_cli_copy_of_the_wait_words_equals_the_contract() -> None:
         cli_states.NEEDS_OPERATOR,
         cli_states.LEGACY_NEEDS_OPERATOR,
     }
+
+
+def test_no_lifecycle_code_spells_a_retired_state_word() -> None:
+    """The migration is finished: the old words live in the contract's alias table.
+
+    What remains in ``NON_LIFECYCLE_STATE_SITES`` belongs to other state machines
+    (a certificate, an installation, a distribution assignment, an endpoint).
+    """
+
+    assert scan.load_baseline()["legacy_state"] == {}

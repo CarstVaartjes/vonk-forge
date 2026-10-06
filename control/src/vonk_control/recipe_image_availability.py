@@ -150,6 +150,9 @@ if TYPE_CHECKING:
     from .recipe_update_batches import RecipeUpdateClaim
 
 _LOGGER = logging.getLogger(__name__)
+#: The progress ``activity`` of an operation: working now, or waiting for its turn.
+_ACTIVE = "active"
+_WAITING = "waiting"
 _PREPARATION_RETRY_QUIET = timedelta(minutes=15)
 SCHEMA_VERSION = 2
 OPERATION_KIND = "recipe.image.availability.v2"
@@ -995,7 +998,7 @@ class RecipeImageAvailabilityService:
             completed_items=completed_items,
             total_items=total_items,
             observed_at=_iso(operation.updated_at),
-            activity="active" if operation.state == "running" else "waiting",
+            activity=_ACTIVE if operation.state == "running" else _WAITING,
         )
         return progress.model_dump(mode="json", exclude_none=True)
 
@@ -2286,7 +2289,7 @@ class RecipeImageAvailabilityService:
                 detail="model-removal child identity does not match its accepted recipe owner",
                 retryable=False,
             )
-        if operation.state in {*model_cache_states.LIVE, "cancelling"}:
+        if operation.state in model_cache_states.LIVE:
             return self._record_recipe_removal_failure(
                 operation_id,
                 code="model_cache.removal_child_pending",

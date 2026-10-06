@@ -328,7 +328,7 @@ def test_a_cancel_ends_even_when_the_stop_is_never_confirmed(cache, tmp_path):
             request_key="00000000-0000-4000-8000-00000000a023",
             reason="stop it",
         )
-        assert view.state == "cancelling"
+        assert view.state == LifecycleState.OBSERVING
         states = []
         for _ in range(STOP_BUDGET + 3):
             now[0] += timedelta(minutes=5)

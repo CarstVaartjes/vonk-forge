@@ -77,6 +77,14 @@ PYTHON_EXCLUDED_PREFIXES = ("src/cluster_profiles/generated_control/",)
 #: per file.  The legacy-state tier subtracts them, so the baseline holds only
 #: lifecycle debt and ends at zero; a count that no longer matches fails as stale.
 NON_LIFECYCLE_STATE_SITES: dict[str, tuple[int, str]] = {
+    "control/src/vonk_control/agent_jobs.py": (
+        2,
+        "distribution assignment; installation",
+    ),
+    "control/src/vonk_control/fleet_profile_contract.py": (1, "endpoint state"),
+    "control/src/vonk_control/fleet_profiles.py": (1, "installation state"),
+    "control/src/vonk_control/recipe_operations.py": (7, "installation state"),
+    "control/src/vonk_control/run_switch_operations.py": (2, "installation state"),
     "control/src/vonk_control/artifact_reference_scan.py": (
         2,
         "distribution assignment",

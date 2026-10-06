@@ -60,6 +60,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentOperation, LifecycleState
 
 from .. import agent_operation_states as aos
+from .. import job_states
 from ..agent_operation_facts import (
     AGENT_UPGRADE_RECOVERY_FENCE,
     RESTART_REISSUE_OPERATIONS,
@@ -111,7 +112,11 @@ OWNER_KIND = "artifact-job"
 STOP_ACTION = ActionName.STOP.value
 #: A parent in one of these states can no longer claim, resume or retire anything:
 #: its orders end with it instead of waiting.
-ENDED_PARENT_STATES = frozenset({"succeeded", "failed", "cancelled", "expired"})
+ENDED_PARENT_STATES = frozenset(
+    job_states.words(
+        LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+    )
+)
 #: States in which a parent's aggregate considers an order finished (a waiting
 #: order is final for the aggregate: the parent then waits with it).
 AGGREGATE_FINAL_STATES = frozenset(
