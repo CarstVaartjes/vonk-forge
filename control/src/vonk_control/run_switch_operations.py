@@ -260,6 +260,7 @@ from .run_switch_contract import (
     RunSwitchContainerBuildResult,
     RunSwitchContainerBuildState,
     RunSwitchCoverage,
+    RunSwitchFinalVerifyResult,
     RunSwitchMemberProgress,
     RunSwitchMemberState,
     RunSwitchOperation,
@@ -787,10 +788,6 @@ def _stored_job_plan(job: Job) -> RunSwitchPlan | None:
 def _start_parent(job: Job | None) -> RecipeStartParent | None:
     payload = read_row_column(job, "payload") if job is not None else None
     return payload if isinstance(payload, RecipeStartParent) else None
-
-
-def _safe_mapping(value: object) -> Mapping[str, object] | None:
-    return value if isinstance(value, Mapping) else None
 
 
 def _required_int(value: object) -> int | None:
@@ -7148,15 +7145,7 @@ class RunSwitchOperationService:
                 LifecycleState.NEEDS_OPERATOR,
             ):
                 return False
-            payload = job.payload
-            raw_plan = payload.get("plan")
-            if not isinstance(raw_plan, Mapping):
-                _reject_invalid_operation(
-                    job, "run-switch persisted plan is invalid", now
-                )
-                session.commit()
-                return True
-            plan = _load_plan(raw_plan)
+            plan = _stored_job_plan(job)
             if plan is None:
                 _reject_invalid_operation(
                     job, "run-switch persisted plan is invalid", now
@@ -7564,7 +7553,7 @@ class RunSwitchOperationService:
                 else:
                     reason = f"run-switch phase operation failed: {child.state if child else 'unknown'}"
                     evidence = _child_progress_payload(child)
-                    detail = evidence.get("reason") or evidence.get("status_reason")
+                    detail = evidence.reason or evidence.status_reason
                     if isinstance(detail, str) and detail:
                         reason += ": " + detail[:384]
                     kind = _child_failure_kind(child)
@@ -8092,8 +8081,14 @@ class RunSwitchOperationService:
                         deadline_expired
                         and now.timestamp() - started >= _FINAL_VERIFICATION_MAX_SECONDS
                     ):
-                        phase_evidence = execution.result or {}
-                        run_id = phase_evidence.get("run_id")
+                        phase_evidence = _phase_result(
+                            execution.result or {}, phase=phase
+                        )
+                        run_id = (
+                            phase_evidence.run_id
+                            if isinstance(phase_evidence, RunSwitchFinalVerifyResult)
+                            else None
+                        )
                         run = (
                             session.get(RecipeRun, run_id)
                             if isinstance(run_id, str)
@@ -8165,12 +8160,26 @@ class RunSwitchOperationService:
                                 f"{RunSwitchCode.FINAL_VERIFICATION_EXPIRED}:"
                             )
                         ):
-                            phase_evidence = execution.result or {}
+                            phase_evidence = _phase_result(
+                                execution.result or {}, phase=phase
+                            )
                             expiry_event = {
                                 "operation_id": job.id,
-                                "run_id": phase_evidence.get("run_id"),
-                                "run_state": phase_evidence.get("state"),
-                                "route_state": phase_evidence.get("route_state"),
+                                "run_id": phase_evidence.run_id
+                                if isinstance(
+                                    phase_evidence, RunSwitchFinalVerifyResult
+                                )
+                                else None,
+                                "run_state": phase_evidence.state
+                                if isinstance(
+                                    phase_evidence, RunSwitchFinalVerifyResult
+                                )
+                                else None,
+                                "route_state": phase_evidence.route_state
+                                if isinstance(
+                                    phase_evidence, RunSwitchFinalVerifyResult
+                                )
+                                else None,
                                 "accepted_start_deadline": start_deadline.isoformat(),
                                 "status_reason": job.status_reason,
                             }
