@@ -10,6 +10,7 @@ from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
     _persisted_profile_progress,
 )
+from vonk_control.lifecycle_contract import LifecycleState
 from vonk_control.models import FleetProfileApplication, FleetProfileSelection
 from vonk_control.run_switch_contract import (
     RunSwitchMemberProgress,
@@ -27,7 +28,7 @@ def _running_child(operation_id, node_id):
         operation_id=operation_id,
         kind="recipe.run-switch.v2",
         action="switch",
-        state="running",
+        state=LifecycleState.RUNNING,
         plan_digest="a" * 64,
         request_key=_uuid(18110),
         node_ids=[node_id],
@@ -36,7 +37,7 @@ def _running_child(operation_id, node_id):
             phase_index=0,
             phase_count=1,
             phase="transfer",
-            state="running",
+            state=LifecycleState.RUNNING,
             total_bytes_known=False,
             members=[RunSwitchMemberProgress(node_id=node_id, state="running")],
         ),
