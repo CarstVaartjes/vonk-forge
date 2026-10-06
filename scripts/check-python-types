@@ -30,27 +30,35 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "tools/pyright-baseline.json"
+TYPECHECK_TIMEOUT_SECONDS = 600
 
 
 def _diagnostics() -> list[dict[str, object]]:
     # pyright is locked in the control dev group and resolves imports from
     # this same interpreter; its version check is the only network access it
     # would otherwise attempt.
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pyright",
-            "--outputjson",
-            "--pythonpath",
-            sys.executable,
-        ],
-        cwd=ROOT,
-        env={**os.environ, "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1"},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pyright",
+                "--outputjson",
+                "--pythonpath",
+                sys.executable,
+            ],
+            cwd=ROOT,
+            env={**os.environ, "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1"},
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=TYPECHECK_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        raise SystemExit(
+            f"pyright exceeded its {TYPECHECK_TIMEOUT_SECONDS}-second execution timeout; "
+            "type-check diagnostics are unavailable"
+        ) from None
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError:

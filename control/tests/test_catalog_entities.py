@@ -444,3 +444,25 @@ def test_refresh_leaves_a_superseded_old_contract_revision_alone_and_quiet(
     session.refresh(first)
     assert first.projected == broken
     assert first.id not in caplog.text
+
+
+def test_new_authorized_revision_supersedes_pending_candidate(
+    session: Session,
+    service: CatalogEntityService,
+) -> None:
+    document = _model()
+    active = _resolve(service, document)
+    pending_document = copy.deepcopy(document)
+    _metadata(pending_document)["description"] = "older pending change"
+    pending = service.revise(
+        active.document_id, pending_document, actor="operator", expected_revision=1
+    )
+    latest_document = copy.deepcopy(document)
+    _metadata(latest_document)["description"] = "new authorized change"
+    latest = service.revise(
+        active.document_id, latest_document, actor="operator", expected_revision=2
+    )
+    assert service.get_entity(active.document_id).id == active.id
+    accepted = service.resolve(latest.id, actor="operator", expected_revision=3)
+    assert accepted.id == latest.id
+    assert accepted.id != pending.id

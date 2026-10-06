@@ -15,21 +15,23 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     InvalidRequestError,
     InvalidRequestReason,
+    LifecycleState,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
 )
 
+from . import job_states, model_cache_states
 from .categorized_errors import InvalidValue
-from .models import ArtifactLifecycleGate
+from .models import ArtifactLifecycleGate, Job, ModelCacheOperation
 
 ArtifactKind = Literal["model-set", "model-object", "runtime-image"]
 RemovalOwnerKind = Literal["model-cache-operation", "recipe-image-job"]
@@ -437,6 +439,124 @@ def reference_gate_is_open_nowait(session: Session, identity: ArtifactIdentity) 
     return row is None or row.removal_owner_id is None
 
 
+def dead_removal_identities(
+    session: Session,
+    *,
+    owner_kind: RemovalOwnerKind,
+    limit: int,
+    after: tuple[str, str] | None = None,
+) -> tuple[ArtifactIdentity, ...]:
+    """Bounded orphan inventory; no storage lock is acquired in this read."""
+    model = ModelCacheOperation if owner_kind == "model-cache-operation" else Job
+    terminal = (
+        model_cache_states.words(
+            LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+        )
+        if owner_kind == "model-cache-operation"
+        else job_states.words(
+            LifecycleState.SUCCEEDED,
+            LifecycleState.FAILED,
+            LifecycleState.CANCELLED,
+            LifecycleState.SUPERSEDED,
+        )
+    )
+    statement = (
+        select(
+            ArtifactLifecycleGate.artifact_kind, ArtifactLifecycleGate.artifact_sha256
+        )
+        .outerjoin(model, model.id == ArtifactLifecycleGate.removal_owner_id)
+        .where(
+            ArtifactLifecycleGate.removal_owner_kind == owner_kind,
+            ArtifactLifecycleGate.removal_owner_id.is_not(None),
+            or_(model.id.is_(None), model.state.in_(terminal)),
+        )
+        .order_by(
+            ArtifactLifecycleGate.artifact_kind, ArtifactLifecycleGate.artifact_sha256
+        )
+        .limit(limit)
+    )
+    if after is not None:
+        kind, digest = after
+        statement = statement.where(
+            or_(
+                ArtifactLifecycleGate.artifact_kind > kind,
+                and_(
+                    ArtifactLifecycleGate.artifact_kind == kind,
+                    ArtifactLifecycleGate.artifact_sha256 > digest,
+                ),
+            )
+        )
+    rows = session.execute(statement)
+    return tuple(
+        ArtifactIdentity(cast(ArtifactKind, kind), digest) for kind, digest in rows
+    )
+
+
+def release_dead_removal_nowait(
+    session: Session,
+    identity: ArtifactIdentity,
+    *,
+    owner_kind: RemovalOwnerKind,
+    now: datetime,
+) -> bool:
+    """Fence a dead remover while holding its exact nonblocking storage lock.
+
+    The caller first releases its inventory transaction, then obtains the same
+    object lock as the deletion executor. Thus an executor that already checked
+    its fence has finished its filesystem step; a delayed executor will observe
+    the cleared fence before deleting. Lease expiry alone is never proof of this.
+    No availability is invented: normal admission still observes managed bytes.
+    """
+    row = _reference_sql(
+        lambda: session.scalar(
+            select(ArtifactLifecycleGate)
+            .where(
+                ArtifactLifecycleGate.artifact_kind == identity.kind,
+                ArtifactLifecycleGate.artifact_sha256 == identity.sha256,
+            )
+            .execution_options(populate_existing=True)
+            .with_for_update(nowait=True)
+        )
+    )
+    if (
+        row is None
+        or row.removal_owner_kind != owner_kind
+        or row.removal_owner_id is None
+    ):
+        return False
+    model = ModelCacheOperation if owner_kind == "model-cache-operation" else Job
+    owner = _reference_sql(
+        lambda: session.scalar(
+            select(model)
+            .where(model.id == row.removal_owner_id)
+            .execution_options(populate_existing=True)
+            .with_for_update(nowait=True)
+        )
+    )
+    if owner is not None:
+        terminal = (
+            model_cache_states.words(
+                LifecycleState.SUCCEEDED,
+                LifecycleState.FAILED,
+                LifecycleState.CANCELLED,
+            )
+            if owner_kind == "model-cache-operation"
+            else job_states.words(
+                LifecycleState.SUCCEEDED,
+                LifecycleState.FAILED,
+                LifecycleState.CANCELLED,
+                LifecycleState.SUPERSEDED,
+            )
+        )
+        if owner.state not in terminal:
+            return False
+    row.removal_owner_kind = None
+    row.removal_owner_id = None
+    row.removal_fence = None
+    row.updated_at = now
+    return True
+
+
 def clear_removal(
     session: Session,
     identities: Iterable[ArtifactIdentity],
@@ -474,8 +594,10 @@ __all__ = [
     "RemovalOwnerKind",
     "check_removal_fence_nowait",
     "clear_removal",
+    "dead_removal_identities",
     "lock_reference_gates",
     "reference_gate_is_open_nowait",
+    "release_dead_removal_nowait",
     "removal_fences_match",
     "require_reference_open",
     "reserve_removal",

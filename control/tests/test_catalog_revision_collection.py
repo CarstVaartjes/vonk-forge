@@ -44,6 +44,7 @@ from vonk_control.models import (
     RunNode,
     SourceBundleArchive,
 )
+from vonk_control.recipe_execution_contract import StoredRunNodePlan, StoredRunPlan
 from vonk_control.source_bundles import (
     DatabaseSourceBundleStore,
     generate_source_bundle,
@@ -240,6 +241,40 @@ class Catalog:
                 created_at=touched,
                 updated_at=touched,
             )
+            workload.plan = StoredRunPlan(
+                schema_version=1,
+                observation_schema_version=2,
+                run_generation=1,
+                installation_id=installed.id,
+                alias="chat",
+                mapping_id=mapping.id,
+                mapping_generation=1,
+                recipe_revision_id=revision_id,
+                plan_digest=workload.plan_digest,
+                nodes=[
+                    StoredRunNodePlan(
+                        node_id=NODE,
+                        rank=0,
+                        role="main",
+                        endpoint_owner=True,
+                        port=8000,
+                        allowed=True,
+                        inventory_observed_at=None,
+                        memory_kind="unified",
+                        memory_pool="shared",
+                        required_memory_bytes=1,
+                        available_memory_bytes=None,
+                        active_reserved_bytes=0,
+                        free_after_bytes=None,
+                        memory_floor_bytes=0,
+                        fabric_address=None,
+                        fabric_bandwidth_mbps=None,
+                        rendezvous_port=None,
+                        blockers=[],
+                        warnings=[],
+                    )
+                ],
+            ).model_dump(mode="json")
             session.add(workload)
             session.flush()
             session.add(
@@ -251,6 +286,9 @@ class Catalog:
                     state=run,
                     port=8000,
                     reserved_memory_bytes=1,
+                    observed_run_generation=1,
+                    observation_process_running=run not in ("stopped", "failed"),
+                    observation_observed_at=touched,
                     updated_at=touched,
                 )
             )
@@ -371,6 +409,8 @@ def test_revision_of_an_installed_workload_is_kept_until_the_workload_moves(
     # quiet for the grace period the revision and its dead rows go together.
     with catalog.sessions.begin() as session:
         _row(session, RecipeRun, run).state = "stopped"
+        for node in session.scalars(select(RunNode).where(RunNode.run_id == run)):
+            node.observation_process_running = False
         _row(session, RecipeInstallation, installation).state = "uninstalled"
     catalog.collector().collect()
 
@@ -413,6 +453,25 @@ def test_a_failed_run_does_not_pin_its_revision_forever(catalog: Catalog) -> Non
 
     assert not catalog.exists(old)
     assert catalog.count(RecipeRun) == 0
+
+
+def test_terminal_run_with_unknown_absence_retains_revision_until_reconciled(
+    catalog: Catalog,
+) -> None:
+    old, _head = _refresh(catalog, "glm")
+    _installation, run = catalog.workload(old, installation="uninstalled", run="failed")
+    with catalog.sessions.begin() as session:
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run))
+        assert node is not None
+        node.observation_process_running = None
+    catalog.collector().collect()
+    assert catalog.exists(old)
+    with catalog.sessions.begin() as session:
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run))
+        assert node is not None
+        node.observation_process_running = False
+    catalog.collector().collect()
+    assert not catalog.exists(old)
 
 
 def test_a_model_digest_named_by_a_head_recipe_document_is_kept_unbound(
@@ -767,6 +826,8 @@ def test_removal_succeeds_on_postgres_with_its_real_constraints(
     catalog.build(head, updated=OLD + timedelta(hours=1))
     with catalog.sessions.begin() as session:
         _row(session, RecipeRun, run).state = "stopped"
+        for node in session.scalars(select(RunNode).where(RunNode.run_id == run)):
+            node.observation_process_running = False
         _row(session, RecipeInstallation, installation).state = "uninstalled"
 
     result = catalog.collector().collect()
