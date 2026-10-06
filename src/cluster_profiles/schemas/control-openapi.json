@@ -14507,6 +14507,36 @@
         "title": "ModelCacheDownloadResult",
         "type": "object"
       },
+      "ModelCacheMissingSourceObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_key": {
+            "minLength": 1,
+            "title": "Artifact Key",
+            "type": "string"
+          },
+          "observations": {
+            "minimum": 1,
+            "title": "Observations",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              404,
+              410
+            ],
+            "title": "Status",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_key",
+          "status",
+          "observations"
+        ],
+        "title": "ModelCacheMissingSourceObservation",
+        "type": "object"
+      },
       "ModelCacheOperationProgress": {
         "additionalProperties": false,
         "properties": {
@@ -15345,6 +15375,17 @@
             ],
             "default": null,
             "title": "Credential Fingerprint"
+          },
+          "missing_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheMissingSourceObservation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "next_retry_at": {
             "anyOf": [

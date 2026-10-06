@@ -5762,6 +5762,18 @@ export interface components {
              */
             schema_version: 2;
         };
+        /** ModelCacheMissingSourceObservation */
+        ModelCacheMissingSourceObservation: {
+            /** Artifact Key */
+            artifact_key: string;
+            /** Observations */
+            observations: number;
+            /**
+             * Status
+             * @enum {integer}
+             */
+            status: 404 | 410;
+        };
         /** ModelCacheOperationProgress */
         ModelCacheOperationProgress: {
             /** Completed Artifacts */
@@ -6044,6 +6056,8 @@ export interface components {
              * @default null
              */
             credential_fingerprint: string | null;
+            /** @default null */
+            missing_source: components["schemas"]["ModelCacheMissingSourceObservation"] | null;
             /**
              * Next Retry At
              * @default null

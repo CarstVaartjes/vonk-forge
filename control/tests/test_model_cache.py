@@ -4059,3 +4059,95 @@ def test_operation_reads_answer_without_an_operator_selector(
             by_key = api.get(f"/api/model/requests/{operation.request_key}")
             assert by_key.status_code == 200, by_key.text
             assert by_key.json()["operation_id"] == operation.id
+
+
+def test_prior_server_errors_do_not_count_as_missing_source_observations(
+    cache, tmp_path
+):
+    _existing, sessions = cache
+    handler, payload, _served = _gone_handler([500] * 5 + [404, 200])
+    service, client = _http_cache_service(
+        tmp_path, sessions, handler, clock=lambda: NOW
+    )
+    try:
+        operation = _download(
+            service,
+            [_http_artifact(payload)],
+            model_content_sha256="b" * 64,
+            request_key="00000000-0000-4000-8000-000000000949",
+        )
+        for _ in range(5):
+            service.run_pending()
+        waiting = service.get_operation(operation.id)
+        assert waiting.state == "queued"
+        assert waiting.failure is not None
+        assert waiting.failure["code"] == "model_cache.source_unavailable"
+        service.run_pending()
+        assert service.get_operation(operation.id).state == "succeeded"
+    finally:
+        service.close()
+        client.close()
+
+
+def test_missing_source_observations_follow_exact_file_and_survive_restart(
+    cache, tmp_path
+):
+    _existing, sessions = cache
+    first_payload, second_payload = b"first file", b"second file"
+    served = {"/first.bin": 0, "/second.bin": 0}
+
+    def handler(request):
+        served[request.url.path] += 1
+        if request.url.path == "/first.bin":
+            status, payload = (404 if served["/first.bin"] <= 4 else 200), first_payload
+        else:
+            status, payload = (
+                (404 if served["/second.bin"] <= 5 else 200),
+                second_payload,
+            )
+        return httpx2.Response(
+            status, request=request, content=payload if status == 200 else b""
+        )
+
+    artifacts = []
+    for name, payload in [("first", first_payload), ("second", second_payload)]:
+        artifact = _http_artifact(payload)
+        artifact.update(
+            id=name, path=f"{name}.bin", source=f"https://example.test/{name}.bin"
+        )
+        artifacts.append(artifact)
+    service, client = _http_cache_service(
+        tmp_path, sessions, handler, clock=lambda: NOW
+    )
+    try:
+        operation = _download(
+            service,
+            artifacts,
+            model_content_sha256="b" * 64,
+            request_key="00000000-0000-4000-8000-000000000950",
+        )
+        for _ in range(4):
+            service.run_pending()
+        assert served == {"/first.bin": 5, "/second.bin": 1}
+        assert service.get_operation(operation.id).state == "queued"
+        service.close()
+        service = ModelCacheService(
+            sessions,
+            tmp_path / "http-nas-cache",
+            reserve_bytes=0,
+            http_client=client,
+            fixture_sources=True,
+            clock=lambda: NOW,
+        )
+        for _ in range(3):
+            service.run_pending()
+            assert service.get_operation(operation.id).state == "queued"
+        service.run_pending()
+        assert served["/second.bin"] == 5
+        gone = service.get_operation(operation.id)
+        assert gone.state == "failed"
+        assert gone.failure is not None
+        assert gone.failure["code"] == "model_cache.source_gone"
+    finally:
+        service.close()
+        client.close()

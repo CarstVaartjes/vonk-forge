@@ -139,6 +139,7 @@ from .model_cache_contract import (
     ModelCacheCancellation,
     ModelCacheCancellationRequest,
     ModelCacheDownloadPayload,
+    ModelCacheMissingSourceObservation,
     ModelCacheObjectReceipt,
     ModelCacheOperationPhase,
     ModelCacheOperationProgress,
@@ -7343,11 +7344,34 @@ class ModelCacheService:
                 retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
                 gone_recovery: str | None = None
                 source_status = getattr(error, "source_status", None)
-                if retryable and source_status in _SOURCE_GONE_STATUSES:
-                    attempts = retry.get("automatic_attempts")
-                    if type(attempts) is not int or attempts < 1:
-                        attempts = max(int(operation.attempt or 1), 1)
-                    if attempts >= _SOURCE_GONE_ATTEMPTS:
+                missing_source: ModelCacheMissingSourceObservation | None = None
+                artifact_key = failed_artifact_key or operation.current_artifact_key
+                if (
+                    retryable
+                    and source_status in _SOURCE_GONE_STATUSES
+                    and artifact_key
+                ):
+                    previous = retry.get("missing_source")
+                    previous_observation = (
+                        ModelCacheMissingSourceObservation.model_validate_json(
+                            json.dumps(previous)
+                        )
+                        if previous is not None
+                        else None
+                    )
+                    observations = (
+                        previous_observation.observations + 1
+                        if previous_observation is not None
+                        and previous_observation.artifact_key == artifact_key
+                        and previous_observation.status == source_status
+                        else 1
+                    )
+                    missing_source = ModelCacheMissingSourceObservation(
+                        artifact_key=artifact_key,
+                        status=404 if source_status == 404 else 410,
+                        observations=observations,
+                    )
+                    if observations >= _SOURCE_GONE_ATTEMPTS:
                         # Observed gone, not a blocker: end the download with a
                         # typed reason naming the file. A new download request
                         # resolves the model's newest catalog revision.
@@ -7359,7 +7383,7 @@ class ModelCacheService:
                             manifest,
                             failed_artifact_key or operation.current_artifact_key,
                             int(source_status),
-                            attempts,
+                            observations,
                         )
                         if row is not None:
                             row.last_error = detail
@@ -7410,6 +7434,10 @@ class ModelCacheService:
                     if payload_after is not None
                     else {}
                 ) | {"operator_retries": operator_retries}
+                if missing_source is None:
+                    retry.pop("missing_source", None)
+                else:
+                    retry["missing_source"] = missing_source.model_dump(mode="json")
                 if failure_code in _CREDENTIAL_FAILURE_CODES:
                     # The worker resumes this exact transfer once the
                     # configured credential file changes.
