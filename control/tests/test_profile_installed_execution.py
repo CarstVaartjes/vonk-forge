@@ -61,6 +61,8 @@ def _profile_service(sessions, lifecycle):
         clock=lifecycle._clock,
         artifacts=CompleteArtifactInspector(),
         artifact_phase_executor=RecordingArtifactExecutor(),
+        # Tests count bytes in the thousands; the platform floor is 2 GB.
+        memory_floor_bytes=0,
     )
     return (
         build_production_fleet_profile_service(
