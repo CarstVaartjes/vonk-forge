@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine
@@ -17,11 +18,16 @@ from vonk_control.distribution import (
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor import DurableDistributionPhaseExecutor
 from vonk_control.models import Base
-from vonk_control.run_switch_contract import RunSwitchPhase, RunSwitchPlan
+from vonk_control.run_switch_contract import (
+    RunSwitchOperationResult,
+    RunSwitchPhase,
+    RunSwitchPlan,
+)
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
 )
 
+from .test_distribution_executor import _receipt_json
 from .test_runtime_image_preparation import (
     ARCHIVE_DIGEST,
     BUILD_ID,
@@ -76,7 +82,9 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
         preparation=None,
         storage=SimpleNamespace(artifact_digests=[model.sha256]),
         image_digest=BUILT_IMAGE_DIGEST,
-        build=SimpleNamespace(oci_layout_sha256=None, image_bytes=None),
+        build=SimpleNamespace(
+            oci_layout_sha256=None, image_bytes=None, build_input_sha256=None
+        ),
         recipe_build_id=BUILD_ID,
         recipe_revision_id=revision_id,
         recipe_content_sha256=receipt.distribution_content_sha256,
@@ -85,13 +93,22 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
         mapping=None,
     )
     runtime_result = {
-        "runtime_image": {
-            **receipt.to_mapping(),
-            "oci_layout_sha256": ARCHIVE_DIGEST,
-        },
+        "phase": "prepare",
+        "subphase": "runtime-image",
+        "runtime_image": receipt,
+        "image_digest": receipt.image_digest,
+        "oci_layout_sha256": receipt.oci_archive_sha256,
+        "image_bytes": receipt.image_bytes,
+        "build_id": receipt.build_id,
         "effective_execution_key": "f" * 64,
     }
     runtime_plan_result = {
+        "phase": "prepare",
+        "subphase": "runtime-plan",
+        "installation_id": str(uuid4()),
+        "mapping_id": str(uuid4()),
+        "install_plan_digest": "c" * 64,
+        "compiled_plan_persisted": True,
         "model_artifact_set_sha256": model_set_digest,
         "model_artifact_set_bytes": model.bytes,
     }
@@ -121,10 +138,12 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
         item_index=0,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress={
-            "workload_intent_ordinal": 1,
-            "phase_results": [runtime_result, runtime_plan_result],
-        },
+        progress=RunSwitchOperationResult.model_validate(
+            {
+                "workload_intent_ordinal": 1,
+                "phase_results": [runtime_result, runtime_plan_result],
+            }
+        ),
     )
     assert first.operation_id == "child-direct"
     assignment = next(iter(captured.values())).to_mapping()
@@ -143,17 +162,28 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
         item_index=0,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress={
-            "phase_results": [
-                runtime_result,
-                runtime_plan_result,
-                {"assignments": {nodes[0]: assignment}},
-            ],
-            "evidence": [{"node_id": nodes[0], "downloaded_bytes": model.bytes}],
-        },
+        progress=RunSwitchOperationResult.model_validate(
+            {
+                "phase_results": [
+                    runtime_result,
+                    runtime_plan_result,
+                    {
+                        "phase": "transfer",
+                        "subphase": "target-copy",
+                        "assignments": {nodes[0]: assignment},
+                    },
+                    {
+                        "phase": "transfer",
+                        "subphase": "target-copy",
+                        "node_id": nodes[0],
+                        "downloaded_bytes": model.bytes,
+                    },
+                ],
+            }
+        ),
     )
     assert verify.result is not None
-    assert verify.result["verified"] is True
+    assert _receipt_json(verify.result)["verified"] is True
 
 
 def _archive_gate_service(tmp_path: Path):
@@ -179,7 +209,9 @@ def _archive_gate_service(tmp_path: Path):
         preparation=None,
         storage=SimpleNamespace(artifact_digests=["b" * 64]),
         image_digest=BUILT_IMAGE_DIGEST,
-        build=SimpleNamespace(oci_layout_sha256=None, image_bytes=None),
+        build=SimpleNamespace(
+            oci_layout_sha256=None, image_bytes=None, build_input_sha256=None
+        ),
         recipe_build_id=BUILD_ID,
         recipe_revision_id="gate-revision",
         recipe_content_sha256=receipt.distribution_content_sha256,

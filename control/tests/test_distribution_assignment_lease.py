@@ -26,6 +26,7 @@ from vonk_control.distribution_executor import (
     RuntimeImagePull,
 )
 from vonk_control.models import AgentNode, ArtifactDistributionAssignment, Job
+from vonk_control.run_switch_contract import RunSwitchOperationResult
 
 from .test_agent_api import NODE_A, NODE_B, agent_system  # noqa: F401
 from .test_distribution_executor import _phase, _plan
@@ -168,17 +169,7 @@ def _transfer(agent_system):  # noqa: F811
             item_index=0,
             actor="test",
             request_key=str(uuid4()),
-            progress={
-                "workload_intent_ordinal": 7,
-                "phase_results": [
-                    {
-                        "build_id": str(uuid4()),
-                        "image_digest": "sha256:" + "e" * 64,
-                        "oci_layout_sha256": "c" * 64,
-                        "image_bytes": 11,
-                    }
-                ],
-            },
+            progress=RunSwitchOperationResult(workload_intent_ordinal=7),
         )
 
     return SimpleNamespace(

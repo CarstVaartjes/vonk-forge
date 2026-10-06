@@ -14,6 +14,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 import pytest
+from pydantic import BaseModel
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -53,9 +54,11 @@ from vonk_control.operation_api import merge_operation_providers
 from vonk_control.operation_item_contract import operation_item
 from vonk_control.run_switch_contract import (
     ArtifactStorageImpact,
+    RunSwitchOperationResult,
     RunSwitchPhase,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
+    RunSwitchTargetTransferEvidenceResult,
     SparkGroup,
     SparkGroupNode,
 )
@@ -69,6 +72,11 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 from .runtime_image_fixtures import place_test_image
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 from .test_recipe_operations import NOW, setup_services
+
+
+def _receipt_json(receipt: BaseModel | None) -> dict[str, object]:
+    assert receipt is not None
+    return receipt.model_dump(mode="json", exclude_unset=True)
 
 
 def _phase(**values: object) -> RunSwitchPhase:
@@ -165,10 +173,10 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
         item_index=0,
         actor="test",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress={},
+        progress=RunSwitchOperationResult(),
     )
     assert result.operation_id is None
-    assert result.result == {
+    assert _receipt_json(result.result) == {
         "phase": "transfer",
         "subphase": "target-copy",
         "skipped": True,
@@ -275,29 +283,23 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         mapping=None,
     )
     phase = _phase(kind="transfer", node_ids=[NODE_A, NODE_B], index=0)
-    build_progress = {
-        "workload_intent_ordinal": 7,
-        "phase_results": [
-            {
-                "build_id": str(uuid4()),
-                "image_digest": "sha256:" + "e" * 64,
-                "oci_layout_sha256": "c" * 64,
-                "image_bytes": 11,
-            }
-        ],
-    }
+    build_progress = {"workload_intent_ordinal": 7}
     first = executor.execute(
         plan,
         phase,
         item_index=0,
         actor="test",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress=build_progress,
+        progress=RunSwitchOperationResult.model_validate(build_progress),
     )
     assert first.operation_id is not None
     pending = executor.get(first.operation_id)
-    assert pending.result["progress"]["members"][0]["completed_bytes"] == 0
-    assert isinstance(pending.result["progress"]["members"][0]["completed_bytes"], int)
+    assert (
+        _receipt_json(pending.result)["progress"]["members"][0]["completed_bytes"] == 0
+    )
+    assert isinstance(
+        _receipt_json(pending.result)["progress"]["members"][0]["completed_bytes"], int
+    )
     with services.sessions.begin() as session:
         child = session.get(Job, first.operation_id)
         assert child is not None
@@ -348,9 +350,12 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         )
     view = executor.get(first.operation_id)
     assert view.state == "succeeded"
-    assert [member["node_id"] for member in view.result["members"]] == [NODE_A, NODE_B]
-    assert view.result["progress"]["completed_bytes"] == 30
-    assert view.result["progress"]["total_bytes"] == 30
+    assert [member["node_id"] for member in _receipt_json(view.result)["members"]] == [
+        NODE_A,
+        NODE_B,
+    ]
+    assert _receipt_json(view.result)["progress"]["completed_bytes"] == 30
+    assert _receipt_json(view.result)["progress"]["total_bytes"] == 30
     with services.sessions() as session:
         persisted = session.get(Job, first.operation_id)
         assert persisted is not None and persisted.result is not None
@@ -363,7 +368,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         item_index=0,
         actor="test",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress=build_progress,
+        progress=RunSwitchOperationResult.model_validate(build_progress),
     )
     assert replay.operation_id == first.operation_id
     with pytest.raises(RuntimeError, match="distribution child request key was reused"):
@@ -373,7 +378,9 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             item_index=0,
             actor="test",
             request_key="00000000-0000-4000-8000-000000000001",
-            progress={**build_progress, "workload_intent_ordinal": 8},
+            progress=RunSwitchOperationResult.model_validate(
+                {**build_progress, "workload_intent_ordinal": 8}
+            ),
         )
     verify = executor.execute(
         plan,
@@ -381,10 +388,20 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         item_index=0,
         actor="test",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress={"cached_nodes": [NODE_B], "evidence": view.result["evidence"]},
+        progress=RunSwitchOperationResult(
+            phase_results=[
+                first.result,
+                *[
+                    RunSwitchTargetTransferEvidenceResult(
+                        phase="transfer", subphase="target-copy", **item.model_dump()
+                    )
+                    for item in view.result.evidence
+                ],
+            ]
+        ),
     )
     assert verify.result is not None
-    assert verify.result["verified"] is True
+    assert _receipt_json(verify.result)["verified"] is True
 
     with services.sessions.begin() as session:
         attempt = session.scalar(
@@ -397,7 +414,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         attempt.result = {**attempt.result, "downloaded_bytes": 14}
     mismatch = executor.get(first.operation_id)
     assert mismatch.state == "failed"
-    assert mismatch.result["members"][0]["error"] == (
+    assert _receipt_json(mismatch.result)["members"][0]["error"] == (
         "distributed transfer byte evidence mismatch"
     )
     with services.sessions.begin() as session:
@@ -411,7 +428,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             item_index=0,
             actor="test",
             request_key="00000000-0000-4000-8000-000000000001",
-            progress=build_progress,
+            progress=RunSwitchOperationResult.model_validate(build_progress),
         )
 
 
@@ -479,30 +496,23 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
         recipe_build_id=build_id,
         plan_digest="d" * 64,
     )
-    progress = {
-        "phase_results": [
-            {
-                "build_id": build_id,
-                "image_digest": image_digest,
-                "oci_layout_sha256": layout_digest,
-                "image_bytes": 11,
-                "state": "succeeded",
-            },
-            {
-                "runtime_image": {
-                    "build_id": build_id,
-                    "image_digest": image_digest,
-                    "oci_archive_sha256": layout_digest,
-                    "image_bytes": 11,
-                }
-            },
-            {"assignments": {node_id: assignment.to_mapping()}},
-            {
-                "node_id": node_id,
-                "downloaded_bytes": 7,
-            },
-        ]
-    }
+    progress = RunSwitchOperationResult.model_validate(
+        {
+            "phase_results": [
+                {
+                    "phase": "transfer",
+                    "subphase": "target-copy",
+                    "assignments": {node_id: assignment.to_mapping()},
+                },
+                {
+                    "phase": "transfer",
+                    "subphase": "target-copy",
+                    "node_id": node_id,
+                    "downloaded_bytes": 7,
+                },
+            ]
+        }
+    )
     executor = CompositeDistributionPhaseExecutor(
         None,
         None,
@@ -510,7 +520,7 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
         model_cache=None,
         clock=lambda: datetime.now(UTC),
     )
-    result = executor._verify_evidence(plan, progress, (node_id,), ())
+    result = _receipt_json(executor._verify_evidence(plan, progress, (node_id,), ()))
     assert result["verified_build_id"] == build_id
     _validate_artifact_execution(plan, _phase(kind="verify"), result)
 
@@ -540,11 +550,11 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
         item_index=0,
         actor="test",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress={},
+        progress=RunSwitchOperationResult(),
     )
     assert cached.result is not None
-    assert cached.result["skipped"] is True
-    assert cached.result["verified_build_id"] == build_id
+    assert _receipt_json(cached.result)["skipped"] is True
+    assert _receipt_json(cached.result)["verified_build_id"] == build_id
     _validate_artifact_execution(plan, _phase(kind="verify"), cached.result)
 
 
@@ -616,8 +626,8 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
         child_id = child.id
     view = executor.get(child_id)
     assert view.state == "failed"
-    assert view.result["members"][0]["error"] == "digest mismatch"
-    assert view.result["reason"] == "digest mismatch"
+    assert _receipt_json(view.result)["members"][0]["error"] == "digest mismatch"
+    assert _receipt_json(view.result)["reason"] == "digest mismatch"
 
 
 @pytest.mark.parametrize("running", [False, True])
@@ -771,11 +781,13 @@ def test_member_failure_kind_and_diagnostic_survive_aggregation(
         )
         child_id = child.id
     view = executor.get(child_id)
-    member = view.result["members"][0]
+    member = _receipt_json(view.result)["members"][0]
     assert member["failure_kind"] == failure_kind
     assert member["diagnostic"] == "http_status=404 error_code=controller.http_404"
-    assert view.result["evidence"][0]["diagnostic"] == member["diagnostic"]
-    assert view.result["failure_kind"] == failure_kind
+    assert (
+        _receipt_json(view.result)["evidence"][0]["diagnostic"] == member["diagnostic"]
+    )
+    assert _receipt_json(view.result)["failure_kind"] == failure_kind
     decision = classify(_child_failure_kind(view))
     assert (decision is RecoveryDecision.RETRY) is retried
 
@@ -876,7 +888,7 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
         item_index=0,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress={},
+        progress=RunSwitchOperationResult(),
     )
     assert result.operation_id == cache_view.id
     assert _call_argument(calls[0], "preview")["artifact_set_sha256"] == "d" * 64
@@ -887,7 +899,7 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
         item_index=0,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress={},
+        progress=RunSwitchOperationResult(),
     )
     assert replay.operation_id == cache_view.id
     assert (
@@ -896,7 +908,8 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
     )
     projected = executor.get(cache_view.id)
     assert projected.state == "queued"
-    assert projected.progress["completed_bytes"] == 3
+    assert projected.progress is not None
+    assert projected.progress.completed_bytes == 3
     cache_view.state = "running"
     assert executor.get(cache_view.id).state == "running"
     cache_view.state = "cancelled"
@@ -995,20 +1008,24 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
         item_index=0,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000012",
-        progress={},
+        progress=RunSwitchOperationResult(),
     )
     assert first.operation_id
     service.run_pending(limit=2)
     completed = executor.get(first.operation_id)
     assert completed.state == "succeeded"
-    assert completed.result["artifact_set_sha256"] == manifest.digest == artifact_set
-    assert completed.result["coverage"] == "complete"
-    assert completed.result["evidence"]["coverage"] == "complete"
+    assert (
+        _receipt_json(completed.result)["artifact_set_sha256"]
+        == manifest.digest
+        == artifact_set
+    )
+    assert _receipt_json(completed.result)["coverage"] == "complete"
+    assert _receipt_json(completed.result)["evidence"]["coverage"] == "complete"
     # The set was completed by the earlier resumable operation before this
     # child ran, so this operation received no bytes despite its planned
     # remaining range.
-    assert completed.result["progress"]["completed_bytes"] == 0
-    assert completed.result["progress"]["total_bytes"] < len(payload)
+    assert _receipt_json(completed.result)["progress"]["completed_bytes"] == 0
+    assert _receipt_json(completed.result)["progress"]["total_bytes"] < len(payload)
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -1267,16 +1284,16 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         item_index=0,
         actor="operator",
         request_key=parent_request,
-        progress={},
+        progress=RunSwitchOperationResult(),
     )
     assert model_child.operation_id == seeded.id
     assert cache.run_pending() == 1
     assert model_child.operation_id is not None
     model_result = executor.get(model_child.operation_id)
     assert model_result.state == "succeeded"
-    assert model_result.result["coverage"] == "complete"
-    assert model_result.result["artifact_set_sha256"] == artifact_set
-    assert model_result.result["progress"]["completed_bytes"] == (
+    assert _receipt_json(model_result.result)["coverage"] == "complete"
+    assert _receipt_json(model_result.result)["artifact_set_sha256"] == artifact_set
+    assert _receipt_json(model_result.result)["progress"]["completed_bytes"] == (
         len(model_payload) + len(auxiliary_payload)
     )
 
@@ -1294,7 +1311,9 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         item_index=0,
         actor="operator",
         request_key=parent_request,
-        progress={"workload_intent_ordinal": 1},
+        progress=RunSwitchOperationResult.model_validate(
+            {"workload_intent_ordinal": 1}
+        ),
     )
     assert copy_child.operation_id
     with services.sessions.begin() as session:
@@ -1369,15 +1388,19 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             assert payload_response.headers["x-vonk-file"].endswith(item["sha256"])
     view = executor.get(copy_child.operation_id)
     assert view.state == "succeeded"
-    assert {member["node_id"] for member in view.result["members"]} == set(nodes)
-    assert len(view.result["evidence"]) == 2
+    assert {
+        member["node_id"] for member in _receipt_json(view.result)["members"]
+    } == set(nodes)
+    assert len(_receipt_json(view.result)["evidence"]) == 2
     replay = executor.execute(
         plan,
         copy_phase,
         item_index=0,
         actor="operator",
         request_key=parent_request,
-        progress={"workload_intent_ordinal": 1},
+        progress=RunSwitchOperationResult.model_validate(
+            {"workload_intent_ordinal": 1}
+        ),
     )
     assert replay.operation_id == copy_child.operation_id
 
@@ -1387,10 +1410,10 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         item_index=0,
         actor="operator",
         request_key=parent_request,
-        progress={},
+        progress=RunSwitchOperationResult(),
     )
     assert cached_model.operation_id is None
-    assert cached_model.result == {
+    assert _receipt_json(cached_model.result) == {
         "schema_version": 2,
         "phase": "transfer",
         "subphase": "model-download",
@@ -1408,7 +1431,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     }
 
     copy_view = executor.get(copy_child.operation_id)
-    member_progress = copy_view.result["progress"]["members"]
+    member_progress = _receipt_json(copy_view.result)["progress"]["members"]
     (tmp_path / "run-switch-plan").mkdir()
     (
         plan_sessions,
@@ -1490,7 +1513,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     family_item = run_provider.get_operation(run_id)
     family_progress = _operation_progress(family_item)
     assert family_progress["completed_bytes"] == 90
-    expected_target_bytes = view.result["members"][0]["total_bytes"]
+    expected_target_bytes = _receipt_json(view.result)["members"][0]["total_bytes"]
     assert {
         _member_totals(item)
         for item in require_sequence(family_progress["members"], "operation members")
@@ -1601,7 +1624,7 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
         assert item_index == 0
         assert actor == "operator"
         assert request_key
-        assert not progress
+        assert progress == RunSwitchOperationResult()
         # Off the tick thread, publication waits for the owner row.
         assert wait_for_busy_owner is True
         entered.set()
@@ -1617,7 +1640,7 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
             item_index=0,
             actor="operator",
             request_key=request_key,
-            progress={},
+            progress=RunSwitchOperationResult(),
         )
         assert result.waiting
         assert result.operation_id is None
@@ -1629,7 +1652,7 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
             item_index=0,
             actor="operator",
             request_key=request_key,
-            progress={},
+            progress=RunSwitchOperationResult(),
         )
         assert observed.waiting
         assert "still running" in (observed.status_reason or "")
@@ -1683,8 +1706,8 @@ def test_zero_byte_model_download_records_the_already_verified_set() -> None:
         item_index=0,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress={},
+        progress=RunSwitchOperationResult(),
     )
     assert result.operation_id is None
-    assert result.result is not None and result.result["skipped"] is True
+    assert result.result is not None and _receipt_json(result.result)["skipped"] is True
     assert adopted == [manifest]
