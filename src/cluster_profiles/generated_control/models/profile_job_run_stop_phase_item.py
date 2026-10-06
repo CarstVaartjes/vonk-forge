@@ -27,7 +27,10 @@ class ProfileJobRunStopPhaseItem:
         Attributes:
             node_id (str):
             operation_id (str):
-            payload (RecipeStopPayload):
+            payload (RecipeStopPayload): Exact cleanup authority, independent of historical launch-plan readability.
+
+                The Controller binds these identities and timeout into the signed helper
+                grant; the helper reconciles only the matching runtime generation.
      """
 
     node_id: str

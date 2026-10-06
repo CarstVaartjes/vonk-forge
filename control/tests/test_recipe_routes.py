@@ -43,7 +43,6 @@ from vonk_control.operation_api import durable_operation_services
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import (
-    SPARK_SILENT_WITHDRAWAL_SECONDS,
     AtomicRecipeRoutePublisher,
     RecipeRouteError,
     RecipeRouteNotReady,
@@ -1500,7 +1499,7 @@ def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
         assert run.route_state == "withdrawn"
         assert run.route_error is not None
         assert run.route_error.startswith("recipe rank health requires recovery: ")
-        assert "every recipe rank must be running" in run.route_error
+        assert "stopped or failed workload" in run.route_error
 
     clock.now += timedelta(seconds=1)
     with service.sessions.begin() as session:
@@ -1583,8 +1582,10 @@ def _agents_reached_the_controller(service, at: datetime) -> None:
             presence.observed_at = at
 
 
-def test_a_route_is_withdrawn_when_its_spark_goes_silent(tmp_path: Path) -> None:
-    """A Spark that stopped reaching the Controller is gone, not late."""
+def test_control_channel_silence_does_not_withdraw_a_serving_route(
+    tmp_path: Path,
+) -> None:
+    """Control channel absence is not proof the inference endpoint stopped."""
 
     clock = MutableClock(NOW)
     base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
@@ -1592,14 +1593,13 @@ def test_a_route_is_withdrawn_when_its_spark_goes_silent(tmp_path: Path) -> None
     service.publish_run(run_id)
     _agents_reached_the_controller(service, NOW)
 
-    clock.now = NOW + timedelta(seconds=SPARK_SILENT_WITHDRAWAL_SECONDS + 1)
+    clock.now = NOW + timedelta(seconds=301)
     RecipeOperationWorker(service.sessions, service, clock=clock).tick()
 
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
-        assert run.route_state == "withdrawn"
-        assert run.route_error is not None
-        assert "has not reached the Controller for" in run.route_error
+        assert run.route_state == "published"
+        assert run.state == "running"
 
 
 def test_worker_keeps_every_serving_route_while_reports_are_missing(
@@ -1886,3 +1886,215 @@ def test_one_run_with_an_invalid_endpoint_does_not_expire_the_other_routes(
     with service.sessions() as session:
         assert _recipe_run(session, healthy_run).route_state == "published"
         assert _recipe_run(session, broken_run).route_state == "withdrawn"
+
+
+@pytest.mark.parametrize("damage", ["plan", "alias", "ranks", "mapping", "endpoint"])
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_bookkeeping_damage_retains_the_accepted_serving_route(
+    tmp_path: Path, damage: str
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    service.publish_run(run_id)
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert node is not None
+        if damage == "plan":
+            run.plan = {"unreadable": True}
+        elif damage == "alias":
+            run.alias = "invalid alias"
+        elif damage == "ranks":
+            node.rank = 2
+        elif damage == "mapping":
+            run.mapping_generation += 1
+        else:
+            node.endpoint = {"url": "not an endpoint"}
+    RecipeOperationWorker(service.sessions, service, clock=clock).tick()
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.state == "running"
+        assert run.route_state == "published"
+
+
+@pytest.mark.parametrize("damage", ["plan", "alias", "ranks", "mapping", "endpoint"])
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
+    tmp_path: Path, damage: str
+) -> None:
+    from copy import deepcopy
+
+    from vonk_control.route_runtime import verify_active_route_bundle
+
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, first = setup(tmp_path / "database", clock=clock)
+    second = add_running_run(
+        base, first, alias="second", route_state="pending", identity=3
+    )
+    root = tmp_path / "live"
+    service = atomic_service(base, root, clock)
+    service.publish_run(first)
+    accepted = verify_active_route_bundle(root)
+    assert isinstance(accepted.routes["routes"], dict)
+    assert isinstance(accepted.litellm["model_list"], list)
+    original_endpoint = deepcopy(accepted.routes["routes"]["qwen"])
+    assert isinstance(original_endpoint, dict)
+    original_model = deepcopy(accepted.litellm["model_list"][0])
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, first)
+        node = session.scalar(select(RunNode).where(RunNode.run_id == first))
+        assert node is not None
+        original_plan, original_alias = deepcopy(run.plan), run.alias
+        original_rank, original_mapping, original_node_endpoint = (
+            node.rank,
+            run.mapping_generation,
+            deepcopy(node.endpoint),
+        )
+        if damage == "plan":
+            run.plan = {"unreadable": True}
+        elif damage == "alias":
+            run.alias = "invalid alias"
+        elif damage == "ranks":
+            node.rank = 2
+        elif damage == "mapping":
+            run.mapping_generation += 1
+        else:
+            node.endpoint = {"url": "not an endpoint"}
+    service.publish_run(second)
+    added = verify_active_route_bundle(root)
+    assert isinstance(added.routes["routes"], dict)
+    assert isinstance(added.litellm["model_list"], list)
+    assert added.routes["routes"]["qwen"] == original_endpoint
+    assert sorted(_live_models(root)) == ["qwen", "second"]
+    assert (
+        next(
+            model
+            for model in added.litellm["model_list"]
+            if model["model_name"] == "qwen"
+        )
+        == original_model
+    )
+
+    def accepted_intent(session, number):
+        return FleetProfileEndpointIntent(
+            number=number,
+            profile_id="00000000-0000-4000-8000-000000000101",
+            application_id="00000000-0000-4000-8000-000000000102",
+            application_state=LifecycleState.SUCCEEDED,
+            assignments=(
+                FleetProfileEndpointAssignmentIntent(
+                    assignment_id="00000000-0000-4000-8000-000000000103",
+                    recipe_title="Qwen",
+                    desired_state=DesiredAssignmentState.RUNNING,
+                    alias="qwen",
+                    state=EndpointState.NOT_PUBLISHED_YET,
+                    expected_run_id=first,
+                ),
+            ),
+        )
+
+    projection = durable_operation_services(
+        service.sessions,
+        root,
+        clock=clock,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+        profile_endpoint_intent=accepted_intent,
+    )
+    assert projection.profile_endpoint is not None
+    view = projection.profile_endpoint(3, "qwen", GATEWAY)
+    assert view.assignments is not None
+    assert view.assignments[0].state == EndpointState.PUBLISHED
+    assert view.assignments[0].endpoint is not None
+    assert view.assignments[0].endpoint.generation == added.marker.generation
+    assert view.assignments[0].endpoint.backend_api_base == "http://10.0.0.2:8000/v1"
+    service.withdraw_run(second)
+    removed = verify_active_route_bundle(root)
+    assert _live_models(root) == ["qwen"]
+    assert isinstance(removed.routes["routes"], dict)
+    assert removed.routes["routes"]["qwen"] == original_endpoint
+    assert service.maintain() is False  # exact snapshot identity does not churn
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, first)
+        node = session.scalar(select(RunNode).where(RunNode.run_id == first))
+        assert node is not None
+        run.plan, run.alias, run.mapping_generation = (
+            original_plan,
+            original_alias,
+            original_mapping,
+        )
+        node.rank, node.endpoint = original_rank, original_node_endpoint
+        node.updated_at = NOW + timedelta(seconds=1)
+    clock.now = NOW + timedelta(seconds=1)
+    assert service.maintain() is True
+    recovered = verify_active_route_bundle(root)
+    assert recovered.marker.generation > removed.marker.generation
+    assert _live_models(root) == ["qwen"]
+    assert isinstance(recovered.routes["routes"], dict)
+    assert (
+        recovered.routes["routes"]["qwen"]["observed_at"]
+        != original_endpoint["observed_at"]
+    )
+    fresh = add_running_run(
+        base, first, alias="fresh", route_state="pending", identity=4
+    )
+    service.publish_run(fresh)
+    assert sorted(_live_models(root)) == ["fresh", "qwen"]
+
+
+@pytest.mark.parametrize("fault", ["stopped", "revoked"])
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_stopped_rank_is_not_hidden_by_a_corrupt_serving_plan(
+    tmp_path: Path, fault: str
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, first = setup(tmp_path / "database", clock=clock)
+    second = add_running_run(
+        base, first, alias="second", route_state="pending", identity=3
+    )
+    root = tmp_path / "live"
+    service = atomic_service(base, root, clock)
+    service.publish_run(first)
+    service.publish_run(second)
+    with service.sessions.begin() as session:
+        _recipe_run(session, first).plan = {"unreadable": True}
+        node = session.query(RunNode).filter_by(run_id=first, rank=1).one()
+        if fault == "stopped":
+            node.state = "stopped"
+        else:
+            agent = session.get(AgentNode, node.node_id)
+            assert agent is not None
+            agent.revoked_at = NOW
+    assert service.maintain() is True
+    assert _live_models(root) == ["second"]
+    with service.sessions() as session:
+        assert _recipe_run(session, first).route_state == "withdrawn"
+        assert _recipe_run(session, second).route_state == "published"
+    fresh = add_running_run(
+        base, second, alias="fresh", route_state="pending", identity=4
+    )
+    service.publish_run(fresh)
+    assert sorted(_live_models(root)) == ["fresh", "second"]
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_unverified_active_bundle_cannot_supply_a_fallback_endpoint(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, first = setup(tmp_path / "database", clock=clock)
+    second = add_running_run(
+        base, first, alias="second", route_state="pending", identity=3
+    )
+    root = tmp_path / "live"
+    service = atomic_service(base, root, clock)
+    service.publish_run(first)
+    marker = json.loads((root / "activation.json").read_text())
+    route_file = root / "generations" / marker["directory"] / "routes.json"
+    route_file.write_text(route_file.read_text() + " ")
+    with service.sessions.begin() as session:
+        _recipe_run(session, first).plan = {"unreadable": True}
+    with pytest.raises(RouteRuntimeError, match="checksum mismatch"):
+        service.publish_run(second)
+    assert json.loads((root / "activation.json").read_text()) == marker
+    assert _live_models(root) == ["qwen"]

@@ -427,11 +427,6 @@ class InstallAdmissionService:
                 ) from error
             models = resolved_entities.model_revisions
             model_document = models[0].document if models else None
-            if not isinstance(model_document, Mapping):
-                raise BookkeepingUnknown(
-                    "exact model license authority is unavailable",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
             compiled_plan_error: str | None = None
             compiled_plan_unsettled = False
             # The snapshot is complete. Production compilation consults managed

@@ -180,7 +180,7 @@
       "path": "control/tests/test_agent_jobs.py",
       "function": "test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retry",
       "kind": "transient-failed-assertion",
-      "count": 2
+      "count": 1
     },
     {
       "path": "control/tests/test_agent_jobs.py",
@@ -311,18 +311,6 @@
     {
       "path": "control/tests/test_agent_operation_lifecycle.py",
       "function": "test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists",
-      "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_outcome.py",
-      "function": "test_a_typed_report_keeps_its_state_word_and_projects_to_the_stored_body",
-      "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_restart_recovery_wire_bridge.py",
-      "function": "test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim",
       "kind": "operator-wait-assertion",
       "count": 1
     },
@@ -1559,12 +1547,6 @@
     {
       "path": "control/tests/test_recipe_builds.py",
       "function": "test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed",
-      "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_builds.py",
-      "function": "test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed",
       "kind": "transient-failed-assertion",
       "count": 1
     },
@@ -1805,12 +1787,6 @@
     {
       "path": "control/tests/test_recipe_operation_bookkeeping.py",
       "function": "test_a_recovery_with_damaged_authority_is_retired_not_raised",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_operation_bookkeeping.py",
-      "function": "test_a_stop_without_its_exact_start_authority_is_a_security_refusal",
       "kind": "ending-without-fresh-request",
       "count": 1
     },
@@ -2158,12 +2134,6 @@
     },
     {
       "path": "control/tests/test_recipe_operations.py",
-      "function": "test_stop_refuses_durable_start_with_changed_target_or_plan",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_operations.py",
       "function": "test_stop_replans_when_the_submitted_digest_is_old",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -2227,12 +2197,6 @@
       "function": "test_uninstall_warns_on_unknown_bytes_but_blocks_active_runs_without_implicit_stop",
       "kind": "ending-without-fresh-request",
       "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_routes.py",
-      "function": "test_a_route_is_withdrawn_when_its_spark_goes_silent",
-      "kind": "observation-withdrawal-assertion",
-      "count": 2
     },
     {
       "path": "control/tests/test_recipe_routes.py",
@@ -2767,6 +2731,30 @@
       "count": 1,
       "reason": "security-edge",
       "justification": "Tests retaining live authorized adopted work across aggregate failure and releasing only replaced exact effects; the final lost-child observation intentionally preserves adopted authority."
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_a_stop_without_start_history_uses_current_exact_run_ownership",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission."
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_stop_works_without_start_jobs_and_with_unreadable_launch_plan",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission."
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_uses_run_ownership_when_start_history_has_changed",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission."
     }
   ]
 }

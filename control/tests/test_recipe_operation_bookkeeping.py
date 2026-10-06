@@ -313,7 +313,7 @@ def test_a_job_that_lost_its_intent_recovers_it_from_its_orders(tmp_path) -> Non
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_cleanup_without_exact_start_authority_fails_the_run_instead_of_raising(
+def test_damaged_start_history_still_queues_exact_run_cleanup(
     tmp_path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -341,12 +341,11 @@ def test_a_cleanup_without_exact_start_authority_fails_the_run_instead_of_raisin
             start.id, node, succeeded=False, evidence={"code": "start.failed"}
         )
 
-    # The failed Start has no exact Start authority to stop from: nothing is
-    # invented, and the run is recorded failed with the reason.
+    # The missing Start receipt cannot certify absence. Durable run membership
+    # still authorizes exact cleanup, retaining its claims until acknowledgement.
     with sessions() as session:
         run = _required(session.get(RecipeRun, start.owner_id))
-        assert run.state == "failed"
-        assert "exact cleanup authority" in (run.route_error or "")
+        assert run.state == "stopping"
         assert (
             session.scalar(
                 select(Job.id).where(
@@ -354,7 +353,7 @@ def test_a_cleanup_without_exact_start_authority_fails_the_run_instead_of_raisin
                     Job.payload["owner_id"].as_string() == start.owner_id,
                 )
             )
-            is None
+            is not None
         )
 
 
@@ -877,7 +876,7 @@ def test_request_refusals_are_typed_invalid_requests(tmp_path) -> None:
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_stop_without_its_exact_start_authority_is_a_security_refusal(
+def test_a_stop_without_start_history_uses_current_exact_run_ownership(
     tmp_path,
 ) -> None:
     sessions, service, _queue, _installation, run, _nodes = _running_recipe(
@@ -890,16 +889,15 @@ def test_a_stop_without_its_exact_start_authority_is_a_security_refusal(
             child.payload = {"not": "a start order"}
     plan = service.preview_stop(run.owner_id)
 
-    with pytest.raises(RecipeStopAuthorityRefused) as refused:
-        service.stop(
-            run.owner_id,
-            plan_digest=plan.plan_digest,
-            actor="admin",
-            request_id="9" * 36,
-        )
-
-    assert isinstance(refused.value, SecurityRefusalError)
-    assert isinstance(refused.value, RecipeOperationConflict)
+    stopped = service.stop(
+        run.owner_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="9" * 36,
+    )
+    assert stopped.kind == "recipe.stop"
+    assert stopped.owner_id == run.owner_id
+    assert stopped.state == "running"
 
 
 def test_a_busy_owner_is_a_retry_later_unknown_outcome(tmp_path) -> None:
@@ -1039,3 +1037,132 @@ def test_no_bookkeeping_class_is_raised_from_a_stored_read() -> None:
     assert issubclass(RecipeRetryLater, UnknownOutcomeError)
     for cls in (RecipeRequestInvalid, RecipeStopAuthorityRefused, RecipeRetryLater):
         assert issubclass(cls, RecipeOperationConflict)
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_stop_works_without_start_jobs_and_with_unreadable_launch_plan(tmp_path):
+    from vonk_agent_protocol import ContainerRuntimeAction
+    from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+
+    sessions, service, _queue, _installation, started, _nodes = _running_recipe(
+        tmp_path, nodes=2
+    )
+    with sessions.begin() as session:
+        run = _required(session.get(RecipeRun, started.owner_id))
+        run.plan = {"unreadable": True}
+        for child in session.scalars(
+            select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
+        ):
+            session.delete(child)
+        session.delete(_required(session.get(Job, started.id)))
+    plan = service.preview_stop(started.owner_id)
+    stopped = service.stop(
+        started.owner_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    with sessions() as session:
+        parent = _required(session.get(Job, stopped.id))
+        children = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == stopped.id)
+            )
+        )
+        assert children
+        for child in children:
+            binding = derive_runtime_plan_binding(
+                session,
+                parent=parent,
+                operation=child,
+                node_id=child.node_id,
+                action=ContainerRuntimeAction.STOP,
+                cancellation_requested=False,
+                now=NOW,
+            )
+            assert binding.runtime_run_id == started.owner_id
+            assert (
+                binding.stop_plan_sha256
+                == hashlib.sha256(canonical_message(child.payload)).hexdigest()
+            )
+
+
+@pytest.mark.parametrize("damage_plan", [False, True])
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_installation_cleanup_does_not_require_original_install_job(
+    tmp_path, damage_plan
+):
+    sessions, service, _queue, mapping, build, nodes = setup_services(tmp_path, nodes=2)
+    installed = installed_recipe(
+        service, mapping, build, nodes, request_id=str(uuid.uuid4())
+    )
+    with sessions.begin() as session:
+        parent = _required(session.get(Job, installed.id))
+        for child in session.scalars(
+            select(AgentOperation).where(AgentOperation.parent_job_id == parent.id)
+        ):
+            session.delete(child)
+        session.delete(parent)
+        if damage_plan:
+            installation = _required(
+                session.get(RecipeInstallation, installed.owner_id)
+            )
+            installation.plan = {"unreadable": True}
+    authority = service.preview_reconciliation_authority(installed.owner_id)
+    assert authority.installation_id == installed.owner_id
+    assert {target.node_id for target in authority.targets} == set(nodes)
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
+    from datetime import timedelta
+
+    sessions, service, _queue, installation, started, nodes = _running_recipe(tmp_path)
+    with sessions() as session:
+        original = _required(session.get(Job, started.id))
+        ordinal = recipe_operations._bound_workload_intent(original)
+    request_id = str(uuid.uuid4())
+    reason, completed, advanced = service._retirement_cleanup(
+        original, request_id, "recipe.stop", "run", started.owner_id, ordinal
+    )
+    assert advanced and not completed, reason
+    with sessions.begin() as session:
+        first = _required(
+            session.scalar(select(Job).where(Job.request_id == request_id))
+        )
+        first_id = first.id
+        first.state = "failed"
+        for child in session.scalars(
+            select(AgentOperation).where(AgentOperation.parent_job_id == first_id)
+        ):
+            child.state = "failed"
+    service._clock = lambda: NOW + timedelta(seconds=10)
+    reason, completed, advanced = service._retirement_cleanup(
+        original, request_id, "recipe.stop", "run", started.owner_id, ordinal
+    )
+    assert advanced and not completed, reason
+    with sessions() as session:
+        stops = tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
+        assert len(stops) == 2
+        retry = next(job for job in stops if job.id != first_id)
+        assert retry.request_id != request_id
+        assert recipe_operations._bound_workload_intent(retry) == ordinal
+    _, _, advanced = service._retirement_cleanup(
+        original, request_id, "recipe.stop", "run", started.owner_id, ordinal
+    )
+    assert not advanced
+    for node in nodes:
+        service.record_node_result(retry.id, node, succeeded=True, evidence={})
+    _, completed, _ = service._retirement_cleanup(
+        original, request_id, "recipe.stop", "run", started.owner_id, ordinal
+    )
+    assert completed
+    fresh = service.preview_run(installation.owner_id, "after-cleanup")
+    assert fresh.allowed
+    accepted = service.start(
+        fresh,
+        plan_digest=fresh.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert accepted.owner_id != started.owner_id

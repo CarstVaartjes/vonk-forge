@@ -43,7 +43,10 @@ def valid_claim() -> dict[str, object]:
         recipe_revision_id="00000000-0000-4000-8000-000000000006",
         mapping_id="00000000-0000-4000-8000-000000000007",
         plan_digest="a" * 64,
-        compiled_execution_plan=compiled_plan,
+        rank=compiled_plan["runtime"]["placement"]["rank"],
+        role=compiled_plan["runtime"]["placement"]["role"],
+        recipe_content_sha256=compiled_plan["identity"]["recipe_revision_sha256"],
+        stop_timeout_seconds=compiled_plan["lifecycle"]["stop_timeout_seconds"],
     ).model_dump(mode="json")
     return {
         "fence": "00000000-0000-4000-8000-000000000003",
