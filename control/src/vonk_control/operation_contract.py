@@ -345,13 +345,13 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
                 document: dict[str, object],
                 strings: list[tuple[dict[str, object], str, str]],
             ) -> None:
-                for key, value in document.items():
-                    if isinstance(value, str) and len(value) > 1:
-                        strings.append((document, key, value))
-                    elif isinstance(value, dict):
-                        candidates(value, strings)
-                    elif isinstance(value, list):
-                        for child in value:
+                for key, nested_value in document.items():
+                    if isinstance(nested_value, str) and len(nested_value) > 1:
+                        strings.append((document, key, nested_value))
+                    elif isinstance(nested_value, dict):
+                        candidates(nested_value, strings)
+                    elif isinstance(nested_value, list):
+                        for child in nested_value:
                             if isinstance(child, dict):
                                 candidates(child, strings)
 
