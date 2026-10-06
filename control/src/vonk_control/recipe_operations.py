@@ -5613,11 +5613,15 @@ class RecipeOperationService:
                                 actor=job.actor,
                                 request_id=cleanup_request_id,
                                 node_payloads=stop_node_payloads,
+                                # Exact relational Stop authority above already
+                                # binds every target. An unreadable role order
+                                # changes scheduling, never target membership.
                                 phases=(
                                     _role_phases(stop_order, stop_node_payloads)
                                     if stop_order is not None
                                     else None
-                                ),
+                                )
+                                or (stop_node_payloads,),
                                 authority_digest=run.plan_digest.removeprefix(
                                     "sha256:"
                                 ),
