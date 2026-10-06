@@ -58,6 +58,7 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     planner = RunSwitchOperationService(
         sessions,
+        memory_floor_bytes=0,
         lifecycle=lifecycle,
         clock=lifecycle._clock,
         artifacts=CompleteArtifactInspector(),

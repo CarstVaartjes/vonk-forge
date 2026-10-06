@@ -151,6 +151,7 @@ from .recovery_policy import (
     kind_for_agent_error,
 )
 from .resource_planning import (
+    PLATFORM_MEMORY_FLOOR_BYTES,
     ResourceDemand,
     installation_disk_requirement,
     memory_capacity_snapshot,
@@ -2207,7 +2208,7 @@ class RunSwitchOperationService:
         model_cache: ModelCacheService | None = None,
         build_archive_available: Callable[[str, int], bool] | None = None,
         inventory_max_age_seconds: int = 300,
-        memory_floor_bytes: int = 0,
+        memory_floor_bytes: int = PLATFORM_MEMORY_FLOOR_BYTES,
     ) -> None:
         if not 1 <= inventory_max_age_seconds <= 86_400:
             raise ValueError("run/switch inventory age is invalid")

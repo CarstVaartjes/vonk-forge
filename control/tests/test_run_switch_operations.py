@@ -1096,7 +1096,7 @@ def test_malformed_operation_is_rejected_without_aborting_the_batch(
     assert after_index != before_index
 
 
-def test_default_run_switch_admission_uses_the_recipe_memory_reserve(
+def test_run_switch_admission_declares_the_resource_estimate_uncertain(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
@@ -1104,6 +1104,7 @@ def test_default_run_switch_admission_uses_the_recipe_memory_reserve(
     )
     service = RunSwitchOperationService(
         sessions,
+        memory_floor_bytes=0,
         lifecycle=lifecycle,
         clock=lambda: lifecycle._clock(),
         artifacts=CompleteArtifactInspector(),
@@ -3542,6 +3543,7 @@ def test_start_phase_adopts_the_child_it_already_queued(tmp_path: Path) -> None:
     )
     service = RunSwitchOperationService(
         sessions,
+        memory_floor_bytes=0,
         lifecycle=lifecycle,
         clock=lambda: lifecycle._clock(),
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
@@ -4392,6 +4394,7 @@ def _parked_start_switch(tmp_path: Path, *, healthy: bool):
     observing = _ObservingLifecycle(lifecycle, healthy=healthy)
     service = RunSwitchOperationService(
         sessions,
+        memory_floor_bytes=0,
         lifecycle=observing,
         clock=lambda: lifecycle._clock(),
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),

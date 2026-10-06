@@ -502,3 +502,44 @@ def test_composed_preflight_returns_settings_demand_and_capacity() -> None:
     assert result.allowed
     assert result.settings is not None
     assert result.demands["rank-0"].total_bytes == 120
+
+
+def test_production_services_use_exactly_the_platform_memory_floor() -> None:
+    import ast
+    from pathlib import Path
+
+    from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
+
+    source = Path(__file__).resolve().parents[1] / "src" / "vonk_control"
+    services = {"RunAdmissionService", "RunSwitchOperationService"}
+    seen: dict[str, int] = {}
+    for path in sorted(source.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else None
+            if name not in services:
+                continue
+            seen[name] = seen.get(name, 0) + 1
+            floors = [
+                item for item in node.keywords if item.arg == "memory_floor_bytes"
+            ]
+            # Omitting the argument takes the constant default; passing it must
+            # pass the constant itself.
+            for item in floors:
+                assert (
+                    isinstance(item.value, ast.Name)
+                    and item.value.id == "PLATFORM_MEMORY_FLOOR_BYTES"
+                ), (
+                    f"{path.name}:{node.lineno} passes a floor other than the platform constant"
+                )
+    assert seen == {"RunAdmissionService": 2, "RunSwitchOperationService": 2}
+    import inspect
+
+    from vonk_control.run_admission import RunAdmissionService
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    for service in (RunAdmissionService, RunSwitchOperationService):
+        default = inspect.signature(service).parameters["memory_floor_bytes"].default
+        assert default == PLATFORM_MEMORY_FLOOR_BYTES == 2_000_000_000
