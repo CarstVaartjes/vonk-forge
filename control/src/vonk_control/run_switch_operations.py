@@ -84,6 +84,11 @@ from .artifact_reference_scan import (
 )
 from .attempt_residues import unowned_never_installed
 from .bounded_json import require_integer, require_mapping
+from .catalog_revision_contract import (
+    CatalogRevisionContractError,
+    RecipeRevisionProjection,
+    read_catalog_projection,
+)
 from .categorized_errors import (
     InvalidValue,
     MissingRecord,
@@ -1198,17 +1203,12 @@ def _refreshed_freshness(
 def _recipe_model_digests(revision: CatalogDocumentRevision | None) -> frozenset[str]:
     """The content digests of the models a recipe revision names."""
 
-    document = revision.document if revision is not None else None
-    models = document.get("models") if isinstance(document, Mapping) else None
-    if not isinstance(models, Sequence) or isinstance(models, (str, bytes)):
-        return frozenset()
-    found: set[str] = set()
-    for item in models:
-        model = item.get("model") if isinstance(item, Mapping) else None
-        digest = model.get("content_sha256") if isinstance(model, Mapping) else None
-        if isinstance(digest, str):
-            found.add(digest)
-    return frozenset(found)
+    recipe = _recipe_definition(revision.document) if revision is not None else None
+    return (
+        frozenset(item.model.content_sha256 for item in recipe.models)
+        if recipe is not None
+        else frozenset()
+    )
 
 
 def _container_build_result(build: RecipeBuild) -> dict[str, object]:
@@ -4116,24 +4116,7 @@ class RunSwitchOperationService:
                         scope="recipe",
                     )
                 )
-            selections = revision.document.get("models")
-            model_selection = (
-                selections[0]
-                if isinstance(selections, Sequence)
-                and not isinstance(selections, (str, bytes))
-                and selections
-                else None
-            )
-            model_ref = (
-                model_selection.get("model")
-                if isinstance(model_selection, Mapping)
-                else None
-            )
-            recipe_model_digest = (
-                model_ref.get("content_sha256")
-                if isinstance(model_ref, Mapping)
-                else None
-            )
+            recipe_model_digest = _primary_model_digest(revision.document)
             if recipe_model_digest != request.model_content_sha256:
                 blockers.append(
                     _as_reason(
@@ -5112,20 +5095,23 @@ class RunSwitchOperationService:
     ]:
         blockers: list[RunSwitchReason] = []
         warnings: list[RunSwitchReason] = []
-        document = revision.document if revision is not None else {}
-        execution = document.get("execution") if isinstance(document, Mapping) else None
-        raw_build = execution.get("build") if isinstance(execution, Mapping) else None
+        # Source packages are catalog-owned; recipe context paths carry no digest.
+        projected: RecipeRevisionProjection | None = None
+        if revision is not None:
+            try:
+                projection = read_catalog_projection(revision)
+                if isinstance(projection, RecipeRevisionProjection):
+                    projected = projection
+            except CatalogRevisionContractError:
+                pass
         # Every recipe image is built for the DGX Spark platform.
         expected_architecture = "linux/arm64"
         source_digest = (
             candidate.source_bundle_sha256
             if candidate is not None
-            else (
-                raw_build.get("context", {}).get("sha256")
-                if isinstance(raw_build, Mapping)
-                and isinstance(raw_build.get("context"), Mapping)
-                else None
-            )
+            else projected.source_bundle_sha256
+            if projected is not None
+            else None
         )
         source_row = (
             session.get(RecipeSourceBundle, source_digest)
@@ -8208,7 +8194,11 @@ class RunSwitchOperationService:
                     # the Controller moves its deadline past the queue wait; the
                     # start job's own payload is the one source of the accepted
                     # deadline.
-                    verify_run_id = (execution.result or {}).get("run_id")
+                    verify_run_id = (
+                        execution.result.run_id
+                        if isinstance(execution.result, RunSwitchFinalVerifyResult)
+                        else None
+                    )
                     if isinstance(verify_run_id, str):
                         issued = session.scalar(
                             select(Job)
@@ -8738,10 +8728,7 @@ class RunSwitchOperationService:
         ends the cancel either way.
         """
 
-        result = job.result
-        child_id = (
-            result.get("child_operation_id") if isinstance(result, Mapping) else None
-        )
+        child_id = _read_progress(job.result).child_operation_id
         if not isinstance(child_id, str) or not child_id:
             return True
         try:
@@ -9220,48 +9207,35 @@ class RunSwitchOperationProvider:
 def _activity_progress(operation: RunSwitchOperation) -> dict[str, object]:
     """Normalize the family DTO into the generic Activity progress vocabulary."""
 
-    raw = operation.progress.model_dump(mode="json")
-    phase = raw.get("phase")
-    generic_phase = phase if isinstance(phase, str) and phase else "unknown"
+    raw = operation.progress
+    generic_phase = raw.phase or "unknown"
     members: list[dict[str, object]] = []
-    for raw_member in raw.get("members", []):
-        if not isinstance(raw_member, Mapping):
-            continue
-        node_id = raw_member.get("node_id")
-        if not isinstance(node_id, str) or not node_id:
-            continue
-        member_phase = raw_member.get("phase")
+    for item in raw.members:
         member: dict[str, object] = {
-            "member_id": node_id,
-            "phase": (
-                member_phase
-                if isinstance(member_phase, str) and member_phase
-                else generic_phase
-            ),
-            "completed_bytes": int(raw_member.get("completed_bytes", 0) or 0),
-            "state": str(raw_member.get("state", "unknown")),
+            "member_id": item.node_id,
+            "phase": item.phase or generic_phase,
+            "completed_bytes": item.completed_bytes,
+            "state": item.state,
         }
-        if raw_member.get("total_bytes") is not None:
-            member["total_bytes"] = int(raw_member["total_bytes"])
+        if item.total_bytes is not None:
+            member["total_bytes"] = item.total_bytes
         members.append(member)
     progress: dict[str, object] = {
         "phase": generic_phase,
-        "completed_bytes": int(raw.get("completed_bytes", 0) or 0),
-        "total_bytes_known": bool(raw.get("total_bytes_known", False)),
+        "completed_bytes": raw.completed_bytes,
+        "total_bytes_known": raw.total_bytes_known,
         "members": members,
         "checkpoint": {
             "key": "run-switch-phase",
-            "sequence": int(raw.get("phase_index", 0) or 0),
+            "sequence": raw.phase_index,
             "digest": operation.plan_digest,
         },
     }
-    if raw.get("total_bytes") is not None:
-        progress["total_bytes"] = int(raw["total_bytes"])
-    measured = raw.get("operation")
-    if isinstance(measured, Mapping):
-        # Unknown measured totals must clear planned totals as well as their
-        # known flag; mixing the two makes the public progress invalid.
-        progress.update(measured)
+    if raw.total_bytes is not None:
+        progress["total_bytes"] = raw.total_bytes
+    if raw.operation is not None:
+        # Measured totals replace planned totals, including unknown totals.
+        progress.update(raw.operation.model_dump(mode="json"))
     return progress
 
 
@@ -9276,7 +9250,9 @@ def _activity_result(operation: RunSwitchOperation) -> dict[str, object] | None:
         else {}
     )
     if operation.state == "failed":
-        retryable = bool(result.get("retryable") is True)
+        retryable = (
+            operation.result.retryable if operation.result is not None else False
+        )
         result.update(
             {
                 "error_code": "run_switch_failed",
@@ -9710,11 +9686,6 @@ def _phase_result(
     return result
 
 
-_ARTIFACT_CHILD_ADAPTER = TypeAdapter(
-    RunSwitchDistributionChildResult | RunSwitchPhaseResult
-)
-
-
 def _child_result(
     child: object,
 ) -> (
@@ -9723,20 +9694,13 @@ def _child_result(
     | RecipeLifecycleResult
     | None
 ):
-    """Read native typed receipts; only artifact transport DTOs may need parsing."""
+    """Read the receipt retained by the owning canonical child DTO."""
     from .distribution_executor import _ChildView
 
     if isinstance(child, RecipeOperationView):
         return child.lifecycle_result
     if isinstance(child, _ChildView):
-        if isinstance(child.result, BaseModel):
-            return _ARTIFACT_CHILD_ADAPTER.validate_python(child.result, strict=True)
-        try:
-            return _ARTIFACT_CHILD_ADAPTER.validate_json(
-                canonical_message(child.result), strict=True
-            )
-        except (TypeError, ValueError):
-            return None
+        return child.result
     return None
 
 
@@ -10605,9 +10569,9 @@ def _is_oci_digest(value: object) -> TypeGuard[str]:
     )
 
 
-def _primary_model_digest(document: object) -> str | None:
+def _recipe_definition(document: object) -> RecipeDefinition | None:
     try:
-        recipe = (
+        return (
             document
             if isinstance(document, RecipeDefinition)
             else RecipeDefinition.model_validate_json(
@@ -10616,7 +10580,15 @@ def _primary_model_digest(document: object) -> str | None:
         )
     except (TypeError, ValueError):
         return None
-    return recipe.models[0].model.content_sha256 if recipe.models else None
+
+
+def _primary_model_digest(document: object) -> str | None:
+    recipe = _recipe_definition(document)
+    return (
+        recipe.models[0].model.content_sha256
+        if recipe is not None and recipe.models
+        else None
+    )
 
 
 def _normalise_architecture(value: str) -> str:
