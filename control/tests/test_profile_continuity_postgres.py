@@ -195,6 +195,13 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
         switch_adapter=boundary,
         assessment_provider=_assessment_with_promises,
     )
+    with sessions.begin() as session:
+        old = session.get(FleetProfileApplication, original.id)
+        assert old is not None
+        restarted._lifecycle.fail(
+            old, "Lost child observation", clock[0], session=session
+        )
+    assert restarted._resume_live_child(original.id) is not None
     with sessions() as session:
         old = session.get(FleetProfileApplication, original.id)
         assert old is not None
@@ -295,6 +302,19 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
     adapter.advance(newer.id)
     assert dispatched == [assignment.id]
     assert restarted.application(original.id).current_operation_id == original_child
+    restarted.cancel(
+        newer.id,
+        profile_number=final_profile.number,
+        request_key=_uuid(18305),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        old = session.get(FleetProfileApplication, original.id)
+        assert old is not None
+        restarted._lifecycle.fail(
+            old, "Lost child observation", clock[0], session=session
+        )
+    assert restarted._resume_live_child(original.id) is None
 
 
 def test_postgres_new_profile_never_adopts_half_of_a_dual_spark_effect(postgres_engine):

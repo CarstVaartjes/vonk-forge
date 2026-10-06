@@ -7474,6 +7474,12 @@ class FleetProfileService:
                 or self._switch_adapter is None
             ):
                 return None
+            progress = _persisted_profile_progress(row)
+            if (
+                progress.cancellation is not None
+                or not self._application_is_current_selection(session, row, progress)
+            ):
+                return None
             try:
                 child = self._switch_adapter.get(
                     row.current_operation_id, session=session
@@ -7489,7 +7495,11 @@ class FleetProfileService:
                 session=session,
             )
             # Failing released its unassigned claims; the resumed child needs them.
-            restore_released_profile_claims(session, row)
+            restore_released_profile_claims(
+                session,
+                row,
+                node_ids=self._adopted_application_scope(session, row),
+            )
             session.flush()
             return self._application_view(row)
 
