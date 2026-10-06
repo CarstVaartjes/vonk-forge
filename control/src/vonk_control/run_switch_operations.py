@@ -10462,9 +10462,8 @@ def _validate_artifact_execution(
         try:
             parsed_receipt = _phase_result(result, phase=phase)
             if not isinstance(parsed_receipt, RunSwitchVerifyResult):
-                raise RunSwitchRetryLater(
-                    RunSwitchCode.ARTIFACT_VERIFICATION_RESULT_INVALID,
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                raise TypeError(
+                    "artifact verification receipt has an unexpected phase"
                 )
             verification = parsed_receipt
         except (TypeError, ValidationError, RunSwitchRetryLater) as error:
