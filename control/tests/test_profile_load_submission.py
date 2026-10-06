@@ -22,6 +22,7 @@ from vonk_control.fleet_profiles import (
     FleetProfileConflict,
     FleetProfileService,
 )
+from vonk_control.lifecycle.types import State as LifecycleState
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -648,7 +649,9 @@ def test_first_dispatch_cannot_adopt_a_replacement_run_after_acceptance(
         before_jobs = set(session.scalars(select(Job.id)))
     assert service.tick()
     observed = service.application(accepted.id)
-    assert observed.state == "queued", observed  # failed; retried by the Controller
+    # A reviewed plan the replacement run made stale is ended as superseded (the
+    # operator reviews again), never retried against the unreviewed run.
+    assert observed.state == LifecycleState.SUPERSEDED, observed
     assert observed.status_reason is not None
     assert "unreviewed" in observed.status_reason
     with sessions() as session:

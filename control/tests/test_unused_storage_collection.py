@@ -1028,8 +1028,9 @@ def test_the_sweep_reads_its_evidence_on_postgres(
 
     _collector(world, lifecycle).collect()
 
-    assert lifecycle.removed == [stale]
-    assert pointed not in lifecycle.removed
+    # What no saved profile points to goes first; the pointed installation (not
+    # of the loaded profile) goes after it when space is short.
+    assert lifecycle.removed == [stale, pointed]
 
 
 def test_receipt_removal_runs_on_postgres(
