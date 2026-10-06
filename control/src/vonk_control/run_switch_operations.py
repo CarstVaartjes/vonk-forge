@@ -108,6 +108,7 @@ from .job_documents import (
     RecipeStartParent,
     RecipeStopParent,
     RunSwitchCleanupIntent,
+    RunSwitchIntent,
     RunSwitchJobPayload,
     RunSwitchProfileStopIntent,
     RunSwitchRunIntent,
@@ -3320,12 +3321,16 @@ class RunSwitchOperationService:
         workload_intent_ordinal: int | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
-        intent = {
-            "type": "cleanup",
-            **request.model_dump(
-                mode="json", exclude={"request_key"}, exclude_none=True
-            ),
-        }
+        intent = RunSwitchCleanupIntent.model_validate_json(
+            canonical_message(
+                {
+                    "type": "cleanup",
+                    **request.model_dump(
+                        mode="json", exclude={"request_key"}, exclude_none=True
+                    ),
+                }
+            )
+        )
         if request.request_key is not None:
             existing = self._existing_request_operation(
                 request.request_key,
@@ -3359,12 +3364,9 @@ class RunSwitchOperationService:
         profile_application_id: str | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
-        intent = {
-            "type": "run",
-            "request": request.model_dump(
-                mode="json", exclude={"request_key"}, exclude_none=True
-            ),
-        }
+        intent = RunSwitchRunIntent(
+            type="run", request=request.model_copy(update={"request_key": None})
+        )
         if request.request_key is not None:
             existing = self._existing_request_operation(
                 request.request_key,
@@ -3409,12 +3411,16 @@ class RunSwitchOperationService:
         profile_application_id: str | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
-        intent = {
-            "type": "stop",
-            **request.model_dump(
-                mode="json", exclude={"request_key"}, exclude_none=True
-            ),
-        }
+        intent = RunSwitchStopIntent.model_validate_json(
+            canonical_message(
+                {
+                    "type": "stop",
+                    **request.model_dump(
+                        mode="json", exclude={"request_key"}, exclude_none=True
+                    ),
+                }
+            )
+        )
         if request.request_key is not None:
             existing = self._existing_request_operation(
                 request.request_key,
@@ -3453,11 +3459,9 @@ class RunSwitchOperationService:
     ) -> RunSwitchOperation:
         """Apply only a FleetProfile-reviewed reachable-rank Stop scope."""
 
-        intent = {
-            "type": "profile-stop",
-            "run_id": run_id,
-            "profile_stop_scope": profile_stop_scope.model_dump(mode="json"),
-        }
+        intent = RunSwitchProfileStopIntent(
+            type="profile-stop", run_id=run_id, profile_stop_scope=profile_stop_scope
+        )
         existing = self._existing_request_operation(
             request_key,
             kind="recipe.stop.v2",
@@ -6819,7 +6823,7 @@ class RunSwitchOperationService:
         kind: str,
         workload_intent_ordinal: int | None,
         profile_application_id: str | None = None,
-        intent: Mapping[str, object] | None = None,
+        intent: RunSwitchIntent | None = None,
     ) -> RunSwitchOperation:
         now = _now(self._clock)
         target_node_ids = _plan_target_node_ids(plan)
@@ -6830,7 +6834,7 @@ class RunSwitchOperationService:
             "action": plan.action,
             "plan_digest": plan.plan_digest,
             "plan": plan.model_dump(mode="json"),
-            **({"intent": dict(intent)} if intent is not None else {}),
+            **({"intent": serialize_json_value(intent)} if intent is not None else {}),
             "progress": {
                 **(
                     {"profile_application_id": profile_application_id}
@@ -6971,7 +6975,7 @@ class RunSwitchOperationService:
         request_key: str,
         *,
         kind: str,
-        intent: Mapping[str, object],
+        intent: RunSwitchIntent,
     ) -> RunSwitchOperation | None:
         """Replay a durable operation before re-planning mutable evidence.
 
