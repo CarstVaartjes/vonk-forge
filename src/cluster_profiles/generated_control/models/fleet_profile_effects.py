@@ -8,9 +8,11 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
+  from ..models.fleet_profile_adopted_application_effect import FleetProfileAdoptedApplicationEffect
   from ..models.fleet_profile_installation_effect import FleetProfileInstallationEffect
   from ..models.fleet_profile_pending_effect import FleetProfilePendingEffect
   from ..models.fleet_profile_run_effect import FleetProfileRunEffect
@@ -31,17 +33,20 @@ class FleetProfileEffects:
             installations (list[FleetProfileInstallationEffect]):
             runs (list[FleetProfileRunEffect]):
             superseded (list[FleetProfilePendingEffect]):
+            adopted (list[FleetProfileAdoptedApplicationEffect] | Unset):
      """
 
     installations: list[FleetProfileInstallationEffect]
     runs: list[FleetProfileRunEffect]
     superseded: list[FleetProfilePendingEffect]
+    adopted: list[FleetProfileAdoptedApplicationEffect] | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.fleet_profile_adopted_application_effect import FleetProfileAdoptedApplicationEffect # noqa: PLC0415
         from ..models.fleet_profile_installation_effect import FleetProfileInstallationEffect # noqa: PLC0415
         from ..models.fleet_profile_pending_effect import FleetProfilePendingEffect # noqa: PLC0415
         from ..models.fleet_profile_run_effect import FleetProfileRunEffect # noqa: PLC0415
@@ -66,6 +71,15 @@ class FleetProfileEffects:
 
 
 
+        adopted: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.adopted, Unset):
+            adopted = []
+            for adopted_item_data in self.adopted:
+                adopted_item = adopted_item_data.to_dict()
+                adopted.append(adopted_item)
+
+
+
 
         field_dict: dict[str, Any] = {}
 
@@ -74,6 +88,8 @@ class FleetProfileEffects:
             "runs": runs,
             "superseded": superseded,
         })
+        if adopted is not UNSET:
+            field_dict["adopted"] = adopted
 
         return field_dict
 
@@ -81,6 +97,7 @@ class FleetProfileEffects:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.fleet_profile_adopted_application_effect import FleetProfileAdoptedApplicationEffect # noqa: PLC0415
         from ..models.fleet_profile_installation_effect import FleetProfileInstallationEffect # noqa: PLC0415
         from ..models.fleet_profile_pending_effect import FleetProfilePendingEffect # noqa: PLC0415
         from ..models.fleet_profile_run_effect import FleetProfileRunEffect # noqa: PLC0415
@@ -115,10 +132,23 @@ class FleetProfileEffects:
             superseded.append(superseded_item)
 
 
+        _adopted = d.pop("adopted", UNSET)
+        adopted: list[FleetProfileAdoptedApplicationEffect] | Unset = UNSET
+        if _adopted is not UNSET:
+            adopted = []
+            for adopted_item_data in _adopted:
+                adopted_item = FleetProfileAdoptedApplicationEffect.from_dict(adopted_item_data)
+
+
+
+                adopted.append(adopted_item)
+
+
         fleet_profile_effects = cls(
             installations=installations,
             runs=runs,
             superseded=superseded,
+            adopted=adopted,
         )
 
         return fleet_profile_effects

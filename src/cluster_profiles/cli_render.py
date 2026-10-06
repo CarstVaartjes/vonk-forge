@@ -1081,6 +1081,10 @@ def _preview(payload: Mapping[str, object]) -> None:
             installation.get("installation_id"),
         )
         _field("Complete group", _words(installation.get("node_ids")))
+    for continuing in _records(effects, "adopted") if "adopted" in effects else []:
+        _field("Continue application", continuing.get("application_id"))
+        _field("Complete group", _words(continuing.get("node_ids")))
+        _field("Bound plan", continuing.get("plan_digest"))
     for pending in _records(effects, "superseded"):
         _field(f"Supersede {_text(pending.get('kind'))}", pending.get("id"))
         _field("Complete group", _words(pending.get("node_ids")))

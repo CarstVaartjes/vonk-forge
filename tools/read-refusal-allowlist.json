@@ -52,12 +52,6 @@
     },
     {
       "path": "control/src/vonk_control/agent_api.py",
-      "function": "install_agent_routes.source_bundle",
-      "kind": "get-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api.py",
       "function": "recipe_run_disposition",
       "kind": "get-helper-refusal",
       "count": 1
@@ -363,5 +357,14 @@
       "count": 1
     }
   ],
-  "exceptions": []
+  "exceptions": [
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "install_agent_routes.source_bundle",
+      "kind": "get-refusal",
+      "count": 2,
+      "reason": "security-edge",
+      "justification": "The authenticated agent source transfer must preserve explicit denied-access HTTP403; its existing HTTP503 reports actual source storage outage without inventing bundle bytes. These are transport authorization/dependency refusals, not damaged stored progress admission gates."
+    }
+  ]
 }

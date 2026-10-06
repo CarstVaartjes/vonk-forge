@@ -13,7 +13,16 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
 
-from vonk_agent_protocol import SourceBundleCode, canonical_message
+from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
+    SecurityRefusalError,
+    SecurityRefusalReason,
+    SourceBundleCode,
+    UnknownOutcomeError,
+    WaitReason,
+    canonical_message,
+)
 from vonk_agent_protocol.source_bundles import (
     SourceBundleDigestManifest,
     SourceBundleFile,
@@ -29,6 +38,33 @@ class SourceBundleError(ValueError):
         self.code = code
         self.detail = detail
         super().__init__(detail)
+
+
+class SourceBundleRefused(SecurityRefusalError, SourceBundleError):
+    """Explicit managed source storage denial, never damaged or missing data."""
+
+    def __init__(self, detail: str) -> None:
+        SourceBundleError.__init__(
+            self, SecurityRefusalReason.PERMISSION_DENIED.value, detail
+        )
+        self.typed_reason = SecurityRefusalReason.PERMISSION_DENIED
+
+
+class SourceBundleUnknown(UnknownOutcomeError, SourceBundleError):
+    """The exact source cannot be observed now; keep existing verified data."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        SourceBundleError.__init__(self, code, detail)
+        self.typed_reason = WaitReason.OBSERVATION_UNAVAILABLE
+
+
+class SourceBundleInvalid(InvalidRequestError, SourceBundleError):
+    """Malformed source input rejected before managed storage effects."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        SourceBundleError.__init__(self, code, detail)
+        self.typed_reason = InvalidRequestReason.MALFORMED
+        self.typed_field = "source_bundle"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +97,7 @@ def generate_source_bundle(files: Mapping[str, bytes]) -> GeneratedSourceBundle:
     """Create a deterministic canonical tar from regular source files."""
 
     if not files:
-        raise SourceBundleError(SourceBundleCode.EMPTY, "source bundle has no files")
+        raise SourceBundleInvalid(SourceBundleCode.EMPTY, "source bundle has no files")
     stream = io.BytesIO()
     normalized: dict[str, bytes] = {}
     with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as bundle:
@@ -110,6 +146,19 @@ class SourceBundleStore:
         self._limits = limits or BundleLimits()
 
     def put(self, expected_sha256: str, payload: IO[bytes]) -> StoredBundle:
+        try:
+            return self._put(expected_sha256, payload)
+        except PermissionError as error:
+            raise SourceBundleRefused(
+                "source bundle storage access was denied"
+            ) from error
+        except OSError as error:
+            raise SourceBundleUnknown(
+                SourceBundleCode.STORAGE_UNAVAILABLE,
+                "source bundle storage is temporarily unavailable",
+            ) from error
+
+    def _put(self, expected_sha256: str, payload: IO[bytes]) -> StoredBundle:
         if (
             len(expected_sha256) != 64
             or expected_sha256.lower() != expected_sha256
@@ -133,7 +182,7 @@ class SourceBundleStore:
                 present = (
                     _inspect_archive(existing, self._limits).sha256 == expected_sha256
                 )
-            except (OSError, SourceBundleError):
+            except (FileNotFoundError, SourceBundleError):
                 present = False
             if present:
                 return StoredBundle(destination, manifest, len(existing))
@@ -171,9 +220,18 @@ class SourceBundleStore:
         path = self._root / sha256[:2] / f"{sha256}.tar"
         try:
             archive = path.read_bytes()
-        except OSError as error:
+        except PermissionError as error:
+            raise SourceBundleRefused(
+                "source bundle storage access was denied"
+            ) from error
+        except FileNotFoundError as error:
             raise SourceBundleError(
                 SourceBundleCode.NOT_FOUND, "source bundle is unavailable"
+            ) from error
+        except OSError as error:
+            raise SourceBundleUnknown(
+                SourceBundleCode.STORAGE_UNAVAILABLE,
+                "source bundle storage is temporarily unavailable",
             ) from error
         manifest = _inspect_archive(archive, self._limits)
         if manifest.sha256 != sha256:
@@ -359,7 +417,7 @@ def _read_archive(payload: IO[bytes], limits: BundleLimits) -> bytes:
             SourceBundleCode.READ_FAILED, "source bundle is not binary"
         )
     if not archive:
-        raise SourceBundleError(SourceBundleCode.EMPTY, "source bundle is empty")
+        raise SourceBundleInvalid(SourceBundleCode.EMPTY, "source bundle is empty")
     if len(archive) > limits.max_archive_bytes:
         raise SourceBundleError(
             SourceBundleCode.ARCHIVE_TOO_LARGE, "source bundle is too large"

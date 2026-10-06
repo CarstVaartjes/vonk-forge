@@ -1047,51 +1047,9 @@
       "count": 1
     },
     {
-      "path": "scripts/agent-apt-state",
-      "function": "RcloneStore._run",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/agent-apt-state",
-      "function": "_compare_versions",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/agent-apt-state",
-      "function": "_run_aptly",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/agent-apt-state",
-      "function": "_validate_receipt",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
       "path": "scripts/build-agent-deb",
       "function": "atomic_output",
       "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "scripts/build-agent-deb",
-      "function": "read_repair_authority",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/check-python-types",
-      "function": "_diagnostics",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/dev_agent_wire_linux.py",
-      "function": "capture",
-      "kind": "call-without-timeout",
       "count": 1
     },
     {
@@ -1107,28 +1065,10 @@
       "count": 1
     },
     {
-      "path": "scripts/generate-agent-wire",
-      "function": "main",
-      "kind": "call-without-timeout",
-      "count": 3
-    },
-    {
       "path": "scripts/generate-control-clients",
       "function": "_normalize_generated_text",
       "kind": "loop-without-deadline",
       "count": 1
-    },
-    {
-      "path": "scripts/generate-control-clients",
-      "function": "_run",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/install-release-publication",
-      "function": "_acceptance_public_key",
-      "kind": "call-without-timeout",
-      "count": 2
     },
     {
       "path": "scripts/install-release-publication",
@@ -1144,62 +1084,14 @@
     },
     {
       "path": "scripts/install-release-publication",
-      "function": "_rclone_object_exists",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/install-release-publication",
-      "function": "_rclone_upload",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/install-release-publication",
-      "function": "_render_bootstrap",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/install-release-publication",
-      "function": "_reuse_existing_acceptance",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/install-release-publication",
       "function": "_safe_bytes",
       "kind": "loop-without-deadline",
       "count": 1
     },
     {
       "path": "scripts/install-release-publication",
-      "function": "_sign",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/install-release-publication",
-      "function": "_signing_public_key",
-      "kind": "call-without-timeout",
-      "count": 2
-    },
-    {
-      "path": "scripts/install-release-publication",
-      "function": "_verify_signature",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/install-release-publication",
       "function": "_write",
       "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "scripts/lifecycle-canary",
-      "function": "Canary.scenario_restart_tolerant_wait",
-      "kind": "call-without-timeout",
       "count": 1
     },
     {
@@ -1224,12 +1116,6 @@
       "path": "scripts/qualify-recipe",
       "function": "_resolve_models",
       "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "scripts/render-accepted-compose-overlay",
-      "function": "main",
-      "kind": "call-without-timeout",
       "count": 1
     },
     {
@@ -1263,39 +1149,9 @@
       "count": 1
     },
     {
-      "path": "scripts/retry_dependency_fetch.py",
-      "function": "main",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/spark_lifecycle_contract.py",
-      "function": "recompute_publication_graphs",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/tests/run_agent_wire_contracts.py",
-      "function": "main",
-      "kind": "call-without-timeout",
-      "count": 2
-    },
-    {
-      "path": "scripts/update-global-contracts",
-      "function": "git",
-      "kind": "call-without-timeout",
-      "count": 1
-    },
-    {
       "path": "scripts/validate-recipe-library",
       "function": "_validate_v2_package",
       "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "scripts/validate_fabric.py",
-      "function": "Runner.local",
-      "kind": "call-without-timeout",
       "count": 1
     },
     {

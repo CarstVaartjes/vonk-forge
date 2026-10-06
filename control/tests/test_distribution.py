@@ -489,3 +489,106 @@ def test_object_location_is_resolved_once_per_window_and_follows_the_file(
     service.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
     with pytest.raises(DistributionError):
         service.locate_object(**ask)
+
+
+def test_revoked_distribution_is_a_refusal_on_the_agent_wire(agent_system):
+    """A revoked grant must never advertise a temporary source outage."""
+    client, services, _, clock = agent_system
+    source = MemoryObjectSource()
+    model_digest = source.put(b"model payload")
+    config_digest = source.put(b"config!")
+    archive_digest = source.put(b"oci archive")
+    assignment = _assignment(NODE_A, model_digest, config_digest, archive_digest)
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    source.register_runtime_image(assignment.oci_image_digest, archive_digest)
+    service = DistributionService(source, clock=clock, sessions=services.sessions)
+    service.register(assignment)
+    service.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
+    object.__setattr__(services, "distribution", service)
+    denied = client.get(
+        "/agent/distribution/manifests/" + assignment.plan_digest,
+        headers=agent_headers(NODE_A, "serial-a"),
+    )
+    assert denied.status_code == 403
+    assert denied.headers["x-vonk-error-code"] == "distribution.revoked"
+
+
+@pytest.mark.parametrize("denial", ["permission", "typed"])
+def test_denied_nas_source_cannot_fall_back_then_recovers_after_access_restored(
+    agent_system, tmp_path, denial
+):
+    """Catch the composite source hiding an explicit NAS refusal with OCI bytes."""
+    from vonk_agent_protocol import SecurityRefusalError, SecurityRefusalReason
+
+    client, services, _, clock = agent_system
+    fallback = MemoryObjectSource()
+    model_digest = fallback.put(b"model payload")
+    config_digest = fallback.put(b"config!")
+    archive_digest = fallback.put(b"oci archive")
+    assignment = _assignment(NODE_A, model_digest, config_digest, archive_digest)
+    fallback.register_runtime_image(assignment.oci_image_digest, archive_digest)
+    files = {}
+    for item in assignment.objects:
+        path = tmp_path / item.sha256
+        path.write_bytes(fallback.objects[item.sha256])
+        files[item.sha256] = path
+    denied = [True]
+
+    class Cache:
+        def cached_artifact_file(self, set_digest, digest, path):
+            if denied[0]:
+                if denial == "permission":
+                    raise PermissionError(13, "NAS access denied")
+                raise SecurityRefusalError(
+                    "NAS authority denied",
+                    reason=SecurityRefusalReason.PERMISSION_DENIED,
+                )
+            return files[digest], files[digest].stat().st_size, digest
+
+    nas = ModelCacheObjectSource.from_service(Cache())
+    nas._manifests[assignment.model_artifact_set_sha256] = assignment.objects
+    nas._paths.update(
+        {
+            item.sha256: (
+                assignment.model_artifact_set_sha256,
+                item.name,
+                files[item.sha256],
+            )
+            for item in assignment.objects
+        }
+    )
+    service = DistributionService(CompositeObjectSource(nas, fallback), clock=clock)
+    service.register(assignment)
+    object.__setattr__(services, "distribution", service)
+    url = f"/agent/distribution/objects/{model_digest}?plan_digest={assignment.plan_digest}"
+    response = client.get(url, headers=agent_headers(NODE_A, "serial-a"))
+    assert response.status_code == 403
+    assert response.headers["x-vonk-error-code"] == "permission_denied"
+    assert "x-vonk-file" not in response.headers
+    denied[0] = False
+    recovered = client.get(url, headers=agent_headers(NODE_A, "serial-a"))
+    assert recovered.status_code == 200
+    assert (
+        recovered.headers["x-vonk-file"]
+        == files[model_digest].relative_to("/").as_posix()
+    )
+
+
+def test_secondary_source_refusal_is_not_masked_by_primary_cache_miss():
+    from vonk_agent_protocol import SecurityRefusalReason
+    from vonk_control.distribution import DistributionRefused
+
+    class DeniedSource(MemoryObjectSource):
+        def open_object(self, digest, expected_bytes):
+            raise DistributionRefused(
+                "permission_denied",
+                "OCI access denied",
+                reason=SecurityRefusalReason.PERMISSION_DENIED,
+            )
+
+    source = CompositeObjectSource(MemoryObjectSource(), DeniedSource())
+    with pytest.raises(DistributionRefused) as caught:
+        source.open_object("a" * 64, 13)
+    assert caught.value.typed_reason == SecurityRefusalReason.PERMISSION_DENIED

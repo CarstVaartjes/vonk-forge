@@ -2729,6 +2729,14 @@
   ],
   "exceptions": [
     {
+      "path": "control/tests/test_fleet_profile_continuity.py",
+      "function": "test_selected_cancel_fences_both_original_and_new_node_ordinals",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests exact cancellation fencing under newer selection; retained borrowed child effects cannot be claimed released before receipt."
+    },
+    {
       "path": "control/tests/test_model_cache.py",
       "function": "test_missing_source_observations_follow_exact_file_and_survive_restart",
       "kind": "transient-failed-assertion",
@@ -2743,6 +2751,22 @@
       "count": 2,
       "justification": "Five confirmed HTTP 404 or 410 observations establish source_gone after bounded retries; the same connected test proves a fresh authorized download succeeds and retains the original ending receipt.",
       "reason": "dependency-unavailable"
+    },
+    {
+      "path": "control/tests/test_profile_adapter_continuity.py",
+      "function": "test_selected_cancel_observes_borrowed_agent_receipt_before_completion",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests exact cancellation acknowledgement while a borrowed effect remains live; its mocked observation seam cannot prove fresh product admission."
+    },
+    {
+      "path": "control/tests/test_profile_continuity_postgres.py",
+      "function": "test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cleanup",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests retaining live authorized adopted work across aggregate failure and releasing only replaced exact effects; the final lost-child observation intentionally preserves adopted authority."
     }
   ]
 }
