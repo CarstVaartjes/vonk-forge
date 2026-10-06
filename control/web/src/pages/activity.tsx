@@ -597,6 +597,11 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
         setError(`Unable to load activity. ${canonicalError}`);
         return;
       }
+      if (canonical.operations == null || canonical.total == null) {
+        setCanonicalAvailable(false);
+        setError(canonical.projection_issue || "Operation membership is currently unknown. Refresh to observe it again.");
+        return;
+      }
       canonicalIds.current = new Set(canonical.operations.map(operation => operation.id));
       setCanonicalCount(canonicalIds.current.size);
       setCanonicalTotal(canonical.total);
@@ -631,6 +636,11 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     const errors: string[] = [];
     if (canonicalResult.status === "fulfilled" && canonicalResult.value) {
       const next = canonicalResult.value;
+      if (next.operations == null || next.total == null) {
+        setPaginationError(next.projection_issue || "Older operation membership is currently unknown. Try again.");
+        setLoadingMore(false);
+        return;
+      }
       for (const operation of next.operations) {
         if (canonicalIds.current.has(operation.id)) continue;
         canonicalIds.current.add(operation.id);

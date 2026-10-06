@@ -1611,8 +1611,10 @@ def test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault() -> N
     assert "unknown" in detail.json()["projection_issue"]
 
     listed = client.get("/api/operations", headers=operator)
-    assert listed.status_code == 503
-    assert listed.json()["detail"] == "operation projection unavailable"
+    assert listed.status_code == 200
+    assert listed.json()["operations"] is None
+    assert listed.json()["total"] is None
+    assert "unknown" in listed.json()["projection_issue"]
 
     repaired = True
     recovered = client.get(f"/api/jobs/{EnqueuedJob.id}", headers=operator)

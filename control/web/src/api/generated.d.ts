@@ -6686,9 +6686,11 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
             /** Operations */
-            operations: components["schemas"]["OperationDetailResponse"][];
+            operations: components["schemas"]["OperationDetailResponse"][] | null;
+            /** Projection Issue */
+            projection_issue?: string | null;
             /** Total */
-            total: number;
+            total: number | null;
         };
         /**
          * OperatorActionName

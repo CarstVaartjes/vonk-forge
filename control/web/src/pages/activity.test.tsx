@@ -597,3 +597,19 @@ it("shows unknown job observations without invented progress counts and refreshe
   await user.click(screen.getByRole("button", {name: "Refresh details"}));
   expect(await screen.findByRole("region", {name: "Operation progress"})).toHaveTextContent("Running1");
 });
+
+it("preserves visible activity when current operation membership is unknown", async () => {
+  const user = userEvent.setup();
+  const loadOperations = vi.fn()
+    .mockResolvedValueOnce({operations: recordedOperations(), total: 3, next_cursor: null})
+    .mockResolvedValueOnce({operations: null, total: null, projection_issue: "Stored observations are unreadable; membership is unknown."})
+    .mockResolvedValue({operations: recordedOperations(), total: 3, next_cursor: null});
+  render(<ActivityPage api={api(undefined, undefined, loadOperations)} now={NOW}/>);
+  await screen.findByRole("region", {name: "Activity history coverage"});
+  await user.click(screen.getByRole("button", {name: "Refresh activity"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("membership is unknown");
+  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Operations are unavailable");
+  await user.click(screen.getByRole("button", {name: "Refresh activity"}));
+  await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Loaded 3 of 3 operations");
+});

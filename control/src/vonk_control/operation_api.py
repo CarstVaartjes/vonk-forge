@@ -344,9 +344,10 @@ class OperationDetailResponse(StrictModel):
 
 
 class OperationsResponse(StrictModel):
-    operations: list[OperationDetailResponse] = Field(max_length=100)
+    operations: list[OperationDetailResponse] | None = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=512)
-    total: int = Field(ge=0)
+    total: int | None = Field(ge=0)
+    projection_issue: str | None = Field(default=None, max_length=256)
 
 
 class JobProgress(StrictModel):

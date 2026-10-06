@@ -2885,6 +2885,17 @@ def _run_switch_request_operation(
     total = page.get("total")
     next_cursor = page.get("next_cursor")
     if (
+        operations is None
+        and total is None
+        and isinstance(page.get("projection_issue"), str)
+    ):
+        raise ControlUnavailable(
+            200,
+            "request lookup observations are unreadable; accepted request membership is unknown",
+            retryable=True,
+            request_id=request_key,
+        )
+    if (
         not isinstance(operations, list)
         or type(total) is not int
         or next_cursor is not None

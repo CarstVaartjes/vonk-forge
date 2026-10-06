@@ -1587,6 +1587,13 @@ def _locks(payload: Mapping[str, object]) -> None:
 def _activity(
     payload: Mapping[str, object], filters: Mapping[str, object] | None
 ) -> None:
+    if (
+        payload.get("operations") is None
+        and payload.get("total") is None
+        and isinstance(payload.get("projection_issue"), str)
+    ):
+        _field("Activity observation", payload["projection_issue"])
+        return
     operations = _records(payload, "operations")
     total = payload.get("total")
     if type(total) is not int or total < 0:

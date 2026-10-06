@@ -1094,10 +1094,13 @@ def create_app(
             raise HTTPException(
                 status_code=422, detail="operation cursor is invalid"
             ) from None
-        except (RuntimeError, TypeError, ValueError):
-            # Anything else here is the projection refusing stored operation
-            # state, not the caller's cursor, so it must not read as a request
-            # fault.
+        except (TypeError, ValueError):
+            return OperationsResponse(
+                operations=None,
+                total=None,
+                projection_issue="Stored operation observations are unreadable; membership and total are unknown.",
+            )
+        except RuntimeError:
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
