@@ -2327,13 +2327,17 @@ class RunSwitchFleetProfileAdapter:
             self._write_state(session, application, state)
             session.flush()
             return self._view_from_state(application, state)
-        pending_cancellation = (
-            None
-            if item.get("kind") == "stop"
-            else self._observe_superseded_agent_effects(
-                session, application, state, before_dispatch=True
+        # Adoption-scope reads also query the session. Keep the entire read
+        # path from flushing a lost child's pending mirror before its owner
+        # starts a replacement in a separate transaction.
+        with session.no_autoflush:
+            pending_cancellation = (
+                None
+                if item.get("kind") == "stop"
+                else self._observe_superseded_agent_effects(
+                    session, application, state, before_dispatch=True
+                )
             )
-        )
         if pending_cancellation is not None:
             # A newer selected effect may own the fence while an older executor
             # still runs. Observe its exact cleanup before issuing replacement
