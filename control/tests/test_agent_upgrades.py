@@ -1964,3 +1964,32 @@ def test_a_conflict_names_a_spark_only_by_its_canonical_identifier() -> None:
         "is not currently online", spark_id="api_key=stored-secret"
     )
     assert str(leaked) == "agent upgrade target is invalid"
+
+
+def test_upgrade_refusals_carry_their_category() -> None:
+    from vonk_agent_protocol import (
+        InvalidRequestError,
+        InvalidRequestReason,
+        SecurityRefusalError,
+        UnknownOutcomeError,
+        WaitReason,
+    )
+    from vonk_control.agent_upgrades import (
+        AgentUpgradeConflict,
+        AgentUpgradeInvalid,
+        AgentUpgradeRefused,
+        AgentUpgradeUnavailable,
+        _request_intent,
+    )
+
+    with pytest.raises(InvalidRequestError) as invalid:
+        _request_intent({"all": "yes"}, None)
+    assert isinstance(invalid.value, AgentUpgradeConflict)
+    assert invalid.value.typed_reason is InvalidRequestReason.MALFORMED
+    unavailable = AgentUpgradeUnavailable(
+        "release unavailable", reason=WaitReason.OBSERVATION_UNAVAILABLE
+    )
+    assert isinstance(unavailable, UnknownOutcomeError)
+    assert isinstance(unavailable, AgentUpgradeConflict)
+    assert isinstance(AgentUpgradeRefused("x"), SecurityRefusalError)
+    assert isinstance(AgentUpgradeInvalid("x"), AgentUpgradeConflict)

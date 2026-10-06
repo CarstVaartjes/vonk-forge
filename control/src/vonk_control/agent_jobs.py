@@ -27,9 +27,15 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
     FailureCode,
+    InvalidRequestError,
+    InvalidRequestReason,
     OutcomeDone,
     OutcomeFailed,
     OutcomeUnknown,
+    SecurityRefusalError,
+    SecurityRefusalReason,
+    UnknownOutcomeError,
+    WaitReason,
     canonical_message,
     outcome_state,
     validate_result_for_operation,
@@ -76,6 +82,13 @@ from .agent_upgrade_status import (
     operator_agent_upgrade_reason,
 )
 from .auth import AgentSource
+from .categorized_errors import (
+    BookkeepingUnknown,
+    InvalidType,
+    InvalidValue,
+    MissingRecord,
+    UnsettledOutcome,
+)
 from .distribution import record_distributed_runtime_image
 from .failure_evidence import safe_text, sanitize_diagnostics
 from .install_admission import InstallAdmissionBusy
@@ -522,10 +535,33 @@ def other_agent_upgrade_in_flight(
 
 
 class StaleAgentAttempt(RuntimeError):
-    """An agent attempted to update an operation it no longer owns."""
+    """An agent attempted to update an operation it no longer owns.
+
+    Raise one of the categorized subclasses.
+    """
 
 
-class OperatorRetirementRefused(ValueError):
+class StaleAgentFence(SecurityRefusalError, StaleAgentAttempt):
+    """The lease, certificate or fence presented is not the operation's own."""
+
+
+class StaleAgentLease(UnknownOutcomeError, StaleAgentAttempt):
+    """The attempt's lease or authority lapsed or its bookkeeping is damaged."""
+
+
+class StaleAgentRequest(InvalidRequestError, StaleAgentAttempt):
+    """A late report that is premature or contradicts the stored evidence."""
+
+
+class AgentConfigurationConflict(InvalidRequestError, RuntimeError):
+    """A consumer is bound twice or after the service started."""
+
+
+class AgentContactIdentityMismatch(SecurityRefusalError, ValueError):
+    """The contact source is not the locked identity of the node."""
+
+
+class OperatorRetirementRefused(InvalidRequestError, ValueError):
     """An operator asked to retire parked work that is still live.
 
     Retirement is the terminal counterpart of ``resume``: it fails a parked
@@ -536,7 +572,10 @@ class OperatorRetirementRefused(ValueError):
     def __init__(self, operation_id: str, reason: str) -> None:
         self.operation_id = operation_id
         self.reason = reason
-        super().__init__(f"operation {operation_id} cannot be retired: {reason}")
+        super().__init__(
+            f"operation {operation_id} cannot be retired: {reason}",
+            reason=InvalidRequestReason.NOT_READY,
+        )
 
 
 def release_owned_reservations_in_session(
@@ -671,7 +710,10 @@ def authorize_operator_resume_in_session(
 
     operations = operator_resume_candidates_in_session(session, job_id, now)
     if not operations:
-        raise ValueError("job has no current authorized resume action")
+        raise InvalidValue(
+            "job has no current authorized resume action",
+            reason=InvalidRequestReason.NOT_READY,
+        )
     operations = tuple(
         session.scalars(
             select(StoredOperation)
@@ -688,7 +730,9 @@ def authorize_operator_resume_in_session(
             for operation in operations
         )
     ):
-        raise ValueError("job is not waiting for operator")
+        raise InvalidValue(
+            "job is not waiting for operator", reason=InvalidRequestReason.NOT_READY
+        )
     adapter = AgentOperationAdapter(
         session, resume_candidates=operator_resume_candidates_in_session
     )
@@ -729,7 +773,7 @@ def retire_exhausted_operations_in_session(
 
     job = session.get(Job, job_id)
     if job is None:
-        raise KeyError(job_id)
+        raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
     scope = AgentJobService._target_scope(job.targets)
     if not scope or not AgentJobService._lock_target_scopes(
         session, {"retire": (job_id, scope)}, scope[0]
@@ -1579,9 +1623,15 @@ class AgentJobService:
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if result_consumer is not None and not callable(result_consumer):
-            raise TypeError("agent result consumer must be callable")
+            raise InvalidType(
+                "agent result consumer must be callable",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         if contact_consumer is not None and not callable(contact_consumer):
-            raise TypeError("agent contact consumer must be callable")
+            raise InvalidType(
+                "agent contact consumer must be callable",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         self._sessions = sessions
         self._clock = clock
         self._monotonic = monotonic
@@ -1635,17 +1685,24 @@ class AgentJobService:
         try:
             protocol_operation = AgentOperation(operation)
         except ValueError as error:
-            raise ValueError(
-                "agent operation is not supported by the control plane"
+            raise InvalidValue(
+                "agent operation is not supported by the control plane",
+                reason=InvalidRequestReason.UNSUPPORTED,
             ) from error
         if protocol_operation.value not in _CONTROL_OPERATIONS:
-            raise ValueError("agent operation is not supported by the control plane")
+            raise InvalidValue(
+                "agent operation is not supported by the control plane",
+                reason=InvalidRequestReason.UNSUPPORTED,
+            )
         targets = session.scalar(select(Job.targets).where(Job.id == parent_job_id))
         if targets is None:
-            raise KeyError(parent_job_id)
+            raise MissingRecord(parent_job_id, reason=InvalidRequestReason.NOT_FOUND)
         scope = self._target_scope(targets)
         if scope is None or node_id not in scope:
-            raise ValueError("agent operation node must be a parent target")
+            raise InvalidValue(
+                "agent operation node must be a parent target",
+                reason=InvalidRequestReason.CONFLICT,
+            )
         uses_workload_admission = protocol_operation.value in _RECIPE_CAPABILITIES
         try:
             if uses_workload_admission:
@@ -1667,32 +1724,51 @@ class AgentJobService:
                 raise RunAdmissionBusy("run capacity writer is busy") from error
             raise
         if not scopes_locked:
-            raise ValueError("agent operation parent target scope changed")
+            raise InvalidValue(
+                "agent operation parent target scope changed",
+                reason=InvalidRequestReason.SUPERSEDED,
+            )
         node = session.scalar(select(AgentNode).where(AgentNode.node_id == node_id))
         if node is None:
-            raise KeyError(node_id)
+            raise MissingRecord(node_id, reason=InvalidRequestReason.NOT_FOUND)
         if node.state != "active" or node.revoked_at is not None:
-            raise ValueError("agent operation node must be active")
+            raise InvalidValue(
+                "agent operation node must be active",
+                reason=InvalidRequestReason.NOT_READY,
+            )
         parent = session.scalar(select(Job).where(Job.id == parent_job_id))
         if parent is None:
-            raise KeyError(parent_job_id)
+            raise MissingRecord(parent_job_id, reason=InvalidRequestReason.NOT_FOUND)
         if parent.state in _TERMINAL_PARENT_STATES:
-            raise ValueError(
-                "cannot enqueue an agent operation beneath a terminal parent"
+            raise InvalidValue(
+                "cannot enqueue an agent operation beneath a terminal parent",
+                reason=InvalidRequestReason.NOT_READY,
             )
         if parent.authority_revision != authority_revision:
-            raise ValueError("agent operation authority revision must match its parent")
+            raise InvalidValue(
+                "agent operation authority revision must match its parent",
+                reason=InvalidRequestReason.SUPERSEDED,
+            )
         if node_id not in parent.targets:
-            raise ValueError("agent operation node must be a parent target")
+            raise InvalidValue(
+                "agent operation node must be a parent target",
+                reason=InvalidRequestReason.CONFLICT,
+            )
         workload_intent_ordinal = parent.payload.get("workload_intent_ordinal")
         if operation in _WORKLOAD_INTENT_OPERATIONS and workload_intent_ordinal is None:
-            raise ValueError("workload operation requires a bound intent")
+            raise InvalidValue(
+                "workload operation requires a bound intent",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         if workload_intent_ordinal is not None and (
             type(workload_intent_ordinal) is not int
             or workload_intent_ordinal < 1
             or workload_intent_ordinal != node.workload_intent_ordinal
         ):
-            raise ValueError("agent operation workload intent was superseded")
+            raise InvalidValue(
+                "agent operation workload intent was superseded",
+                reason=InvalidRequestReason.SUPERSEDED,
+            )
         reserved_fence = str(uuid.uuid4())
         payload_bytes = canonical_payload(protocol_operation, payload)
         final_payload = json.loads(payload_bytes)
@@ -1886,7 +1962,10 @@ class AgentJobService:
             or type(ordinal) is not int
             or ordinal < 1
         ):
-            raise ValueError("workload cancellation scope is invalid")
+            raise InvalidValue(
+                "workload cancellation scope is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         acquire_admission_keys(
             session,
             tuple(node_admission_key(node_id) for node_id in scope),
@@ -2008,7 +2087,10 @@ class AgentJobService:
                     for child in children
                 )
             ):
-                raise ValueError("superseded workload order identity is invalid")
+                raise BookkeepingUnknown(
+                    "superseded workload order identity is invalid",
+                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                )
             for child in children:
                 # Superseded work is never retried: withdraw any schedule.  An
                 # order that never ran ends now; one that did stays until its
@@ -2130,7 +2212,10 @@ class AgentJobService:
             or type(current_ordinal) is not int
             or current_ordinal < 1
         ):
-            raise ValueError("workload observation scope is invalid")
+            raise InvalidValue(
+                "workload observation scope is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         candidates = tuple(
             session.scalars(
                 select(StoredOperation)
@@ -2174,7 +2259,10 @@ class AgentJobService:
                 or operation.node_id not in parent.targets
                 or AgentJobService._target_scope(parent.targets) is None
             ):
-                raise ValueError("superseded agent effect identity is invalid")
+                raise BookkeepingUnknown(
+                    "superseded agent effect identity is invalid",
+                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                )
             observation_deadline = max(
                 deadline, _aware(attempt.lease_deadline)
             ) + timedelta(seconds=960)
@@ -2204,24 +2292,42 @@ class AgentJobService:
     def set_result_consumer(self, consumer: ResultConsumer) -> None:
         """Bind projection consumption once, before the queue serves any work."""
         if not callable(consumer):
-            raise TypeError("agent result consumer must be callable")
+            raise InvalidType(
+                "agent result consumer must be callable",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         with self._configuration_lock:
             if self._result_consumer is not None:
-                raise RuntimeError("agent result consumer is already configured")
+                raise AgentConfigurationConflict(
+                    "agent result consumer is already configured",
+                    reason=InvalidRequestReason.IMMUTABLE,
+                )
             if self._started:
-                raise RuntimeError("agent job service has already started")
+                raise AgentConfigurationConflict(
+                    "agent job service has already started",
+                    reason=InvalidRequestReason.IMMUTABLE,
+                )
             self._result_consumer = consumer
 
     def set_contact_consumer(self, consumer: ContactConsumer) -> None:
         """Bind atomic authenticated contact persistence before serving work."""
 
         if not callable(consumer):
-            raise TypeError("agent contact consumer must be callable")
+            raise InvalidType(
+                "agent contact consumer must be callable",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         with self._configuration_lock:
             if self._contact_consumer is not None:
-                raise RuntimeError("agent contact consumer is already configured")
+                raise AgentConfigurationConflict(
+                    "agent contact consumer is already configured",
+                    reason=InvalidRequestReason.IMMUTABLE,
+                )
             if self._started:
-                raise RuntimeError("agent job service has already started")
+                raise AgentConfigurationConflict(
+                    "agent job service has already started",
+                    reason=InvalidRequestReason.IMMUTABLE,
+                )
             self._contact_consumer = consumer
 
     def set_rollout_owner(
@@ -2283,7 +2389,10 @@ class AgentJobService:
                 and re.fullmatch(r"[0-9a-f]{64}", preflight_fingerprint) is None
             )
         ):
-            raise ValueError("node and certificate are required")
+            raise InvalidValue(
+                "node and certificate are required",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         running = self._runtime_identity(runtime_identity)
         if self._advance_node is not None:
             try:
@@ -2454,7 +2563,9 @@ class AgentJobService:
         }
         prefix = prefixes.get(boundary)
         if prefix is None:
-            raise ValueError("agent boundary is invalid")
+            raise InvalidValue(
+                "agent boundary is invalid", reason=InvalidRequestReason.MALFORMED
+            )
         with self._sessions.begin() as session:
             current = session.scalar(
                 select(AgentOperationAttempt).where(
@@ -3528,7 +3639,10 @@ class AgentJobService:
             select(Job).where(Job.id == operation.parent_job_id).with_for_update(of=Job)
         )
         if job is None:
-            raise ValueError("agent operation lacks its parent job")
+            raise BookkeepingUnknown(
+                "agent operation lacks its parent job",
+                reason=WaitReason.JOB_STATE_UNCERTAIN,
+            )
         if self._target_scope(job.targets) != locked_targets:
             return False
         current_operation = session.scalar(
@@ -3750,7 +3864,9 @@ class AgentJobService:
     ) -> AgentDirective:
         self._mark_started()
         if lease_seconds <= 0:
-            raise ValueError("lease must be positive")
+            raise InvalidValue(
+                "lease must be positive", reason=InvalidRequestReason.OUT_OF_RANGE
+            )
         with self._sessions.begin() as session:
             operation, attempt = self._active(
                 session,
@@ -3775,11 +3891,15 @@ class AgentJobService:
                     None if parent is None else parent.result
                 )
                 if cancellation_deadline is None:
-                    raise StaleAgentAttempt(
-                        "superseded cancellation authority is invalid"
+                    raise StaleAgentLease(
+                        "superseded cancellation authority is invalid",
+                        reason=WaitReason.JOB_STATE_UNCERTAIN,
                     )
                 if _aware(now) >= cancellation_deadline:
-                    raise StaleAgentAttempt("superseded cancellation authority expired")
+                    raise StaleAgentLease(
+                        "superseded cancellation authority expired",
+                        reason=WaitReason.LEASE_LAPSED,
+                    )
                 deadline = min(
                     cancellation_deadline,
                     max(
@@ -3824,8 +3944,9 @@ class AgentJobService:
                             attempt.progress, validated, _aware(now)
                         )
                 except (TypeError, ValueError) as error:
-                    raise ValueError(
-                        f"operation progress is invalid: {error}"
+                    raise InvalidValue(
+                        f"operation progress is invalid: {error}",
+                        reason=InvalidRequestReason.MALFORMED,
                     ) from error
             if write_progress:
                 attempt.lease_deadline = deadline
@@ -3963,13 +4084,17 @@ class AgentJobService:
                 .where(AgentOperationAttempt.fence == message.fence)
             ).one_or_none()
             if hint is None:
-                raise StaleAgentAttempt(
-                    "agent operation lease, certificate, or fence is stale"
+                raise StaleAgentFence(
+                    "agent operation lease, certificate, or fence is stale",
+                    reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
                 )
             operation_id, node_id, serial, parent_job_id = hint
             scopes = self._lock_operation_scopes(session, (operation_id,), node_id)
             if scopes is None or scopes[operation_id][0] != parent_job_id:
-                raise StaleAgentAttempt("agent operation authority is stale")
+                raise StaleAgentFence(
+                    "agent operation authority is stale",
+                    reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                )
             # Certificate rotation replaces the TLS identity while retaining
             # the node's durable ledger. Authenticate current contact under
             # its fresh certificate; the expired attempt remains bound to the
@@ -3980,7 +4105,10 @@ class AgentJobService:
             identity = self._lock_identity(session, node_id, contact_serial)
             now = self._clock()
             if identity is None or not self._identity_is_active(*identity, now):
-                raise StaleAgentAttempt("agent certificate is no longer active")
+                raise StaleAgentFence(
+                    "agent certificate is no longer active",
+                    reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                )
             node, certificate = identity
             self._consume_contact(session, source, node, certificate)
             parent = session.get(Job, parent_job_id, with_for_update=True)
@@ -4001,8 +4129,9 @@ class AgentJobService:
                 or attempt.operation_id != operation.id
                 or attempt.agent_certificate_serial != serial
             ):
-                raise StaleAgentAttempt(
-                    "agent operation authority or expired attempt is stale"
+                raise StaleAgentFence(
+                    "agent operation authority or expired attempt is stale",
+                    reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
                 )
             message, _outcome = stored_report(operation.kind, message)
             validate_result_for_operation(
@@ -4108,10 +4237,16 @@ class AgentJobService:
                     if parent.state in {"queued", "running"}:
                         self._aggregate_parent(session, operation.parent_job_id)
             if not agent_operation_states.attempt_lapsed(attempt):
-                raise StaleAgentAttempt("agent operation attempt is not expired")
+                raise StaleAgentRequest(
+                    "agent operation attempt is not expired",
+                    reason=InvalidRequestReason.NOT_READY,
+                )
             if attempt.result is not None:
                 if attempt.result != evidence:
-                    raise StaleAgentAttempt("expired attempt evidence changed")
+                    raise StaleAgentRequest(
+                        "expired attempt evidence changed",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
                 return True
             attempt.result = evidence
             return True
@@ -4144,7 +4279,10 @@ class AgentJobService:
             node = session.get(AgentNode, operation.node_id)
             parent = session.get(Job, operation.parent_job_id)
             if parent is None:
-                raise StaleAgentAttempt("agent operation lacks its parent job")
+                raise StaleAgentLease(
+                    "agent operation lacks its parent job",
+                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                )
             superseded = bool(
                 node is not None
                 and operation.workload_intent_ordinal is not None
@@ -4159,14 +4297,18 @@ class AgentJobService:
                     or cancellation_deadline is None
                     or _aware(now) >= cancellation_deadline
                 ):
-                    raise StaleAgentAttempt(
-                        "superseded operation has no completion authority"
+                    raise StaleAgentLease(
+                        "superseded operation has no completion authority",
+                        reason=WaitReason.LEASE_LAPSED,
                     )
             if isinstance(fence, AgentResult):
                 if fence.state != state or (
                     result is not None and _document(fence.result) != _document(result)
                 ):
-                    raise ValueError("agent result does not match requested completion")
+                    raise InvalidValue(
+                        "agent result does not match requested completion",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
                 message = fence
             else:
                 canonical_result = (
@@ -4218,8 +4360,9 @@ class AgentJobService:
                         )
                     )
                 except (TypeError, ValueError) as error:
-                    raise ValueError(
-                        f"operation failure evidence is invalid: {error}"
+                    raise InvalidValue(
+                        f"operation failure evidence is invalid: {error}",
+                        reason=InvalidRequestReason.MALFORMED,
                     ) from error
             else:
                 message_result = _document(message.result)
@@ -4348,20 +4491,23 @@ class AgentJobService:
             .where(AgentOperationAttempt.fence == token)
         ).one_or_none()
         if identity_hint is None:
-            raise StaleAgentAttempt(
-                "agent operation lease, certificate, or fence is stale"
+            raise StaleAgentFence(
+                "agent operation lease, certificate, or fence is stale",
+                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
             )
         operation_id, node_id, certificate_serial, parent_job_id = identity_hint
         scopes = self._lock_operation_scopes(session, (operation_id,), node_id)
         if scopes is None or scopes[operation_id][0] != parent_job_id:
-            raise StaleAgentAttempt(
-                "agent operation lease, certificate, or fence is stale"
+            raise StaleAgentFence(
+                "agent operation lease, certificate, or fence is stale",
+                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
             )
         identity = self._lock_identity(session, node_id, certificate_serial)
         now = self._clock()
         if identity is None or not self._identity_is_active(*identity, now):
-            raise StaleAgentAttempt(
-                "agent operation lease, certificate, or fence is stale"
+            raise StaleAgentFence(
+                "agent operation lease, certificate, or fence is stale",
+                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
             )
         node, certificate = identity
         self._consume_contact(session, source, node, certificate)
@@ -4373,8 +4519,9 @@ class AgentJobService:
             or parent.state not in {"queued", "running"}
             or node.node_id not in parent.targets
         ):
-            raise StaleAgentAttempt(
-                "agent operation lease, certificate, or fence is stale"
+            raise StaleAgentFence(
+                "agent operation lease, certificate, or fence is stale",
+                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
             )
         operation = session.scalar(
             select(StoredOperation)
@@ -4383,8 +4530,9 @@ class AgentJobService:
             .execution_options(populate_existing=True)
         )
         if operation is None:
-            raise StaleAgentAttempt(
-                "agent operation lease, certificate, or fence is stale"
+            raise StaleAgentFence(
+                "agent operation lease, certificate, or fence is stale",
+                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
             )
         if (
             self._target_scope(parent.targets) != scopes[operation_id][1]
@@ -4411,8 +4559,9 @@ class AgentJobService:
             or node.state != "active"
             or node.revoked_at is not None
         ):
-            raise StaleAgentAttempt(
-                "agent operation lease, certificate, or fence is stale"
+            raise StaleAgentFence(
+                "agent operation lease, certificate, or fence is stale",
+                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
             )
         attempt = session.scalar(
             select(AgentOperationAttempt)
@@ -4442,8 +4591,9 @@ class AgentJobService:
                 )
             )
         ):
-            raise StaleAgentAttempt(
-                "agent operation lease, certificate, or fence is stale"
+            raise StaleAgentFence(
+                "agent operation lease, certificate, or fence is stale",
+                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
             )
         self._record_contact(session, node, certificate, now, None, None, None)
         return operation, attempt
@@ -4464,7 +4614,10 @@ class AgentJobService:
             node.last_seen_at = observed
         contact_time = node.last_seen_at
         if contact_time is None:
-            raise ValueError("agent contact timestamp is unavailable")
+            raise BookkeepingUnknown(
+                "agent contact timestamp is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         if hostname is not None:
             profile = session.scalar(
                 select(AgentNodeProfile)
@@ -4501,11 +4654,17 @@ class AgentJobService:
         value: AgentRuntimeIdentity | Mapping[str, object] | None,
     ) -> AgentRuntimeIdentity:
         if value is None:
-            raise ValueError("agent runtime identity is required")
+            raise InvalidValue(
+                "agent runtime identity is required",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         try:
             return AgentRuntimeIdentity.model_validate(value)
         except (TypeError, ValidationError) as error:
-            raise ValueError("agent runtime identity is invalid") from error
+            raise InvalidValue(
+                "agent runtime identity is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            ) from error
 
     def _consume_contact(
         self,
@@ -4523,9 +4682,15 @@ class AgentJobService:
             or identity.certificate_fingerprint != certificate.fingerprint
             or identity.verified is not True
         ):
-            raise ValueError("agent contact source does not match its locked identity")
+            raise AgentContactIdentityMismatch(
+                "agent contact source does not match its locked identity",
+                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+            )
         if self._contact_consumer is None:
-            raise RuntimeError("agent contact consumer is not configured")
+            raise UnsettledOutcome(
+                "agent contact consumer is not configured",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         self._contact_consumer(session, source)
 
     @staticmethod
@@ -4534,12 +4699,17 @@ class AgentJobService:
             return fence
         if isinstance(fence, (AgentClaim, AgentProgress, AgentResult)):
             return fence.fence
-        raise StaleAgentAttempt("agent operation lease, certificate, or fence is stale")
+        raise StaleAgentFence(
+            "agent operation lease, certificate, or fence is stale",
+            reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+        )
 
     @staticmethod
     def _reason(reason: str | None) -> str:
         if not isinstance(reason, str) or not reason.strip():
-            raise ValueError("failure reason is required")
+            raise InvalidValue(
+                "failure reason is required", reason=InvalidRequestReason.INCOMPLETE
+            )
         return redact_text(reason)[:1024]
 
     @staticmethod
@@ -4604,7 +4774,7 @@ class AgentJobService:
             select(Job).where(Job.id == parent_job_id).with_for_update(of=Job)
         )
         if job is None:
-            raise KeyError(parent_job_id)
+            raise MissingRecord(parent_job_id, reason=InvalidRequestReason.NOT_FOUND)
         if (
             job.kind == "recipe.build.v1"
             and isinstance(job.result, Mapping)
