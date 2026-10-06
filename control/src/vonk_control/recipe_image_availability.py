@@ -3814,7 +3814,9 @@ class RecipeImageAvailabilityService:
         return view.blockers or (
             make_blocker(
                 RecipeImageCode.PREPARING,
-                f"Preparing the model and runtime image ({view.measurement.phase}).",
+                f"Preparing the model and runtime image ({view.measurement.phase})."
+                if view.measurement is not None
+                else "Preparing progress is currently unavailable; the Controller retries observation.",
                 severity="info",
             ),
         )
@@ -5906,7 +5908,7 @@ class RecipeImageAvailabilityService:
             request_id=operation.request_id,
             request=identity.request if identity else None,
             kind=operation.kind,
-            state=LifecycleState.BACKOFF,
+            state=operation.state,
             attempt=int(operation.current_attempt or 0),
             recipe_revision_id=identity.recipe_revision_id
             if identity
@@ -5914,7 +5916,7 @@ class RecipeImageAvailabilityService:
             recipe_content_sha256=identity.recipe_content_sha256 if identity else None,
             model_digest=None,
             build_input_sha256=None,
-            progress=_progress(ProgressPhase.WAITING),
+            progress=identity.progress if identity else None,
             image_progress=None,
             result=None,
             failure=None,
@@ -5952,7 +5954,6 @@ class RecipeImageAvailabilityService:
             residue = retire_as_unknown(
                 "recipe-image.result", operation.id, BookkeepingReason.EVIDENCE_MISMATCH
             )
-            state = LifecycleState.BACKOFF
             result = None
         if state != "succeeded":
             result = None

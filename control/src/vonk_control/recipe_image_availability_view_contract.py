@@ -28,7 +28,7 @@ class RecipeImageAvailabilityView(StrictJSONModel):
     recipe_content_sha256: str | None
     model_digest: str | None
     build_input_sha256: str | None
-    measurement: OperationProgress = Field(alias="progress")
+    measurement: OperationProgress | None = Field(alias="progress")
     image_measurement: OperationProgress | None = Field(alias="image_progress")
     artifact: AvailabilityJobResult | None = Field(alias="result")
     failure_evidence: AvailabilityOperationFailure | None = Field(alias="failure")
@@ -68,7 +68,11 @@ class RecipeImageAvailabilityView(StrictJSONModel):
 
     @property
     def progress(self):
-        return self.measurement.model_dump(mode="json", exclude_none=True)
+        return (
+            self.measurement.model_dump(mode="json", exclude_none=True)
+            if self.measurement is not None
+            else None
+        )
 
     @property
     def image_progress(self):

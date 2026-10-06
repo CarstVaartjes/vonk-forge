@@ -16,6 +16,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -26,6 +28,7 @@ from vonk_control.artifact_reference_scan import (
     runtime_image_reference_findings,
     runtime_image_reference_reasons,
 )
+from vonk_control.auth import Actor
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import build_policy_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
@@ -73,7 +76,11 @@ from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityService,
     _retryable,
 )
-from vonk_control.recipe_image_availability_api import _recipe_error, _view_document
+from vonk_control.recipe_image_availability_api import (
+    _recipe_error,
+    _view_document,
+    install_recipe_operator_routes,
+)
 from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
 )
@@ -224,6 +231,85 @@ def _service(*args: object, **kwargs: object) -> RecipeImageAvailabilityService:
     kwargs.setdefault("builder", _builder(storage))
     kwargs.setdefault("transport", Transport())
     return RecipeImageAvailabilityService(*args, **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("invalid_metadata", [None, 12])
+def test_authenticated_observation_preserves_operation_through_metadata_repair(
+    tmp_path: Path,
+    invalid_metadata: int | None,
+) -> None:
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'availability.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    payload = _availability_payload("revision-observation").model_dump(mode="json")
+    now = datetime.now(UTC)
+    operation_id = "00000000-0000-4000-8000-000000000207"
+    with sessions.begin() as session:
+        session.add(
+            Job(
+                id=operation_id,
+                request_id="00000000-0000-4000-8000-000000000208",
+                kind="recipe.image.availability.v2",
+                state="running",
+                actor="owner",
+                authority_revision="revision-observation",
+                targets=[],
+                payload_digest="a" * 64,
+                payload=payload,
+                current_attempt=3,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    service = _service(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
+        authority=lambda **_: (_recipe("recipe-source-build.json"), _runtime()),
+        clock=lambda: now,
+    )
+    app = FastAPI()
+    install_recipe_operator_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("reader", "viewer")),
+        service=service,
+    )
+    client = TestClient(app)
+    path = f"/api/recipe/operations/{operation_id}"
+    healthy = client.get(path)
+    assert healthy.status_code == 200, healthy.text
+    damaged = payload | {
+        "recipe": None,
+        "request": None,
+        "recipe_revision_id": invalid_metadata,
+        "recipe_content_sha256": invalid_metadata,
+    }
+    with sessions.begin() as session:
+        session.execute(
+            update(Job).where(Job.id == operation_id).values(payload=damaged)
+        )
+    unknown = client.get(path)
+    assert unknown.status_code == 200, unknown.text
+    observed = unknown.json()
+    assert observed["id"] == operation_id
+    assert observed["state"] == "running"
+    assert observed["attempt"] == 3
+    assert observed["progress"]["phase"] == payload["progress"]["phase"]
+    assert observed["request"] is None
+    assert observed["recipe_content_sha256"] is None
+    assert observed["residue"]["kind"] == "recipe-image.recipe"
+    assert observed["residue"]["reason"] == "evidence-unavailable"
+    with sessions.begin() as session:
+        stored = session.get(Job, operation_id)
+        assert stored is not None
+        assert stored.payload == damaged
+        stored.payload = payload
+    repaired = client.get(path)
+    assert repaired.status_code == 200, repaired.text
+    assert repaired.json() == healthy.json()
 
 
 def _reference_receipt(
