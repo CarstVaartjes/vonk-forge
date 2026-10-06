@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "inventory_note": "Initial T1 syntax inventory; all findings are unaudited debt, not approved behavior. Lower counts as owning tracks repair them. New exceptions require a fixed reason and justification.",
+  "debt": [
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "AgentCertificate",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "AgentEnrollment",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "AgentEnrollmentGrant",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "AgentIssuedCertificateRevocation",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "AgentNode",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "AgentNodeProfile",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "AgentPresence",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "ArtifactJob",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "ArtifactJobBlob",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "ArtifactLifecycleGate",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "CatalogDocument",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "CatalogDocumentHead",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "ControlProcessHeartbeat",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "FleetEventCursor",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "FleetProfile",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "FleetProfileSelection",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "NodeTelemetryLatest",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "RecipeRouteAuthority",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "RoutePublicationOwner",
+      "kind": "table-without-delete-path",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models.py",
+      "function": "User",
+      "kind": "table-without-delete-path",
+      "count": 1
+    }
+  ],
+  "exceptions": []
+}

@@ -1,0 +1,2778 @@
+{
+  "schema": 1,
+  "inventory_note": "Initial T1 syntax inventory; all findings are unaudited debt, not approved behavior. Lower counts as owning tracks repair them. New exceptions require a fixed reason and justification.",
+  "debt": [
+    {
+      "path": "agent_protocol/tests/test_host_helper.py",
+      "function": "test_runtime_stop_request_binds_exact_stop_plan_and_has_no_argv",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "agent_protocol/tests/test_state_aliases.py",
+      "function": "test_an_old_attempt_word_also_yields_why_it_is_observed",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "agent_protocol/tests/test_state_aliases.py",
+      "function": "test_callers_may_still_send_a_retired_word_as_input",
+      "kind": "operator-wait-assertion",
+      "count": 2
+    },
+    {
+      "path": "agent_protocol/tests/test_state_aliases.py",
+      "function": "test_old_rows_are_adopted_on_read",
+      "kind": "operator-wait-assertion",
+      "count": 2
+    },
+    {
+      "path": "agent_protocol/tests/test_state_aliases.py",
+      "function": "test_old_rows_are_adopted_on_read",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "agent_protocol/tests/test_state_aliases.py",
+      "function": "test_the_core_vocabulary_has_nine_states_and_superseded_is_terminal",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "agent_protocol/tests/test_state_aliases.py",
+      "function": "test_the_core_vocabulary_has_nine_states_and_superseded_is_terminal",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/security/test_agent_protocol.py",
+      "function": "test_secret_bearing_payload_is_rejected",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_absent_run_release.py",
+      "function": "test_stop_of_a_run_the_spark_reports_gone_succeeds_and_releases",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_absent_run_release.py",
+      "function": "test_superseded_run_is_settled_and_released_not_recovered",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_absent_run_release.py",
+      "function": "test_superseded_run_is_settled_and_released_not_recovered",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_acceptance_preflight_evidence.py",
+      "function": "test_preflight_query_projects_only_comparison_fields",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_admission_build_install_postgres.py",
+      "function": "test_source_build_plan_writer_and_install_retry_share_builder_admission",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_a_concluded_operation_never_acquires_a_boundary_refusal_note",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_bootstrap_requires_the_host_helper_authority",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_boundary_failures_record_a_correlated_operator_reason",
+      "kind": "refused-read-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_builder_uploads_digest_verified_docker_archive_without_a_registry",
+      "kind": "refused-read-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_claim_api_rejects_noncanonical_runtime_architecture",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_claim_rejects_retired_supervisor_identity_fields",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_claim_requires_a_trusted_policy_bounded_source",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_declared_failure_kind_survives_agent_result_ingress",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs",
+      "kind": "refused-read-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_recipe_run_disposition_names_every_run_the_controller_does_not_want",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_recipe_run_observation_report_applies_process_state_per_run",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_unsupported_protocol_version_is_rejected_without_recording_contact",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_api.py",
+      "function": "test_untrusted_and_stale_requests_do_not_record_agent_contact",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_job_lock_order_postgres.py",
+      "function": "test_changed_candidate_does_not_claim_another_operation",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_job_lock_order_postgres.py",
+      "function": "test_changed_target_scope_is_rejected_after_unlocked_hint",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_job_lock_order_postgres.py",
+      "function": "test_revocation_between_hint_and_lock_stays_fail_closed",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs.py",
+      "function": "test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retry",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_agent_jobs.py",
+      "function": "test_parent_job_becomes_succeeded_only_after_every_operation_succeeds",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs.py",
+      "function": "test_parent_job_fails_when_all_operations_are_terminal_and_one_failed",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs.py",
+      "function": "test_parent_job_waits_when_all_operations_terminal_without_failures",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs.py",
+      "function": "test_parent_job_waits_when_all_operations_terminal_without_failures",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs.py",
+      "function": "test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim",
+      "kind": "transient-failed-assertion",
+      "count": 3
+    },
+    {
+      "path": "control/tests/test_agent_jobs.py",
+      "function": "test_recipe_build_requires_runtime_identity_on_the_current_claim",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs.py",
+      "function": "test_sqlite_enqueue_enforces_parent_commit_and_target",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs_postgres.py",
+      "function": "test_postgres_claim_locks_only_operations_without_nullable_join",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs_postgres.py",
+      "function": "test_postgres_complete_serializes_expiry_gate_with_identity_lock",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs_postgres.py",
+      "function": "test_postgres_concurrent_final_completions_aggregate_parent_once",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs_postgres.py",
+      "function": "test_postgres_enqueue_cannot_race_parent_finalization",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs_postgres.py",
+      "function": "test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs_postgres.py",
+      "function": "test_postgres_enqueue_rejects_node_outside_parent_targets",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs_postgres.py",
+      "function": "test_postgres_restart_receipt_retries_only_exact_safe_operation",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_jobs_postgres.py",
+      "function": "test_postgres_revocation_serializes_agent_work_and_contact",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_operation_lifecycle.py",
+      "function": "test_a_cancel_completes_past_dead_work",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_operation_lifecycle.py",
+      "function": "test_a_cancelled_irreversible_order_ends_with_its_effect_unknown",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_operation_lifecycle.py",
+      "function": "test_a_row_written_before_the_core_adopts_its_retry_schedule",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_operation_lifecycle.py",
+      "function": "test_a_stored_order_maps_onto_the_core_states",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_operation_lifecycle.py",
+      "function": "test_actions_are_advertised_exactly_when_the_job_endpoints_accept_them",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_operation_lifecycle.py",
+      "function": "test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_operation_lifecycle.py",
+      "function": "test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_outcome.py",
+      "function": "test_a_typed_report_keeps_its_state_word_and_projects_to_the_stored_body",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_restart_recovery_wire_bridge.py",
+      "function": "test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_upgrade_lifecycle.py",
+      "function": "test_every_stored_shape_adopts_and_no_event_waits_for_an_operator",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_agent_upgrades.py",
+      "function": "test_root_rollback_receipt_retries_the_spark_and_preserves_typed_outcome",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_api.py",
+      "function": "test_cookie_authentication_resolves_only_through_browser_sessions",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_api.py",
+      "function": "test_signed_bearer_authentication_remains_unchanged_and_takes_precedence",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_api.py",
+      "function": "test_unexpected_route_errors_use_bounded_context_and_request_id",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_api.py",
+      "function": "test_artifact_transfer_openapi_declares_binary_streams",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_api.py",
+      "function": "test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_api.py",
+      "function": "test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes",
+      "kind": "refused-read-assertion",
+      "count": 5
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_a_legacy_failed_lease_expiry_no_longer_blocks_the_runs_stop",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_a_legacy_waiting_job_with_a_cancel_heals_to_cancelled",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_a_legacy_waiting_job_without_a_cancel_gets_the_stop_action",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_a_legacy_waiting_job_without_a_cancel_gets_the_stop_action",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_a_restart_in_the_middle_of_a_cancel_is_harmless",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_an_exact_stop_receipt_resolves_a_recorded_residue",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_no_stored_job_state_waits_without_an_action",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_rows_written_before_the_rename_read_as_preparation_state_and_cancel",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_rows_written_before_the_rename_read_as_preparation_state_and_cancel",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_the_job_follows_its_order_without_a_second_state",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_unsubmitted_jobs_have_nothing_to_stop",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_jobs.py",
+      "function": "test_artifact_cancel_completes_over_corrupt_evidence",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_jobs.py",
+      "function": "test_artifact_cancel_preserves_declared_evidence_and_meaningful_values",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_jobs.py",
+      "function": "test_artifact_cancel_stop_failure_ends_cancelled_with_residue",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_jobs.py",
+      "function": "test_artifact_lease_expiry_is_observed_then_stoppable",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_jobs.py",
+      "function": "test_artifact_lease_expiry_is_observed_then_stoppable",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_jobs.py",
+      "function": "test_draft_artifact_cancel_idempotency_rejects_mismatched_replay",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_jobs.py",
+      "function": "test_reconcile_reclaims_only_the_expired_jobs_own_blobs",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_jobs.py",
+      "function": "test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_result",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_artifact_jobs.py",
+      "function": "test_terminal_job_retention_removes_only_unreferenced_cas_bytes",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_auth_api.py",
+      "function": "test_login_rejects_non_exact_or_unbounded_strict_documents",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_availability_build_observation.py",
+      "function": "test_settled_child_failure_gets_new_execution_identity_on_recovery",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_availability_builder_fencing.py",
+      "function": "test_parent_claim_is_held_until_child_admission_commits",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_availability_claim_fencing.py",
+      "function": "test_cancelled_image_owner_recovers_after_publication_process_dies",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_bounded_retry.py",
+      "function": "test_a_build_cancellation_repeats_a_lock_another_writer_holds",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_cancellation_process_recovery.py",
+      "function": "test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_death",
+      "kind": "transient-failed-assertion",
+      "count": 3
+    },
+    {
+      "path": "control/tests/test_build_cancellation_recovery.py",
+      "function": "test_cache_removal_preserves_an_accepted_build_and_its_claim",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_cancellation_recovery.py",
+      "function": "test_cancelled_replacement_preserves_the_verified_image",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_cancellation_recovery.py",
+      "function": "test_explicit_cancellation_does_not_corrupt_the_canonical_build_request",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_cancellation_recovery.py",
+      "function": "test_new_intent_after_cancellation_cannot_revive_or_release_the_old_attempt",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_cancellation_recovery.py",
+      "function": "test_removal_does_not_lock_or_mutate_an_accepted_build_owner",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_cancellation_recovery.py",
+      "function": "test_removal_of_an_unissued_plan_does_not_invent_a_failed_attempt",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_consumer_ownership.py",
+      "function": "test_accepted_profile_consumer_protects_build_until_its_intent_is_cancelled",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_consumer_ownership.py",
+      "function": "test_build_cancellation_preserves_each_accepted_availability_consumer",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_consumer_ownership.py",
+      "function": "test_new_availability_consumer_committing_before_cancellation_keeps_shared_build",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_consumer_ownership.py",
+      "function": "test_profile_protects_its_build_before_the_execution_child_exists",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_consumer_ownership.py",
+      "function": "test_recipe_parent_cancellation_detaches_one_shared_build_consumer",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_import_wire_bridge.py",
+      "function": "test_cancelled_build_cleanup_crosses_the_real_wire_boundary",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_build_revision_install.py",
+      "function": "test_install_rechecks_the_stored_image_after_preview",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_cache_removal_cancellation_postgres.py",
+      "function": "test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_peer",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_cache_request_recovery.py",
+      "function": "test_recipe_lookup_preserves_id_visibility_and_private_request_correlation",
+      "kind": "refused-read-assertion",
+      "count": 3
+    },
+    {
+      "path": "control/tests/test_catalog_sync.py",
+      "function": "test_stale_running_sync_never_blocks_a_new_sync",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_catalog_sync.py",
+      "function": "test_sync_reactivates_retained_recipe_without_replacing_history_or_model_head",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_distributed_recovery_bookkeeping.py",
+      "function": "test_a_repeated_recovery_stop_request_is_answered_with_the_queued_job",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_distributed_recovery_budget.py",
+      "function": "test_distributed_recovery_backoff_survives_restart_and_resumes",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_distributed_recovery_budget.py",
+      "function": "test_distributed_recovery_waits_for_fresh_presence_then_resumes",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_distributed_recovery_budget.py",
+      "function": "test_recovery_refuses_missing_or_invalid_original_start_authority",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_distributed_recovery_budget.py",
+      "function": "test_recovery_refuses_missing_or_invalid_original_start_authority",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_distribution.py",
+      "function": "test_authorization_is_decided_once_per_assignment_not_per_range",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_distribution.py",
+      "function": "test_distribution_rejects_unassigned_wrong_node_and_corrupt_object",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_distribution_executor.py",
+      "function": "test_abandon_closes_only_a_parked_distribution_child",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_distribution_executor.py",
+      "function": "test_model_download_is_a_durable_cache_child_with_exact_pins",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_distribution_executor.py",
+      "function": "test_partial_child_replays_and_aggregates_cached_target",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_enrollment.py",
+      "function": "test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_serial",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_exact_recovery_process_postgres.py",
+      "function": "test_postgres_exact_intent_recovers_past_budget_after_process_death",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_find_prepare_installed_cli.py",
+      "function": "test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_operation",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_events.py",
+      "function": "test_durable_operation_projection_resume_records_waiting_then_queued",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_events.py",
+      "function": "test_recorder_installation_is_idempotent_and_uninstall_removes_listeners",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_events.py",
+      "function": "test_replay_batch_reads_events_and_retention_metadata_from_one_snapshot",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_events.py",
+      "function": "test_retention_window_reads_one_database_snapshot",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_events.py",
+      "function": "test_sqlite_concurrent_allocations_are_unique_and_monotonic",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_events_postgres.py",
+      "function": "test_postgres_cursor_lock_makes_ids_follow_commit_order",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_api.py",
+      "function": "test_a_rejected_profile_save_names_the_field_and_the_reason",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_api.py",
+      "function": "test_definition_roundtrip_keeps_metadata_and_enforces_the_observed_revision",
+      "kind": "refused-read-assertion",
+      "count": 3
+    },
+    {
+      "path": "control/tests/test_fleet_profile_api.py",
+      "function": "test_profile_load_bound_to_a_review_refuses_a_plan_that_changed",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_bookkeeping.py",
+      "function": "test_a_cancel_completes_when_a_node_fence_moved_to_another_intent",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_bookkeeping.py",
+      "function": "test_a_saved_recipe_without_an_active_revision_waits_for_the_catalog",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_cache_recovery.py",
+      "function": "test_cache_recovery_replans_an_actually_missing_build_archive",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_cancel.py",
+      "function": "test_cancel_during_child_start_keeps_late_start_receipt_from_resuming_profile",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_cancel.py",
+      "function": "test_latest_selected_profile_supersedes_parked_apps_before_cancellation",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_cancel.py",
+      "function": "test_pending_cancellation_observation_does_not_suppress_recovery",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_cancel.py",
+      "function": "test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_effects",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_cancel.py",
+      "function": "test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch",
+      "kind": "refused-read-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_fleet_profile_cancel.py",
+      "function": "test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_cancel.py",
+      "function": "test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_lifecycle.py",
+      "function": "test_a_cancel_completes_for_a_child_issued_without_a_recorded_intent",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_lifecycle.py",
+      "function": "test_a_cancel_completes_when_its_evidence_cannot_be_read",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_lifecycle.py",
+      "function": "test_a_cancel_completes_when_the_stop_cannot_be_confirmed",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_lifecycle.py",
+      "function": "test_a_cancel_survives_a_restart_in_the_middle",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_lifecycle.py",
+      "function": "test_a_legacy_operator_wait_is_healed_and_its_child_is_left_alone",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_lifecycle.py",
+      "function": "test_a_legacy_parked_cancel_ends_as_soon_as_its_child_does",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_lifecycle.py",
+      "function": "test_a_legacy_parked_cancel_leaves_the_wait_and_completes",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_lifecycle.py",
+      "function": "test_a_legacy_parked_cancel_leaves_the_wait_and_completes",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_lifecycle.py",
+      "function": "test_a_repeated_cancel_request_replays_and_a_different_one_is_refused",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_lifecycle.py",
+      "function": "test_the_legacy_wait_is_the_only_needs_operator_and_it_is_read_only",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_recovery_current.py",
+      "function": "test_a_failed_application_shown_as_queued_can_be_cancelled",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_recovery_current.py",
+      "function": "test_cancelling_a_failed_order_that_still_owns_a_live_child_cancels_the_child",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_recovery_current.py",
+      "function": "test_cancelling_a_failed_order_that_still_owns_a_live_child_cancels_the_child",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_recovery_current.py",
+      "function": "test_cancelling_a_queued_load_waiting_for_preparation_always_succeeds",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_recovery_current.py",
+      "function": "test_exhausted_profile_retry_keeps_an_automatic_due_time",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_recovery_current.py",
+      "function": "test_explicit_retry_preserves_failed_child_recovery_and_replay",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_recovery_identity.py",
+      "function": "test_rebuilt_image_cannot_replace_persisted_profile_identity",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profile_recovery_identity.py",
+      "function": "test_rebuilt_image_cannot_replace_persisted_profile_identity",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profiles.py",
+      "function": "test_a_replaced_workload_keeps_serving_until_its_successor_starts",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_profiles.py",
+      "function": "test_profile_endpoint_intent_uses_loaded_application_after_saved_edits",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_projection.py",
+      "function": "test_projection_rejects_more_than_500_registered_nodes_before_state_queries",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_projection.py",
+      "function": "test_projection_schema_is_finite_for_states_items_and_task3_numbers",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_fleet_projection.py",
+      "function": "test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_resume_installed_cli.py",
+      "function": "test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt",
+      "kind": "operator-wait-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_fleet_resume_installed_cli.py",
+      "function": "test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_resume_installed_cli.py",
+      "function": "test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt.request",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_stream.py",
+      "function": "test_production_repositories_bound_queries_and_release_before_orderly_close",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_fleet_stream.py",
+      "function": "test_production_stream_cancellation_during_poll_await_leaves_no_resources",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_gateway_keys.py",
+      "function": "test_create_list_and_revoke_client_keys",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_gateway_keys.py",
+      "function": "test_unreachable_litellm_is_a_bounded_503",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_host_helper_authority.py",
+      "function": "test_service_stop_grant_signs_exact_durable_prior_start",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_image_availability_lifecycle.py",
+      "function": "test_a_cancel_of_a_queued_preparation_via_the_service_completes",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_image_availability_lifecycle.py",
+      "function": "test_a_cancel_of_issued_work_observes_then_ends_when_nothing_is_outstanding",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_image_availability_lifecycle.py",
+      "function": "test_a_cancel_of_work_that_never_ran_ends_at_once",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_image_availability_lifecycle.py",
+      "function": "test_a_definite_failure_ends_and_a_removal_failure_is_partial",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_image_availability_lifecycle.py",
+      "function": "test_a_spent_cancel_ends_with_the_effect_unknown_and_fences_the_claim",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_image_availability_lifecycle.py",
+      "function": "test_a_supersede_ends_an_unstarted_preparation",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_image_availability_lifecycle.py",
+      "function": "test_an_update_batch_is_always_observed_by_its_owner",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_image_availability_lifecycle.py",
+      "function": "test_no_stored_state_and_event_leaves_a_row_waiting_for_a_person",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_install_start_wire_bridge.py",
+      "function": "test_controller_queued_install_and_start_payloads_cross_rust_and_back",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_install_start_wire_bridge.py",
+      "function": "test_controller_routine_uninstall_payload_crosses_rust_and_back",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_installation_reconciliation_api.py",
+      "function": "test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child",
+      "kind": "refused-read-assertion",
+      "count": 3
+    },
+    {
+      "path": "control/tests/test_installation_reconciliation_postgres.py",
+      "function": "test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_job_lifecycle.py",
+      "function": "test_a_legacy_waiting_job_adopts_as_a_wait_that_advertises_resume",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_job_lifecycle.py",
+      "function": "test_finish_ends_the_job_and_its_attempt_once",
+      "kind": "transient-failed-assertion",
+      "count": 3
+    },
+    {
+      "path": "control/tests/test_job_states.py",
+      "function": "test_a_selection_finds_old_and_new_spellings_of_a_state",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_job_states.py",
+      "function": "test_an_attempt_that_lapsed_was_interrupted_but_a_job_that_lapsed_is_over",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_latest_workload_intent_recovery.py",
+      "function": "test_new_profile_cancels_issued_start_then_stops_before_replacement",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_legacy_states.py",
+      "function": "test_every_retired_word_is_rewritten_to_the_word_it_means_and_once",
+      "kind": "operator-wait-assertion",
+      "count": 3
+    },
+    {
+      "path": "control/tests/test_library_assessment.py",
+      "function": "test_late_assessment_is_discarded_and_selector_scan_does_not_assess",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_library_assessment.py",
+      "function": "test_ready_uses_actual_nas_files_and_does_not_require_spark_copies",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_library_assessment.py",
+      "function": "test_stale_capacity_is_unavailable_and_filter_cannot_report_empty_success",
+      "kind": "refused-read-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_library_canonical_projection.py",
+      "function": "test_a_stored_image_that_cannot_be_read_is_named_not_a_cache_miss",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_library_canonical_projection.py",
+      "function": "test_library_item_at_one_byte_over_wire_budget_is_refused",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_library_canonical_projection.py",
+      "function": "test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_library_canonical_projection.py",
+      "function": "test_recipe_library_refuses_one_item_larger_than_wire_budget_actionably",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_library_listing_budget.py",
+      "function": "test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_lifecycle_core.py",
+      "function": "test_an_unknown_effect_waits_for_an_operator_only_with_an_action",
+      "kind": "operator-wait-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_lifecycle_core.py",
+      "function": "test_parked_legacy_rows_are_reevaluated_on_their_first_tick",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_cache.py",
+      "function": "test_cancel_queued_download_is_durable_and_idempotent",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_cache.py",
+      "function": "test_model_removal_applies_to_current_storage_after_an_old_review",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_cache.py",
+      "function": "test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_cache.py",
+      "function": "test_model_removal_review_reports_exact_live_deletion_owner",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_cache.py",
+      "function": "test_model_removal_waits_for_in_use_sets_then_completes",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_cache.py",
+      "function": "test_operator_download_replays_original_before_catalog_or_storage_readmission",
+      "kind": "refused-read-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_model_cache.py",
+      "function": "test_remove_model_supersedes_an_older_download_of_the_same_set",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_cache_bookkeeping.py",
+      "function": "test_one_unreadable_download_never_stops_the_claim_loop",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_cache_bookkeeping.py",
+      "function": "test_requests_naming_nothing_still_get_a_defined_refusal",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_cache_lifecycle.py",
+      "function": "test_a_cancel_ends_even_when_the_stop_is_never_confirmed",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_cache_lifecycle.py",
+      "function": "test_cancelling_a_queued_download_ends_it_at_once",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_removal_finalization_contention.py",
+      "function": "test_finalization_gate_contention_defers_without_blocking_unrelated_removal",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_removal_reference_lifecycle.py",
+      "function": "test_newer_model_removal_supersedes_an_accepted_download_request",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_model_removal_reference_lifecycle.py",
+      "function": "test_sibling_membership_change_after_review_keeps_the_shared_object",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_activity_sql_pages_equal_timestamps_and_binds_request_filter",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_corrupt_stored_evidence_decoration_is_a_declared_server_fault",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_resume_authorises_the_parked_operation_for_the_next_claim",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_resume_has_one_atomic_winner",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_resume_is_never_refused_for_earlier_failed_attempts",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_ends_a_parked_operation_without_a_budget_gate",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_fails_the_order_but_retains_uncertain_capacity",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_fails_the_order_but_retains_uncertain_capacity",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_fails_the_order_but_retains_uncertain_capacity",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_refuses_a_parked_operation_whose_lease_is_live",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_refuses_a_parked_operation_whose_lease_is_live",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_refuses_live_current_attempt_without_transition",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_refuses_live_current_attempt_without_transition",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_refuses_live_current_attempt_without_transition",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_retains_uncertain_run_capacity",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_retains_uncertain_run_capacity",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_durable_retire_retains_uncertain_run_capacity",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_generic_operation_read_contract_is_unavailable_without_projection",
+      "kind": "refused-read-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_profile_operation_provider_is_registered_through_the_global_api",
+      "kind": "operator-wait-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_resume_action_disappearing_after_preflight_is_refused",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_resume_action_disappearing_after_preflight_is_refused",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_resume_action_disappearing_after_preflight_is_refused",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault",
+      "kind": "refused-read-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_operation_api.py",
+      "function": "test_target_cursor_rejects_cross_job_and_cross_resource_replay",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_operator_projection_api.py",
+      "function": "test_fleet_locks_is_administrator_only_and_empty_on_sqlite",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_prebuilt_images.py",
+      "function": "test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_build_process_recovery.py",
+      "function": "test_profile_recovers_after_worker_process_death",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_capacity_admission.py",
+      "function": "test_late_admission_outcome_preserves_concurrent_winner",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_capacity_admission.py",
+      "function": "test_pending_admission_refuses_revoked_actor_before_fencing_workloads",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_capacity_admission.py",
+      "function": "test_profile_load_parks_while_shared_node_admission_is_held",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_claim_selfheal.py",
+      "function": "test_a_resumed_load_reserves_what_its_transient_failure_released",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_disk_claims.py",
+      "function": "test_supersession_and_failed_dispatch_release_only_unassigned_claims",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_intent_ordering.py",
+      "function": "test_direct_queue_cannot_overtake_later_terminal_receipt",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_intent_ordering.py",
+      "function": "test_malformed_sibling_retry_root_does_not_block_new_pending_admission",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_load_submission.py",
+      "function": "test_admission_serializes_insertion_of_a_previously_unknown_spark",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_load_submission.py",
+      "function": "test_admission_serializes_run_replacement_until_acceptance_commits",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_load_submission.py",
+      "function": "test_change_between_fresh_review_and_admission_refuses_load",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_load_submission.py",
+      "function": "test_load_precondition_and_original_replay_use_current_authority",
+      "kind": "refused-read-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_profile_load_submission.py",
+      "function": "test_recipe_head_changed_after_review_is_not_substituted_into_admitted_intent",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_load_submission.py",
+      "function": "test_superseded_child_contention_is_parked_without_holding_admission",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_load_submission.py",
+      "function": "test_workload_change_between_review_and_acceptance_is_refused",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_removed_spark_postgres.py",
+      "function": "test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_profile_removed_spark_postgres.py",
+      "function": "test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_builds.py",
+      "function": "test_build_resolution_reports_stale_receipt_when_archive_is_gone",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_builds.py",
+      "function": "test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_builds.py",
+      "function": "test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_builds.py",
+      "function": "test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_builds.py",
+      "function": "test_removal_does_not_corrupt_the_stored_build_envelope",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_cancellation.py",
+      "function": "test_cancellation_reason_is_bounded_and_requires_text",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_accepted_cancellation_is_idempotent_and_prevents_queued_dispatch",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_cancelling_image_reference_intent_is_counted_until_claim_release",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_cancelling_one_parent_preserves_a_shared_partial_model_transfer",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_cancelling_reference_intent_rejects_stale_or_fenced_claim",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_late_verified_image_result_cannot_publish_after_cancellation",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_model_and_image_children_advance_independently_and_reuse_image",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_oversized_removal_owner_does_not_hold_up_later_request",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_postgres_recipe_removal_persists_owner_before_first_unlink",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_recipe_removal_replay_rebuilds_a_damaged_stored_result_from_its_checkpoint",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_recipe_removal_replay_rejects_issuer_drift_in_job_envelope",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_recipe_removal_replay_rejects_malformed_stored_intent",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_recipe_removal_request_key_rejects_changed_intent",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_recipe_removal_request_key_replays_before_resolving_current_head",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability.py",
+      "function": "test_remove_recipe_does_not_cancel_accepted_build_or_preparation",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability_api.py",
+      "function": "test_operation_observation_names_a_transient_availability_refusal",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability_bookkeeping.py",
+      "function": "test_damaged_cancellation_evidence_reads_as_none_and_a_fresh_cancel_heals_it",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_newer_workload_intent_wins_over_singleton_reboot_recovery",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_newer_workload_intent_wins_over_singleton_reboot_recovery",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_observation_deadline_applies_to_first_observation_not_renewal",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_production_start_rust_observation_and_controller_consume",
+      "kind": "refused-read-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_production_start_rust_observation_and_controller_consume",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_singleton_absence_reboots_through_new_controller_processes",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_singleton_recovery_checks_compiled_lifecycle_authority",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_singleton_recovery_checks_compiled_lifecycle_authority",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_singleton_recovery_enters_cooldown_then_resumes_automatically",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_singleton_recovery_refuses_per_node_start_for_another_plan",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_singleton_recovery_stop_grant_survives_start_deadline",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_stale_presence_waits_then_recovery_resumes_without_new_run",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_uncertain_singleton_recovery_stop_retains_run_claims",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_observation_wire_bridge.py",
+      "function": "test_uncertain_singleton_recovery_stop_retains_run_claims",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_a_damaged_run_plan_is_rebuilt_from_the_mapping_not_refused",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_a_profile_stop_child_that_cannot_be_proven_is_retired_not_raised",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_a_profile_stop_whose_parent_is_damaged_retires_nothing_and_ends_failed",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_a_recovery_with_damaged_authority_is_retired_not_raised",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_an_unreadable_profile_stop_is_retried_and_never_guessed",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_cancelling_a_pull_whose_build_is_gone_completes_on_the_job",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_request_refusals_are_typed_invalid_requests",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_run_membership_nobody_can_prove_is_retired_as_unknown",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_uninstall_keeps_the_model_when_the_recipe_names_none",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_lifecycle.py",
+      "function": "test_a_build_completion_racing_a_cancel_is_swept_not_parked",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_lifecycle.py",
+      "function": "test_a_build_completion_that_raced_its_cancel_keeps_cancelling",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_lifecycle.py",
+      "function": "test_a_cancel_of_issued_orders_stays_in_flight_never_waits",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_lifecycle.py",
+      "function": "test_a_legacy_build_wait_with_a_cancel_heals_and_one_without_is_left",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_lifecycle.py",
+      "function": "test_a_parent_whose_orders_never_ran_is_cancelled_at_once",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_lifecycle.py",
+      "function": "test_a_waiting_parent_accepts_a_cancel",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operation_lifecycle.py",
+      "function": "test_no_event_leaves_a_parent_waiting_for_an_operator",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_adopt_owned_operation_requires_the_exact_kind_and_owner",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting",
+      "kind": "transient-failed-assertion",
+      "count": 3
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_concurrent_duplicate_stop_maps_to_one_operation_on_sqlite",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_concurrent_final_rank_results_serialize_gang_cleanup",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_different_uninstall_request_remains_blocked_by_active_operation",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_distributed_rank_loss_waits_for_fresh_presence_when_evidence_is_missing",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_distributed_recovery_deadline_is_enforced_before_phase_advance",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_distributed_recovery_deadline_is_enforced_before_phase_advance",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_distributed_recovery_deadline_is_enforced_during_stop_phase_advance",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_distributed_recovery_deadline_is_rechecked_before_route_publication",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_distributed_recovery_deadline_is_rechecked_before_route_publication",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_distributed_start_deadline_is_enforced_before_phase_advance",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_distributed_start_deadline_is_enforced_before_phase_advance",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_distributed_start_deadline_is_enforced_before_phase_advance",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_distributed_start_launches_all_ranks_then_checks_collective",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_failed_collective_readiness_is_recorded_and_fails_the_start",
+      "kind": "transient-failed-assertion",
+      "count": 3
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_failed_multinode_start_queues_idempotent_stop_for_every_rank",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_install_requires_reviewed_digest_and_request_keys_remain_scoped",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_installations_removed_together_do_not_keep_each_others_model_files",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_issued_stop_is_not_retired_as_unissued",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_multirank_role_phases_persist_recover_and_stop_in_reverse_order",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_new_stop_intent_replans_after_unissued_old_stop",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_new_stop_intent_replans_after_unissued_old_stop",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_new_uninstall_intent_replans_after_unissued_old_uninstall",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_partial_install_fails_as_a_group_and_can_retry",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_partial_multinode_stop_retains_every_active_capacity_reservation",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_postgres_disjoint_stops_serialize_one_route_candidate",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_postgres_dual_recovery_stop_grant_uses_the_queued_run_plan",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_postgres_duplicate_stop_request_returns_same_operation",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_postgres_duplicate_uninstall_rechecks_replay_after_installation_lock",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_postgres_failed_start_cleanup_stop_grant_uses_the_queued_run_plan",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_postgres_ordinary_stop_grant_uses_the_queued_run_plan",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_recovery_publication_crossing_deadline_is_immediately_withdrawn",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_recovery_publication_crossing_deadline_is_immediately_withdrawn",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_start_stop_and_uninstall_preserve_capacity_safely",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_commit_failure_after_publication_is_safe_side",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_preview_blocks_nonexact_reservation_authority",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_preview_is_stable_exact_and_defers_capacity_release",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_replans_when_the_submitted_digest_is_old",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_replay_is_bound_to_selected_run_kind_and_action_digest",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_state_and_queue_creation_roll_back_together",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_withdrawal_failure_rolls_back_job_and_run_state",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_uninstall_cleans_model_per_spark_when_dependency_is_node_local",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_uninstall_keeps_model_when_another_installed_recipe_uses_it",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_uninstall_queue_rollback_and_request_key_are_owner_bound",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_uninstall_replans_after_installation_observation_changes",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_uninstall_validates_stored_identity_without_requiring_launch_placement",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_uninstall_warns_on_unknown_bytes_but_blocks_active_runs_without_implicit_stop",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_routes.py",
+      "function": "test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_routes.py",
+      "function": "test_disjoint_sqlite_withdrawals_serialize_one_global_candidate",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_routes.py",
+      "function": "test_initial_exact_observation_deadline_fails_missing_rank_for_recovery",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_routes.py",
+      "function": "test_initial_exact_observation_deadline_fails_missing_rank_for_recovery",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_routes.py",
+      "function": "test_postgres_publication_recovers_after_worker_restart_without_new_effect",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_routes.py",
+      "function": "test_route_publication_keeps_retrying_at_a_capped_rate_until_it_converges",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_routes.py",
+      "function": "test_temporary_publication_failure_stays_pending_and_converges",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_routes.py",
+      "function": "test_worker_republishes_automatically_with_fresh_recovered_rank_evidence",
+      "kind": "observation-withdrawal-assertion",
+      "count": 3
+    },
+    {
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py",
+      "function": "test_a_cancel_ends_when_every_child_settled",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py",
+      "function": "test_a_cancel_that_a_child_will_not_confirm_completes",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py",
+      "function": "test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py",
+      "function": "test_a_cancelled_batch_is_not_claimed",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py",
+      "function": "test_an_unreadable_cancel_document_still_completes",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py",
+      "function": "test_no_event_leaves_a_batch_waiting_for_an_operator",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_update_batches.py",
+      "function": "test_cancelling_update_before_admission_settles_without_issuing_children",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_update_batches.py",
+      "function": "test_one_admission_failure_does_not_suppress_other_children",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_recipe_update_batches.py",
+      "function": "test_postgres_update_cancel_after_first_child_prevents_later_admission_after_restart",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_update_batches.py",
+      "function": "test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_recipe_update_batches.py",
+      "function": "test_update_cancellation_recovers_child_committed_before_parent_checkpoint",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_retirement_recovery.py",
+      "function": "test_retired_installation_requires_uninstall_receipt_and_preserves_denial",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_retirement_recovery.py",
+      "function": "test_retirement_cleanup_never_takes_newer_workload_authority",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_retirement_recovery.py",
+      "function": "test_retirement_preserves_uncertain_capacity_until_exact_stop",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_retirement_recovery.py",
+      "function": "test_retirement_refuses_expired_lease_inside_issued_launch_budget",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_retirement_recovery.py",
+      "function": "test_retirement_refuses_expired_lease_inside_issued_launch_budget",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "_recovery_waits_without_a_transaction",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "_stop_waits_without_a_transaction",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "test_a_refused_stop_withdraws_nothing",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "test_a_stop_killed_while_withdrawing_resumes_from_the_claim",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "test_a_stop_never_retried_gets_its_route_back_without_a_client",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "test_a_stop_never_retried_gets_its_route_back_without_a_client",
+      "kind": "observation-withdrawal-assertion",
+      "count": 4
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "test_postgres_stop_withdraws_without_holding_the_owner_row_lock",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "test_stop_withdraws_again_when_a_competing_publication_lists_the_run",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "test_stop_withdraws_without_a_transaction_and_dispatches_only_afterwards",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_claim_ownership.py",
+      "function": "_old_contract_run_does_not_block_a_new_load",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_bookkeeping.py",
+      "function": "test_a_cancel_completes_when_the_stored_plan_is_unreadable",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_bookkeeping.py",
+      "function": "test_a_stop_preview_rebuilds_a_damaged_run_plan_from_its_installation",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_lifecycle.py",
+      "function": "test_a_cancel_completes_for_a_legacy_parked_operation",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_lifecycle.py",
+      "function": "test_a_cancel_completes_when_the_stop_stays_unconfirmed",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_lifecycle.py",
+      "function": "test_a_cancel_ends_when_the_child_ends_without_waiting_for_its_clock",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_lifecycle.py",
+      "function": "test_a_cancel_survives_a_restart_in_the_middle",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_lifecycle.py",
+      "function": "test_a_cancel_that_is_not_due_is_not_reported_as_progress",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_lifecycle.py",
+      "function": "test_a_legacy_operator_wait_is_re_evaluated_by_the_first_decision",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_lifecycle.py",
+      "function": "test_a_legacy_operator_wait_with_a_live_child_is_observed_not_failed",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_cancel_closes_a_transfer_parked_for_an_operator_instead_of_waiting",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_legacy_operator_wait_without_a_clock_is_healed_not_left_waiting",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_malformed_operation_is_rejected_without_aborting_the_batch",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_measured_operation_keeps_unknown_totals_and_failure_readable",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_reconcile_review_binds_opaque_invalid_launch_spec_and_uninstall_rebuilds_its_ranks",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_run_switch_missing_target_is_terminal_with_clear_reason",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_temporary_phase_failure_preserves_exact_intent_across_restart",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_operations.py",
+      "function": "test_temporary_phase_failure_preserves_exact_intent_across_restart",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_postgres.py",
+      "function": "test_postgres_final_verification_timeout_hands_run_to_recovery",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_run_switch_postgres.py",
+      "function": "test_postgres_final_verification_timeout_hands_run_to_recovery",
+      "kind": "transient-failed-assertion",
+      "count": 2
+    },
+    {
+      "path": "control/tests/test_runtime_image_preparation.py",
+      "function": "test_find_build_matches_the_recorded_input_identity_only",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_runtime_image_preparation.py",
+      "function": "test_runtime_image_storage_types_only_clean_absence_as_cache_missing",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_runtime_image_preparation.py",
+      "function": "test_verified_lookup_treats_a_vanished_archive_as_a_miss",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_selected_profile_postgres.py",
+      "function": "test_failed_newer_load_stays_selected_instead_of_falling_back_to_success",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_shared_build_cancellation.py",
+      "function": "test_last_consumer_retains_issued_capacity_until_exact_cleanup_receipt",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_shared_build_cancellation.py",
+      "function": "test_malformed_ownership_cannot_starve_an_unneeded_valid_build",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_shared_build_cancellation.py",
+      "function": "test_parent_detaches_without_cancelling_an_independent_producer",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_shared_build_cancellation.py",
+      "function": "test_parent_detachment_refuses_a_busy_build_boundary_without_partial_changes",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_shared_build_cancellation.py",
+      "function": "test_shared_build_survives_one_detachment_then_stops_after_last_consumer",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_strict_json_scalar_contract.py",
+      "function": "test_a_route_answers_an_unhandled_unknown_outcome_with_a_typed_retry",
+      "kind": "refused-read-assertion",
+      "count": 3
+    },
+    {
+      "path": "control/tests/test_telemetry.py",
+      "function": "test_record_batch_locks_node_before_reading_latest_projection",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_telemetry.py",
+      "function": "test_record_batch_rejects_time_window_before_opening_transaction",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_telemetry.py",
+      "function": "test_sample_and_latest_writes_are_one_transaction",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_telemetry_postgres.py",
+      "function": "test_postgres_concurrent_replay_is_idempotent",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_telemetry_postgres.py",
+      "function": "test_postgres_out_of_order_commits_cannot_regress_latest",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_token_scan_memory.py",
+      "function": "test_operation_token_scan_memory_does_not_grow_with_the_table",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_unused_storage_collection.py",
+      "function": "test_a_second_removal_waits_for_the_first_to_show_in_a_fresh_report",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "control/tests/test_unused_storage_collection.py",
+      "function": "test_removal_a_guard_refuses_queues_nothing",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "tests/cluster_profiles/test_cli_states.py",
+      "function": "test_a_job_prepared_or_running_is_named_by_its_stage_or_state",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "tests/cluster_profiles/test_controller_cli.py",
+      "function": "test_fleet_activity_passes_all_filters_to_one_canonical_page",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "tests/cluster_profiles/test_controller_cli.py",
+      "function": "test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker",
+      "kind": "operator-wait-assertion",
+      "count": 1
+    },
+    {
+      "path": "tests/control/test_openapi_clients.py",
+      "function": "test_generated_run_switch_clients_accept_auto_wait_and_preserve_manual_wait",
+      "kind": "operator-wait-assertion",
+      "count": 2
+    },
+    {
+      "path": "tests/scripts/test_qualify_recipe.py",
+      "function": "test_qualifier_reports_a_failed_local_http_serving_check",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    },
+    {
+      "path": "tests/test_fresh_nas_acceptance.py",
+      "function": "test_tailnet_service_route_ownership_is_bound_to_the_current_gateway",
+      "kind": "ending-without-fresh-request",
+      "count": 1
+    },
+    {
+      "path": "tests/test_spark_upgrade_carry.py",
+      "function": "test_an_observed_phase_that_crashes_on_a_surprise_is_still_only_observed",
+      "kind": "transient-failed-assertion",
+      "count": 1
+    }
+  ],
+  "exceptions": [
+    {
+      "path": "control/tests/test_fleet_profile_continuity.py",
+      "function": "test_selected_cancel_fences_both_original_and_new_node_ordinals",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests exact cancellation fencing under newer selection; retained borrowed child effects cannot be claimed released before receipt."
+    },
+    {
+      "path": "control/tests/test_model_cache.py",
+      "function": "test_missing_source_observations_follow_exact_file_and_survive_restart",
+      "kind": "transient-failed-assertion",
+      "count": 1,
+      "justification": "Confirmed consecutive HTTP 404 observations exhaust the exact file bound across restart; source_gone is an intentional terminal fact, while earlier observations remain queued.",
+      "reason": "dependency-unavailable"
+    },
+    {
+      "path": "control/tests/test_model_cache.py",
+      "function": "test_permanent_missing_source_ends_and_admits_a_fresh_download",
+      "kind": "transient-failed-assertion",
+      "count": 2,
+      "justification": "Five confirmed HTTP 404 or 410 observations establish source_gone after bounded retries; the same connected test proves a fresh authorized download succeeds and retains the original ending receipt.",
+      "reason": "dependency-unavailable"
+    },
+    {
+      "path": "control/tests/test_profile_adapter_continuity.py",
+      "function": "test_selected_cancel_observes_borrowed_agent_receipt_before_completion",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests exact cancellation acknowledgement while a borrowed effect remains live; its mocked observation seam cannot prove fresh product admission."
+    },
+    {
+      "path": "control/tests/test_profile_continuity_postgres.py",
+      "function": "test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cleanup",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests retaining live authorized adopted work across aggregate failure and releasing only replaced exact effects; the final lost-child observation intentionally preserves adopted authority."
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_a_stop_without_start_history_uses_current_exact_run_ownership",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission."
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_stop_works_without_start_jobs_and_with_unreadable_launch_plan",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission."
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_uses_run_ownership_when_start_history_has_changed",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission."
+    }
+  ]
+}

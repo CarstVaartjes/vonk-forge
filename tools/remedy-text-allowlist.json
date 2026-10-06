@@ -1,0 +1,205 @@
+{
+  "schema": 1,
+  "inventory_note": "Initial T1 syntax inventory; all findings are unaudited debt, not approved behavior. Lower counts as owning tracks repair them. New exceptions require a fixed reason and justification.",
+  "debt": [
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "operator_resume_candidates_in_session",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_upgrade_status.py",
+      "function": "agent_upgrade_next_action",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/db.py",
+      "function": "run_with_database_startup_retry",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/distribution_executor.py",
+      "function": "CompositeDistributionPhaseExecutor._prepare_runtime_image",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService._observe_pending_admissions",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService.preview",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "FleetProfileService.retry",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "RunSwitchFleetProfileAdapter._advance_in_session",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "_require_recovery_preparation",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "function": "keep_default_key",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/adapter.py",
+      "function": "KindAdapter.retry_not_before",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/image_availability.py",
+      "function": "<module>",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/image_availability.py",
+      "function": "ImageAvailabilityAdapter.plan_failure",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService._open_http_response",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "_retry_after_seconds",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.plan",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._hold_capacity_writer",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._phases",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/runtime_image_preparation.py",
+      "function": "RuntimeImagePreparer.__call__",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/runtime_image_preparation.py",
+      "function": "prepare_runtime_image",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/strict_json.py",
+      "function": "_retry_later_response",
+      "kind": "imperative-remedy",
+      "count": 2
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "function": "run_heartbeats",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "rust/crates/vonk-nas-setup/src/main.rs",
+      "function": "<module>",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "scripts/generate-control-clients",
+      "function": "_generated_client_schema",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/cli.py",
+      "function": "_plain_language_error",
+      "kind": "imperative-remedy",
+      "count": 2
+    },
+    {
+      "path": "src/cluster_profiles/cli_artifact_jobs.py",
+      "function": "_cancel",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/cli_artifact_jobs.py",
+      "function": "_submit",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/cli_help.py",
+      "function": "<module>",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/cli_render.py",
+      "function": "_error",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/cli_render.py",
+      "function": "_failure",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/cli_render.py",
+      "function": "_preview",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/controller_cli.py",
+      "function": "_selection_remaining",
+      "kind": "imperative-remedy",
+      "count": 1
+    },
+    {
+      "path": "src/cluster_profiles/controller_cli.py",
+      "function": "add_controller_commands",
+      "kind": "imperative-remedy",
+      "count": 2
+    }
+  ],
+  "exceptions": []
+}
