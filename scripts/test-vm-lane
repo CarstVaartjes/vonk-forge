@@ -39,6 +39,7 @@ orb -m vonk-ci bash -lc "
         VONK_RECIPE_LIBRARY_ROOT=$(printf %q "$recipe_root") \
         CARGO_TARGET_DIR=\"\$HOME/target-vonk-vm-lane\"
     trap 'rm -rf \"\$HOME/venv-$tag\" \"\$HOME/cli-deps-$tag\"' EXIT
+    scripts/build-control-wheel
     uv sync --project control --frozen --quiet
     scripts/sync-cli-dependencies
     uv run --project control --frozen pytest -q ${guest_args:-tests/cluster_profiles/test_cli_update.py -k installed_cli}
