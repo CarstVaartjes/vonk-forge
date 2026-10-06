@@ -2898,6 +2898,16 @@ class SparkLifecycle:
                 carried = carry()
                 if carried is not None:
                     installation_id, run_id = carried
+                # The carry redeploys Caddy on a new ephemeral host port. Its
+                # refreshed browser owns the current boundary; the original
+                # inference client still addresses the retired publication.
+                assert self.browser is not None
+                inference_key = self._read_secret("litellm-master-key")
+                inference = self.browser.bearer(inference_key, timeout=30)
+                del inference_key
+                response_digest = self._run_canonical_inference(
+                    inference, fixture.serving_check, fixture.slug
+                )
             self._exercise_corrupt_agent_journal(
                 node_id=node_id,
                 run_id=run_id,
