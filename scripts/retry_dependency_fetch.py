@@ -11,6 +11,9 @@ from pathlib import Path
 # Every command here only acquires locked or digest-pinned inputs. A command
 # is matched on its executable name, so a path such as
 # control/web/node_modules/.bin/playwright is matched as ``playwright``.
+# Three five-minute attempts fit the existing 20-minute acquisition lanes.
+FETCH_TIMEOUT_SECONDS = 5 * 60
+
 _COMMANDS = (
     ("uv", "sync"),
     ("skopeo", "inspect"),
@@ -60,7 +63,35 @@ def main(command: list[str] | None = None) -> int:
         )
         return 64
     for attempt in range(1, 4):
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        timed_out = False
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=FETCH_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as error:
+            timed_out = True
+
+            # run() kills and reaps the expired child. Keep partial output on
+            # stderr and let the existing bounded acquisition loop retry.
+            def text_output(output: str | bytes | None) -> str:
+                return (
+                    output.decode(errors="replace")
+                    if isinstance(output, bytes)
+                    else (output or "")
+                )
+
+            result = subprocess.CompletedProcess(
+                command, 124, text_output(error.stdout), text_output(error.stderr)
+            )
+            print(
+                f"Dependency acquisition attempt {attempt}/3 exceeded "
+                f"{FETCH_TIMEOUT_SECONDS}s ({words[0]}).",
+                file=sys.stderr,
+            )
         if result.stderr:
             print(result.stderr, end="", file=sys.stderr)
         if result.returncode == 0:
@@ -70,7 +101,12 @@ def main(command: list[str] | None = None) -> int:
             return 0
         if result.stdout:
             print(result.stdout, end="", file=sys.stderr)
-        if attempt == 3 or not retryable(result.stdout + result.stderr):
+        output = result.stdout + result.stderr
+        if (
+            attempt == 3
+            or _PERMANENT.search(output)
+            or (not timed_out and not retryable(output))
+        ):
             return result.returncode
         delay = 2**attempt
         print(

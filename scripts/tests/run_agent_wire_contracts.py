@@ -105,6 +105,7 @@ def main() -> int:
                 ],
                 cwd=repository,
                 check=True,
+                timeout=1200,
             )
     if args.build_only:
         return 0
@@ -147,6 +148,7 @@ def main() -> int:
             cwd=repository,
             env=environment,
             check=False,
+            timeout=1200,
         )
         if result.returncode:
             return result.returncode
