@@ -1744,7 +1744,7 @@
     {
       "family": "install_admission.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InstallPlanConflict validates a contract or request.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InstallPlanConflict validates a contract or request. Exact admission compares submitted digest and protected execution effects before commit; observation or capacity changes cannot substitute another image, topology, port or resource promise.",
       "sites": [
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "install.dependencies_stale", 2],
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "install.plan_invalid", 1],
@@ -1756,7 +1756,8 @@
         ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "cluster-mapping-is-not-ready", 1],
         ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "recipe-revision-is-not-resolved", 1],
         ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "successful-recipe-build-does-not-match-the-mapping", 1],
-        ["control/src/vonk_control/install_admission.py", "MissingRecord", "InstallAdmissionService.plan_install", "not-found", 2]
+        ["control/src/vonk_control/install_admission.py", "MissingRecord", "InstallAdmissionService.plan_install", "not-found", 2],
+        ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "require_same_execution", "install.plan_stale", 1]
       ]
     },
     {
@@ -2383,7 +2384,7 @@
     {
       "family": "run_admission.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class RunPlanConflict validates a contract or request.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class RunPlanConflict validates a contract or request. Exact admission compares submitted digest and protected execution effects before commit; observation or capacity changes cannot substitute another image, topology, port or resource promise.",
       "sites": [
         ["control/src/vonk_control/run_admission.py", "InvalidType", "RunAdmissionService.plan_run", "mapping-endpoint-owner-is-missing", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidType", "RunAdmissionService.plan_run", "topology-role-memory-is-invalid", 1],
@@ -2400,7 +2401,8 @@
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.dependencies_stale", 1],
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.plan_invalid", 1],
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.plan_stale", 1],
-        ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "require_admissible", "run.plan_invalid", 1]
+        ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "require_admissible", "run.plan_invalid", 1],
+        ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "require_same_execution", "run.plan_stale", 1]
       ]
     },
     {
@@ -3674,7 +3676,7 @@
     {
       "family": "recipe_operations.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class MissingRecord is of the input-validation error type; class RecipeRequestInvalid is of the input-validation error type.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class MissingRecord is of the input-validation error type; class RecipeRequestInvalid is of the input-validation error type. Exact admission compares submitted digest and protected execution effects before commit; observation or capacity changes cannot substitute another image, topology, port or resource promise.",
       "sites": [
         ["control/src/vonk_control/recipe_operations.py", "DistributedRecoveryInvalid", "RecipeOperationService.queue_recovery_stop_in_session", "singleton-recovery-was-superseded-by-a-newer-workload-intent", 1],
         ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "RecipeOperationService.__init__", "recipe-run-health-age-is-invalid", 1],
@@ -3686,7 +3688,10 @@
         ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService._start_once.start_payload", "recipe-start-endpoint-address-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.get", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.run_status", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._record_node_result_once", "node-is-not-part-of-operation-group", 1]
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._record_node_result_once", "node-is-not-part-of-operation-group", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._install_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1]
       ]
     },
     {
