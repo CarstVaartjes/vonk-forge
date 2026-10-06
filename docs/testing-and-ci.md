@@ -365,6 +365,19 @@ modules that own an operation) must use a class derived from
 `categorized_raises.ceiling` only fall, and an unlisted module may not raise an
 uncategorized error. Converting a raise lowers the count (`--write-baseline`).
 
+The ways a bookkeeping raise leaves a lifecycle path, in the order to try them:
+a reader of a stored document *returns* `Damaged` (`lifecycle/evidence.py`) and
+`read_or_rebuild` rebuilds it from evidence or retires it as `Residue`, so no
+exception crosses the caller; a request that meets a try-lock refusal repeats its
+whole transaction through `bounded_attempts` (`bounded_retry.py`, with
+`admission_attempts` for admission contention) and re-raises the last refusal
+only after the attempts are spent; and a loop that genuinely retries or reports
+an unknown outcome to the lifecycle core is declared in `retry_loops`, with the
+reason it retries, so the AST proof in `control/tests/blocker_retries.py` moves
+the raises it reaches to the module's `proven-retry` family. A raise that decides
+a destructive effect (a removal gate, an uninstall or stop authority, a lease
+fence, a reviewed-intent integrity check) stays a `bookkeeping-debt` entry.
+
 A PR that touches lifecycle, raise or allowlist files reports the movement.
 `scripts/lifecycle-counts` prints the four numbers (writers, operator waits,
 raises, debt) read from the two allowlists, which the ratchets above hold equal
