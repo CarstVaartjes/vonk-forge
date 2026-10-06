@@ -763,13 +763,8 @@ impl DistributionAssignment {
 
 impl AgentResult {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        if !matches!(
-            self.state.as_str(),
-            "succeeded" | "failed" | "cancelled" | "waiting-for-operator"
-        ) {
-            return Err(ProtocolError::Identity("result identity"));
-        }
-        // A typed outcome decides its own state word; the legacy state field
+        // The state is the closed `AgentResultState`, so no other word can reach
+        // here. A typed outcome decides its own state word; the legacy state field
         // must say the same thing, so the two cannot drift.
         if let Some(state) = self.result.outcome_state()
             && state != self.state

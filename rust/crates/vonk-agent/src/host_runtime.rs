@@ -10,7 +10,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
-use vonk_agent_protocol::generated::{HelperErrorCode, RuntimePreflightFindingCode};
+use vonk_agent_protocol::generated::{
+    HelperErrorCode, HostHelperResponseStatus, RuntimePreflightFindingCode,
+};
 use vonk_agent_protocol::{
     AgentClaim, HostRuntimeAction, HostRuntimeRequest, HostRuntimeRequestRule, RecipeJobRunRequest,
     RecipeReconciliationIdentity, RecipeRunInspectionRequest, RecipeStartRequest,
@@ -329,7 +331,9 @@ impl HostRuntimeBoundary<'_> {
         if response.error_code.is_some() {
             return Err(runtime_rejection(&response, HostRuntimeAction::RunInspect));
         }
-        if response.status != "container-runtime-request-executed" || response.exit_code.is_some() {
+        if response.status != HostHelperResponseStatus::ContainerRuntimeRequestExecuted
+            || response.exit_code.is_some()
+        {
             return Err(HostRuntimeError::HelperProtocol(
                 HelperProtocolCause::InspectionOutcome,
             ));
@@ -483,7 +487,8 @@ impl HostRuntimeBoundary<'_> {
             })
             .await
             .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))??;
-            let stop_uncertain = response.status == "container-runtime-stop-uncertain";
+            let stop_uncertain =
+                response.status == HostHelperResponseStatus::ContainerRuntimeStopUncertain;
             require_bound_response(&response, &request_id)?;
             if response.error_code.is_some() {
                 return Err(runtime_rejection(&response, action));
@@ -557,7 +562,8 @@ fn require_executed_outcome(
         return Err(malformed());
     }
     if response.diagnostic.is_some()
-        || !stop_uncertain && response.status != "container-runtime-request-executed"
+        || !stop_uncertain
+            && response.status != HostHelperResponseStatus::ContainerRuntimeRequestExecuted
     {
         return Err(malformed());
     }
@@ -578,7 +584,7 @@ fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> Ho
     else {
         return HostRuntimeError::HelperProtocol(HelperProtocolCause::RejectionMalformed);
     };
-    if response.status != "rejected"
+    if response.status != HostHelperResponseStatus::Rejected
         || response.exit_code.is_some()
         || response.process_running.is_some()
         || response.diagnostic.is_some()

@@ -36,6 +36,7 @@ from vonk_agent_protocol import (
     OutcomeDone,
     OutcomeFailed,
     OutcomeUnknown,
+    ProgressPhase,
     ReservationState,
     RouteState,
     RunState,
@@ -4414,7 +4415,7 @@ class AgentJobService:
                 # Final authoritative evidence closes a last sample that may
                 # have been coalesced immediately before result publication.
                 final_progress = {
-                    "phase": "completed",
+                    "phase": ProgressPhase.COMPLETED,
                     "completed_bytes": message_result["downloaded_bytes"],
                 }
                 if attempt.progress and attempt.progress.get("total_items") is not None:

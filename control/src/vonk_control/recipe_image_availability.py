@@ -39,6 +39,7 @@ from vonk_agent_protocol import (
     ModelCacheCode,
     OperationMemberProgress,
     OperationProgress,
+    ProgressPhase,
     RecipeBuildCode,
     RecipeImageCode,
     RecipePackageCode,
@@ -1072,11 +1073,11 @@ class RecipeImageAvailabilityService:
         successful = operation.state == "succeeded"
         progress = OperationProgress(
             phase=(
-                "completed"
+                ProgressPhase.COMPLETED
                 if successful
-                else "failed"
+                else ProgressPhase.FAILED
                 if operation.state in {"failed", "cancelled"}
-                else "reclaiming"
+                else ProgressPhase.RECLAIMING
             ),
             completed_bytes=reclaimed_bytes,
             total_bytes=reclaimed_bytes if successful else None,
