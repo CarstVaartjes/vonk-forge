@@ -182,7 +182,7 @@ DesiredAssignmentStateField = Annotated[
 FleetProfileAssignmentState = Annotated[
     ObservedAssignmentState, BeforeValidator(machine_adopter(ObservedAssignmentState))
 ]
-FleetProfileAction = Literal["switch", "keep"]
+FleetProfileAction = Literal["switch", "keep", "adopt"]
 FleetProfilePlanStepKind = Literal["switch", "prepare"]
 FleetProfileOperationKind = Literal["fleet-profile.apply"]
 FleetProfileEndpointState = Annotated[
@@ -770,12 +770,33 @@ class FleetProfilePendingEffect(StrictModel):
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
 
 
+class FleetProfileAdoptedApplicationEffect(StrictModel):
+    """An exact continuing executor authorized by the newer reviewed snapshot."""
+
+    application_id: UuidId
+    plan_digest: Digest
+    workload_intent_ordinal: int = Field(ge=1)
+    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    assignment_ids: list[UuidId] = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def scope_is_canonical(self) -> FleetProfileAdoptedApplicationEffect:
+        if self.node_ids != sorted(set(self.node_ids)):
+            raise ValueError("adopted effect nodes must be sorted and unique")
+        if self.assignment_ids != sorted(set(self.assignment_ids)):
+            raise ValueError("adopted assignment IDs must be sorted and unique")
+        return self
+
+
 class FleetProfileEffects(StrictModel):
     """Identified live effects, including complete distributed membership."""
 
     runs: list[FleetProfileRunEffect]
     installations: list[FleetProfileInstallationEffect]
     superseded: list[FleetProfilePendingEffect]
+    adopted: list[FleetProfileAdoptedApplicationEffect] = Field(
+        default_factory=list, max_length=64
+    )
 
 
 class FleetProfileChildProgress(StrictModel):

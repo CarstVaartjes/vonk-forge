@@ -1865,6 +1865,7 @@ class _BackgroundTransfer:
     force: bool
     specs: list[ArtifactSpec]
     planned_total: int
+    transfer_attempt: int
     next_index: int = 0
     futures: list[Future[None]] = field(default_factory=list)
     future_specs: dict[Future[None], str] = field(default_factory=dict)
@@ -5535,7 +5536,9 @@ class ModelCacheService:
             return
         manifest, set_digest, force, transfer = started
         planned_total = transfer.total_bytes
-        self._mark_running(operation_id)
+        transfer_attempt = self._mark_running(operation_id)
+        if transfer_attempt is None:
+            return
         completed = 0
         try:
             with self._lock:
@@ -5609,6 +5612,7 @@ class ModelCacheService:
                 manifest,
                 error,
                 failed_artifact_key=getattr(error, "failed_artifact_key", None),
+                transfer_attempt=transfer_attempt,
             )
 
     def _download_one_unique(
@@ -7444,6 +7448,7 @@ class ModelCacheService:
         manifest: ArtifactSetManifest,
         error: BaseException,
         failed_artifact_key: str | None = None,
+        transfer_attempt: int | None = None,
     ) -> None:
         if isinstance(error, _ArtifactWriterBusy):
             self._defer_artifact_writer(operation_id, error, failed_artifact_key)
@@ -7477,12 +7482,28 @@ class ModelCacheService:
         ):
             failure_code = ModelCacheCode.OPERATION_FAILED
         cancellation_pending = False
+        source_status = getattr(error, "source_status", None)
         with self._session(write=True) as session:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
             )
             if operation is not None and operation.state == "cancelled":
                 return
+            if transfer_attempt is not None and source_status in _SOURCE_GONE_STATUSES:
+                if operation is None:
+                    return
+                claim = self._lifecycle.lifecycle(operation, now)
+                if (
+                    claim.state is not State.RUNNING
+                    or claim.fence != self._claim_owner
+                    or claim.attempt != transfer_attempt
+                    or claim.lease_deadline is None
+                    or claim.lease_deadline <= _aware(now)
+                ):
+                    # The same failed Future may be reported again after a
+                    # lost commit acknowledgement. Only its exact live attempt
+                    # can contribute a new provider file observation.
+                    return
             cancellation_pending = (
                 operation is not None and _operation_cancellation(operation) is not None
             )
@@ -7509,11 +7530,11 @@ class ModelCacheService:
                     payload_before.retry if payload_before is not None else None
                 )
                 gone_recovery: str | None = None
-                source_status = getattr(error, "source_status", None)
                 missing_source: ModelCacheMissingSourceObservation | None = None
                 artifact_key = failed_artifact_key or operation.current_artifact_key
                 if (
                     retryable
+                    and transfer_attempt is not None
                     and source_status in _SOURCE_GONE_STATUSES
                     and artifact_key
                 ):
@@ -8050,9 +8071,10 @@ class ModelCacheService:
             if owns_client:
                 client.close()
 
-    def _mark_running(self, operation_id: str) -> None:
+    def _mark_running(self, operation_id: str) -> int | None:
         """The worker starts (or resumes) the transfer: claim or renew, then run."""
 
+        stop = self._transfer_stop(operation_id)
         now = self._clock()
         with self._session(write=True) as session:
             operation = session.get(
@@ -8071,6 +8093,11 @@ class ModelCacheService:
                     operation.kind,
                     payload.model_copy(update={"failure": None}),
                 )
+                # A settled failed transfer stopped its siblings. A newly
+                # accepted attempt resumes; durable cancellation above wins.
+                stop.clear()
+                return operation.attempt
+        return None
 
     def _finish_succeeded(
         self, operation_id: str, result: ModelCacheDownloadResult
@@ -8747,7 +8774,9 @@ class ModelCacheService:
         planned_total = transfer.total_bytes
         with self._session(write=True) as session:
             self._ensure_set(session, manifest)
-        self._mark_running(operation_id)
+        transfer_attempt = self._mark_running(operation_id)
+        if transfer_attempt is None:
+            return
         specs = list(_unique_artifacts(manifest.artifacts).values())
         self._background_operations[operation_id] = _BackgroundTransfer(
             set_digest=set_digest,
@@ -8755,6 +8784,7 @@ class ModelCacheService:
             force=force,
             specs=specs,
             planned_total=planned_total,
+            transfer_attempt=transfer_attempt,
         )
         self._set_operation_progress(
             operation_id,
@@ -8841,6 +8871,7 @@ class ModelCacheService:
                         record.manifest,
                         first_error,
                         failed_artifact_key=record.failure_artifact_key,
+                        transfer_attempt=record.transfer_attempt,
                     )
                 self._background_operations.pop(operation_id, None)
                 finished += 1

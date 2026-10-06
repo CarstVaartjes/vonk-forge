@@ -41,6 +41,7 @@ from .test_model_cache import (
     _artifact,
     _download,
     cache,  # noqa: F401 - the fixture
+    threaded_cache,  # noqa: F401 - independent connections for background workers
 )
 
 MODEL = "a" * 64
@@ -611,11 +612,11 @@ def _settle_background(service: ModelCacheService) -> None:
 
 
 def test_a_background_transfer_with_an_unknown_outcome_is_kept_and_retried(
-    cache, tmp_path
+    threaded_cache, tmp_path
 ):
     from vonk_control.model_cache import ModelCacheStorageUnknown
 
-    service, _sessions = cache
+    service, _sessions = threaded_cache
     now = _clock_at(service)
     operation, _artifact_spec = _queue(
         service, tmp_path, "00000000-0000-4000-8000-00000000a061", b"flaky storage"

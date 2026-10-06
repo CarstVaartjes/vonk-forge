@@ -47,7 +47,9 @@ from .models import (
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .source_bundles import (
     SourceBundleError,
+    SourceBundleRefused,
     SourceBundleStoreProtocol,
+    SourceBundleUnknown,
     parse_source_bundle_manifest,
 )
 
@@ -129,6 +131,8 @@ class CatalogService:
             )
         try:
             stored = self._source_bundles.put(expected_sha256, payload)
+        except (SourceBundleRefused, SourceBundleUnknown):
+            raise
         except SourceBundleError as error:
             raise CatalogValidationError(error.code, error.detail) from error
         manifest = stored.manifest
