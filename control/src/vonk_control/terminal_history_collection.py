@@ -278,7 +278,9 @@ class TerminalHistoryCollector:
                 select(exists().where(AgentOperation.parent_job_id == identity))
             ):
                 return False
-            if session.scalar(select(exists().where(ArtifactJob.job_id == identity))):
+            if session.scalar(
+                select(exists().where(ArtifactJob.operation_id == identity))
+            ):
                 return False
         if isinstance(row, (Job, ModelCacheOperation)) and session.scalar(
             select(exists().where(ArtifactLifecycleGate.removal_owner_id == identity))
