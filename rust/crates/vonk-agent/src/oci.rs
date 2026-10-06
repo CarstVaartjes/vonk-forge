@@ -2280,7 +2280,21 @@ fn materialize_compiled_models_with(
             uuid::Uuid::new_v4(),
             artifact.file_id
         ));
-        if link && fs::hard_link(&source, &temporary).is_ok() {
+        let linked = if link {
+            match fs::hard_link(&source, &temporary) {
+                Ok(()) => true,
+                Err(error) => {
+                    eprintln!(
+                        "vonk-agent: model.materialization_copy_fallback sha256={} bytes={} cause={error}",
+                        artifact.sha256, artifact.size_bytes
+                    );
+                    false
+                }
+            }
+        } else {
+            false
+        };
+        if linked {
             let mut temporary_guard = TemporaryArtifact::new(temporary.clone());
             // The name just linked must be the object opened above, still a
             // trusted model file, before it replaces anything.
